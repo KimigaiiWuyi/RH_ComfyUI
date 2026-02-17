@@ -1,0 +1,175 @@
+{
+  "103": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "104": {
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "106": {
+    "inputs": {
+      "seed": 246742970037494,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "116",
+        0
+      ],
+      "positive": [
+        "108",
+        0
+      ],
+      "negative": [
+        "111",
+        0
+      ],
+      "latent_image": [
+        "107",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "107": {
+    "inputs": {
+      "width": 992,
+      "height": 1328,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "EmptySD3LatentImage"
+    }
+  },
+  "108": {
+    "inputs": {
+      "text": "海报字，居中，第一行“Qwen-Image-2512”，第二行“Nunchaku版本”，第三行“基础工作流”",
+      "clip": [
+        "104",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "109": {
+    "inputs": {
+      "samples": [
+        "106",
+        0
+      ],
+      "vae": [
+        "103",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "110": {
+    "inputs": {
+      "shift": 3.1000000000000005,
+      "model": [
+        "114",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "ModelSamplingAuraFlow"
+    }
+  },
+  "111": {
+    "inputs": {
+      "text": "低分辨率，低画质，肢体畸形，手指畸形，画面过饱和，蜡像感，人脸无细节，过度光滑，画面具有AI感。构图混乱。文字模糊，扭曲",
+      "clip": [
+        "104",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "112": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "109",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "113": {
+    "inputs": {
+      "model_name": "nunchaku_qwen_image_2512_best_quality_int4.safetensors",
+      "cpu_offload": "disable",
+      "num_blocks_on_gpu": 20,
+      "use_pin_memory": "enable"
+    },
+    "class_type": "NunchakuQwenImageDiTLoader",
+    "_meta": {
+      "title": "Nunchaku Qwen-Image DiT Loader"
+    }
+  },
+  "114": {
+    "inputs": {
+      "🔢 LoRA Count": "1",
+      "lora_count": 1,
+      "toggle_all": true,
+      "cpu_offload": "disable",
+      "enabled_1": true,
+      "lora_name_1": "Qwen-Image-2512-Lightning-4steps-V1.0-fp32.safetensors",
+      "lora_strength_1": 1,
+      "model": [
+        "113",
+        0
+      ]
+    },
+    "class_type": "NunchakuQwenImageLoraStackV3",
+    "_meta": {
+      "title": "Nunchaku Qwen Image LoRA Stack V3"
+    }
+  },
+  "116": {
+    "inputs": {
+      "strength": 1,
+      "model": [
+        "110",
+        0
+      ]
+    },
+    "class_type": "CFGNorm",
+    "_meta": {
+      "title": "CFGNorm"
+    }
+  }
+}

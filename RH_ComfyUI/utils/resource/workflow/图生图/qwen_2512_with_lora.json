@@ -1,0 +1,291 @@
+{
+  "2": {
+    "inputs": {
+      "unet_name": "qwen_image_2512_fp8_e4m3fn_scaled_comfyui_4steps_v1.0.safetensors",
+      "weight_dtype": "fp8_e4m3fn"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "3": {
+    "inputs": {
+      "lora_name": "【千问加速lora】4steps-V1.0.safetensors",
+      "strength_model": 1.0000000000000002,
+      "model": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "15": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "28",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "20": {
+    "inputs": {
+      "model_name": "RealESRGAN_x2plus.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "Load Upscale Model"
+    }
+  },
+  "21": {
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "22": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "23": {
+    "inputs": {
+      "text": "二次元白毛小萝莉",
+      "clip": [
+        "21",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "24": {
+    "inputs": {
+      "conditioning": [
+        "23",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "25": {
+    "inputs": {
+      "strength": 1.0000000000000002,
+      "model": [
+        "49",
+        0
+      ]
+    },
+    "class_type": "CFGNorm",
+    "_meta": {
+      "title": "CFGNorm"
+    }
+  },
+  "26": {
+    "inputs": {
+      "seed": 642448776558255,
+      "steps": 6,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 0.4000000000000001,
+      "model": [
+        "25",
+        0
+      ],
+      "positive": [
+        "23",
+        0
+      ],
+      "negative": [
+        "24",
+        0
+      ],
+      "latent_image": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "27": {
+    "inputs": {
+      "samples": [
+        "26",
+        0
+      ],
+      "vae": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "28": {
+    "inputs": {
+      "upscale_model": [
+        "20",
+        0
+      ],
+      "image": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {
+      "title": "Upscale Image (using Model)"
+    }
+  },
+  "31": {
+    "inputs": {
+      "lora_name": "Majicflus_9.safetensors",
+      "strength_model": 0.4000000000000001,
+      "model": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "41": {
+    "inputs": {
+      "image": "d743798ebe403c65dc50cc28350c933ad573a50d862677f8e42f8248b0fa9e57.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "43": {
+    "inputs": {
+      "size": 1820,
+      "interpolation_mode": "bicubic",
+      "image": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "JWImageResizeByLongerSide",
+    "_meta": {
+      "title": "Image Resize by Longer Side"
+    }
+  },
+  "44": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/view?filename=rgthree.compare._temp_hexdp_00001_jqypj_1771327416.jpg&type=temp&subfolder=&rand=0.6644778057931019&Rh-Comfy-Auth=eyJ1c2VySWQiOiJkMGJiYzY1ZGRjNzE2NzZlODM1MDk5MjBhZTZiOWYxZCIsInNpZ25FeHBpcmUiOjE3NzE5MzE4NjQxMjIsInRzIjoxNzcxMzI3MDY0MTIyLCJzaWduIjoiNWUzYjRiN2NiYmUzYWM1YWFjY2Y5YWUzNzJjOGQ0M2EifQ==&Rh-Identify=d0bbc65ddc71676e83509920ae6b9f1d"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/view?filename=rgthree.compare._temp_hexdp_00002_psqdr_1771327418.jpg&type=temp&subfolder=&rand=0.9970648099111988&Rh-Comfy-Auth=eyJ1c2VySWQiOiJkMGJiYzY1ZGRjNzE2NzZlODM1MDk5MjBhZTZiOWYxZCIsInNpZ25FeHBpcmUiOjE3NzE5MzE4NjQxMjIsInRzIjoxNzcxMzI3MDY0MTIyLCJzaWduIjoiNWUzYjRiN2NiYmUzYWM1YWFjY2Y5YWUzNzJjOGQ0M2EifQ==&Rh-Identify=d0bbc65ddc71676e83509920ae6b9f1d"
+          }
+        ]
+      },
+      "image_a": [
+        "27",
+        0
+      ],
+      "image_b": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "Image Comparer (rgthree)"
+    }
+  },
+  "46": {
+    "inputs": {
+      "pixels": [
+        "43",
+        0
+      ],
+      "vae": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "48": {
+    "inputs": {
+      "lora_name": "er.safetensors",
+      "strength_model": 0.4000000000000001,
+      "model": [
+        "31",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "49": {
+    "inputs": {
+      "lora_name": "白发女qwen seanarcherqwen.tBlW.safetensors",
+      "strength_model": 0.4000000000000001,
+      "model": [
+        "48",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "51": {
+    "inputs": {
+      "images": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  }
+}
