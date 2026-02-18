@@ -1,0 +1,449 @@
+{
+  "3": {
+    "inputs": {
+      "enable_vae_tiling": false,
+      "tile_x": 272,
+      "tile_y": 272,
+      "tile_stride_x": 144,
+      "tile_stride_y": 128,
+      "normalization": "default",
+      "vae": [
+        "18",
+        0
+      ],
+      "samples": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "WanVideoDecode",
+    "_meta": {
+      "title": "WanVideo Decode"
+    }
+  },
+  "4": {
+    "inputs": {
+      "float_list": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "FloatToSigmas",
+    "_meta": {
+      "title": "Float To Sigmas"
+    }
+  },
+  "6": {
+    "inputs": {
+      "positive_prompt": [
+        "37",
+        0
+      ],
+      "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "force_offload": true,
+      "use_disk_cache": false,
+      "device": "gpu",
+      "t5": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "WanVideoTextEncode",
+    "_meta": {
+      "title": "WanVideo TextEncode"
+    }
+  },
+  "7": {
+    "inputs": {
+      "steps": [
+        "41",
+        0
+      ],
+      "cfg": 1,
+      "shift": 8.000000000000002,
+      "seed": 1,
+      "force_offload": true,
+      "scheduler": "unipc",
+      "riflex_freq_index": 0,
+      "denoise_strength": 1,
+      "batched_cfg": false,
+      "rope_function": "comfy",
+      "start_step": [
+        "8",
+        0
+      ],
+      "end_step": -1,
+      "add_noise_to_samples": false,
+      "model": [
+        "23",
+        0
+      ],
+      "image_embeds": [
+        "43",
+        0
+      ],
+      "text_embeds": [
+        "6",
+        0
+      ],
+      "samples": [
+        "10",
+        0
+      ],
+      "sigmas": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "WanVideoSampler",
+    "_meta": {
+      "title": "WanVideo Sampler"
+    }
+  },
+  "8": {
+    "inputs": {
+      "expression": "a/2",
+      "a": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "Math Expression 🐍"
+    }
+  },
+  "10": {
+    "inputs": {
+      "steps": [
+        "41",
+        0
+      ],
+      "cfg": 1,
+      "shift": 8.000000000000002,
+      "seed": 1,
+      "force_offload": true,
+      "scheduler": "unipc",
+      "riflex_freq_index": 0,
+      "denoise_strength": 1,
+      "batched_cfg": false,
+      "rope_function": "comfy",
+      "start_step": 0,
+      "end_step": [
+        "8",
+        0
+      ],
+      "add_noise_to_samples": false,
+      "model": [
+        "20",
+        0
+      ],
+      "image_embeds": [
+        "43",
+        0
+      ],
+      "text_embeds": [
+        "6",
+        0
+      ],
+      "sigmas": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "WanVideoSampler",
+    "_meta": {
+      "title": "WanVideo Sampler"
+    }
+  },
+  "11": {
+    "inputs": {
+      "expression": "a*16+1",
+      "a": [
+        "33",
+        0
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "Math Expression 🐍"
+    }
+  },
+  "12": {
+    "inputs": {
+      "model": "Wan2_2-T2V-A14B_HIGH_fp8_e4m3fn_scaled_KJ.safetensors",
+      "base_precision": "fp16",
+      "quantization": "fp8_e4m3fn_scaled",
+      "load_device": "offload_device",
+      "attention_mode": "sageattn",
+      "rms_norm_function": "default",
+      "compile_args": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "WanVideoModelLoader",
+    "_meta": {
+      "title": "WanVideo Model Loader"
+    }
+  },
+  "13": {
+    "inputs": {
+      "model": "Wan2_2-T2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors",
+      "base_precision": "fp16",
+      "quantization": "fp8_e4m3fn_scaled",
+      "load_device": "offload_device",
+      "attention_mode": "sageattn",
+      "rms_norm_function": "default",
+      "compile_args": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "WanVideoModelLoader",
+    "_meta": {
+      "title": "WanVideo Model Loader"
+    }
+  },
+  "14": {
+    "inputs": {
+      "model": [
+        "13",
+        0
+      ],
+      "block_swap_args": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "WanVideoSetBlockSwap",
+    "_meta": {
+      "title": "WanVideo Set BlockSwap"
+    }
+  },
+  "15": {
+    "inputs": {
+      "blocks_to_swap": 5,
+      "offload_img_emb": false,
+      "offload_txt_emb": false,
+      "use_non_blocking": false,
+      "vace_blocks_to_swap": 1,
+      "prefetch_blocks": 0,
+      "block_swap_debug": false
+    },
+    "class_type": "WanVideoBlockSwap",
+    "_meta": {
+      "title": "WanVideo Block Swap"
+    }
+  },
+  "17": {
+    "inputs": {
+      "model_name": "umt5-xxl-enc-bf16.safetensors",
+      "precision": "bf16",
+      "load_device": "offload_device",
+      "quantization": "disabled"
+    },
+    "class_type": "LoadWanVideoT5TextEncoder",
+    "_meta": {
+      "title": "WanVideo T5 Text Encoder Loader"
+    }
+  },
+  "18": {
+    "inputs": {
+      "model_name": "wan_2.1_vae.safetensors",
+      "precision": "bf16",
+      "use_cpu_cache": false,
+      "verbose": false
+    },
+    "class_type": "WanVideoVAELoader",
+    "_meta": {
+      "title": "WanVideo VAE Loader"
+    }
+  },
+  "20": {
+    "inputs": {
+      "model": [
+        "22",
+        0
+      ],
+      "lora": [
+        "26",
+        0
+      ]
+    },
+    "class_type": "WanVideoSetLoRAs",
+    "_meta": {
+      "title": "WanVideo Set LoRAs"
+    }
+  },
+  "22": {
+    "inputs": {
+      "model": [
+        "12",
+        0
+      ],
+      "block_swap_args": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "WanVideoSetBlockSwap",
+    "_meta": {
+      "title": "WanVideo Set BlockSwap"
+    }
+  },
+  "23": {
+    "inputs": {
+      "model": [
+        "14",
+        0
+      ],
+      "lora": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "WanVideoSetLoRAs",
+    "_meta": {
+      "title": "WanVideo Set LoRAs"
+    }
+  },
+  "25": {
+    "inputs": {
+      "lora": "Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V1.1-low_noise_model.safetensors",
+      "strength": 1,
+      "low_mem_load": false,
+      "merge_loras": false
+    },
+    "class_type": "WanVideoLoraSelect",
+    "_meta": {
+      "title": "WanVideo Lora Select"
+    }
+  },
+  "26": {
+    "inputs": {
+      "lora": "Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V1.1-high_noise_model.safetensors",
+      "strength": 1.0000000000000002,
+      "low_mem_load": false,
+      "merge_loras": false
+    },
+    "class_type": "WanVideoLoraSelect",
+    "_meta": {
+      "title": "WanVideo Lora Select"
+    }
+  },
+  "27": {
+    "inputs": {
+      "backend": "inductor",
+      "fullgraph": false,
+      "mode": "default",
+      "dynamic": false,
+      "dynamo_cache_size_limit": 64,
+      "compile_transformer_blocks_only": true,
+      "dynamo_recompile_limit": 128,
+      "force_parameter_static_shapes": false,
+      "allow_unmerged_lora_compile": false
+    },
+    "class_type": "WanVideoTorchCompileSettings",
+    "_meta": {
+      "title": "WanVideo Torch Compile Settings"
+    }
+  },
+  "33": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "JWInteger",
+    "_meta": {
+      "title": "生成视频秒数，默认5秒"
+    }
+  },
+  "34": {
+    "inputs": {
+      "value": 1280
+    },
+    "class_type": "JWInteger",
+    "_meta": {
+      "title": "高"
+    }
+  },
+  "35": {
+    "inputs": {
+      "frame_rate": 16,
+      "loop_count": 0,
+      "filename_prefix": "AnimateDiff",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "no_preview": false,
+      "images": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "37": {
+    "inputs": {
+      "text": "Hyper-realistic cinematic 4K, Western man age 55-70 with grey hair and subtle wrinkles, business-casual shirt with visible fabric texture, seated at a modern office desk, focused posture and professional concentration, slight torso pause before standing, one hand lightly bracing on desk edge, concentrated expression with a tight-but-neutral mouth, warm daylight from large window, soft shadows, clean Scandinavian office interior, minimal clutter, shallow depth of field. Camera: slow dolly in from medium shot to medium-close, gentle handheld micro-movement. Skin texture detailed, natural pores, no redness, no medical elements"
+    },
+    "class_type": "CR Text",
+    "_meta": {
+      "title": "🔤 CR Text"
+    }
+  },
+  "38": {
+    "inputs": {
+      "string": "1.0, 0.9375001, 0.8333333, 0.625, 0.0000"
+    },
+    "class_type": "StringToFloatList",
+    "_meta": {
+      "title": "String to Float List"
+    }
+  },
+  "41": {
+    "inputs": {
+      "int": 4
+    },
+    "class_type": "Primitive integer [Crystools]",
+    "_meta": {
+      "title": "🪛 Primitive integer"
+    }
+  },
+  "43": {
+    "inputs": {
+      "width": [
+        "44",
+        0
+      ],
+      "height": [
+        "34",
+        0
+      ],
+      "num_frames": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "WanVideoEmptyEmbeds",
+    "_meta": {
+      "title": "WanVideo Empty Embeds"
+    }
+  },
+  "44": {
+    "inputs": {
+      "value": 720
+    },
+    "class_type": "JWInteger",
+    "_meta": {
+      "title": "宽"
+    }
+  }
+}

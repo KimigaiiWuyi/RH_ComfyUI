@@ -290,9 +290,14 @@ class ComfyUIAPI:
     async def generate_video_by_prompt(
         self,
         prompt: Dict,
-        output_path: Path,
-        video_name: str,
+        output_path: Optional[Path] = None,
+        video_name: Optional[str] = None,
     ):
+        if video_name is None:
+            video_name = f"{uuid.uuid4()}.mp4"
+        if output_path is None:
+            output_path = OUTPUT_PATH
+
         logger.debug(f"🚧 [ComfyUI] 生成视频提示词: {prompt}")
 
         prompt_data = await self.queue_prompt(prompt)
@@ -303,11 +308,11 @@ class ComfyUIAPI:
         output_path.mkdir(parents=True, exist_ok=True)
         video_data = io.BytesIO(video)
 
-        save_path = output_path / f"{video_name}.mp4"
+        save_path = output_path / f"{video_name}"
         with open(save_path, "wb") as f:
             f.write(video_data.getbuffer())
-
         logger.info(f"✅ [ComfyUI] 视频生成完成！保存路径: {save_path}")
+        return video
 
     async def upload_mp3(self, mp3: Union[Path, bytes]) -> str:
         return await self.upload_image(mp3, "audio/mpeg")

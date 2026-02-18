@@ -3,7 +3,7 @@ from gsuid_core.bot import Bot
 from gsuid_core.models import Event
 from gsuid_core.utils.image.convert import convert_img
 
-from ..utils.comfyui.wrapper import draw_img_by_qwen_2512
+from ..utils.comfyui.wrapper import gen_image_by_text
 from ..utils.database.models import RHBind
 
 sv_draw = SV("AI绘图")
@@ -18,7 +18,7 @@ async def draw_img(bot: Bot, ev: Event):
 
     if await RHBind.deduct_point(ev.user_id, ev.bot_id, 1):
         await bot.send("💪 积分充足！已扣除1点积分!\n✅ 正在生成图片，预计将等待1分钟...")
-        image = await draw_img_by_qwen_2512(prompt)
+        image = await gen_image_by_text(prompt)
 
         await bot.send("✅ 图片生成完成！")
         return await bot.send(await convert_img(image))

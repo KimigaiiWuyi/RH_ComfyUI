@@ -1,0 +1,127 @@
+{
+  "12": {
+    "inputs": {
+      "top_k": 30,
+      "top_p": 0.8,
+      "temperature": 0.8,
+      "num_beams": 3,
+      "max_mel_tokens": 1500,
+      "max_text_tokens_per_sentence": 120,
+      "custom_cuda_kernel": false,
+      "deepspeed": false,
+      "unload_model": true,
+      "emo_alpha": 1,
+      "emo_vector": "",
+      "use_emo_text": false,
+      "emo_text": "",
+      "use_random": false,
+      "emo_alpha_s2": 1,
+      "emo_vector_s2": "",
+      "use_emo_text_s2": false,
+      "emo_text_s2": "",
+      "use_random_s2": false,
+      "audio": [
+        "37",
+        0
+      ],
+      "text": [
+        "14",
+        0
+      ],
+      "emo_audio_prompt": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "IndexTTS2Run",
+    "_meta": {
+      "title": "IndexTTS2 Run"
+    }
+  },
+  "13": {
+    "inputs": {
+      "audio": "db45150cea81fbe50372311ebb5839e1322e1edeb3d5182cffcff0620968b90d.MP3",
+      "audioUI": ""
+    },
+    "class_type": "LoadAudio",
+    "_meta": {
+      "title": "Load Audio"
+    }
+  },
+  "14": {
+    "inputs": {
+      "value": "我于人间已无敌，不与天战与谁站"
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "String (Multiline)"
+    }
+  },
+  "15": {
+    "inputs": {
+      "audio": "db45150cea81fbe50372311ebb5839e1322e1edeb3d5182cffcff0620968b90d.MP3",
+      "audioUI": ""
+    },
+    "class_type": "LoadAudio",
+    "_meta": {
+      "title": "Load Audio"
+    }
+  },
+  "17": {
+    "inputs": {
+      "filename_prefix": "audio/xiaren",
+      "audioUI": "",
+      "audio": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "SaveAudio",
+    "_meta": {
+      "title": "Save Audio (FLAC)"
+    }
+  },
+  "37": {
+    "inputs": {
+      "start_time": "0:00",
+      "end_time": "0:12",
+      "audio": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "AudioCrop",
+    "_meta": {
+      "title": "AudioCrop"
+    }
+  },
+  "38": {
+    "inputs": {
+      "start_time": "0:00",
+      "end_time": "0:12",
+      "audio": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "AudioCrop",
+    "_meta": {
+      "title": "AudioCrop"
+    }
+  },
+  "39": {
+    "inputs": {
+      "filename_prefix": "audio/ComfyUI",
+      "quality": "V0",
+      "audioUI": "",
+      "audio": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "SaveAudioMP3",
+    "_meta": {
+      "title": "Save Audio (MP3)"
+    }
+  }
+}
