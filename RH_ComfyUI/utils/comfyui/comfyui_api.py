@@ -109,26 +109,22 @@ class ComfyUIAPI:
             response.raise_for_status()
             return response.content
 
-    async def get_video(self, prompt_id):
+    async def get_videos(self, prompt_id: str):
+        output_audios = []
         history = (await self.get_history(prompt_id))[prompt_id]
-        url = f"{self.url}/view"
-        logger.info(history)
-        oo = {}
-        for g in list(history["outputs"].values())[::-1]:
-            if "gifs" in g:
-                oo = g["gifs"][0]
-                break
-        else:
-            logger.info("No video!")
-
-        response = httpx.get(
-            url,
-            params=oo,
-            timeout=50,
-            follow_redirects=True,
-        )
-        response.raise_for_status()
-        return response.content
+        for node_id in history["outputs"]:
+            node_output = history["outputs"][node_id]
+            for content in ["gifs", "images"]:
+                if content in node_output:
+                    for video in node_output[content]:
+                        if video["type"] == "output":
+                            video_data = await self.get_file(
+                                video["filename"],
+                                video["subfolder"],
+                                video["type"],
+                            )
+                        output_audios.append({"filename": video["filename"], "data": video_data})
+        return output_audios
 
     async def get_images(self, prompt_id):
         output_images = []
@@ -157,18 +153,19 @@ class ComfyUIAPI:
         history = (await self.get_history(prompt_id))[prompt_id]
         for node_id in history["outputs"]:
             node_output = history["outputs"][node_id]
-            if "audio" in node_output:
-                for audio in node_output["audio"]:
-                    if audio["type"] == "output":
-                        audio_data = await self.get_audio(
-                            audio["filename"],
-                            audio["subfolder"],
-                            audio["type"],
-                        )
+            for content in ["audio", "images"]:
+                if content in node_output:
+                    for audio in node_output[content]:
+                        if audio["type"] == "output":
+                            audio_data = await self.get_file(
+                                audio["filename"],
+                                audio["subfolder"],
+                                audio["type"],
+                            )
                         output_audios.append({"filename": audio["filename"], "data": audio_data})
         return output_audios
 
-    async def get_audio(self, filename: str, subfolder, folder_type):
+    async def get_file(self, filename: str, subfolder, folder_type):
         # 确保 subfolder 是 Path 对象
         if isinstance(subfolder, str):
             subfolder = Path(subfolder)
@@ -252,13 +249,14 @@ class ComfyUIAPI:
         prompt_id = prompt_data["prompt_id"]
         await self.track_progress(prompt, prompt_id)
         audios = await self.get_audios(prompt_id)
-        logger.info(f"✅ [ComfyUI] 音频生成完成！音频内容: {audios}")
+        logger.info(f"✅ [ComfyUI] 音频生成完成！包含音频数量: {len(audios)}")
         if audios and len(audios) > 0:
             audio_object = audios[0]  # 取第一个音频文件
             audio_data: bytes = audio_object["data"]  # 获取音频数据
             audio_path = output_path / file_name
             with open(audio_path, "wb") as f:
                 f.write(audio_data)
+            logger.info(f"✅ [ComfyUI] 音频生成完成！保存路径: {audio_path}")
             return audio_data
         return None
 
@@ -292,7 +290,7 @@ class ComfyUIAPI:
         prompt: Dict,
         output_path: Optional[Path] = None,
         video_name: Optional[str] = None,
-    ):
+    ) -> Optional[bytes]:
         if video_name is None:
             video_name = f"{uuid.uuid4()}.mp4"
         if output_path is None:
@@ -303,16 +301,18 @@ class ComfyUIAPI:
         prompt_data = await self.queue_prompt(prompt)
         prompt_id = prompt_data["prompt_id"]
         await self.track_progress(prompt, prompt_id)
-        video = await self.get_video(prompt_id)
+        videos = await self.get_videos(prompt_id)
 
-        output_path.mkdir(parents=True, exist_ok=True)
-        video_data = io.BytesIO(video)
-
-        save_path = output_path / f"{video_name}"
-        with open(save_path, "wb") as f:
-            f.write(video_data.getbuffer())
-        logger.info(f"✅ [ComfyUI] 视频生成完成！保存路径: {save_path}")
-        return video
+        logger.info(f"✅ [ComfyUI] 视频生成完成！包含视频数量: {len(videos)}")
+        if videos and len(videos) > 0:
+            video_object = videos[0]  # 取第一个视频文件
+            video_data: bytes = video_object["data"]  # 获取视频数据
+            video_path = output_path / video_name
+            with open(video_path, "wb") as f:
+                f.write(video_data)
+            logger.info(f"✅ [ComfyUI] 视频生成完成！保存路径: {video_path}")
+            return video_data
+        return None
 
     async def upload_mp3(self, mp3: Union[Path, bytes]) -> str:
         return await self.upload_image(mp3, "audio/mpeg")
@@ -401,17 +401,16 @@ class ComfyUIAPI:
             while True:
                 message = await q.get()  # 从队列中获取属于自己的消息
 
-                logger.info(f"Prompt {prompt_id} -> {message}")
+                logger.debug(f"Prompt {prompt_id} -> {message}")
 
-                # --- 这里是你的原始处理逻辑 ---
                 if message["type"] == "progress":
                     data = message["data"]
                     current_step = data["value"]
-                    logger.info(f"Prompt {prompt_id} -> Step: {current_step} of: {data['max']}")
+                    logger.debug(f"Prompt {prompt_id} -> Step: {current_step} of: {data['max']}")
 
                 # 当收到执行完成的信号时，任务结束
                 if message.get("type") == "executing" and message.get("data", {}).get("node") is None:
-                    logger.info(f"Prompt {prompt_id} finished.")
+                    logger.success(f"Prompt {prompt_id} finished.")
                     break  # 退出循环
         finally:
             # 清理，防止内存泄漏

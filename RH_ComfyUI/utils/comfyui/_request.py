@@ -51,8 +51,8 @@ async def edit_img_by_qwen_edit_2511(prompt: str, img_list: List[bytes]):
 
 async def gen_music_by_ace_step_1_5(style_prompt: str, lyric_prompt: Optional[str] = None):
     workflow = load_workflow(MUSIC_WORKFLOW_PATH / "ace_step1.5.json")
-    workflow["125"]["inputs"]["text"] = style_prompt
-    workflow["126"]["inputs"]["text"] = lyric_prompt if lyric_prompt else ""
+    workflow["131"]["inputs"]["text"] = style_prompt
+    workflow["130"]["inputs"]["text"] = lyric_prompt if lyric_prompt else ""
 
     audio = await api.generate_audio_by_prompt(workflow)
     return audio

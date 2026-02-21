@@ -69,7 +69,7 @@
   },
   "64": {
     "inputs": {
-      "strength": 1,
+      "strength": 1.0000000000000002,
       "model": [
         "67",
         0
@@ -112,7 +112,7 @@
   },
   "67": {
     "inputs": {
-      "shift": 3.1,
+      "shift": 3.1000000000000005,
       "model": [
         "93",
         0
@@ -213,7 +213,7 @@
   "73": {
     "inputs": {
       "upscale_method": "lanczos",
-      "megapixels": 1.5,
+      "megapixels": 1.5000000000000002,
       "resolution_steps": 1,
       "image": [
         "41",
@@ -270,52 +270,10 @@
       "title": "EmptySD3LatentImage"
     }
   },
-  "86": {
-    "inputs": {
-      "direction": "right",
-      "match_image_size": true,
-      "image1": [
-        "90",
-        0
-      ],
-      "image2": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "ImageConcanate",
-    "_meta": {
-      "title": "Image Concatenate"
-    }
-  },
-  "90": {
-    "inputs": {
-      "inputcount": 3,
-      "direction": "down",
-      "match_image_size": true,
-      "Update inputs": null,
-      "image_1": [
-        "73",
-        0
-      ],
-      "image_2": [
-        "79",
-        0
-      ],
-      "image_3": [
-        "81",
-        0
-      ]
-    },
-    "class_type": "ImageConcatMulti",
-    "_meta": {
-      "title": "Image Concatenate Multi"
-    }
-  },
   "93": {
     "inputs": {
       "lora_name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-fp32.safetensors",
-      "strength_model": 1,
+      "strength_model": 1.0000000000000002,
       "model": [
         "12",
         0
@@ -324,19 +282,6 @@
     "class_type": "LoraLoaderModelOnly",
     "_meta": {
       "title": "Load LoRA"
-    }
-  },
-  "101": {
-    "inputs": {
-      "filename_prefix": "ComfyUI",
-      "images": [
-        "86",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
     }
   },
   "103": {
