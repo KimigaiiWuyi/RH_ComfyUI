@@ -2,7 +2,6 @@ from gsuid_core.sv import SV
 from gsuid_core.bot import Bot
 from gsuid_core.models import Event
 from gsuid_core.segment import MessageSegment
-from gsuid_core.utils.resource_manager import RM
 
 from ..utils.comfyui.wrapper import gen_video_by_img, gen_video_by_text
 from ..utils.database.models import RHBind
@@ -21,7 +20,7 @@ async def _(bot: Bot, ev: Event):
         await bot.send("💪 积分充足！已扣除8点积分!\n✅ 正在生成视频，预计将等待5分钟...")
 
         if ev.image_id:
-            video = await gen_video_by_img(prompt, await RM.get(ev.image_id))
+            video = await gen_video_by_img(prompt, ev.image_id)
         else:
             video = await gen_video_by_text(prompt)
 
