@@ -4,6 +4,7 @@ from typing import Optional, Annotated
 from PIL import Image
 from msgspec import Meta
 
+from gsuid_core.segment import MessageSegment
 from gsuid_core.ai_core.register import ai_tools
 from gsuid_core.utils.resource_manager import RM
 
@@ -124,6 +125,8 @@ async def gen_music(
     if model_func is None:
         raise ValueError(f"模型 {model} 不存在")
     result = await model_func(style_prompt, lyric_prompt)
+    if result is not None:
+        return MessageSegment.record(result)
     return result
 
 
@@ -142,6 +145,8 @@ async def gen_speech(
     if model_func is None:
         raise ValueError(f"模型 {model} 不存在")
     result = await model_func(text)
+    if result is not None:
+        return MessageSegment.record(result)
     return result
 
 
@@ -162,6 +167,8 @@ async def gen_video_by_text(
     if model_func is None:
         raise ValueError(f"模型 {model} 不存在")
     result = await model_func(prompt, w, h)
+    if result is not None:
+        return MessageSegment.video(result)
     return result
 
 
@@ -184,4 +191,6 @@ async def gen_video_by_img(
         raise ValueError(f"模型 {model} 不存在")
     image = await RM.get(image_id)
     result = await model_func(prompt, image, w, h)
+    if result is not None:
+        return MessageSegment.video(result)
     return result

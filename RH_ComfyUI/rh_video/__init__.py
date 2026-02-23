@@ -1,7 +1,6 @@
 from gsuid_core.sv import SV
 from gsuid_core.bot import Bot
 from gsuid_core.models import Event
-from gsuid_core.segment import MessageSegment
 
 from ..utils.comfyui.wrapper import gen_video_by_img, gen_video_by_text
 from ..utils.database.models import RHBind
@@ -28,6 +27,6 @@ async def _(bot: Bot, ev: Event):
             return await bot.send("❌ 视频生成失败！请检查prompt是否正确！")
 
         await bot.send("✅ 视频生成完成！")
-        return await bot.send(MessageSegment.video(video))
+        return await bot.send(video)
     else:
         return await bot.send("❌ 积分不足！无法生成视频！")
