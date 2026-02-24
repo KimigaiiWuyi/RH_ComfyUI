@@ -1,6 +1,7 @@
 import sys
 import json
 import random
+import shutil
 from pathlib import Path
 
 from gsuid_core.data_store import get_res_path
@@ -55,11 +56,8 @@ def init_dir():
     for _dir in _CP_WORKFLOW_PATH.iterdir():
         for _file in _dir.iterdir():
             pa = WORKFLOW_PATH / _dir.name / _file.name
-            if not pa.exists():
-                pa.parent.mkdir(parents=True, exist_ok=True)
-                if not pa.exists():
-                    with _file.open("rb") as src, pa.open("wb") as dst:
-                        dst.write(src.read())
+            pa.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_file, pa)
 
 
 init_dir()

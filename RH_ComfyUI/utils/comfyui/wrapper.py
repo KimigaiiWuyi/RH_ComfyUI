@@ -1,9 +1,11 @@
 import random
-from typing import Optional, Annotated
+from typing import Tuple, Optional, Annotated
 
 from PIL import Image
 from msgspec import Meta
 
+from gsuid_core.logger import logger
+from gsuid_core.models import Event
 from gsuid_core.segment import MessageSegment
 from gsuid_core.ai_core.register import ai_tools
 from gsuid_core.utils.resource_manager import RM
@@ -17,6 +19,7 @@ from ._request import (
     gen_video_by_text_by_wan2_2,
     draw_img_by_img_by_qwen_2512,
 )
+from ...utils.database.models import RHBind
 
 text2image_workflow = {
     "qwen_2512": draw_img_by_qwen_2512,
@@ -47,7 +50,23 @@ image2video_workflow = {
 }
 
 
-@ai_tools
+async def check_point(ev: Event, point: int) -> Tuple[bool, str]:
+    """
+    检查用户是否有足够的积分
+    """
+    logger.info(f"[RHComfyUI] check_point: UserID:{ev.user_id} BotID:{ev.bot_id} Point:{point}")
+    bind = await RHBind.deduct_point(
+        ev.user_id,
+        ev.bot_id,
+        point,
+    )
+    if bind:
+        return True, f"💪 积分充足！已扣除{point}积分!\n✅ 正在生成，预计将等待1分钟..."
+    else:
+        return False, f"❌ 积分不足！需要{point}积分！"
+
+
+@ai_tools(check_func=check_point, point=1)
 async def gen_image_by_text(
     prompt: Annotated[str, Meta(description="生成图片的提示词")],
     w: Annotated[int, Meta(description="生成图片的宽度")] = 720,
@@ -67,7 +86,7 @@ async def gen_image_by_text(
     return result
 
 
-@ai_tools
+@ai_tools(check_func=check_point, point=1)
 async def gen_image_by_img(
     prompt: Annotated[str, Meta(description="生成图片的提示词")],
     image_id: Annotated[str, Meta(description="生成图片的基础图片ID")],
@@ -88,7 +107,7 @@ async def gen_image_by_img(
     return result
 
 
-@ai_tools
+@ai_tools(check_func=check_point, point=2)
 async def gen_edit_img_by_img(
     prompt: Annotated[str, Meta(description="编辑图片的提示词")],
     image_id_list: Annotated[list[str], Meta(description="编辑图片的基础图片ID列表")],
@@ -109,7 +128,7 @@ async def gen_edit_img_by_img(
     return result
 
 
-@ai_tools
+@ai_tools(check_func=check_point, point=1)
 async def gen_music(
     style_prompt: Annotated[str, Meta(description="生成音乐的风格提示词")],
     lyric_prompt: Annotated[Optional[str], Meta(description="生成音乐的歌词提示词")] = None,
@@ -130,7 +149,7 @@ async def gen_music(
     return result
 
 
-@ai_tools
+@ai_tools(check_func=check_point, point=1)
 async def gen_speech(
     text: Annotated[str, Meta(description="生成语音的文本")],
     model: Annotated[Optional[str], Meta(description="使用的模型，为空时默认随机选择")] = None,
@@ -150,7 +169,7 @@ async def gen_speech(
     return result
 
 
-@ai_tools
+@ai_tools(check_func=check_point, point=8)
 async def gen_video_by_text(
     prompt: Annotated[str, Meta(description="生成视频的提示词")],
     w: Annotated[int, Meta(description="生成视频的宽度")] = 720,
@@ -172,7 +191,7 @@ async def gen_video_by_text(
     return result
 
 
-@ai_tools
+@ai_tools(check_func=check_point, point=8)
 async def gen_video_by_img(
     prompt: Annotated[str, Meta(description="生成视频的提示词")],
     image_id: Annotated[str, Meta(description="生成视频的基础图片ID")],
