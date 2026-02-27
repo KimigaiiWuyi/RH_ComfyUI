@@ -20,4 +20,20 @@ CONFIG_DEFAULT: Dict[str, GSC] = {
         "用于设置RunningHub API Key的配置",
         "",
     ),
+    "BLT_apikey": GsStrConfig(
+        "BLT API Key",
+        "用于设置BLT/OpenAI兼容API的API Key配置",
+        "",
+        options=[
+            "sk-xxx",
+        ],
+    ),
+    "BLT_API_URL": GsStrConfig(
+        "BLT API URL",
+        "用于设置BLT/OpenAI兼容API的Base URL配置",
+        "https://api.bltcy.ai",
+        [
+            "https://api.bltcy.ai",
+        ],
+    ),
 }
