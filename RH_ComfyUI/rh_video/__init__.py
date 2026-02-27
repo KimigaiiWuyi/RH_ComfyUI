@@ -2,8 +2,11 @@ from gsuid_core.sv import SV
 from gsuid_core.bot import Bot
 from gsuid_core.models import Event
 
-from ..utils.comfyui.wrapper import gen_video_by_img, gen_video_by_text
+from ..utils.wrapper import gen_video_by_img, gen_video_by_text
 from ..utils.database.models import RHBind
+from ..rh_config.comfyui_config import RHCOMFYUI_CONFIG
+
+Video_Point: int = RHCOMFYUI_CONFIG.get_config("Video_Point").data
 
 sv_video = SV("AI视频")
 
@@ -15,8 +18,8 @@ async def _(bot: Bot, ev: Event):
     if not prompt:
         return await bot.send("你需要在命令后面加入你要生成的视频文本！")
 
-    if await RHBind.deduct_point(ev.user_id, ev.bot_id, 8):
-        await bot.send("💪 积分充足！已扣除8点积分!\n✅ 正在生成视频，预计将等待5分钟...")
+    if await RHBind.deduct_point(ev.user_id, ev.bot_id, Video_Point):
+        await bot.send(f"💪 积分充足！已扣除{Video_Point}点积分!\n✅ 正在生成视频，预计将等待5分钟...")
 
         if ev.image_id:
             video = await gen_video_by_img(prompt, ev.image_id)

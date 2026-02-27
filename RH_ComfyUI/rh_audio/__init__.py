@@ -2,8 +2,12 @@ from gsuid_core.sv import SV
 from gsuid_core.bot import Bot
 from gsuid_core.models import Event
 
-from ..utils.comfyui.wrapper import gen_music, gen_speech
+from ..utils.wrapper import gen_music, gen_speech
 from ..utils.database.models import RHBind
+from ..rh_config.comfyui_config import RHCOMFYUI_CONFIG
+
+Music_Point: int = RHCOMFYUI_CONFIG.get_config("Music_Point").data
+Speech_Point: int = RHCOMFYUI_CONFIG.get_config("Speech_Point").data
 
 sv_audio = SV("AI音频")
 
@@ -15,8 +19,8 @@ async def _(bot: Bot, ev: Event):
     if not prompt:
         return await bot.send("你需要在命令后面加入你要生成的音乐prompt！")
 
-    if await RHBind.deduct_point(ev.user_id, ev.bot_id, 2):
-        await bot.send("💪 积分充足！已扣除2点积分!\n✅ 正在生成音乐，预计将等待1分钟...")
+    if await RHBind.deduct_point(ev.user_id, ev.bot_id, Music_Point):
+        await bot.send(f"💪 积分充足！已扣除{Music_Point}点积分!\n✅ 正在生成音乐，预计将等待1分钟...")
         music = await gen_music(prompt)
 
         if music is None:
@@ -35,8 +39,8 @@ async def _(bot: Bot, ev: Event):
     if not prompt:
         return await bot.send("你需要在命令后面加入你要生成的语音文本！")
 
-    if await RHBind.deduct_point(ev.user_id, ev.bot_id, 2):
-        await bot.send("💪 积分充足！已扣除2点积分!\n✅ 正在生成语音，预计将等待1分钟...")
+    if await RHBind.deduct_point(ev.user_id, ev.bot_id, Speech_Point):
+        await bot.send(f"💪 积分充足！已扣除{Speech_Point}点积分!\n✅ 正在生成语音，预计将等待1分钟...")
         speech = await gen_speech(prompt)
 
         if speech is None:

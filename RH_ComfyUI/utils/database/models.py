@@ -1,9 +1,15 @@
+from typing import Optional
+
 from sqlmodel import Field
 from fastapi_amis_admin.amis.components import PageSchema
 
 from gsuid_core.webconsole import site
 from gsuid_core.webconsole.mount_app import GsAdminModel
 from gsuid_core.utils.database.base_models import Bind
+
+from ...rh_config.comfyui_config import RHCOMFYUI_CONFIG
+
+DEFAULT_POINT: int = RHCOMFYUI_CONFIG.get_config("Default_Point").data
 
 
 class RHBind(Bind, table=True):
@@ -15,8 +21,11 @@ class RHBind(Bind, table=True):
         cls,
         user_id: str,
         bot_id: str,
-        point: int = 20,
+        point: Optional[int] = None,
     ):
+        if point is None:
+            point = DEFAULT_POINT
+
         await cls.insert_data(
             group_id=None,
             user_id=user_id,
