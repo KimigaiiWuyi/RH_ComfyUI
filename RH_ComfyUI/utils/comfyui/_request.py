@@ -39,11 +39,15 @@ async def edit_img_by_qwen_edit_2511(prompt: str, img_list: List[bytes]):
     workflow["103"]["inputs"]["text"] = prompt
 
     img_slot = ["41", "79", "81"]
+    img_slot2 = ["73", "79", "81"]
     for index, i in enumerate(img_list):
         if index >= 3:
             break
 
         workflow[img_slot[index]]["inputs"]["image"] = await api.upload_image(i)
+
+        for j in ["68", "69"]:
+            workflow[j]["inputs"][f"image{index + 1}"] = [img_slot2[index], 0]
 
     image = await api.generate_image_by_prompt(workflow)
     return image

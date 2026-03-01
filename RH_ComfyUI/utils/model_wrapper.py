@@ -9,7 +9,7 @@ from gsuid_core.ai_core.register import ai_entity
 from .model_knowledge import MODEL_KNOWLEDGE, get_model_names_by_category
 
 
-def register_model_knowledge():
+def register_model_kai():
     """注册模型知识到框架"""
     plugin_name = "RH_ComfyUI"
     knowledge_type = "model"
@@ -91,4 +91,4 @@ async def recommend_model(
         return None
 
 
-register_model_knowledge()
+register_model_kai()

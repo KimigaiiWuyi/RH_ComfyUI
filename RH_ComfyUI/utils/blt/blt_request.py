@@ -94,6 +94,15 @@ async def _request(
 
     while fail_count < max_retries:
         try:
+            if not headers:
+                headers = {}
+
+            if API_KEY:
+                headers["Authorization"] = f"Bearer {API_KEY}"
+            else:
+                logger.warning("[BLT] 未配置API_KEY，将无法请求！")
+                return -1
+
             resp = await _base_request(method, url, headers, json, data)
 
             if isinstance(resp, int):
@@ -236,9 +245,6 @@ async def draw_image_by_model(
         "Accept": "application/json",
     }
 
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
-
     # 构造请求体
     request_body = {
         "model": model,
@@ -331,9 +337,6 @@ async def draw_image_by_blt(
         "Accept": "application/json",
     }
 
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
-
     # 构造请求体
     request_body: Dict[str, Any] = {
         "model": model,
@@ -348,7 +351,12 @@ async def draw_image_by_blt(
         # 将 list[bytes] 转换为 base64 字符串列表
         request_body["image"] = [base64.b64encode(img_bytes).decode() for img_bytes in image_list]
 
-    logger.debug(f"[BLT] 请求体: {request_body}")
+    # 截断过长的 base64 字符串用于日志输出
+    log_body = request_body.copy()
+    if "image" in log_body:
+        log_body["image"] = [f"{img[:50]}... (长度: {len(img)})" for img in log_body["image"]]
+
+    logger.debug(f"[BLT] 请求体: {log_body}")
 
     # 发送请求
     resp = await _request(
