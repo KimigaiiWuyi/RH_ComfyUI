@@ -1,9 +1,8 @@
 import random
-from typing import List, Optional
+from typing import Optional
 
 from gsuid_core.logger import logger
 from gsuid_core.ai_core.rag import query_knowledge
-from gsuid_core.ai_core.models import KnowledgePoint
 
 # 插件名称
 PLUGIN_NAME = "RH_ComfyUI"
@@ -38,7 +37,21 @@ MODEL_KNOWLEDGE = {
         "qwen_2511": {
             "title": "通义千问 Edit 2511",
             "content": "专业的图像编辑模型。优势：中文指令理解准确，支持精确的区域编辑，可同时处理多图输入。适用场景：局部修图和编辑，多图融合处理，照片精修，添加或删除元素。成本：低，速度：中等，输出质量：低。",
-            "tags": ["中文", "图片编辑", "多图", "精确编辑", "风格迁移", "添加文字"],
+            "tags": [
+                "中文",
+                "图片编辑",
+                "多图",
+                "精确编辑",
+                "风格迁移",
+                "添加文字",
+                "图片编辑",
+                "修改文字",
+                "局部修图",
+                "给图片加上字",
+                "删掉图片里的东西",
+                "P图",
+                "Image Editing Add Text",
+            ],
         },
         "banana2": {
             "title": "Gemini 3.1 Flash Image / Nano Bnana 2",
@@ -82,30 +95,6 @@ MODEL_KNOWLEDGE = {
 }
 
 
-def get_model_knowledge_for_embedding() -> List[KnowledgePoint]:
-    """获取所有模型知识，用于填充向量库
-
-    Returns:
-        模型知识列表，格式：{id, plugin, type, category, title, content, tags}
-    """
-    results = []
-    for category in MODEL_KNOWLEDGE:
-        for model in MODEL_KNOWLEDGE[category]:
-            info = MODEL_KNOWLEDGE[category][model]
-            results.append(
-                {
-                    "id": f"{PLUGIN_NAME}:model:{category}:{model}",
-                    "plugin": PLUGIN_NAME,
-                    "type": "model",
-                    "category": category,
-                    "title": info["title"],
-                    "content": info["content"],
-                    "tags": info["tags"],
-                }
-            )
-    return results
-
-
 def get_model_names_by_category(category: str):
     """获取指定类别下的所有模型名称
 
@@ -116,15 +105,6 @@ def get_model_names_by_category(category: str):
         模型名称列表
     """
     return list(MODEL_KNOWLEDGE.get(category, {}).keys())
-
-
-def get_all_categories():
-    """获取所有模型类别
-
-    Returns:
-        类别列表
-    """
-    return list(MODEL_KNOWLEDGE.keys())
 
 
 async def recommend_model(
