@@ -72,12 +72,14 @@ async def check_point(ev: Event, point: int) -> Tuple[bool, str]:
     """
     检查用户是否有足够的积分
     """
-    logger.info(f"[RHComfyUI] check_point: UserID:{ev.user_id} BotID:{ev.bot_id} Point:{point}")
+    logger.info(f"[RHComfyUI] check_point: 用户:{ev.user_id} BotID:{ev.bot_id} 消费:{point}")
+
     bind = await RHBind.deduct_point(
         ev.user_id,
         ev.bot_id,
         point,
     )
+
     if bind:
         return True, f"💪 积分充足！已扣除{point}积分!\n✅ 正在生成，预计将等待1分钟..."
     else:
