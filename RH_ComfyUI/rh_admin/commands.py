@@ -132,7 +132,7 @@ async def add_user_points(
             user_id=target_user_id,
             bot_id=ev.bot_id,
         )
-        return f"✅ 成功为用户 [{target_user_id}] 增加 {point_num} 积分！\n当前积分: {current_point}"
+        return f"✅ 成功为用户 [{target_user_id}] 增加 {point_num} 积分！\n📋 当前积分: {current_point}"
     else:
         return "❌ 增加积分失败！"
 
@@ -175,7 +175,7 @@ async def deduct_user_points(
             user_id=target_user_id,
             bot_id=ev.bot_id,
         )
-        return f"✅ 成功为用户 [{target_user_id}] 扣除 {point_num} 积分！\n当前积分: {new_point}"
+        return f"✅ 成功为用户 [{target_user_id}] 扣除 {point_num} 积分！\n📋 当前积分: {new_point}"
     else:
         return "❌ 扣除积分失败！"
 
