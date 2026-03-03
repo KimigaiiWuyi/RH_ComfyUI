@@ -82,10 +82,15 @@ async def check_point(ev: Event, point: int) -> Tuple[bool, str]:
         point,
     )
 
+    point = await RHBind.get_point(
+        ev.user_id,
+        ev.bot_id,
+    )
+
     if bind:
-        return True, f"💪 积分充足！已扣除{point}积分!\n✅ 正在生成，预计将等待1分钟..."
+        return True, f"💪 积分充足！已扣除{point}积分!\n📋 当前积分: {point}\n✅ 正在生成，预计将等待1分钟..."
     else:
-        return False, f"❌ 积分不足！需要{point}积分！"
+        return False, f"❌ 积分不足！需要{point}积分！\n📋 当前积分: {point}"
 
 
 @ai_tools(check_func=check_point, point=Draw_Point)

@@ -48,7 +48,6 @@ class RHBind(Bind, table=True):
     @classmethod
     async def add_point(
         cls,
-        group_id: str,
         user_id: str,
         bot_id: str,
         add_point_num: int,
