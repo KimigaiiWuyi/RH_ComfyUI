@@ -1,9 +1,3 @@
-import random
-from typing import Optional
-
-from gsuid_core.logger import logger
-from gsuid_core.ai_core.rag import query_knowledge
-
 # 插件名称
 PLUGIN_NAME = "RH_ComfyUI"
 
@@ -12,18 +6,147 @@ MODEL_KNOWLEDGE = {
     "text2image": {
         "qwen_2512": {
             "title": "千问Qwen-Image2512",
-            "content": "千问Image2512模型，擅长中文提示词理解，适合各种风格的图像生成。优势：中文提示词理解能力强，支持复杂风格描述，输出质量稳定可靠。适用场景：中文场景的图像生成，需要精确描述的画面，艺术创作和插画。成本：低，速度：中等，输出质量：低。",
-            "tags": ["中文", "图像生成", "高质量", "艺术创作", "文生图"],
+            "content": "千问Image2512模型，擅长中文提示词理解，适合各种风格的图像生成。优势：中文提示词理解能力强，支持复杂风格描述，输出质量稳定可靠，成本低。适用场景：中文场景的图像生成，简单需求，二次元动漫头像，通用图像生成。成本：低，速度：中等，输出质量：中等。",
+            "tags": [
+                # 常见生成指令
+                "生成",
+                "画",
+                "帮我画",
+                "生成一张",
+                "画一个",
+                "创建一个",
+                "绘制",
+                # 常见风格
+                "二次元",
+                "动漫",
+                "卡通",
+                "简约",
+                "简单",
+                "清新",
+                "可爱",
+                "甜美",
+                # 常见主题
+                "头像",
+                "女生",
+                "男生",
+                "女孩",
+                "男孩",
+                "人物",
+                "风景",
+                "风景画",
+                "动物",
+                "宠物",
+                "猫",
+                "狗",
+                "食物",
+                "美食",
+                "植物",
+                "花卉",
+                "花朵",
+                "背景",
+                "壁纸",
+                "海报",
+                "插画",
+                "封面",
+                "头像",
+                "大头照",
+                # 通用场景
+                "日常",
+                "休闲",
+                "普通",
+                "基础",
+                "标准",
+                "默认",
+                # 中文相关
+                "中文",
+                "文生图",
+                "图像生成",
+            ],
         },
         "banana2": {
             "title": "Gemini 3.1 Flash Image / Nano Bnana 2",
-            "content": "Gemini 3.1 Flash 图像生成模型，速度快，适合快速生成和预览。优势：生成速度非常快，支持快速迭代测试，质量稳定可控，适合批量生成。适用场景：快速预览和测试，低延迟要求的应用，批量生成。成本：中等，速度：快，输出质量：高。",
-            "tags": ["快速", "图像生成", "低延迟", "批量生成", "文生图"],
+            "content": "Gemini 3.1 Flash 图像生成模型，速度快，适合快速生成和预览。优势：生成速度非常快，支持快速迭代测试，质量稳定可控，适合批量生成。适用场景：需要较快速度但保持较好质量的图像，高清图像，精细画面。成本：中等，速度：快，输出质量：高。",
+            "tags": [
+                # 高质量要求
+                "高清",
+                "高质量",
+                "高分辨率",
+                "清晰",
+                "细腻",
+                "细节丰富",
+                # 专业场景
+                "专业",
+                "商用",
+                "商业",
+                "广告",
+                "宣传",
+                "包装",
+                # 精细要求
+                "精细",
+                "精致",
+                "精美",
+                "完美",
+                "逼真",
+                "真实感",
+                # 视觉风格
+                "电影质感",
+                "油画感",
+                "摄影",
+                "写真",
+                "3D",
+                "渲染",
+                # 复杂场景
+                "复杂",
+                "多人物",
+                "多元素",
+                "场景",
+                "光影",
+                "氛围",
+                # 快速需求
+                "快速",
+                "低延迟",
+                "批量",
+                "批量生成",
+                "文生图",
+            ],
         },
         "banana_pro": {
             "title": "Nano Banana 1 Pro",
             "content": "Nano Banana 2.2K 高质量图像生成模型。优势：图像质量非常高，细节丰富细腻，色彩表现优秀，适合专业输出。适用场景：需要最终输出的高质量图像，专业创作场景，商业项目，需要精细细节的画面。成本：高，速度：中等，输出质量：极高。",
-            "tags": ["高质量", "图像生成", "专业", "精细", "文生图"],
+            "tags": [
+                # 最高质量
+                "最高质量",
+                "终极",
+                "旗舰",
+                "顶级",
+                "极致",
+                "超级",
+                # 商业级
+                "商业级",
+                "商用",
+                "广告级",
+                "印刷级",
+                "出版级",
+                # 专业级
+                "专业级",
+                "设计师",
+                "艺术家",
+                "创作级",
+                "精品",
+                # 精细细节
+                "超精细",
+                "超高细节",
+                "极致细节",
+                "毛孔",
+                "发丝",
+                "纹理",
+                # 复杂制作
+                "复杂场景",
+                "史诗级",
+                "电影级",
+                "3D渲染",
+                "虚幻引擎",
+            ],
         },
     },
     "image2image": {
@@ -105,52 +228,3 @@ def get_model_names_by_category(category: str):
         模型名称列表
     """
     return list(MODEL_KNOWLEDGE.get(category, {}).keys())
-
-
-async def recommend_model(
-    query: str,
-    category: str,
-    limit: int = 3,
-    fallback: bool = True,
-) -> Optional[str]:
-    """为特定类别推荐模型
-
-    Args:
-        query: 用户需求描述
-        category: 模型类别 (text2image, image2image, etc.)
-        limit: 查询结果数量
-        fallback: 当没有找到匹配时是否回退到随机选择
-
-    Returns:
-        推荐的模型名称，如果没有找到且fallback=False则返回None
-    """
-    results = await query_knowledge(
-        query,
-        category,
-        limit=limit,
-    )
-
-    if not results:
-        if fallback:
-            models = get_model_names_by_category(category)
-            if models:
-                logger.info(f"🧠 [{PLUGIN_NAME}][RAG] 未找到匹配模型，随机选择: {category}")
-                return random.choice(models)
-        return None
-
-    # 选择分数最高的模型
-    best_model = sorted(results, key=lambda x: x.score, reverse=True)[0]
-    if best_model.payload is None:
-        return None
-
-    model_id = best_model.payload.get("id")
-
-    # 从ID中提取模型名称: RH_ComfyUI:model:text2image:qwen_2512 -> qwen_2512
-    if model_id:
-        model_name = model_id.split(":")[-1] if ":" in model_id else model_id
-        model_display = best_model.payload.get("title", model_name)
-
-        logger.info(f"🧠 [{PLUGIN_NAME}][RAG] 推荐模型: {model_display} ({model_name}) 分数: {best_model.score:.4f}")
-
-        return model_name
-    return None
