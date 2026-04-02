@@ -6,10 +6,21 @@
 import time
 import asyncio
 from enum import Enum, auto
-from typing import Dict, List, Tuple, Callable, Optional
+from typing import Dict, List, Tuple, Callable, Optional, Literal
 from dataclasses import dataclass
 
 from ..rh_config.comfyui_config import RHCOMFYUI_CONFIG
+
+# 任务类型定义
+TaskType = Literal[
+    "text2image",
+    "image2image",
+    "image_edit",
+    "text2video",
+    "image2video",
+    "music",
+    "speech",
+]
 
 
 class ModelRequirement(Enum):
@@ -37,8 +48,9 @@ class ModelInfo:
     name: str
     func: Callable
     requirements: List[ModelRequirement]
-    category: str
+    task_type: TaskType
     description: str
+    knowledge_content: str = ""  # 知识库内容，用于Agent选择参考
 
 
 @dataclass
