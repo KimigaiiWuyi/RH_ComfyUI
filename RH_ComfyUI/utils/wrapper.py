@@ -1,34 +1,98 @@
-from typing import List, Optional
+"""主包装器模块"""
 
-from gsuid_core.segment import Message, MessageSegment
+from typing import Tuple, Callable, Optional
+
+from gsuid_core.logger import logger
 from gsuid_core.ai_core.register import ai_tools
 from gsuid_core.utils.resource_manager import RM
 
-from .model_registry import (
+from .models import (
     MODEL_REGISTRY,
+    ModelStatus,
+    ModelUnavailableError,
+    recommend_model,
+    availability_checker,
+)
+from .points import (
     Draw_Point,
     Music_Point,
     Video_Point,
     Speech_Point,
     Edit_Image_Point,
     check_point,
-    select_available_model,
 )
 
-# 工作流字典
-text2image_workflow = {name: info.func for name, info in MODEL_REGISTRY.items() if info.task_type == "text2image"}
 
-image2image_workflow = {name: info.func for name, info in MODEL_REGISTRY.items() if info.task_type == "image2image"}
+# ===== 模型选择 =====
+async def select_available_model(
+    category: str,
+    preferred_model: Optional[str] = None,
+    query: Optional[str] = None,
+) -> Tuple[str, Callable]:
+    """
+    选择一个可用的模型
 
-image_edit_workflow = {name: info.func for name, info in MODEL_REGISTRY.items() if info.task_type == "image_edit"}
+    Args:
+        category: 模型类别
+        preferred_model: 优先选择的模型（如果可用）
+        query: 用户提示词（可选），用于Agent智能推荐
 
-music_workflow = {name: info.func for name, info in MODEL_REGISTRY.items() if info.task_type == "music"}
+    Returns:
+        (模型名称, 模型函数)
 
-speech_workflow = {name: info.func for name, info in MODEL_REGISTRY.items() if info.task_type == "speech"}
+    Raises:
+        ModelUnavailableError: 如果该类别没有可用模型
+    """
+    import random
 
-text2video_workflow = {name: info.func for name, info in MODEL_REGISTRY.items() if info.task_type == "text2video"}
+    # 获取该类别所有模型
+    category_models = [name for name, info in MODEL_REGISTRY.items() if info.task_type == category]
 
-image2video_workflow = {name: info.func for name, info in MODEL_REGISTRY.items() if info.task_type == "image2video"}
+    if not category_models:
+        raise ModelUnavailableError(
+            f"类别 {category} 没有注册的模型",
+            "",
+            ModelStatus.UNKNOWN,
+        )
+
+    # 如果指定了优先模型，先检查它
+    if preferred_model and preferred_model in category_models:
+        result = await availability_checker.check_model(MODEL_REGISTRY[preferred_model])
+        if result.is_available:
+            return preferred_model, MODEL_REGISTRY[preferred_model].func
+        else:
+            logger.warning(f"[RHComfyUI] 优先模型 {preferred_model} 不可用，尝试其他模型")
+
+    # 如果提供了 query，尝试使用 Agent 智能推荐
+    if query:
+        try:
+            rag_model = await recommend_model(query, category)
+            if rag_model and rag_model in category_models:
+                # 检查 Agent 推荐的模型是否可用
+                result = await availability_checker.check_model(MODEL_REGISTRY[rag_model])
+                if result.is_available:
+                    logger.info(f"[RHComfyUI] Agent 推荐模型: {rag_model}")
+                    return rag_model, MODEL_REGISTRY[rag_model].func
+                else:
+                    logger.warning(f"[RHComfyUI] Agent 推荐模型 {rag_model} 不可用，尝试其他模型")
+        except Exception as e:
+            logger.warning(f"[RHComfyUI] Agent 推荐失败: {e}")
+
+    # 检查该类别所有模型的可用性
+    available_models = await availability_checker.filter_available(category_models, MODEL_REGISTRY)
+
+    if not available_models:
+        # 记录所有不可用的原因
+        for name in category_models:
+            result = await availability_checker.check_model(MODEL_REGISTRY[name])
+            logger.warning(f"[RHComfyUI] 模型 {name} 不可用: {result.reason}")
+
+        raise ModelUnavailableError(f"类别 {category} 没有可用模型，请检查配置", "", ModelStatus.UNKNOWN)
+
+    # 随机选择一个可用模型
+    selected = random.choice(available_models)
+    logger.info(f"[RHComfyUI] 从类别 {category} 选择模型: {selected}")
+    return selected, MODEL_REGISTRY[selected].func
 
 
 # ===== AI 工具函数 =====
@@ -40,7 +104,8 @@ async def gen_image_by_text(
     model: Optional[str] = None,
 ):
     """
-    文生图工具：根据文字描述生成图片
+    文生图工具
+    根据文字描述生成图片
 
     根据用户提供的文字描述，从零开始创建生成图片。
     适用于创意设计、插画、海报、概念图等视觉内容生成场景。
@@ -74,7 +139,8 @@ async def gen_image_by_img(
     model: Optional[str] = None,
 ):
     """
-    图生图工具：以现有图片为基础，根据文字描述生成新图片
+    图生图工具
+    以现有图片为基础，根据文字描述生成新图片
 
     以现有图片为基础，根据文字描述对原图进行重新创作和生成，保留原图的大部分内容或风格特征。
     适用于基于已有图片进行重新绘图的场景。
@@ -102,71 +168,92 @@ async def gen_image_by_img(
 
 
 @ai_tools(check_func=check_point, point=Edit_Image_Point)
-async def gen_edit_img_by_img(
+async def edit_image(
     prompt: str,
-    image_id_list: List[str],
+    image_id: str,
     model: Optional[str] = None,
 ):
     """
-    图片编辑工具：对已有图片进行智能编辑和修改
+    图片编辑工具
 
-    对已有图片进行智能编辑、修改或替换，支持局部区域编辑和修复、多图片融合等操作。
-    适用于图片内容替换、换背景、局部修改、图片融合等场景。
+    对现有图片进行编辑和修改
+    对已有图片进行编辑，包括局部修改、元素添加或删除、风格转换等操作。
 
     Args:
-        prompt: 图片编辑的具体要求描述，如"将背景替换为海边"或"添加眼镜"
-        image_id_list: 要编辑的图片资源ID列表，支持多图片输入
+        prompt: 编辑指令，描述要进行的修改
+        image_id: 要编辑的图片资源ID
         model: 可选，指定使用的模型名称，默认为自动选择可用模型
 
     Returns:
         编辑后的图片结果对象
 
     Example:
-        >>> await gen_edit_img_by_img("换上一件红色外套", image_id_list=["person_001"])
-        >>> await gen_edit_img_by_img("背景替换为城市夜景", image_id_list=["photo_002"])
+        >>> await edit_image("给图片加上文字：Hello", image_id="photo_001")
+        >>> await edit_image("删除背景中的路人", image_id="street_001")
     """
     model_name, model_func = await select_available_model(
         "image_edit",
         model,
         query=prompt,
     )
-    image_list = [await RM.get(image_id) for image_id in image_id_list]
-    result = await model_func(prompt, image_list)
+    image = await RM.get(image_id)
+    result = await model_func(prompt, image)
+    return result
+
+
+async def gen_edit_img_by_img(
+    prompt: str,
+    image_id_list: list,
+) -> str:
+    """
+    编辑图片（多图）
+
+    对已有图片进行编辑，支持多图输入。
+
+    Args:
+        prompt: 编辑指令，描述要进行的修改
+        image_id_list: 要编辑的图片资源ID列表
+
+    Returns:
+        编辑后的图片结果
+    """
+    images = [await RM.get(img_id) for img_id in image_id_list]
+    model_name, model_func = await select_available_model(
+        "image_edit",
+        query=prompt,
+    )
+    result = await model_func(prompt, images)
     return result
 
 
 @ai_tools(check_func=check_point, point=Music_Point)
 async def gen_music(
-    style_prompt: str,
-    lyric_prompt: Optional[str] = None,
+    prompt: str,
     model: Optional[str] = None,
-) -> Message:
+):
     """
-    音乐生成工具：根据风格和歌词描述生成音乐
+    音乐生成工具
+    根据描述生成音乐
 
-    根据用户提供的风格描述和可选歌词内容，自动生成对应的音乐作品。
-    适用于创作背景音乐、配乐、歌曲等音乐生成场景。
+    根据文字描述生成音乐，可以指定风格、情绪、用途等特征。
 
     Args:
-        style_prompt: 音乐风格描述，如"欢快的流行音乐"或"悲伤的钢琴曲"
-        lyric_prompt: 可选，歌词内容，用于生成带人声的歌曲，None则生成纯音乐
+        prompt: 音乐描述，描述想要的音乐风格、情绪、用途等
         model: 可选，指定使用的模型名称，默认为自动选择可用模型
 
     Returns:
-        生成的音频消息对象，包含音乐文件
+        生成的音频结果对象
 
     Example:
-        >>> await gen_music("欢快的电子音乐")
-        >>> await gen_music("浪漫的钢琴曲", lyric_prompt="月光下我们起舞")
+        >>> await gen_music("轻松愉快的背景音乐，适合咖啡厅")
+        >>> await gen_music("动感电子音乐，适合运动视频")
     """
     model_name, model_func = await select_available_model(
         "music",
         model,
-        query=style_prompt,
+        query=prompt,
     )
-    result = await model_func(style_prompt, lyric_prompt)
-    if result is not None:
-        return MessageSegment.record(result)
+    result = await model_func(prompt)
     return result
 
 
@@ -176,21 +263,20 @@ async def gen_speech(
     model: Optional[str] = None,
 ):
     """
-    语音生成工具：将文字转换为语音音频
+    语音生成工具
 
-    将用户提供的文字内容通过语音合成技术转换为自然流畅的语音音频。
-    适用于文字朗读、有声书制作、视频配音、旁白生成等场景。
+    将输入的文字内容转换为自然语音输出。
 
     Args:
-        text: 要转换为语音的文字内容，支持较长文本
+        text: 要转换的文字内容
         model: 可选，指定使用的模型名称，默认为自动选择可用模型
 
     Returns:
-        生成的音频消息对象，包含语音文件
+        生成的语音结果对象
 
     Example:
-        >>> await gen_speech("欢迎收听今天的新闻播报")
-        >>> await gen_speech("这是一段视频旁白内容")
+        >>> await gen_speech("欢迎使用 RH_ComfyUI，这是一个强大的 AI 工具。")
+        >>> await gen_speech("今天天气真好，我们出去走走吧。")
     """
     model_name, model_func = await select_available_model(
         "speech",
@@ -198,45 +284,38 @@ async def gen_speech(
         query=text,
     )
     result = await model_func(text)
-    if result is not None:
-        return MessageSegment.record(result)
     return result
 
 
 @ai_tools(check_func=check_point, point=Video_Point)
 async def gen_video_by_text(
     prompt: str,
-    w: int = 720,
-    h: int = 1280,
+    duration: int = 5,
     model: Optional[str] = None,
 ):
     """
-    文生视频工具：根据文字描述生成视频
+    文生视频工具
 
-    根据用户提供的文字描述，从零开始创作生成动态视频内容。
-    适用于动画创作、短视频生成、概念视频制作等场景。
+    根据文字描述直接生成视频内容。
 
     Args:
-        prompt: 要生成视频的文字描述内容，支持描述场景、动作、氛围等
-        w: 生成视频的宽度，默认720
-        h: 生成视频的高度，默认1280
+        prompt: 视频内容描述，描述想要的视频场景、动作、氛围等
+        duration: 视频时长（秒），默认5秒
         model: 可选，指定使用的模型名称，默认为自动选择可用模型
 
     Returns:
-        生成的视频消息对象
+        生成的视频结果对象
 
     Example:
-        >>> await gen_video_by_text("一只狗在海边奔跑，夕阳西下")
-        >>> await gen_video_by_text("城市街道下雨场景", w=1920, h=1080)
+        >>> await gen_video_by_text("一只猫在草地上追蝴蝶", duration=5)
+        >>> await gen_video_by_text("日出时分海边风景", duration=10)
     """
     model_name, model_func = await select_available_model(
         "text2video",
         model,
         query=prompt,
     )
-    result = await model_func(prompt, w, h)
-    if result is not None:
-        return MessageSegment.video(result)
+    result = await model_func(prompt, duration)
     return result
 
 
@@ -244,29 +323,26 @@ async def gen_video_by_text(
 async def gen_video_by_img(
     prompt: str,
     image_id: str,
-    w: int = 720,
-    h: int = 1280,
+    duration: int = 5,
     model: Optional[str] = None,
 ):
     """
-    图生视频工具：以图片为基础生成动态视频
+    图生视频工具
 
-    以静态图片为基础，根据文字描述为图片中的元素添加动态效果，生成动态视频。
-    适用于将静态图片转化为动态视频、图片元素动效添加等场景。
+    将静态图片转换为动态视频，可以添加运动效果。
 
     Args:
-        prompt: 描述视频中动态效果的文字内容
-        image_id: 基础图片的资源ID，用于获取原始静态图片
-        w: 生成视频的宽度，默认720
-        h: 生成视频的高度，默认1280
+        prompt: 视频描述，描述想要的运动效果和变化
+        image_id: 源图片的资源ID
+        duration: 视频时长（秒），默认5秒
         model: 可选，指定使用的模型名称，默认为自动选择可用模型
 
     Returns:
-        生成的视频消息对象
+        生成的视频结果对象
 
     Example:
-        >>> await gen_video_by_img("风吹动树叶", image_id="static_001")
-        >>> await gen_video_by_img("云朵缓缓飘动", image_id="landscape_002")
+        >>> await gen_video_by_img("云朵飘动，水波荡漾", image_id="landscape_001", duration=5)
+        >>> await gen_video_by_img("人物转身离开", image_id="person_001", duration=3)
     """
     model_name, model_func = await select_available_model(
         "image2video",
@@ -274,7 +350,5 @@ async def gen_video_by_img(
         query=prompt,
     )
     image = await RM.get(image_id)
-    result = await model_func(prompt, image, w, h)
-    if result is not None:
-        return MessageSegment.video(result)
+    result = await model_func(prompt, image, duration)
     return result

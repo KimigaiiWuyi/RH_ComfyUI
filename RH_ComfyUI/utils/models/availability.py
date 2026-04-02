@@ -1,67 +1,28 @@
-"""
-模型可用性检查模块
-提供运行时模型可用性检查和 RAG 预过滤
-"""
+"""模型可用性检查模块"""
 
 import time
 import asyncio
-from enum import Enum, auto
-from typing import Dict, List, Tuple, Callable, Optional, Literal
-from dataclasses import dataclass
+from typing import Dict, List
 
-from ..rh_config.comfyui_config import RHCOMFYUI_CONFIG
-
-# 任务类型定义
-TaskType = Literal[
-    "text2image",
-    "image2image",
-    "image_edit",
-    "text2video",
-    "image2video",
-    "music",
-    "speech",
-]
+from .types import ModelInfo, ModelStatus
 
 
-class ModelRequirement(Enum):
-    """模型依赖类型"""
-
-    BLT_API = auto()  # 需要 BLT API Key
-    COMFYUI_URL = auto()  # 需要 ComfyUI 服务地址
-    RH_API = auto()  # 需要 RunningHub API Key
-
-
-class ModelStatus(Enum):
-    """模型可用状态"""
-
-    AVAILABLE = "available"
-    MISSING_BLT_API = "missing_blt_api"
-    MISSING_COMFYUI = "missing_comfyui"
-    MISSING_RH_API = "missing_rh_api"
-    UNKNOWN = "unknown"
-
-
-@dataclass
-class ModelInfo:
-    """模型信息"""
-
-    name: str
-    func: Callable
-    requirements: List[ModelRequirement]
-    task_type: TaskType
-    description: str
-    knowledge_content: str = ""  # 知识库内容，用于Agent选择参考
-
-
-@dataclass
 class AvailabilityResult:
     """可用性检查结果"""
 
-    model_name: str
-    status: ModelStatus
-    is_available: bool
-    reason: str
-    last_checked: float
+    def __init__(
+        self,
+        model_name: str,
+        status: ModelStatus,
+        is_available: bool,
+        reason: str,
+        last_checked: float,
+    ):
+        self.model_name = model_name
+        self.status = status
+        self.is_available = is_available
+        self.reason = reason
+        self.last_checked = last_checked
 
     def to_error_message(self) -> str:
         """转换为错误消息"""
@@ -84,8 +45,10 @@ class ModelAvailabilityChecker:
         self._cache: Dict[str, AvailabilityResult] = {}
         self._lock = asyncio.Lock()
 
-    def _get_config(self, key: str) -> Optional[str]:
+    def _get_config(self, key: str):
         """获取配置值"""
+        from ...rh_config.comfyui_config import RHCOMFYUI_CONFIG
+
         try:
             config = RHCOMFYUI_CONFIG.get_config(key)
             value = config.data if config else None
@@ -95,14 +58,10 @@ class ModelAvailabilityChecker:
         except Exception:
             return None
 
-    def _check_requirement(
-        self, req: ModelRequirement
-    ) -> Tuple[
-        bool,
-        Optional[ModelStatus],
-        Optional[str],
-    ]:
+    def _check_requirement(self, req) -> tuple:
         """检查单个依赖"""
+        from .types import ModelRequirement
+
         if req == ModelRequirement.BLT_API:
             api_key = self._get_config("BLT_apikey")
             if not api_key:
@@ -123,11 +82,7 @@ class ModelAvailabilityChecker:
 
         return True, None, None
 
-    async def check_model(
-        self,
-        model_info: ModelInfo,
-        force: bool = False,
-    ) -> AvailabilityResult:
+    async def check_model(self, model_info: ModelInfo, force: bool = False) -> AvailabilityResult:
         """检查单个模型可用性"""
         model_name = model_info.name
         now = time.time()
@@ -224,13 +179,3 @@ class ModelAvailabilityChecker:
 
 # 全局检查器实例
 availability_checker = ModelAvailabilityChecker(cache_ttl=60)
-
-
-class ModelUnavailableError(Exception):
-    """模型不可用异常"""
-
-    def __init__(self, message: str, model_name: str = "", status: ModelStatus = ModelStatus.UNKNOWN):
-        super().__init__(message)
-        self.model_name = model_name
-        self.status = status
-        self.message = message
