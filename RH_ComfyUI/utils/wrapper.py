@@ -170,7 +170,7 @@ async def gen_image_by_img(
 @ai_tools(check_func=check_point, point=Edit_Image_Point)
 async def edit_image(
     prompt: str,
-    image_id: str,
+    image_ids: list[str],
     model: Optional[str] = None,
 ):
     """
@@ -181,7 +181,7 @@ async def edit_image(
 
     Args:
         prompt: 编辑指令，描述要进行的修改
-        image_id: 要编辑的图片资源ID
+        image_ids: 要编辑的图片资源ID列表
         model: 可选，指定使用的模型名称，默认为自动选择可用模型
 
     Returns:
@@ -196,15 +196,15 @@ async def edit_image(
         model,
         query=prompt,
     )
-    image = await RM.get(image_id)
-    result = await model_func(prompt, image)
+    image_list = [await RM.get(img_id) for img_id in image_ids]
+    result = await model_func(prompt, image_list)
     return result
 
 
 async def gen_edit_img_by_img(
     prompt: str,
-    image_id_list: list,
-) -> str:
+    image_id_list: list[str],
+) -> bytes:
     """
     编辑图片（多图）
 
