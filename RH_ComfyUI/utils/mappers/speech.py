@@ -13,4 +13,10 @@ async def index_tts2_mapper(
 ) -> dict:
     """IndexTTS2 语音生成工作流的参数映射"""
     workflow["14"]["inputs"]["value"] = request.prompt
+
+    # 上传参考音频到 ComfyUI，获取服务器端文件名并填入 LoadAudio 节点
+    if request.reference_audio is not None:
+        audio_name = await api.upload_mp3(request.reference_audio)
+        workflow["13"]["inputs"]["audio"] = audio_name
+
     return workflow

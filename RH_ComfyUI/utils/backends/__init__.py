@@ -32,10 +32,12 @@ def init_backends() -> BackendRegistry:
     from .blt.executor import BLTBackend
     from .rh_app.executor import RHAppBackend
     from .comfyui.executor import ComfyUIBackend
+    from .minimax.executor import MiniMaxBackend
 
     backend_registry.register(ComfyUIBackend())
     backend_registry.register(BLTBackend())
     backend_registry.register(RHAppBackend())
+    backend_registry.register(MiniMaxBackend())
 
     return backend_registry
 

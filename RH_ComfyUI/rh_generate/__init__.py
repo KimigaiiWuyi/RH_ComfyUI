@@ -102,8 +102,10 @@ async def _do_generate(
               格式1（自动选模型）: "一只可爱的猫咪在草地上玩耍"
               格式2（指定模型）: "qwen 一只可爱的猫咪"
               格式3（指定 Anima 二次元模型，必须使用小写模型名前缀）: "anima 蕾米莉亚的图"
-              常用模型名: qwen, banana, banana_pro, anima
+              格式4（指定 MiniMax 模型）: "image01 一只可爱的猫咪"
+              常用模型名: qwen, banana, banana_pro, anima, image01（即 minimax_image01）
               当用户明确要求 Anima / anima 模型，或需求是二次元、动漫角色、插画、萌系头像时，text 必须以 "anima " 开头。
+              当用户明确要求 image01 / minimax 模型时，text 必须以 "image01 " 开头。
         image_id: 可选，参考图片的资源ID（img_xxxxxxxx），有则为图生图。
     """,
 )
@@ -284,12 +286,20 @@ async def generate_music(bot: Bot, ev: Event) -> None:
 @sv_gen.on_command(
     ("生语音", "生成语音"),
     block=True,
-    to_ai="""将文字转换为自然语音。
-    当用户想要文字转语音、制作有声内容时调用。
+    to_ai="""将文字转换为自然语音，支持上传参考音频进行语音克隆。
+    当用户想要文字转语音、制作有声内容、用特定音色朗读时调用。
+    如果用户附带了音频文件，则使用该音频的音色进行语音克隆生成。
+
+    **重要**：当没有用户提供参考音频时，你必须先调用
+    `get_self_persona_info(info_type="audio", persona_name=<当前Persona名>)`
+    获取自己Persona的音频资源ID，然后将返回的资源ID作为 audio_id 传入，
+    这样生成的语音就会使用你自己的音色。
 
     Args:
         text: 要转换的文字 + 可选模型名。
               例如 "欢迎使用 RH_ComfyUI"
+        audio_id: 可选，参考音频的资源ID，有则进行语音克隆。
+                  若未提供且无用户上传音频，应先调用 get_self_persona_info 获取自身音色。
     """,
 )
 async def generate_speech(bot: Bot, ev: Event) -> None:
@@ -305,6 +315,25 @@ async def generate_speech(bot: Bot, ev: Event) -> None:
         prompt=actual_prompt,
         model=model_name,
     )
+
+    # 附加参考音频（语音克隆音色）：优先使用 audio_id（AI 调用或用户语音消息），
+    # 其次检查用户上传的音频文件附件
+    if ev.audio_id:
+        from gsuid_core.utils.resource_manager import RM
+
+        request.reference_audio = await RM.get(ev.audio_id)
+    elif ev.file and ev.file_name and ev.file_name.lower().endswith((".mp3", ".wav", ".ogg", ".flac", ".m4a")):
+        import base64
+
+        import httpx
+
+        if ev.file_type == "url":
+            async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+                resp = await client.get(ev.file)
+                resp.raise_for_status()
+                request.reference_audio = resp.content
+        elif ev.file_type == "base64":
+            request.reference_audio = base64.b64decode(ev.file)
 
     result = await _do_generate(request, ev, bot)
     if result is None:

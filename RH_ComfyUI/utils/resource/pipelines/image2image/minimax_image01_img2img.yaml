@@ -1,0 +1,16 @@
+name: "minimax_image01_img2img"
+display_name: "MiniMax Image-01 图生图"
+task_type: image2image
+backend: minimax
+point_cost: 3
+description: "MiniMax image-01 图生图模型，支持上传参考人物照片进行风格化生成"
+knowledge_content: |
+  MiniMax image-01 图生图功能，通过上传参考人物照片（subject_reference）进行图像生成。
+  优势：保持人物特征的同时进行风格化创作，支持多种宽高比。
+  适用场景：人物写真风格化、角色一致性创作、参考照片的艺术化处理。
+  不适用场景：非人物主体的图生图、精确像素级编辑。
+  使用建议：上传清晰的单人正面照片效果最佳，配合详细的场景描述提示词。
+requirements:
+  - minimax_apikey
+mode: programmatic
+mapper: "RH_ComfyUI.utils.mappers.minimax_image2image:minimax_image01_img2img_mapper"

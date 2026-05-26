@@ -43,6 +43,14 @@ CONFIG_DEFAULT: Dict[str, GSC] = {
             "https://api.bltcy.ai",
         ],
     ),
+    "MiniMax_apikey": GsStrConfig(
+        "MiniMax API Key",
+        "用于设置MiniMax图像生成API的API Key配置（文生图/图生图）",
+        "",
+        options=[
+            "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+        ],
+    ),
     "Default_Point": GsIntConfig(
         "默认初始积分",
         "用于设置新用户默认初始积分的配置",
