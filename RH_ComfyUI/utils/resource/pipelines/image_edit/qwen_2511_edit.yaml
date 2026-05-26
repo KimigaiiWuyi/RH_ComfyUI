@@ -1,0 +1,16 @@
+name: "qwen_2511_edit"
+display_name: "通义千问 Edit 2511"
+task_type: image_edit
+backend: comfyui
+point_cost: 4
+description: "专业的图像编辑模型，支持中文指令和多图输入"
+knowledge_content: |
+  专业的图像编辑模型。
+  优势：中文指令理解准确，支持精确的区域编辑，可同时处理多图输入。
+  适用场景：局部修图和编辑，多图融合处理，照片精修，添加或删除元素。
+  不适用场景：从零生图（建议用 qwen_2512）。
+requirements:
+  - comfyui_url
+workflow: "qwen_edit_2511.json"
+mode: programmatic
+mapper: "RH_ComfyUI.utils.mappers.image_edit:qwen_edit_mapper"

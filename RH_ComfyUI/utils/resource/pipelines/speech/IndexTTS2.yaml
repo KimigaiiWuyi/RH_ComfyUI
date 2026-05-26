@@ -1,0 +1,16 @@
+name: "IndexTTS2"
+display_name: "Index TTS 2"
+task_type: speech
+backend: comfyui
+point_cost: 2
+description: "语音合成模型，语音自然，中文发音准确"
+knowledge_content: |
+  语音合成模型。
+  优势：语音自然，中文发音准确，支持多种语气。
+  适用场景：文本转语音，有声内容制作，辅助阅读。
+  不适用场景：音乐生成（建议用 ace_step1.5）。
+requirements:
+  - comfyui_url
+workflow: "IndexTTS2.json"
+mode: programmatic
+mapper: "RH_ComfyUI.utils.mappers.speech:index_tts2_mapper"

@@ -7,6 +7,12 @@ from gsuid_core.utils.plugins_config.models import (
 )
 
 CONFIG_DEFAULT: Dict[str, GSC] = {
+    "Max_Concurrency": GsIntConfig(
+        "全局最大并发数",
+        "限制所有后端（RH原生/ComfyUI/BLT）同时执行的最大任务数，防止过载",
+        1,
+        options=[1, 2, 3, 5, 10],
+    ),
     "ComfyUI_BaseURL": GsStrConfig(
         "ComfyUI 服务地址",
         "用于设置ComfyUI Server Address的配置",

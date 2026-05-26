@@ -1,7 +1,7 @@
 [project]
 name = "RH_ComfyUI"
-version = "0.0.1"
-description = "支持连接到ComfyUI实例或者连接至RunningHub代理的聊天机器人插件, 支持OneBot(QQ)、OneBotV12、QQ频道、微信、KOOK（开黑啦）、Telegram（电报）、FeiShu（飞书）、DoDo、Discord等多种Bot。"
+version = "2.0.0"
+description = "AIGC统一生成插件，支持ComfyUI/BLT等多后端，声明式Pipeline架构，智能模型路由"
 authors = [
     {name = "KimigaiiWuyi", email = "444835641@qq.com"},
 ]
@@ -10,7 +10,9 @@ dependencies = [
     "pillow>=10.1.0",
     "aiofiles>=23.2.1",
     "aiohttp>=3.8.6",
+    "websockets>=12.0",
+    "pyyaml>=6.0",
 ]
-requires-python = ">=3.8.1,<4.0"
+requires-python = ">=3.10,<4.0"
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}

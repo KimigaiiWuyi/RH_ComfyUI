@@ -42,5 +42,5 @@
 
 + 本项目仅供学习使用，请勿用于商业用途
 + https://www.runninghub.cn/?inviteCode=756bja8l 
-+ 注册领500RH币可以免费生成好多图片视频哦！
++ 注册领1000RH币可以免费生成好多图片视频哦！
 + [GPL-3.0 License](https://github.com/KimigaiiWuyi/RH_ComfyUI/blob/master/LICENSE)

@@ -1,1 +1,1 @@
-aigc_version = "0.0.1"
+RH_ComfyUI_version = "2.0.0"

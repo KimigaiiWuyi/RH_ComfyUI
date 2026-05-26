@@ -1,0 +1,15 @@
+name: "banana_pro"
+display_name: "Nano Banana 1 Pro"
+task_type: text2image
+backend: blt
+point_cost: 3
+description: "Nano Banana 2.2K 高质量图像生成模型"
+knowledge_content: |
+  Nano Banana 2.2K 高质量图像生成模型。
+  优势：图像质量非常高，细节丰富细腻，色彩表现优秀，适合专业输出。
+  适用场景：需要最终输出的高质量图像，专业创作场景，商业项目，需要精细细节的画面。
+  不适用场景：快速预览、批量测试（建议用 banana2）。
+requirements:
+  - blt_api_key
+mode: programmatic
+mapper: "RH_ComfyUI.utils.mappers.blt_text2image:banana_pro_mapper"

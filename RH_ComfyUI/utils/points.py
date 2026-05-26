@@ -1,5 +1,7 @@
 """积分相关模块"""
 
+from __future__ import annotations
+
 from typing import Tuple
 
 from gsuid_core.logger import logger
@@ -17,7 +19,11 @@ Video_Point: int = RHCOMFYUI_CONFIG.get_config("Video_Point").data
 
 
 async def check_point(ev: Event, point: int) -> Tuple[bool, str]:
-    """检查用户是否有足够的积分"""
+    """检查用户是否有足够的积分
+
+    此函数同时用于命令触发器和 @ai_tools 的 check_func。
+    当作为 @ai_tools 的 check_func 时，point 参数由装饰器传入。
+    """
     logger.info(f"[RHComfyUI] check_point: 用户:{ev.user_id} BotID:{ev.bot_id} 消费:{point}")
 
     bind = await RHBind.deduct_point(ev.user_id, ev.bot_id, point)
