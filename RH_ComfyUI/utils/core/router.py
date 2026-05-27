@@ -28,7 +28,7 @@ PRIORITY: dict[TaskType, list[str]] = {
     TaskType.TEXT2VIDEO: ["wan2.2_text2video"],
     TaskType.IMAGE2VIDEO: ["wan2.2_img2video"],
     TaskType.MUSIC: ["ace_step1.5"],
-    TaskType.SPEECH: ["IndexTTS2"],
+    TaskType.SPEECH: ["IndexTTS2", "minimax_t2a_speech", "mimo_tts"],
 }
 
 

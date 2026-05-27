@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from gsuid_core.logger import logger
@@ -72,3 +73,58 @@ def parse_model_from_prompt(
     all_names = [p.name for p in registry.get_by_task(task_type)]
     logger.warning(f"[Parser] 模型名 '{first_word}' 未匹配，该任务类型可用模型: {all_names}")
     return None, text.strip()
+
+
+# MiniMax T2A 支持的情绪标签
+MINIMAX_EMOTIONS = {
+    "happy",
+    "sad",
+    "angry",
+    "fearful",
+    "disgusted",
+    "surprised",
+    "calm",
+    "fluent",
+    "whisper",
+}
+
+# 情绪标签解析正则（支持 [情绪] 和 [情绪:xxx] 格式）
+
+_MOOD_BRACKET_RE = re.compile(r"^\[([^\]]+)\]\s*")
+
+
+def parse_mood_from_prompt(text: str) -> tuple[Optional[str], str]:
+    """从文本开头解析可选的情绪标签
+
+    支持的格式：
+    1. [高兴] 实际文本 → mood="高兴"
+    2. [happy] 实际文本 → mood="happy"
+    3. [情绪:开心的] 实际文本 → mood="开心的"
+    4. 实际文本（无情绪标签） → mood=None
+
+    Args:
+        text: 经过模型名解析后的剩余文本
+
+    Returns:
+        (mood_or_None, actual_text)
+    """
+    if not text:
+        return None, text
+
+    match = _MOOD_BRACKET_RE.match(text)
+    if not match:
+        return None, text
+
+    mood_raw = match.group(1).strip()
+
+    # 支持 [情绪:xxx] 格式，提取冒号后面的部分
+    if mood_raw.startswith("情绪:"):
+        mood = mood_raw[3:].strip()
+    elif mood_raw.startswith("mood:"):
+        mood = mood_raw[5:].strip()
+    else:
+        mood = mood_raw
+
+    remaining = text[match.end() :]
+    logger.info(f"[Parser] 情绪标签解析成功: '{mood}', text={remaining[:30]}...")
+    return mood, remaining

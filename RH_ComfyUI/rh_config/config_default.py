@@ -45,10 +45,18 @@ CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "MiniMax_apikey": GsStrConfig(
         "MiniMax API Key",
-        "用于设置MiniMax图像生成API的API Key配置（文生图/图生图）",
+        "用于设置MiniMax API的Key配置（文生图/图生图/T2A语音合成）",
         "",
         options=[
             "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+        ],
+    ),
+    "MIMO_apikey": GsStrConfig(
+        "MiMo API Key",
+        "用于设置XiaoMi MiMo TTS语音合成API的Key配置（MiMo-V2.5-TTS系列）",
+        "",
+        options=[
+            "sk-xxx",
         ],
     ),
     "Default_Point": GsIntConfig(

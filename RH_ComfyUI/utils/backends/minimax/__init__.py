@@ -1,4 +1,4 @@
-"""MiniMax 图像生成后端"""
+"""MiniMax 后端 — 图像生成 + T2A 异步语音合成"""
 
 from .api import MiniMaxAPI
 from .executor import MiniMaxBackend

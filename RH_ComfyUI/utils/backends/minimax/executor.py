@@ -1,4 +1,4 @@
-"""MiniMax 图像生成后端执行器 — 实现 Backend 接口"""
+"""MiniMax 后端执行器 — 实现 Backend 接口，支持图像生成与语音合成"""
 
 from __future__ import annotations
 
@@ -13,10 +13,11 @@ from ...core.pipeline import PipelineDef
 
 
 class MiniMaxBackend(Backend):
-    """MiniMax 图像生成后端
+    """MiniMax 后端
 
-    通过 MiniMax /v1/image_generation API 进行文生图和图生图，
-    支持 image-01 和 image-01-live 模型。
+    通过 MiniMax API 进行：
+    - 图像生成（/v1/image_generation）：文生图、图生图
+    - 语音合成（/v1/t2a_async_v2）：异步语音合成
     """
 
     name = "minimax"
@@ -67,10 +68,15 @@ class MiniMaxBackend(Backend):
             )
 
         if isinstance(result, bytes):
+            # 根据 pipeline 的 task_type 判断输出类型
+            from ...core.request import TASK_MIME_MAP, TASK_OUTPUT_MAP
+
+            output_type = TASK_OUTPUT_MAP.get(pipeline.task_type, OutputType.IMAGE)
+            mime_type = TASK_MIME_MAP.get(pipeline.task_type, "image/png")
             return GenerationResult(
-                output_type=OutputType.IMAGE,
+                output_type=output_type,
                 data=result,
-                mime_type="image/png",
+                mime_type=mime_type,
             )
 
         raise RuntimeError(f"MiniMax Pipeline {pipeline.name} 返回了无法处理的类型: {type(result)}")

@@ -16,11 +16,12 @@ from gsuid_core.utils.image.convert import convert_img
 from gsuid_core.ai_core.trigger_bridge import ai_return
 
 from ..utils.points import check_point
-from ..utils.core.parser import parse_model_from_prompt
+from ..utils.core.parser import parse_mood_from_prompt, parse_model_from_prompt
 from ..utils.core.router import ModelUnavailableError, route
 from ..utils.core.request import TaskType, GenerationResult, GenerationRequest
 from ..utils.core.executor import execute_generation
 from ..utils.core.pipeline import pipeline_registry
+from ..utils.database.models import RHBind
 
 sv_gen = SV("AI生成")
 
@@ -81,8 +82,12 @@ async def _do_generate(
         return result
     except Exception as e:
         logger.exception(f"[RHComfyUI] 生成失败: {e}")
-        ai_return(f"错误：生成失败 - {str(e)}")
-        await bot.send(f"❌ 生成失败: {e}")
+        await RHBind.add_point(ev.user_id, ev.bot_id, pipeline.point_cost)
+        refund_msg = f"已退回{pipeline.point_cost}积分。"
+        ai_return(
+            f"错误：生成失败 - {str(e)}。{refund_msg}不要在同一轮对话中盲目切换到未确认可用的云端 TTS 后端重试；如果错误码是 MiniMax 2038，表示账号未开通 voice_clone 权限，代码无法绕过。"
+        )
+        await bot.send(f"❌ 生成失败: {e}\n↩️ {refund_msg}")
         return None
 
 
@@ -286,7 +291,7 @@ async def generate_music(bot: Bot, ev: Event) -> None:
 @sv_gen.on_command(
     ("生语音", "生成语音"),
     block=True,
-    to_ai="""将文字转换为自然语音，支持上传参考音频进行语音克隆。
+    to_ai="""将文字转换为自然语音，支持上传参考音频进行语音克隆，支持情绪控制。
     当用户想要文字转语音、制作有声内容、用特定音色朗读时调用。
     如果用户附带了音频文件，则使用该音频的音色进行语音克隆生成。
 
@@ -294,10 +299,26 @@ async def generate_music(bot: Bot, ev: Event) -> None:
     `get_self_persona_info(info_type="audio", persona_name=<当前Persona名>)`
     获取自己Persona的音频资源ID，然后将返回的资源ID作为 audio_id 传入，
     这样生成的语音就会使用你自己的音色。
+    如果 MiniMax 返回 2038 / voice clone user forbidden，表示账号未开通 MiniMax
+    音色复刻权限，不能通过更换参数解决；不要继续用 MiniMax 重试。
+    如果 MiMo 返回 401 / Invalid API Key，表示 MIMO_apikey 无效，不能继续调用 MiMo。
+
+    可用模型（text 中的模型名前缀）：
+    - IndexTTS2 本地模型（默认）：不加前缀，或前缀 "indextts"
+    - MiniMax T2A 云端模型：前缀 "minimax"
+    - 小米 MiMo TTS 云端模型：前缀 "mimo"（支持音色复刻、风格控制、方言、唱歌）
 
     Args:
-        text: 要转换的文字 + 可选模型名。
-              例如 "欢迎使用 RH_ComfyUI"
+        text: 要转换的文字 + 可选模型名 + 可选情绪标签。
+              格式1: "欢迎使用 RH_ComfyUI"（使用默认 IndexTTS2）
+              格式2: "minimax 欢迎使用 RH_ComfyUI"（使用 MiniMax）
+              格式3: "mimo 欢迎使用 RH_ComfyUI"（使用小米 MiMo TTS）
+              格式4: "minimax [happy] 欢迎使用 RH_ComfyUI"（MiniMax + 情绪）
+              格式5: "mimo [用慵懒的语调] 我爱你"（MiMo + 风格指令）
+              格式6: "mimo [情绪:东北话] 哎呀妈呀"（MiMo + 方言）
+              情绪标签用方括号包裹，放在文本开头（模型名之后）。
+              当用户提到"小米"、"MiMo"、"mimo"时，必须使用 "mimo" 前缀。
+              当用户提到"minimax"时，使用 "minimax" 前缀。
         audio_id: 可选，参考音频的资源ID，有则进行语音克隆。
                   若未提供且无用户上传音频，应先调用 get_self_persona_info 获取自身音色。
     """,
@@ -310,10 +331,14 @@ async def generate_speech(bot: Bot, ev: Event) -> None:
 
     model_name, actual_prompt = parse_model_from_prompt(prompt, TaskType.SPEECH)
 
+    # 从文本中解析情绪标签（格式: [情绪] 或 [情绪:xxx]）
+    mood, actual_prompt = parse_mood_from_prompt(actual_prompt)
+
     request = GenerationRequest(
         task_type=TaskType.SPEECH,
         prompt=actual_prompt,
         model=model_name,
+        mood=mood,
     )
 
     # 附加参考音频（语音克隆音色）：优先使用 audio_id（AI 调用或用户语音消息），

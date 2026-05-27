@@ -19,4 +19,8 @@ async def index_tts2_mapper(
         audio_name = await api.upload_mp3(request.reference_audio)
         workflow["13"]["inputs"]["audio"] = audio_name
 
+    # 设置情绪描述文本（填入 slot 40 节点）
+    if request.mood is not None:
+        workflow["40"]["inputs"]["value"] = request.mood
+
     return workflow

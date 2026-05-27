@@ -70,6 +70,7 @@ class GenerationRequest:
         prompt            | ✅ 必须    | ✅ 必须     | ✅ 必须    | ✅ 必须    | ✅ 必须     | ✅ 风格 | ✅ 文本
         images            | ❌         | ✅ 1张      | ✅ 1~N张   | ❌         | ✅ 1张      | ❌     | ❌
         reference_audio   | ❌         | ❌          | ❌         | ❌         | ❌          | ❌     | ⭕ 可选
+        mood              | ❌         | ❌          | ❌         | ❌         | ❌          | ❌     | ⭕ 可选
         width             | ✅         | ✅          | ❌         | ✅         | ✅          | ❌     | ❌
         height            | ✅         | ✅          | ❌         | ✅         | ✅          | ❌     | ❌
         duration          | ❌         | ❌          | ❌         | ✅         | ✅          | ❌     | ❌
@@ -87,6 +88,9 @@ class GenerationRequest:
 
     # ── 音频输入（语音克隆参考音色） ──
     reference_audio: Optional[bytes] = None
+
+    # ── 语音情绪（语音生成专用） ──
+    mood: Optional[str] = None
 
     # ── 尺寸参数 ──
     width: int = 720

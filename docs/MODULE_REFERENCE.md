@@ -136,8 +136,8 @@ dependencies = [
 | `TASK_OUTPUT_MAP` | [31](RH_ComfyUI/utils/core/request.py:31) | 任务类型→输出类型映射 |
 | `TASK_MIME_MAP` | [42](RH_ComfyUI/utils/core/request.py:42) | 任务类型→MIME类型映射 |
 | `TASK_DISPLAY_NAME` | [53](RH_ComfyUI/utils/core/request.py:53) | 任务类型→中文名映射 |
-| `GenerationRequest` | [64](RH_ComfyUI/utils/core/request.py:64) | 统一请求模型（dataclass） |
-| `GenerationResult` | [123](RH_ComfyUI/utils/core/request.py:123) | 统一响应模型（dataclass） |
+| `GenerationRequest` | [64](RH_ComfyUI/utils/core/request.py:64) | 统一请求模型（dataclass），含 `mood` 字段（语音情绪控制） |
+| `GenerationResult` | [126](RH_ComfyUI/utils/core/request.py:126) | 统一响应模型（dataclass） |
 
 ### [`pipeline.py`](RH_ComfyUI/utils/core/pipeline.py:1) — Pipeline 注册表
 
@@ -209,6 +209,38 @@ dependencies = [
 | [`rh_app/api.py`](RH_ComfyUI/utils/backends/rh_app/api.py:1) | `RHAppAPI` | RunningHub OpenAPI v2 客户端 |
 | [`rh_app/executor.py`](RH_ComfyUI/utils/backends/rh_app/executor.py:1) | `RHAppBackend` | RH App 后端执行器 |
 
+### MiniMax 后端
+
+| 文件 | 关键类 | 说明 |
+|------|--------|------|
+| [`minimax/api.py`](RH_ComfyUI/utils/backends/minimax/api.py:1) | `MiniMaxAPI` | MiniMax API 客户端（图像生成 + T2A 异步语音合成） |
+| [`minimax/executor.py`](RH_ComfyUI/utils/backends/minimax/executor.py:1) | `MiniMaxBackend` | MiniMax 后端执行器（支持图像 + 音频输出） |
+
+**MiniMaxAPI 关键方法：**
+
+| 方法 | 说明 |
+|------|------|
+| `generate_image()` | 文生图/图生图（/v1/image_generation） |
+| `create_t2a_async_task()` | 创建异步语音合成任务（/v1/t2a_async_v2） |
+| `query_t2a_async_task()` | 查询异步语音合成任务状态（/v1/query/t2a_async_query_v2） |
+| `retrieve_file()` | 下载生成的文件（/v1/files/retrieve） |
+| `generate_speech()` | 高级语音合成接口（自动：创建→轮询→下载） |
+
+### MiMo TTS 后端
+
+| 文件 | 关键类 | 说明 |
+|------|--------|------|
+| [`mimo/api.py`](RH_ComfyUI/utils/backends/mimo/api.py:1) | `MIMOAPI` | XiaoMi MiMo TTS API 客户端（OpenAI 兼容格式） |
+| [`mimo/executor.py`](RH_ComfyUI/utils/backends/mimo/executor.py:1) | `MIMOBackend` | MiMo TTS 后端执行器（支持音频输出） |
+
+**MIMOAPI 关键方法：**
+
+| 方法 | 说明 |
+|------|------|
+| `generate_speech()` | 语音合成（自动选模型：有参考音频→voiceclone，否则→tts） |
+
+**支持的模型：** `mimo-v2.5-tts`（预置音色）、`mimo-v2.5-tts-voicedesign`（音色设计）、`mimo-v2.5-tts-voiceclone`（音色复刻）
+
 ---
 
 ## 五、utils/mappers — 参数映射
@@ -219,9 +251,13 @@ dependencies = [
 | [`blt_image_edit.py`](RH_ComfyUI/utils/mappers/blt_image_edit.py:1) | `banana2_edit_mapper`, `banana_pro_edit_mapper` | BLT | 图片编辑 |
 | [`image_edit.py`](RH_ComfyUI/utils/mappers/image_edit.py:1) | `qwen_edit_mapper` | ComfyUI | 图片编辑 |
 | [`image2image.py`](RH_ComfyUI/utils/mappers/image2image.py:1) | `qwen_img2img_mapper` | ComfyUI | 图生图 |
+| [`minimax_text2image.py`](RH_ComfyUI/utils/mappers/minimax_text2image.py:1) | `minimax_image01_mapper` | MiniMax | 文生图 |
+| [`minimax_image2image.py`](RH_ComfyUI/utils/mappers/minimax_image2image.py:1) | `minimax_image01_img2img_mapper` | MiniMax | 图生图 |
 | [`video.py`](RH_ComfyUI/utils/mappers/video.py:1) | `wan_text2video_mapper`, `wan_img2video_mapper` | ComfyUI | 视频生成 |
 | [`music.py`](RH_ComfyUI/utils/mappers/music.py:1) | `ace_step_mapper` | ComfyUI | 音乐生成 |
-| [`speech.py`](RH_ComfyUI/utils/mappers/speech.py:1) | `index_tts2_mapper` | ComfyUI | 语音生成 |
+| [`speech.py`](RH_ComfyUI/utils/mappers/speech.py:1) | `index_tts2_mapper` | ComfyUI | 语音生成（支持 mood 情绪控制） |
+| [`minimax_speech.py`](RH_ComfyUI/utils/mappers/minimax_speech.py:1) | `minimax_t2a_speech_mapper` | MiniMax | 语音生成（支持情绪/语速/音色控制） |
+| [`mimo_speech.py`](RH_ComfyUI/utils/mappers/mimo_speech.py:1) | `mimo_tts_mapper` | MiMo | 语音生成（支持情绪/风格/音色复刻/方言） |
 
 ---
 
@@ -262,7 +298,9 @@ dependencies = [
 | `pipelines/text2image/banana2.yaml` | `banana2` | 文生图 | blt |
 | `pipelines/text2image/banana_pro.yaml` | `banana_pro` | 文生图 | blt |
 | `pipelines/text2image/rh_app_demo.yaml` | `anima` | 文生图 | rh_app |
+| `pipelines/text2image/minimax_image01.yaml` | `minimax_image01` | 文生图 | minimax |
 | `pipelines/image2image/qwen_2512_img2img.yaml` | `qwen_2512_img2img` | 图生图 | comfyui |
+| `pipelines/image2image/minimax_image01_img2img.yaml` | `minimax_image01_img2img` | 图生图 | minimax |
 | `pipelines/image_edit/qwen_2511_edit.yaml` | `qwen_2511_edit` | 图片编辑 | comfyui |
 | `pipelines/image_edit/banana2_edit.yaml` | `banana2_edit` | 图片编辑 | blt |
 | `pipelines/image_edit/banana_pro_edit.yaml` | `banana_pro_edit` | 图片编辑 | blt |
@@ -270,6 +308,8 @@ dependencies = [
 | `pipelines/image2video/wan2.2_img2video.yaml` | `wan2.2_img2video` | 图生视频 | comfyui |
 | `pipelines/music/ace_step1.5.yaml` | `ace_step1.5` | 音乐生成 | comfyui |
 | `pipelines/speech/IndexTTS2.yaml` | `IndexTTS2` | 语音生成 | comfyui |
+| `pipelines/speech/minimax_t2a_speech.yaml` | `minimax_t2a_speech` | 语音生成 | minimax |
+| `pipelines/speech/mimo_tts.yaml` | `mimo_tts` | 语音生成 | mimo |
 
 ### 内置工作流 JSON 文件
 

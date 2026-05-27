@@ -30,6 +30,7 @@ backend_registry = BackendRegistry()
 def init_backends() -> BackendRegistry:
     """启动时注册所有后端"""
     from .blt.executor import BLTBackend
+    from .mimo.executor import MIMOBackend
     from .rh_app.executor import RHAppBackend
     from .comfyui.executor import ComfyUIBackend
     from .minimax.executor import MiniMaxBackend
@@ -38,6 +39,7 @@ def init_backends() -> BackendRegistry:
     backend_registry.register(BLTBackend())
     backend_registry.register(RHAppBackend())
     backend_registry.register(MiniMaxBackend())
+    backend_registry.register(MIMOBackend())
 
     return backend_registry
 
