@@ -10,19 +10,13 @@
 resource/
 ├── RESOURCE_PATH.py     # 路径常量定义 + 目录初始化
 ├── pipelines/           # 内置 Pipeline YAML 定义（随插件发布）
-│   ├── text2image/      # 文生图 Pipeline
-│   ├── image2image/     # 图生图 Pipeline
-│   ├── image_edit/      # 图片编辑 Pipeline
-│   ├── text2video/      # 文生视频 Pipeline
-│   ├── image2video/     # 图生视频 Pipeline
+│   ├── imagegen/        # 图片生成 Pipeline(文生图 / 图生图 / 图片编辑 统一)
+│   ├── videogen/        # 视频生成 Pipeline(文生 / 图生 / 首尾帧 / 多模态 统一)
 │   ├── music/           # 音乐生成 Pipeline
 │   └── speech/          # 语音生成 Pipeline
 └── workflow/            # 内置 ComfyUI 工作流 JSON（随插件发布）
-    ├── 文生图/
-    ├── 图生图/
-    ├── 图片编辑/
-    ├── 文生视频/
-    ├── 图生视频/
+    ├── 图片生成/
+    ├── 视频生成/
     ├── 音乐生成/
     └── 语音生成/
 ```
@@ -47,11 +41,8 @@ resource/
 
 | 常量 | 路径 | 说明 |
 |------|------|------|
-| `DRAW_TEXT_WORKFLOW_PATH` | `workflow/文生图/` | 文生图工作流 |
-| `DRAW_IMAGE_WORKFLOW_PATH` | `workflow/图生图/` | 图生图工作流 |
-| `EDIT_WORKFLOW_PATH` | `workflow/图片编辑/` | 图片编辑工作流 |
-| `VIDEO_BY_TEXT_WORKFLOW_PATH` | `workflow/文生视频/` | 文生视频工作流 |
-| `VIDEO_BY_IMAGE_WORKFLOW_PATH` | `workflow/图生视频/` | 图生视频工作流 |
+| `IMAGEGEN_WORKFLOW_PATH` | `workflow/图片生成/` | 图片生成工作流(文生图/图生图/图片编辑统一) |
+| `VIDEO_WORKFLOW_PATH` | `workflow/视频生成/` | 视频生成工作流(文生/图生/首尾帧统一) |
 | `MUSIC_WORKFLOW_PATH` | `workflow/音乐生成/` | 音乐生成工作流 |
 | `SPEECH_WORKFLOW_PATH` | `workflow/语音生成/` | 语音生成工作流 |
 
@@ -79,12 +70,12 @@ def load_workflow(path: Path) -> dict:
 
 ### Pipeline YAML 定义
 
-每个 YAML 文件定义一个 Pipeline，示例（[`qwen_2512.yaml`](RH_ComfyUI/utils/resource/pipelines/text2image/qwen_2512.yaml:1)）：
+每个 YAML 文件定义一个 Pipeline，示例（[`qwen_2512.yaml`](RH_ComfyUI/utils/resource/pipelines/imagegen/qwen_2512.yaml:1)）：
 
 ```yaml
 name: "qwen_2512"
 display_name: "千问 Qwen-Image 2512"
-task_type: text2image
+task_type: image
 backend: comfyui
 point_cost: 2
 description: "千问Image2512模型..."
@@ -108,16 +99,16 @@ mappings:
 
 | YAML 文件 | 名称 | 任务类型 | 后端 | 映射模式 |
 |-----------|------|---------|------|---------|
-| `text2image/qwen_2512.yaml` | `qwen_2512` | 文生图 | comfyui | 声明式 |
-| `text2image/banana2.yaml` | `banana2` | 文生图 | blt | 编程式 |
-| `text2image/banana_pro.yaml` | `banana_pro` | 文生图 | blt | 编程式 |
-| `text2image/rh_app_demo.yaml` | `anima` | 文生图 | rh_app | 声明式 |
-| `image2image/qwen_2512_img2img.yaml` | `qwen_2512_img2img` | 图生图 | comfyui | 编程式 |
-| `image_edit/qwen_2511_edit.yaml` | `qwen_2511_edit` | 图片编辑 | comfyui | 编程式 |
-| `image_edit/banana2_edit.yaml` | `banana2_edit` | 图片编辑 | blt | 编程式 |
-| `image_edit/banana_pro_edit.yaml` | `banana_pro_edit` | 图片编辑 | blt | 编程式 |
-| `text2video/wan2.2_text2video.yaml` | `wan2.2_text2video` | 文生视频 | comfyui | 编程式 |
-| `image2video/wan2.2_img2video.yaml` | `wan2.2_img2video` | 图生视频 | comfyui | 编程式 |
+| `imagegen/qwen_2512.yaml` | `qwen_2512` | 文生图(仅 0 图) | comfyui | 声明式 |
+| `imagegen/banana2.yaml` | `banana2` | 文生图/编辑(0~3 图) | gpt_image2 | 编程式 |
+| `imagegen/banana_pro.yaml` | `banana_pro` | 文生图/编辑(0~3 图) | gpt_image2 | 编程式 |
+| `imagegen/rh_app_demo.yaml` | `anima` | 文生图(仅 0 图) | rh_app | 声明式 |
+| `imagegen/qwen_2511.yaml` | `qwen_2511` | 图片编辑(1~3 图) | comfyui | 编程式 |
+| `imagegen/gpt_image2.yaml` | `gpt_image2` | 文生图/编辑(0~N 图) | gpt_image2 | 编程式 |
+| `videogen/wan2.2_videogen.yaml` | `wan2.2_videogen` | 视频生成(0/1/N 图) | comfyui | 编程式 |
+| `videogen/seedance2.yaml` | `seedance2` | 视频生成(多模态) | seedance | 编程式 |
+| `videogen/seedance2_fast.yaml` | `seedance2_fast` | 视频生成(快速版) | seedance | 编程式 |
+| `videogen/seedance15_pro.yaml` | `seedance15_pro` | 视频生成(高清+flex) | seedance | 编程式 |
 | `music/ace_step1.5.yaml` | `ace_step1.5` | 音乐生成 | comfyui | 编程式 |
 | `speech/IndexTTS2.yaml` | `IndexTTS2` | 语音生成 | comfyui | 编程式 |
 

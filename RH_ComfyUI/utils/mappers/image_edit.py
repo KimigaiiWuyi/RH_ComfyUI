@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..core.request import GenerationRequest
 from ..backends.comfyui.api import ComfyUIAPI
 
 
 async def qwen_edit_mapper(
     request: GenerationRequest,
-    workflow: dict,
+    workflow: dict[str, Any],
     api: ComfyUIAPI,
-) -> dict:
+) -> dict[str, Any]:
     """千问编辑工作流的参数映射"""
     workflow["103"]["inputs"]["text"] = request.prompt
 

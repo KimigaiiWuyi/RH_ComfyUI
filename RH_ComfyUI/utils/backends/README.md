@@ -2,36 +2,39 @@
 
 ## 模块概述
 
-`utils/backends` 是 RH_ComfyUI 插件的**后端抽象层**，定义了所有 AIGC 后端必须实现的统一接口（`Backend` 基类），并提供了三个具体后端实现：ComfyUI（WebSocket API）、BLT（OpenAI 兼容 API）、RunningHub 原生 AI 应用。
+`utils/backends` 是 RH_ComfyUI 插件的**后端抽象层**，定义了所有 AIGC 后端必须实现的统一接口（`Adapter` 基类），并提供了多个具体后端实现：ComfyUI（WebSocket API）、GPT-Image2 / OpenAI 兼容协议生图、RunningHub 原生 AI 应用、MiniMax、MIMO TTS、Seedance 视频。
 
 ## 文件结构
 
 ```
 backends/
-├── __init__.py          # BackendRegistry 注册表 + init_backends()
-├── base.py              # Backend 抽象基类
+├── __init__.py          # AdapterRegistry 注册表 + init_backends()
+├── base.py              # Adapter 抽象基类
 ├── comfyui/             # ComfyUI 后端（WebSocket API）
 │   ├── __init__.py
 │   ├── api.py           # ComfyUIAPI WebSocket/HTTP 客户端
-│   └── executor.py      # ComfyUIBackend 执行器
-├── blt/                 # BLT 后端（OpenAI 兼容 API）
+│   └── executor.py      # ComfyUIAdapter 执行器
+├── gpt_image2/          # GPT-Image2 / OpenAI 兼容协议生图后端
 │   ├── __init__.py
-│   ├── api.py           # BLTAPI HTTP 客户端
-│   └── executor.py      # BLTBackend 执行器
-└── rh_app/              # RunningHub 原生 AI 应用后端
-    ├── __init__.py
-    ├── api.py           # RHAppAPI HTTP 客户端
-    └── executor.py      # RHAppBackend 执行器
+│   ├── api.py           # GPTImage2API HTTP 客户端
+│   └── executor.py      # GPTImage2Adapter 执行器
+├── rh_app/              # RunningHub 原生 AI 应用后端
+│   ├── __init__.py
+│   ├── api.py           # RHAppAPI HTTP 客户端
+│   └── executor.py      # RHAppAdapter 执行器
+├── minimax/             # MiniMax 文生图 / 图生图 / T2A 语音后端
+├── mimo/                # MiMo TTS 后端
+└── seedance/            # Seedance 视频生成后端
 ```
 
 ## 核心组件
 
-### 1. Backend 抽象基类 [`base.py`](RH_ComfyUI/utils/backends/base.py:1)
+### 1. Adapter 抽象基类 [`base.py`](RH_ComfyUI/utils/backends/base.py:1)
 
 所有后端必须实现的接口：
 
 ```python
-class Backend(ABC):
+class Adapter(ABC):
     name: str  # 后端唯一标识
 
     @abstractmethod
@@ -43,18 +46,25 @@ class Backend(ABC):
         """如果不可用，返回原因描述"""
 
     @abstractmethod
-    async def execute(self, request: GenerationRequest, pipeline: PipelineDef) -> GenerationResult:
+    def capabilities(self) -> CapabilityManifest:
+        """声明该后端能处理哪些任务、消费哪些参数"""
+
+    @abstractmethod
+    async def execute(self, request: GenerationRequest, node: NodeDef, *, on_progress=None) -> NodeOutput:
         """执行生成任务"""
 ```
 
-### 2. BackendRegistry 注册表 [`__init__.py`](RH_ComfyUI/utils/backends/__init__.py:1)
+### 2. AdapterRegistry 注册表 [`__init__.py`](RH_ComfyUI/utils/backends/__init__.py:1)
 
-全局单例 [`backend_registry`](RH_ComfyUI/utils/backends/__init__.py:27)，启动时通过 [`init_backends()`](RH_ComfyUI/utils/backends/__init__.py:30) 注册所有后端：
+全局单例 [`backend_registry`](RH_ComfyUI/utils/backends/__init__.py:25)，启动时通过 [`init_backends()`](RH_ComfyUI/utils/backends/__init__.py:40) 注册所有后端：
 
 ```python
-backend_registry.register(ComfyUIBackend())
-backend_registry.register(BLTBackend())
-backend_registry.register(RHAppBackend())
+backend_registry.register(ComfyUIAdapter())
+backend_registry.register(GPTImage2Adapter())
+backend_registry.register(RHAppAdapter())
+backend_registry.register(MiniMaxAdapter())
+backend_registry.register(MIMOAdapter())
+backend_registry.register(SeedanceAdapter())
 ```
 
 ### 3. ComfyUI 后端 [`comfyui/`](RH_ComfyUI/utils/backends/comfyui/)
@@ -80,16 +90,16 @@ backend_registry.register(RHAppBackend())
 
 #### 执行器 [`executor.py`](RH_ComfyUI/utils/backends/comfyui/executor.py:1)
 
-[`ComfyUIBackend`](RH_ComfyUI/utils/backends/comfyui/executor.py:23) 实现 `Backend` 接口：
+[`ComfyUIAdapter`](RH_ComfyUI/utils/backends/comfyui/executor.py:23) 实现 `Adapter` 接口：
 
 ```python
-class ComfyUIBackend(Backend):
+class ComfyUIAdapter(Adapter):
     name = "comfyui"
 
     async def check_available(self) -> bool:
-        # 检查 ComfyUI_BaseURL 是否已配置且不是默认值
+        # 检查 ComfyUI_BaseURL 是否已配置
 
-    async def execute(self, request, pipeline) -> GenerationResult:
+    async def execute(self, request, node, *, on_progress=None) -> NodeOutput:
         # 1. 加载工作流 JSON
         # 2. 参数映射（声明式 or 编程式）
         # 3. 调用 API 生成（图片/视频/音频）
@@ -103,33 +113,34 @@ class ComfyUIBackend(Backend):
 
 映射规则支持 `source`、`value`、`default`、`template`、`type`（image/upload_image）等字段。
 
-### 4. BLT 后端 [`blt/`](RH_ComfyUI/utils/backends/blt/)
+### 4. GPT-Image2 后端 [`gpt_image2/`](RH_ComfyUI/utils/backends/gpt_image2/)
 
-#### API 客户端 [`api.py`](RH_ComfyUI/utils/backends/blt/api.py:1)
+#### API 客户端 [`api.py`](RH_ComfyUI/utils/backends/gpt_image2/api.py:1)
 
-[`BLTAPI`](RH_ComfyUI/utils/backends/blt/api.py:19) 封装了 OpenAI 兼容 API 的图片生成接口：
+[`GPTImage2API`](RH_ComfyUI/utils/backends/gpt_image2/api.py:19) 封装了 OpenAI 兼容 API 的图片生成接口：
 
 | 方法 | 说明 |
 |------|------|
 | `draw_image_by_model(model, prompt)` | 通过 Chat Completions API 生成图片 |
-| `draw_image(model, prompt, aspect_ratio)` | 通过 DALL-E 格式 API 生成图片 |
+| `draw_image(model, prompt, aspect_ratio, image_list)` | 通过 DALL-E 格式 API 生成/编辑图片 |
 
-支持自动重试（最多3次）、421 频控等待（180秒）、base64/URL 图片解析。
+支持自动重试（最多3次）、421 频控等待（180秒）、base64/URL 图片解析。后端 Base URL 可指向任意 OpenAI 兼容服务（OpenAI 官方 / OneAPI / NewAPI / OpenRouter / SiliconFlow / 本地 Ollama / BLT 等）。
 
-#### 执行器 [`executor.py`](RH_ComfyUI/utils/backends/blt/executor.py:1)
+#### 执行器 [`executor.py`](RH_ComfyUI/utils/backends/gpt_image2/executor.py:1)
 
-[`BLTBackend`](RH_ComfyUI/utils/backends/blt/executor.py:15) 实现 `Backend` 接口：
+[`GPTImage2Adapter`](RH_ComfyUI/utils/backends/gpt_image2/executor.py:24) 实现 `Adapter` 接口：
 
 ```python
-class BLTBackend(Backend):
-    name = "blt"
+class GPTImage2Adapter(Adapter):
+    name = "gpt_image2"
 
     async def check_available(self) -> bool:
-        # 检查 BLT_apikey 是否已配置
+        # 检查 GPT_Image2_apikey 是否已配置
 
-    async def execute(self, request, pipeline) -> GenerationResult:
-        # BLT 不走工作流，直接调 mapper_func 执行
-        result = await pipeline.mapper_func(request, self.api)
+    async def execute(self, request, node, *, on_progress=None) -> NodeOutput:
+        # 注入 backend_model（节点 YAML 中声明的 vendor model id）
+        # 直接调 mapper_func 执行（单端点同时支持文生图 / 图生图 / 编辑）
+        result = await node.mapper_func(request, self.api)
 ```
 
 ### 5. RunningHub 原生 AI 应用后端 [`rh_app/`](RH_ComfyUI/utils/backends/rh_app/)
@@ -148,17 +159,17 @@ class BLTBackend(Backend):
 
 #### 执行器 [`executor.py`](RH_ComfyUI/utils/backends/rh_app/executor.py:1)
 
-[`RHAppBackend`](RH_ComfyUI/utils/backends/rh_app/executor.py:22) 实现 `Backend` 接口：
+[`RHAppAdapter`](RH_ComfyUI/utils/backends/rh_app/executor.py:22) 实现 `Adapter` 接口：
 
 ```python
-class RHAppBackend(Backend):
+class RHAppAdapter(Adapter):
     name = "rh_app"
 
     async def check_available(self) -> bool:
         # 检查 RH_apikey 是否已配置
 
-    async def execute(self, request, pipeline) -> GenerationResult:
-        # 1. 从 pipeline.workflow_file 读取 webapp_id
+    async def execute(self, request, node, *, on_progress=None) -> NodeOutput:
+        # 1. 从 node.workflow_file 读取 webapp_id
         # 2. 构建 nodeInfoList（声明式映射）
         # 3. 上传图片（如有）
         # 4. 提交任务
@@ -166,14 +177,14 @@ class RHAppBackend(Backend):
         # 6. 下载结果文件
 ```
 
-## 三个后端对比
+## 适配后端对比
 
-| 特性 | ComfyUI | BLT | RH App |
-|------|---------|-----|--------|
-| 后端标识 | `comfyui` | `blt` | `rh_app` |
-| 连接方式 | WebSocket + HTTP | HTTP REST | HTTP REST |
-| 工作流 | JSON 工作流文件 | 无（直接调 API） | WebApp ID |
-| 映射模式 | 声明式 / 编程式 | 仅编程式 | 声明式 |
-| 可用性检查 | ComfyUI_BaseURL 配置 | BLT_apikey 配置 | RH_apikey 配置 |
-| 支持任务 | 全部7种 | 仅图片生成 | 全部（取决于应用） |
-| 代理支持 | RunningHub 代理 | 无 | 原生 |
+| 特性 | ComfyUI | GPT-Image2 | RH App | MiniMax | MIMO | Seedance |
+|------|---------|------------|--------|---------|------|----------|
+| 后端标识 | `comfyui` | `gpt_image2` | `rh_app` | `minimax` | `mimo` | `seedance` |
+| 连接方式 | WebSocket + HTTP | HTTP REST | HTTP REST | HTTP REST | HTTP REST | HTTP REST |
+| 工作流 | JSON 工作流文件 | 无（直接调 API） | WebApp ID | 无（直接调 API） | 无（直接调 API） | 无（直接调 API） |
+| 映射模式 | 声明式 / 编程式 | 仅编程式 | 声明式 | 仅编程式 | 仅编程式 | 仅编程式 |
+| 可用性检查 | ComfyUI_BaseURL | GPT_Image2_apikey | RH_apikey | MiniMax_apikey | MIMO_apikey | Seedance_apikey |
+| 支持任务 | 全部 | 图片生成/编辑 | 全部 | 图片/语音 | 语音 | 视频 |
+| 代理支持 | RunningHub 代理 | 任意 OpenAI 兼容网关 | 原生 | 原生 | 原生 | 原生 |

@@ -195,12 +195,12 @@ dependencies = [
 | [`comfyui/api.py`](RH_ComfyUI/utils/backends/comfyui/api.py:1) | `ComfyUIAPI` | WebSocket + HTTP 客户端 |
 | [`comfyui/executor.py`](RH_ComfyUI/utils/backends/comfyui/executor.py:1) | `ComfyUIBackend` | ComfyUI 后端执行器 |
 
-### BLT 后端
+### GPT-Image2 / OpenAI 兼容后端
 
 | 文件 | 关键类 | 说明 |
 |------|--------|------|
-| [`blt/api.py`](RH_ComfyUI/utils/backends/blt/api.py:1) | `BLTAPI` | OpenAI 兼容 HTTP 客户端 |
-| [`blt/executor.py`](RH_ComfyUI/utils/backends/blt/executor.py:1) | `BLTBackend` | BLT 后端执行器 |
+| [`gpt_image2/api.py`](RH_ComfyUI/utils/backends/gpt_image2/api.py:1) | `GPTImage2API` | OpenAI 兼容 HTTP 客户端（兼容 OpenAI 官方 / OneAPI / NewAPI / BLT 等任意服务） |
+| [`gpt_image2/executor.py`](RH_ComfyUI/utils/backends/gpt_image2/executor.py:1) | `GPTImage2Adapter` | GPT-Image2 后端执行器 |
 
 ### RH App 后端
 
@@ -247,8 +247,7 @@ dependencies = [
 
 | 文件 | 映射函数 | 目标后端 | 任务类型 |
 |------|---------|---------|---------|
-| [`blt_text2image.py`](RH_ComfyUI/utils/mappers/blt_text2image.py:1) | `banana2_mapper`, `banana_pro_mapper` | BLT | 文生图 |
-| [`blt_image_edit.py`](RH_ComfyUI/utils/mappers/blt_image_edit.py:1) | `banana2_edit_mapper`, `banana_pro_edit_mapper` | BLT | 图片编辑 |
+| [`gpt_image2.py`](RH_ComfyUI/utils/mappers/gpt_image2.py:1) | `gpt_image2_mapper` | GPT-Image2 | 文生图 / 图片编辑 / 图生图（统一） |
 | [`image_edit.py`](RH_ComfyUI/utils/mappers/image_edit.py:1) | `qwen_edit_mapper` | ComfyUI | 图片编辑 |
 | [`image2image.py`](RH_ComfyUI/utils/mappers/image2image.py:1) | `qwen_img2img_mapper` | ComfyUI | 图生图 |
 | [`minimax_text2image.py`](RH_ComfyUI/utils/mappers/minimax_text2image.py:1) | `minimax_image01_mapper` | MiniMax | 文生图 |
@@ -295,15 +294,14 @@ dependencies = [
 | 文件 | Pipeline 名 | 任务类型 | 后端 |
 |------|------------|---------|------|
 | `pipelines/text2image/qwen_2512.yaml` | `qwen_2512` | 文生图 | comfyui |
-| `pipelines/text2image/banana2.yaml` | `banana2` | 文生图 | blt |
-| `pipelines/text2image/banana_pro.yaml` | `banana_pro` | 文生图 | blt |
+| `pipelines/text2image/banana2.yaml` | `banana2` | 文生图 / 图片编辑（统一） | gpt_image2 |
+| `pipelines/text2image/banana_pro.yaml` | `banana_pro` | 文生图 / 图片编辑（统一） | gpt_image2 |
+| `pipelines/text2image/gpt_image2.yaml` | `gpt_image2` | 文生图 / 图片编辑（统一） | gpt_image2 |
 | `pipelines/text2image/rh_app_demo.yaml` | `anima` | 文生图 | rh_app |
 | `pipelines/text2image/minimax_image01.yaml` | `minimax_image01` | 文生图 | minimax |
 | `pipelines/image2image/qwen_2512_img2img.yaml` | `qwen_2512_img2img` | 图生图 | comfyui |
 | `pipelines/image2image/minimax_image01_img2img.yaml` | `minimax_image01_img2img` | 图生图 | minimax |
 | `pipelines/image_edit/qwen_2511_edit.yaml` | `qwen_2511_edit` | 图片编辑 | comfyui |
-| `pipelines/image_edit/banana2_edit.yaml` | `banana2_edit` | 图片编辑 | blt |
-| `pipelines/image_edit/banana_pro_edit.yaml` | `banana_pro_edit` | 图片编辑 | blt |
 | `pipelines/text2video/wan2.2_text2video.yaml` | `wan2.2_text2video` | 文生视频 | comfyui |
 | `pipelines/image2video/wan2.2_img2video.yaml` | `wan2.2_img2video` | 图生视频 | comfyui |
 | `pipelines/music/ace_step1.5.yaml` | `ace_step1.5` | 音乐生成 | comfyui |

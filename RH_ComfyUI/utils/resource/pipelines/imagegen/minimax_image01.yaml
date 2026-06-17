@@ -1,0 +1,39 @@
+name: minimax_image01
+display_name: MiniMax Image-01
+task_type: image
+backend: minimax
+point_cost: 3
+description: MiniMax image-01 文生图模型，支持多种宽高比，生成质量高，适合人像、场景等
+knowledge_content: |
+  MiniMax image-01 是 MiniMax 推出的高质量文生图模型。
+  优势：图像质量高，支持多种宽高比（1:1/16:9/4:3/3:2/2:3/3:4/9:16/21:9），支持 prompt 优化。
+  适用场景：人像写真、场景生成、创意图像、产品图、插画等。
+  不适用场景：需要精确像素控制的专业设计场景。
+  提示词建议：支持中英文描述，建议详细描述主体、场景、风格、光线等要素。
+requirements:
+  - minimax_apikey
+mode: programmatic
+mapper: "RH_ComfyUI.utils.mappers.minimax_text2image:minimax_image01_mapper"
+
+capabilities:
+  priority: 65
+  mode: async_poll
+
+inputs:
+  prompt:
+    type: text
+    required: true
+    description: 生成描述
+  width:
+    type: integer
+    default: 720
+    description: 图片宽度(用于推断比例)
+  height:
+    type: integer
+    default: 1280
+    description: 图片高度(用于推断比例)
+
+outputs:
+  image:
+    type: output_image
+    description: 生成的图片

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..core.request import GenerationRequest
 from ..backends.comfyui.api import ComfyUIAPI
 
 
 async def index_tts2_mapper(
     request: GenerationRequest,
-    workflow: dict,
+    workflow: dict[str, Any],
     api: ComfyUIAPI,
-) -> dict:
+) -> dict[str, Any]:
     """IndexTTS2 语音生成工作流的参数映射"""
     workflow["14"]["inputs"]["value"] = request.prompt
 

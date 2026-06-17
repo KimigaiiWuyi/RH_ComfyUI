@@ -1,4 +1,4 @@
-"""RunningHub 原生 AI 应用后端执行器 — 实现 Backend 接口"""
+"""RunningHub 原生 AI 应用 Adapter"""
 
 from __future__ import annotations
 
@@ -8,71 +8,71 @@ from typing import Any, Dict, List
 import httpx
 
 from .api import rh_app_api
-from ..base import Backend
+from ..base import Adapter
+from ...core.types import NodeOutput, ProgressEvent, CapabilityManifest
 from ...core.request import (
     TASK_MIME_MAP,
     TASK_OUTPUT_MAP,
     OutputType,
-    GenerationResult,
     GenerationRequest,
 )
-from ...core.pipeline import PipelineDef
+from ...core.pipeline import NodeDef
 
 
-class RHAppBackend(Backend):
-    """RunningHub 原生 AI 应用后端
-
-    通过 RunningHub OpenAPI v2 直接调用 AI 应用（WebApp），
-    无需 ComfyUI 工作流 JSON，使用 nodeInfoList 传递参数。
-    """
+class RHAppAdapter(Adapter):
+    """RunningHub 原生 AI 应用后端"""
 
     name = "rh_app"
 
     def __init__(self) -> None:
         self.api = rh_app_api
 
-    async def check_available(self) -> bool:
-        from ....rh_config.comfyui_config import RHCOMFYUI_CONFIG
+    # ── Adapter 接口 ──
 
-        key: str = RHCOMFYUI_CONFIG.get_config("RH_apikey").data
+    async def check_available(self) -> bool:
+        from ....rh_config.comfyui_config import SERVICE_CONFIG
+
+        key: str = SERVICE_CONFIG.get_config("RH_apikey").data
         return bool(key)
 
     async def get_unavailable_reason(self) -> str:
-        return "未配置 RunningHub API Key，请在 Web 控制台配置 RH_apikey"
+        return "未配置 RunningHub API Key,请在 Web 控制台配置 RH_apikey"
 
-    async def execute(self, request: GenerationRequest, pipeline: PipelineDef) -> GenerationResult:
-        """执行 RH 原生 AI 应用任务
+    def capabilities(self) -> CapabilityManifest:
+        return CapabilityManifest(
+            supported_tasks=["image"],
+            supported_params=["prompt", "width", "height", "images"],
+            output_mime=["image/png", "image/jpeg"],
+            mode="async_poll",
+            priority=55,
+        )
 
-        流程：
-        1. 从 pipeline.workflow_file 读取 webapp_id
-        2. 根据声明式映射构建 nodeInfoList
-        3. 上传图片（如有 IMAGE 类型映射）
-        4. 提交任务
-        5. 轮询等待结果
-        6. 下载结果文件并封装为 GenerationResult
-        """
-        # 1. 获取 webapp_id
-        webapp_id = pipeline.workflow_file
+    async def execute(
+        self,
+        request: GenerationRequest,
+        node: NodeDef,
+        *,
+        on_progress=None,
+    ) -> NodeOutput:
+        # 1. webapp_id
+        webapp_id = node.workflow_file
         if not webapp_id:
-            raise RuntimeError(
-                f"RH App Pipeline '{pipeline.name}' 缺少 workflow 字段，请填写 webappId 作为 workflow 值"
-            )
+            raise RuntimeError(f"RH App 节点 '{node.name}' 缺少 workflow 字段,请填写 webappId 作为 workflow 值")
 
         # 2. 构建 nodeInfoList
-        node_info_list = await self._build_node_info_list(request, pipeline)
+        node_info_list = await self._build_node_info_list(request, node)
         if not node_info_list:
-            raise RuntimeError(f"RH App Pipeline '{pipeline.name}' 构建的 nodeInfoList 为空")
+            raise RuntimeError(f"RH App 节点 '{node.name}' 构建的 nodeInfoList 为空")
 
         # 3. 提交任务
+        await _emit(on_progress, ProgressEvent(stage="submitting", percent=10, message="提交任务"))
         submit_result = await self.api.submit_task(webapp_id, node_info_list)
-
-        # 4. 检查提交结果
         task_id = submit_result.get("taskId")
         if not task_id:
             error = submit_result.get("errorMessage", "未知错误")
             raise RuntimeError(f"[RHApp] 提交任务失败: {error}")
 
-        # 检查 promptTips 中的 node_errors（工作流预校验）
+        # 预校验
         prompt_tips_str = submit_result.get("promptTips", "")
         if prompt_tips_str:
             try:
@@ -84,48 +84,45 @@ class RHAppBackend(Backend):
             except json.JSONDecodeError:
                 pass
 
-        # 5. 轮询等待结果
+        # 4. 轮询
+        await _emit(on_progress, ProgressEvent(stage="queued", percent=20, message="任务排队中"))
         results = await self.api.wait_for_result(task_id)
+        await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="完成"))
 
-        # 6. 处理结果
-        return await self._process_results(results, request, pipeline)
+        # 5. 封装结果
+        return await self._process_results(results, request, node)
 
-    # ── 声明式映射 ──
+    # ── 内部方法(声明式映射) ──
 
     async def _build_node_info_list(
         self,
         request: GenerationRequest,
-        pipeline: PipelineDef,
+        node: NodeDef,
     ) -> List[Dict[str, Any]]:
-        """根据声明式映射规则构建 nodeInfoList"""
         node_info_list: List[Dict[str, Any]] = []
 
-        for rule in self._normalize_mappings(pipeline.mappings):
+        for rule in self._normalize_mappings(node.mappings):
             optional = bool(rule.get("optional", False))
             target = self._get_required_str(rule, "target")
             description = rule.get("description", "")
 
-            # 解析 target: "nodeId.fieldName"
             parts = target.split(".")
             if len(parts) != 2:
-                raise RuntimeError(f"[RHApp] 映射 target 格式错误，应为 'nodeId.fieldName': {target}")
+                raise RuntimeError(f"[RHApp] 映射 target 格式错误,应为 'nodeId.fieldName': {target}")
             node_id, field_name = parts[0], parts[1]
 
-            # 解析值
             value = await self._resolve_mapping_value(request, rule)
             if value is None:
                 if optional:
                     continue
                 raise RuntimeError(f"[RHApp] 映射缺少必要值: target={target}")
 
-            # 处理 template
             template = rule.get("template")
             if template is not None:
                 if not isinstance(template, str):
                     raise RuntimeError(f"[RHApp] 映射 template 必须是字符串: target={target}")
                 value = template.replace("{value}", str(value))
 
-            # 处理图片上传
             mapping_type = rule.get("type", "")
             if mapping_type in {"image", "upload_image"}:
                 if not isinstance(value, bytes):
@@ -143,7 +140,6 @@ class RHAppBackend(Backend):
                     if not isinstance(item, bytes):
                         raise RuntimeError(f"[RHApp] 映射图片列表包含非 bytes 元素: target={target}")
                     uploaded.append(await self.api.upload_file(item, filename=f"input_{i}.png"))
-                # LIST 类型字段可能需要逗号分隔或列表格式，这里统一用逗号分隔字符串
                 value = ",".join(uploaded) if len(uploaded) > 1 else uploaded[0]
             elif mapping_type:
                 raise RuntimeError(f"[RHApp] 未知映射类型: {mapping_type}")
@@ -160,8 +156,7 @@ class RHAppBackend(Backend):
         return node_info_list
 
     @staticmethod
-    def _normalize_mappings(mappings: dict | list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """标准化 mappings，兼容旧字典格式和新列表格式"""
+    def _normalize_mappings(mappings: dict[str, Any] | list[dict[str, Any]]) -> list[dict[str, Any]]:
         if isinstance(mappings, list):
             return mappings
 
@@ -170,7 +165,6 @@ class RHAppBackend(Backend):
             if not isinstance(mapping, dict):
                 raise RuntimeError(f"[RHApp] 旧版声明式映射必须是字典: {source}")
 
-            # 新格式（已有 target）
             if "target" in mapping:
                 rule = dict(mapping)
                 if "source" not in rule and "value" not in rule:
@@ -178,7 +172,6 @@ class RHAppBackend(Backend):
                 normalized.append(rule)
                 continue
 
-            # 旧格式（node_id + field_name）
             if "node_id" not in mapping or "field_name" not in mapping:
                 raise RuntimeError(f"[RHApp] 旧版声明式映射缺少 node_id/field_name: {source}")
             rule = {
@@ -192,10 +185,8 @@ class RHAppBackend(Backend):
         return normalized
 
     async def _resolve_mapping_value(self, request: GenerationRequest, rule: dict[str, Any]) -> Any:
-        """解析映射值，支持 value、source、default"""
         if "value" in rule:
             return rule["value"]
-
         source = self._get_required_str(rule, "source")
         value = self._read_request_path(request, source)
         if value is None and "default" in rule:
@@ -204,7 +195,6 @@ class RHAppBackend(Backend):
 
     @staticmethod
     def _read_request_path(request: GenerationRequest, source: str) -> Any:
-        """读取 GenerationRequest 路径，如 prompt、images.0、extra.width"""
         parts = source.split(".")
         if not parts:
             return None
@@ -214,6 +204,8 @@ class RHAppBackend(Backend):
             value: Any = request.task_type
         elif root == "prompt":
             value = request.prompt
+        elif root == "negative_prompt":
+            value = request.negative_prompt
         elif root == "images":
             value = request.images
         elif root == "reference_audio":
@@ -224,12 +216,34 @@ class RHAppBackend(Backend):
             value = request.height
         elif root == "duration":
             value = request.duration
-        elif root == "negative_prompt":
-            value = request.negative_prompt
+        elif root == "seed":
+            value = request.seed
+        elif root == "ratio":
+            value = request.ratio
+        elif root == "resolution":
+            value = request.resolution
+        elif root == "generate_audio":
+            value = request.generate_audio
+        elif root == "watermark":
+            value = request.watermark
+        elif root == "camera_fixed":
+            value = request.camera_fixed
+        elif root == "return_last_frame":
+            value = request.return_last_frame
+        elif root == "service_tier":
+            value = request.service_tier
+        elif root == "mood":
+            value = request.mood
+        elif root == "voice_id":
+            value = request.voice_id
+        elif root == "speed":
+            value = request.speed
+        elif root == "language_boost":
+            value = request.language_boost
         elif root == "model":
             value = request.model
-        elif root == "extra":
-            value = request.extra
+        elif root in ("params", "extra"):
+            value = request.params if root == "params" else request.extra
         else:
             return None
 
@@ -251,7 +265,6 @@ class RHAppBackend(Backend):
 
     @staticmethod
     def _get_required_str(rule: dict[str, Any], key: str) -> str:
-        """读取必填字符串字段"""
         if key not in rule:
             raise RuntimeError(f"[RHApp] 映射缺少字段: {key}")
         value = rule[key]
@@ -265,9 +278,8 @@ class RHAppBackend(Backend):
         self,
         results: List[Dict[str, Any]],
         request: GenerationRequest,
-        pipeline: PipelineDef,
-    ) -> GenerationResult:
-        """处理任务结果，下载文件并封装为 GenerationResult"""
+        node: NodeDef,
+    ) -> NodeOutput:
         if not results:
             raise RuntimeError("[RHApp] 任务完成但未返回任何结果")
 
@@ -276,10 +288,8 @@ class RHAppBackend(Backend):
         output_type_str = result_item.get("outputType", "").lower()
         text_content = result_item.get("text")
 
-        # 确定输出类型和 MIME 类型
         output_type = TASK_OUTPUT_MAP.get(request.task_type, OutputType.IMAGE)
 
-        # 根据实际返回的文件扩展名推断 MIME 类型
         ext_mime_map = {
             "png": "image/png",
             "jpg": "image/jpeg",
@@ -290,27 +300,45 @@ class RHAppBackend(Backend):
             "wav": "audio/wav",
             "txt": "text/plain",
         }
-        mime_type = ext_mime_map.get(output_type_str, TASK_MIME_MAP.get(request.task_type, "application/octet-stream"))
+        mime_type = ext_mime_map.get(
+            output_type_str,
+            TASK_MIME_MAP.get(request.task_type, "application/octet-stream"),
+        )
 
-        # 纯文本输出（无 URL）
         if text_content is not None and not file_url:
-            return GenerationResult(
-                output_type=output_type,
-                data=str(text_content).encode("utf-8"),
+            data = str(text_content).encode("utf-8")
+            return NodeOutput(
+                status="ok",
+                output_type="image",
+                data=data,
                 mime_type="text/plain",
             )
 
         if not file_url:
             raise RuntimeError(f"[RHApp] 结果中没有文件 URL: {result_item}")
 
-        # 下载文件
         async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
             response = await client.get(file_url)
             response.raise_for_status()
             file_data = response.content
 
-        return GenerationResult(
-            output_type=output_type,
+        return NodeOutput(
+            status="ok",
+            output_type=output_type.value,
             data=file_data,
             mime_type=mime_type,
+            raw={"file_url": file_url},
         )
+
+
+async def _emit(cb, event: ProgressEvent) -> None:
+    if cb is None:
+        return
+    try:
+        await cb(event)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# 向后兼容
+RHAppBackend = RHAppAdapter

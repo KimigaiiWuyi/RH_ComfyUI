@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..core.request import GenerationRequest
 from ..backends.comfyui.api import ComfyUIAPI
 
 
 async def ace_step_mapper(
     request: GenerationRequest,
-    workflow: dict,
+    workflow: dict[str, Any],
     api: ComfyUIAPI,
-) -> dict:
+) -> dict[str, Any]:
     """ACE Step 1.5 音乐生成工作流的参数映射"""
     # prompt 作为风格描述
     workflow["131"]["inputs"]["text"] = request.prompt

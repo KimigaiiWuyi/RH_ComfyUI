@@ -1,20 +1,36 @@
-"""统一请求/响应模型 — 覆盖所有 AIGC 任务类型"""
+"""统一请求/响应模型 — 覆盖所有 AIGC 任务类型
+
+设计原则:
+1. 显式字段优先 — 不再用 `extra: dict` 作为逃生通道,所有后端专属参数都有命名字段
+2. 通用包 + 任务专属 payload — 用 `params` 字典做轻量任务级扩展
+3. 多模态有序内容 — `ordered_content` 用于 Seedance 2.0 这类支持任意顺序 text+image+video+audio 的接口
+"""
 
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 from dataclasses import field, dataclass
+
+if TYPE_CHECKING:
+    # 仅为类型检查导入,避免运行时循环
+    from .types import MediaRef, ContentItem
 
 
 class TaskType(str, Enum):
-    """任务类型枚举"""
+    """任务类型 = 输出模态
 
-    TEXT2IMAGE = "text2image"
-    IMAGE2IMAGE = "image2image"
-    IMAGE_EDIT = "image_edit"
-    TEXT2VIDEO = "text2video"
-    IMAGE2VIDEO = "image2video"
+    路由不再按 文生图/图生图/编辑、文生/图生/首尾帧/多模态 这种细分强制分类,
+    而是以"输出模态"作为路由桶,桶内由节点声明的输入端口(inputs)+输入档案
+    (图片数量、是否带音/视频参考)来隔离具体能力:
+      - IMAGE : 0 张图 → 文生图; >=1 张图 → 图片编辑(已移除潜空间图生图 i2i)
+      - VIDEO : 0 图=文生视频 / 1 图=图生视频 / 2 图=首尾帧 / 图+音视频=多模态
+      - MUSIC : 音乐生成
+      - SPEECH: 语音生成(支持参考音频克隆)
+    """
+
+    IMAGE = "image"
+    VIDEO = "video"
     MUSIC = "music"
     SPEECH = "speech"
 
@@ -29,84 +45,153 @@ class OutputType(str, Enum):
 
 # 任务类型 → 输出类型 映射
 TASK_OUTPUT_MAP: dict[TaskType, OutputType] = {
-    TaskType.TEXT2IMAGE: OutputType.IMAGE,
-    TaskType.IMAGE2IMAGE: OutputType.IMAGE,
-    TaskType.IMAGE_EDIT: OutputType.IMAGE,
-    TaskType.TEXT2VIDEO: OutputType.VIDEO,
-    TaskType.IMAGE2VIDEO: OutputType.VIDEO,
+    TaskType.IMAGE: OutputType.IMAGE,
+    TaskType.VIDEO: OutputType.VIDEO,
     TaskType.MUSIC: OutputType.AUDIO,
     TaskType.SPEECH: OutputType.AUDIO,
 }
 
 # 任务类型 → MIME 类型 映射
 TASK_MIME_MAP: dict[TaskType, str] = {
-    TaskType.TEXT2IMAGE: "image/png",
-    TaskType.IMAGE2IMAGE: "image/png",
-    TaskType.IMAGE_EDIT: "image/png",
-    TaskType.TEXT2VIDEO: "video/mp4",
-    TaskType.IMAGE2VIDEO: "video/mp4",
+    TaskType.IMAGE: "image/png",
+    TaskType.VIDEO: "video/mp4",
     TaskType.MUSIC: "audio/mpeg",
     TaskType.SPEECH: "audio/mpeg",
 }
 
 # 任务类型 → 中文名称 映射
 TASK_DISPLAY_NAME: dict[TaskType, str] = {
-    TaskType.TEXT2IMAGE: "文生图",
-    TaskType.IMAGE2IMAGE: "图生图",
-    TaskType.IMAGE_EDIT: "图片编辑",
-    TaskType.TEXT2VIDEO: "文生视频",
-    TaskType.IMAGE2VIDEO: "图生视频",
+    TaskType.IMAGE: "图片生成",
+    TaskType.VIDEO: "视频生成",
     TaskType.MUSIC: "音乐生成",
     TaskType.SPEECH: "语音生成",
 }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  GenerationRequest
+# ═══════════════════════════════════════════════════════════════════════
 
 
 @dataclass
 class GenerationRequest:
     """统一的 AIGC 生成请求 — 覆盖所有任务类型
 
-    字段使用矩阵:
-        字段              | text2image | image2image | image_edit | text2video | image2video | music | speech
-        prompt            | ✅ 必须    | ✅ 必须     | ✅ 必须    | ✅ 必须    | ✅ 必须     | ✅ 风格 | ✅ 文本
-        images            | ❌         | ✅ 1张      | ✅ 1~N张   | ❌         | ✅ 1张      | ❌     | ❌
-        reference_audio   | ❌         | ❌          | ❌         | ❌         | ❌          | ❌     | ⭕ 可选
-        mood              | ❌         | ❌          | ❌         | ❌         | ❌          | ❌     | ⭕ 可选
-        width             | ✅         | ✅          | ❌         | ✅         | ✅          | ❌     | ❌
-        height            | ✅         | ✅          | ❌         | ✅         | ✅          | ❌     | ❌
-        duration          | ❌         | ❌          | ❌         | ✅         | ✅          | ❌     | ❌
-        negative_prompt   | ⭕         | ⭕          | ❌         | ⭕         | ⭕          | ❌     | ❌
-        model             | ⭕         | ⭕          | ⭕         | ⭕         | ⭕          | ⭕     | ⭕
-        extra             | ⭕         | ⭕          | ⭕         | ⭕         | ⭕          | ⭕     | ⭕
+    字段矩阵(✅=必有,⭕=可选,空=不适用):
+
+    字段                    | t2i | i2i | edit | t2v | i2v | flf2v | mm2v | music | speech
+    ------------------------|-----|-----|------|-----|-----|-------|------|-------|--------
+    prompt                  | ✅  | ✅  | ✅   | ✅  | ✅  | ✅    | ✅   | ✅ 风格 | ✅ 文本
+    negative_prompt         | ⭕  | ⭕  |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
+    images                  |     | ✅1+| ✅1+ |     | ✅1 | ✅2   | ✅1+ |        |
+    video_refs              |     |     |      |     |     |       | ✅0+ |        |
+    audio_refs              |     |     |      |     |     |       | ✅0+ |        |
+    ordered_content         |     |     |      |     |     |       | ✅   |        |
+    reference_audio         |     |     |      |     |     |       |      |        | ⭕
+    mood                    |     |     |      |     |     |       |      |        | ⭕
+    voice_id                |     |     |      |     |     |       |      |        | ⭕
+    width / height          | ✅  | ✅  |      | ✅  | ✅  | ✅    | ✅   |        |
+    ratio                   |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
+    resolution              |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
+    duration                |     |     |      | ✅  | ✅  | ✅    | ✅   |        |
+    seed                    | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   |        |
+    generate_audio          |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
+    watermark               | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   |        |
+    camera_fixed            |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
+    return_last_frame       |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
+    service_tier            |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
+    model                   | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   | ⭕    | ⭕
+    speed                   |     |     |      |     |     |       |      |        | ⭕
+    language_boost          |     |     |      |     |     |       |      |        | ⭕
+    params                  | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   | ⭕    | ⭕
     """
 
     # ── 必填字段 ──
     task_type: TaskType
-    prompt: str
+    prompt: str = ""
 
-    # ── 图片输入（图生图/编辑/图生视频） ──
+    # ── 负面提示词 ──
+    negative_prompt: str = ""
+
+    # ── 图片输入(图生图/编辑/图生视频) ──
     images: list[bytes] = field(default_factory=list)
 
-    # ── 音频输入（语音克隆参考音色） ──
+    # ── 视频参考(Seedance 多模态) ──
+    video_refs: list[MediaRef] = field(default_factory=list)
+
+    # ── 音频参考(Seedance 多模态 / 语音克隆) ──
+    audio_refs: list[MediaRef] = field(default_factory=list)
+
+    # ── 有序多模态内容(Seedance 风格,严格按顺序) ──
+    #    当该字段非空时,Adapter 应优先使用它而不是 prompt/images/video_refs/audio_refs
+    ordered_content: list[ContentItem] = field(default_factory=list)
+
+    # ── 音频输入(语音克隆参考音色,向后兼容字段) ──
     reference_audio: Optional[bytes] = None
 
-    # ── 语音情绪（语音生成专用） ──
+    # ── 语音情绪(语音生成专用) ──
     mood: Optional[str] = None
+
+    # ── 语音:音色 ID ──
+    voice_id: Optional[str] = None
+
+    # ── 语音:语速(0.5~2.0) ──
+    speed: float = 1.0
+
+    # ── 语音:语言增强 ──
+    language_boost: str = "auto"
 
     # ── 尺寸参数 ──
     width: int = 720
     height: int = 1280
 
-    # ── 视频时长（秒） ──
+    # ── 视频宽高比(如 "16:9", "9:16", "adaptive") ──
+    ratio: Optional[str] = None
+
+    # ── 视频分辨率(480p/720p/1080p) ──
+    resolution: Optional[str] = None
+
+    # ── 视频时长(秒) ──
     duration: int = 5
 
-    # ── 负面提示词 ──
-    negative_prompt: str = ""
+    # ── 随机种子 ──
+    seed: Optional[int] = None
 
-    # ── 模型覆盖（用户显式指定 Pipeline 名） ──
+    # ── 是否生成有声视频(Seedance 等) ──
+    generate_audio: bool = False
+
+    # ── 水印 ──
+    watermark: bool = True
+
+    # ── 摄像机是否固定 ──
+    camera_fixed: bool = False
+
+    # ── 是否同时返回尾帧图 ──
+    return_last_frame: bool = False
+
+    # ── 推理档位(default/flex) ──
+    service_tier: str = "default"
+
+    # ── 模型覆盖(用户显式指定 Pipeline 名) ──
     model: Optional[str] = None
 
-    # ── 扩展参数（后端专属参数） ──
-    extra: dict = field(default_factory=dict)
+    # ── 通用任务级参数(替代旧的 extra:dict) ──
+    #    约定:
+    #      - 与 Seedance/MiniMax/MiMo 等 API 直接对应的字段应优先提升为命名字段
+    #      - 只有真正后端私有、且无法通用化的字段才放进这里
+    #      - 推荐使用 TypedAdapter 实现类型安全,而不是往这里堆 dict
+    params: dict[str, Any] = field(default_factory=dict)
+
+    # ── 兼容旧字段(已标记 deprecated,新代码不要使用) ──
+    extra: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    # ── 上下文(可选,由调用方注入) ──
+    user_id: Optional[str] = None
+    trace_id: Optional[str] = None
+
+    # ══════════════════════════════════════════════════════════════
+    #  便捷属性
+    # ══════════════════════════════════════════════════════════════
 
     @property
     def output_type(self) -> OutputType:
@@ -123,10 +208,67 @@ class GenerationRequest:
         """根据 task_type 获取中文显示名"""
         return TASK_DISPLAY_NAME[self.task_type]
 
+    # ── 向后兼容:旧的 extra 访问走 params/extra 合并 ──
+
+    def get_param(self, key: str, default: Any = None) -> Any:
+        """优先从 params 取,回退到 extra"""
+        if key in self.params:
+            return self.params[key]
+        return self.extra.get(key, default)
+
+    def set_param(self, key: str, value: Any) -> None:
+        """写入到 params(不再写 extra)"""
+        self.params[key] = value
+
+    # ── 多模态内容便捷构造 ──
+
+    def build_ordered_content(
+        self,
+        *,
+        prepend_text: bool = True,
+    ) -> list[ContentItem]:
+        """根据 prompt/images/video_refs/audio_refs 构造有序 content
+
+        当 ordered_content 已有值时直接返回;
+        否则从通用字段构造一个合理的有序内容:
+          [text(prompt), image(images[0]), image(images[1]), ...]
+        """
+        if self.ordered_content:
+            return self.ordered_content
+
+        # 延迟导入以避免循环:request ↔ types
+        from .types import (
+            image_ref,
+            text_item,
+            audio_item,
+            image_item,
+            video_item,
+        )
+
+        items: list[ContentItem] = []
+        if prepend_text and self.prompt:
+            items.append(text_item(self.prompt))
+        for img in self.images:
+            items.append(image_item(image_ref(data=img)))
+        for v in self.video_refs:
+            items.append(video_item(v))
+        for a in self.audio_refs:
+            items.append(audio_item(a))
+        return items
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  GenerationResult
+# ═══════════════════════════════════════════════════════════════════════
+
 
 @dataclass
 class GenerationResult:
-    """统一的 AIGC 生成结果"""
+    """统一的 AIGC 生成结果
+
+    简单场景下使用 (output_type, data, mime_type);
+    复杂场景(Seedance 等)还可以使用 outputs/usage/last_frame_url 等扩展字段。
+    """
 
     output_type: OutputType
     data: bytes
@@ -134,4 +276,22 @@ class GenerationResult:
     model_used: str = ""
     pipeline_used: str = ""
     cost_points: int = 0
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    # ── 扩展字段(视频生成等使用) ──
+    outputs: dict[str, Any] = field(default_factory=dict)  # e.g. {"video": bytes, "last_frame": bytes}
+    usage: dict[str, Any] = field(default_factory=dict)  # e.g. {"completion_tokens": 246840}
+    raw: dict[str, Any] = field(default_factory=dict)  # 厂商原始响应
+
+    @classmethod
+    def from_node_output(cls, node_output: Any) -> "GenerationResult":
+        """从 NodeOutput 转换为 GenerationResult,在 request.py 中延迟
+        引用 NodeOutput 类型,打破 types <-> request 的循环依赖。
+        """
+        return cls(
+            output_type=OutputType(node_output.output_type),
+            data=node_output.data,
+            mime_type=node_output.mime_type,
+            cost_points=int(node_output.usage.get("points", 0)),
+            metadata=node_output.metadata,
+        )

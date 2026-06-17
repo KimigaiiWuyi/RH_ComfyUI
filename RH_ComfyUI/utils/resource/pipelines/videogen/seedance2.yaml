@@ -1,0 +1,98 @@
+name: seedance2
+display_name: Seedance 2.0
+task_type: video
+backend: seedance
+backend_model: doubao-seedance-2-0-260128
+point_cost: 20
+description: Seedance 2.0 统一视频生成,按输入自动切换 文生/图生/首尾帧/多模态,无需手动区分
+knowledge_content: |
+  字节跳动 Seedance 2.0 统一视频生成节点。
+  一个节点覆盖全部视频生成形态,由输入自动决定:
+    - 不传图       → 文生视频
+    - 传 1 张图     → 图生视频(该图作为首帧)
+    - 传 2 张图     → 首尾帧生视频(图1=首帧, 图2=尾帧, 其余作参考)
+    - 传图+音/视频  → 多模态参考生视频(prompt 中用 "图片1/视频1/音频1" 代号引用素材)
+  优势:中文支持优秀、动作流畅,支持 480p/720p/1080p,
+  支持 16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9 / adaptive 比例,
+  支持可选有声视频、摄像机固定、水印、seed、可选尾帧等。
+  支持时长:4~15 秒。
+requirements:
+  - seedance_apikey
+
+mode: programmatic
+mapper: "RH_ComfyUI.utils.mappers.seedance:seedance_video_mapper"
+
+capabilities:
+  priority: 90
+  mode: async_poll
+
+inputs:
+  prompt:
+    type: text
+    required: true
+    description: |
+      视频生成提示词。多模态场景可用 "图片1"/"图片2"/"视频1"/"音频1"
+      等代号引用下方传入的素材。
+  images:
+    type: list
+    item_type: image
+    required: false
+    min_items: 0
+    max_items: 9
+    description: 参考图片(0~9 张):0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考
+  video_refs:
+    type: list
+    item_type: video
+    required: false
+    max_items: 3
+    description: 参考视频(0~3 段),prompt 中用 "视频1/视频2/..." 引用
+  audio_refs:
+    type: list
+    item_type: audio
+    required: false
+    max_items: 3
+    description: 参考音频(0~3 段),prompt 中用 "音频1/音频2/..." 引用
+  ratio:
+    type: enum
+    values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"]
+    default: "adaptive"
+    description: 视频宽高比(adaptive 跟随首帧)
+  resolution:
+    type: enum
+    values: ["480p", "720p", "1080p"]
+    default: "720p"
+    description: 视频分辨率
+  duration:
+    type: integer
+    default: 5
+    minimum: 4
+    maximum: 15
+    description: 视频时长(秒)
+  seed:
+    type: integer
+    required: false
+    description: 随机种子(留空则随机)
+  generate_audio:
+    type: boolean
+    default: false
+    description: 是否生成同步音频
+  watermark:
+    type: boolean
+    default: false
+    description: 是否添加 AI 水印
+  camera_fixed:
+    type: boolean
+    default: false
+    description: 摄像机是否固定
+  return_last_frame:
+    type: boolean
+    default: false
+    description: 是否同时返回尾帧图
+
+outputs:
+  video:
+    type: output_video
+    description: 生成的视频(MP4)
+  last_frame:
+    type: output_image
+    description: 视频尾帧图(仅在 return_last_frame=true 时返回)

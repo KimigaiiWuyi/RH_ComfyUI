@@ -10,7 +10,7 @@ import aiohttp
 
 from gsuid_core.logger import logger
 
-from ....rh_config.comfyui_config import RHCOMFYUI_CONFIG
+from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 
 class MIMOAPI:
@@ -67,7 +67,7 @@ class MIMOAPI:
     @property
     def api_key(self) -> str:
         """动态读取 API Key，避免模块导入时配置未生效"""
-        return RHCOMFYUI_CONFIG.get_config("MIMO_apikey").data or ""
+        return SERVICE_CONFIG.get_config("MIMO_apikey").data or ""
 
     def _headers(self) -> Dict[str, str]:
         return {
@@ -79,7 +79,7 @@ class MIMOAPI:
         self,
         json: Dict[str, Any],
         max_retries: int = 3,
-    ) -> Union[Dict, int]:
+    ) -> Union[Dict[str, Any], int]:
         """带重试机制的 HTTP 请求"""
         fail_count = 0
 

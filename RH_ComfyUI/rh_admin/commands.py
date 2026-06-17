@@ -79,9 +79,9 @@ async def parse_query_points_args(ev: Event) -> tuple[str, Optional[str]]:
             target_user_id = ev.user_id
 
     if ev.user_pm != 0 and ev.user_id != target_user_id:
-        return target_user_id, "🚫 您不是管理员，无法查询其他用户积分！"
+        return target_user_id or "", "🚫 您不是管理员，无法查询其他用户积分！"
 
-    return target_user_id, None
+    return target_user_id or ev.user_id, None
 
 
 # ============================================================

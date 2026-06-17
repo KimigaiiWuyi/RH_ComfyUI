@@ -16,6 +16,7 @@ from gsuid_core.utils.image.convert import convert_img
 from gsuid_core.ai_core.trigger_bridge import ai_return
 
 from ..utils.points import check_point
+from ..utils.core.types import audio_ref
 from ..utils.core.parser import parse_mood_from_prompt, parse_model_from_prompt
 from ..utils.core.router import ModelUnavailableError, route
 from ..utils.core.request import TaskType, GenerationResult, GenerationRequest
@@ -57,35 +58,48 @@ async def _do_generate(
     request: GenerationRequest,
     ev: Event,
     bot: Bot,
+    *,
+    on_progress=None,
 ) -> Optional[GenerationResult]:
     """通用生成执行流程：路由 → 积分检查 → 执行"""
     # 1. 路由
     try:
-        pipeline = await route(request)
+        node = await route(request)
     except ModelUnavailableError as e:
         ai_return(f"错误：{e.reason}")
         await bot.send(f"❌ {e.reason}")
         return None
 
     # 2. 积分检查
-    success, msg = await check_point(ev, pipeline.point_cost)
+    success, msg = await check_point(ev, node.point_cost)
     if not success:
-        ai_return(f"错误：积分不足，需要{pipeline.point_cost}积分")
+        ai_return(f"错误：积分不足，需要{node.point_cost}积分")
         await bot.send(msg)
         return None
-    await bot.send(f"{msg}\n🎯 使用模型: {pipeline.display_name}")
+    await bot.send(f"{msg}\n🎯 使用模型: {node.display_name}")
 
-    # 3. 执行
+    # 3. 进度回调(包装后透传给 executor)
+    async def _wrapped_progress(event) -> None:
+        await bot.send(f"⏳ {event.message}")
+        if on_progress is not None:
+            try:
+                await on_progress(event)
+            except Exception:  # noqa: BLE001
+                pass
+
+    # 4. 执行
     try:
-        result = await execute_generation(request, pipeline)
-        ai_return(f"生成完成，使用模型: {pipeline.display_name}")
+        result = await execute_generation(request, node, on_progress=_wrapped_progress)
+        ai_return(f"生成完成，使用模型: {node.display_name}")
         return result
     except Exception as e:
         logger.exception(f"[RHComfyUI] 生成失败: {e}")
-        await RHBind.add_point(ev.user_id, ev.bot_id, pipeline.point_cost)
-        refund_msg = f"已退回{pipeline.point_cost}积分。"
+        await RHBind.add_point(ev.user_id, ev.bot_id, node.point_cost)
+        refund_msg = f"已退回{node.point_cost}积分。"
         ai_return(
-            f"错误：生成失败 - {str(e)}。{refund_msg}不要在同一轮对话中盲目切换到未确认可用的云端 TTS 后端重试；如果错误码是 MiniMax 2038，表示账号未开通 voice_clone 权限，代码无法绕过。"
+            f"错误：生成失败 - {str(e)}。{refund_msg}"
+            "不要在同一轮对话中盲目切换到未确认可用的云端 TTS 后端重试；"
+            "如果错误码是 MiniMax 2038，表示账号未开通 voice_clone 权限，代码无法绕过。"
         )
         await bot.send(f"❌ 生成失败: {e}\n↩️ {refund_msg}")
         return None
@@ -97,10 +111,10 @@ async def _do_generate(
 @sv_gen.on_command(
     "生图",
     block=True,
-    to_ai="""根据文字描述生成图片，或基于已有图片生成新图片。
+    to_ai="""根据文字描述生成图片;若附带参考图片则对其进行编辑/重绘。
     当用户想要创建图片、画图、生成插画、设计图等时调用。
-    如果用户提供了参考图片，则进行图生图；否则进行文生图。
-    可通过模型名指定使用哪个模型，不指定则自动选择。
+    不提供图片即文生图;提供图片则按图片编辑处理(已不再有独立的潜空间图生图)。
+    可通过模型名指定使用哪个模型，不指定则自动选择(系统按输入与可用性自动路由)。
 
     Args:
         text: 生成描述 + 可选模型名。
@@ -108,38 +122,34 @@ async def _do_generate(
               格式2（指定模型）: "qwen 一只可爱的猫咪"
               格式3（指定 Anima 二次元模型，必须使用小写模型名前缀）: "anima 蕾米莉亚的图"
               格式4（指定 MiniMax 模型）: "image01 一只可爱的猫咪"
-              常用模型名: qwen, banana, banana_pro, anima, image01（即 minimax_image01）
+              常用模型名: qwen, banana, banana_pro, anima, image01（即 minimax_image01）, gpt
               当用户明确要求 Anima / anima 模型，或需求是二次元、动漫角色、插画、萌系头像时，text 必须以 "anima " 开头。
               当用户明确要求 image01 / minimax 模型时，text 必须以 "image01 " 开头。
-        image_id: 可选，参考图片的资源ID（img_xxxxxxxx），有则为图生图。
+        image_id: 可选，参考图片的资源ID（img_xxxxxxxx），有则按编辑处理。
     """,
 )
 async def generate_image(bot: Bot, ev: Event) -> None:
     prompt = ev.text.strip()
     if not prompt:
         ai_return("错误：未提供生成描述")
-        return await bot.send("请在命令后输入描述，例如：\n生图 一只可爱的猫咪\n生图 qwen 一只可爱的猫咪")
+        await bot.send("请在命令后输入描述，例如：\n生图 一只可爱的猫咪\n生图 qwen 一只可爱的猫咪")
+        return
 
-    # 自动推断任务类型
-    has_image = bool(ev.image_id)
-    task_type = TaskType.IMAGE2IMAGE if has_image else TaskType.TEXT2IMAGE
+    # 统一为 IMAGE 模态:具体走文生图还是编辑,由路由按"有没有图片"决定
+    model_name, actual_prompt = parse_model_from_prompt(prompt, TaskType.IMAGE)
 
-    # 解析可选模型名
-    model_name, actual_prompt = parse_model_from_prompt(prompt, task_type)
-
-    # 构建请求
     request = GenerationRequest(
-        task_type=task_type,
+        task_type=TaskType.IMAGE,
         prompt=actual_prompt,
         model=model_name,
     )
 
-    # 附加图片
-    if has_image and ev.image_id:
+    # 附加图片(有图则路由到编辑类节点)
+    if ev.image_id:
         from gsuid_core.utils.resource_manager import RM
 
         image_bytes = await RM.get(ev.image_id)
-        request.images = [image_bytes]
+        request.images = [_flatten_transparent_image_to_white(image_bytes)]
 
     # 执行生成
     result = await _do_generate(request, ev, bot)
@@ -172,22 +182,24 @@ async def edit_image(bot: Bot, ev: Event) -> None:
     prompt = ev.text.strip()
     if not prompt:
         ai_return("错误：未提供编辑指令")
-        return await bot.send("请在命令后输入编辑指令，例如：改图 把背景换成海边")
+        await bot.send("请在命令后输入编辑指令，例如：改图 把背景换成海边")
+        return
 
     # 兼容 AI 通过 image_id 参数传入资源 ID 的情况
     image_id_list = ev.image_id_list or ([ev.image_id] if ev.image_id else [])
     if not image_id_list:
         ai_return("错误：编辑图片必须附带图片")
-        return await bot.send("编辑图片需要附带至少一张图片！")
+        await bot.send("编辑图片需要附带至少一张图片！")
+        return
 
-    model_name, actual_prompt = parse_model_from_prompt(prompt, TaskType.IMAGE_EDIT)
+    model_name, actual_prompt = parse_model_from_prompt(prompt, TaskType.IMAGE)
 
     from gsuid_core.utils.resource_manager import RM
 
     images = [_flatten_transparent_image_to_white(await RM.get(img_id)) for img_id in image_id_list]
 
     request = GenerationRequest(
-        task_type=TaskType.IMAGE_EDIT,
+        task_type=TaskType.IMAGE,
         prompt=actual_prompt,
         model=model_name,
         images=images,
@@ -207,39 +219,53 @@ async def edit_image(bot: Bot, ev: Event) -> None:
 @sv_gen.on_command(
     ("生视频", "生成视频"),
     block=True,
-    to_ai="""根据文字描述生成视频，或基于图片生成视频。
-    当用户想要创建视频、让图片动起来时调用。
-    如果用户提供了参考图片，则进行图生视频；否则进行文生视频。
+    to_ai="""根据文字/图片/音视频生成视频。当用户想要创建视频、让图片动起来时调用。
+    统一为"视频"任务,具体形态由系统按输入自动决定,无需手动区分:
+      - 不传图           → 文生视频
+      - 传 1 张图         → 图生视频(该图作首帧)
+      - 传 ≥2 张图        → 首尾帧生视频(图片1=首帧, 图片2=尾帧)
+      - 传图+音/视频参考  → 多模态参考生视频(prompt 中用 "图片1/音频1" 等代号引用素材)
 
     Args:
         text: 视频描述 + 可选模型名。
               格式1: "一只猫在草地上追蝴蝶"
               格式2: "wan 一只猫在草地上追蝴蝶"
-        image_id: 可选，参考图片的资源ID（img_xxxxxxxx），有则为图生视频。
+              格式3 (Seedance 多模态): "图片1为主角,音频1为背景音乐,他在草原上奔跑"
+        image_id: 可选，参考图片的资源ID（img_xxxxxxxx），支持多张。
+        audio_id: 可选,多模态参考音频。
     """,
 )
 async def generate_video(bot: Bot, ev: Event) -> None:
     prompt = ev.text.strip()
     if not prompt:
         ai_return("错误：未提供视频描述")
-        return await bot.send("请在命令后输入视频描述")
+        await bot.send("请在命令后输入视频描述")
+        return
 
-    has_image = bool(ev.image_id)
-    task_type = TaskType.IMAGE2VIDEO if has_image else TaskType.TEXT2VIDEO
-
-    model_name, actual_prompt = parse_model_from_prompt(prompt, task_type)
+    model_name, actual_prompt = parse_model_from_prompt(prompt, TaskType.VIDEO)
 
     request = GenerationRequest(
-        task_type=task_type,
+        task_type=TaskType.VIDEO,
         prompt=actual_prompt,
         model=model_name,
     )
 
-    if has_image and ev.image_id:
+    # 收集参考图片/音频;具体走 文生/图生/首尾帧/多模态 由路由+mapper 按输入分发
+    image_ids = ev.image_id_list or ([ev.image_id] if ev.image_id else [])
+    audio_ids = ev.audio_id_list or ([ev.audio_id] if ev.audio_id else [])
+    if image_ids or audio_ids:
         from gsuid_core.utils.resource_manager import RM
 
-        image_bytes = await RM.get(ev.image_id)
-        request.images = [image_bytes]
+        for img_id in image_ids:
+            try:
+                request.images.append(await RM.get(img_id))
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[generate_video] 加载图片 {img_id} 失败: {e}")
+        for audio_id in audio_ids:
+            try:
+                request.audio_refs.append(audio_ref(data=await RM.get(audio_id)))
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[generate_video] 加载音频 {audio_id} 失败: {e}")
 
     result = await _do_generate(request, ev, bot)
     if result is None:
@@ -247,6 +273,15 @@ async def generate_video(bot: Bot, ev: Event) -> None:
 
     await bot.send("✅ 视频生成完成！")
     await bot.send(MessageSegment.video(result.data))
+
+    # ── 尾帧图(若 Seedance 返回) ──
+    last_frame = (result.outputs or {}).get("last_frame")
+    if last_frame:
+        try:
+            await bot.send("🎞️ 视频尾帧图：")
+            await bot.send(await convert_img(last_frame))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[generate_video] 发送尾帧失败: {e}")
 
 
 # ── 生音乐命令 ──
@@ -267,7 +302,8 @@ async def generate_music(bot: Bot, ev: Event) -> None:
     prompt = ev.text.strip()
     if not prompt:
         ai_return("错误：未提供音乐描述")
-        return await bot.send("请在命令后输入音乐描述")
+        await bot.send("请在命令后输入音乐描述")
+        return
 
     model_name, actual_prompt = parse_model_from_prompt(prompt, TaskType.MUSIC)
 
@@ -327,7 +363,8 @@ async def generate_speech(bot: Bot, ev: Event) -> None:
     prompt = ev.text.strip()
     if not prompt:
         ai_return("错误：未提供要转换的文字")
-        return await bot.send("请在命令后输入要转换的文字")
+        await bot.send("请在命令后输入要转换的文字")
+        return
 
     model_name, actual_prompt = parse_model_from_prompt(prompt, TaskType.SPEECH)
 
@@ -383,11 +420,8 @@ async def list_models(bot: Bot, ev: Event) -> None:
             continue
 
         type_names = {
-            TaskType.TEXT2IMAGE: "🖼️ 文生图",
-            TaskType.IMAGE2IMAGE: "🎨 图生图",
-            TaskType.IMAGE_EDIT: "✏️ 图片编辑",
-            TaskType.TEXT2VIDEO: "🎬 文生视频",
-            TaskType.IMAGE2VIDEO: "🎥 图生视频",
+            TaskType.IMAGE: "🖼️ 图片生成",
+            TaskType.VIDEO: "🎬 视频生成",
             TaskType.MUSIC: "🎵 音乐生成",
             TaskType.SPEECH: "🗣️ 语音生成",
         }
@@ -407,7 +441,8 @@ async def model_detail(bot: Bot, ev: Event) -> None:
     model_name = ev.text.strip()
     pipeline = pipeline_registry.get(model_name)
     if not pipeline:
-        return await bot.send(f"未找到模型: {model_name}，发送 模型列表 查看所有模型")
+        await bot.send(f"未找到模型: {model_name}，发送 模型列表 查看所有模型")
+        return
 
     info = (
         f"📋 模型详情：{pipeline.display_name}\n\n"

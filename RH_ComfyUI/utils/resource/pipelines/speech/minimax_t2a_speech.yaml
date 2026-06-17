@@ -1,9 +1,9 @@
-name: "minimax_t2a_speech"
-display_name: "MiniMax T2A 语音合成"
+name: minimax_t2a_speech
+display_name: MiniMax 语音合成
 task_type: speech
 backend: minimax
 point_cost: 3
-description: "MiniMax 异步语音合成模型，支持多种情绪、语速调节、音色克隆，语音自然度高"
+description: MiniMax 异步语音合成模型，支持多种情绪、语速调节、音色克隆，语音自然度高
 knowledge_content: |
   MiniMax T2A Async V2 是 MiniMax 推出的高质量异步语音合成模型。
   优势：语音自然度高，支持多种情绪（happy/sad/angry/fearful/disgusted/surprised/calm/fluent/whisper），
@@ -18,3 +18,44 @@ requirements:
   - minimax_apikey
 mode: programmatic
 mapper: "RH_ComfyUI.utils.mappers.minimax_speech:minimax_t2a_speech_mapper"
+
+capabilities:
+  priority: 60
+  mode: async_poll
+
+inputs:
+  prompt:
+    type: text
+    required: true
+    description: 待合成文本
+  voice_id:
+    type: string
+    required: false
+    description: 预置音色 ID,留空使用默认 audiobook_male_1
+  reference_audio:
+    type: audio
+    required: false
+    description: 参考音频(用于音色克隆)
+  mood:
+    type: string
+    required: false
+    description: 情绪(happy/sad/angry/fearful/disgusted/surprised/calm/fluent/whisper)
+  speed:
+    type: number
+    default: 1.0
+    description: 语速(0.5~2.0)
+    minimum: 0.5
+    maximum: 2.0
+  language_boost:
+    type: string
+    default: auto
+    description: 语言增强(auto / zh / en / ja ...)
+  params:
+    type: string
+    required: false
+    description: 预留扩展(可指定 model=speech-2.8-hd 等)
+
+outputs:
+  audio:
+    type: output_audio
+    description: 生成的语音

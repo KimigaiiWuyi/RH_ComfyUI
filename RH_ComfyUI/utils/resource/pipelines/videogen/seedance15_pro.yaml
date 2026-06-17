@@ -1,0 +1,85 @@
+name: seedance15_pro
+display_name: Seedance 1.5 Pro
+task_type: video
+backend: seedance
+backend_model: doubao-seedance-1-5-pro-251215
+point_cost: 18
+description: Seedance 1.5 Pro 视频生成,支持离线推理(flex)
+knowledge_content: |
+  Seedance 1.5 Pro 视频生成。
+  能力:
+  - 离线推理(flex service_tier):价格仅在线推理 50%
+  - 1080p 分辨率
+  - 按输入自动决定形态:0 张=文生 / 1 张=图生 / 2 张=首尾帧 / 多图+音视频=多模态
+  支持时长:4~12 秒。
+  适用场景:成本敏感的生产场景。
+  注:样片(Draft)模式不再提供独立节点,需在调用前设置
+  `request.params["draft"] = True`,成本仅在线推理 60%,
+  但仅支持 480p 且不支持尾帧/flex。
+requirements:
+  - seedance_apikey
+
+mode: programmatic
+mapper: "RH_ComfyUI.utils.mappers.seedance:seedance_video_mapper"
+
+capabilities:
+  priority: 75
+  mode: async_poll
+
+inputs:
+  prompt:
+    type: text
+    required: true
+    description: 视频生成提示词
+  ratio:
+    type: enum
+    values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"]
+    default: "16:9"
+    description: 视频宽高比
+  resolution:
+    type: enum
+    values: ["480p", "720p", "1080p"]
+    default: "720p"
+    description: 视频分辨率
+  duration:
+    type: integer
+    default: 5
+    minimum: 4
+    maximum: 12
+    description: 视频时长(秒)
+  seed:
+    type: integer
+    required: false
+    description: 随机种子
+  generate_audio:
+    type: boolean
+    default: false
+    description: 是否生成同步音频
+  watermark:
+    type: boolean
+    default: false
+    description: 是否添加 AI 水印
+  camera_fixed:
+    type: boolean
+    default: false
+    description: 摄像机是否固定
+  return_last_frame:
+    type: boolean
+    default: false
+    description: 是否同时返回尾帧图
+  service_tier:
+    type: enum
+    values: ["default", "flex"]
+    default: "default"
+    description: |
+      推理档位:
+        - default: 在线推理,响应快
+        - flex: 离线推理,价格 50%,适合对时延不敏感的场景
+
+outputs:
+  video:
+    type: output_video
+    description: 生成的视频(MP4)
+  last_frame:
+    type: output_image
+    description: 视频尾帧图

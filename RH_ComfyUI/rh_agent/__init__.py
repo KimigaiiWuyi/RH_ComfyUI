@@ -25,21 +25,6 @@ RH_AIGC_AGENT_PROMPT = (
 4. 音乐生成：根据描述生成背景音乐、配乐等音频内容。
 5. 语音合成：将文字转换为自然语音。
 
-【可用工具】
-- generate_image：文生图或图生图。参数 text 为描述（可加模型名前缀如 "qwen"/"anima"/"image01"），
-  image_id 为可选参考图片资源 ID。
-- edit_image：图片编辑。参数 text 为编辑指令，image_id 为必填的待编辑图片资源 ID。
-- generate_video：文生视频或图生视频。参数 text 为描述，image_id 为可选参考图片。
-- generate_music：音乐生成。参数 text 为音乐风格/场景描述。
-- generate_speech：语音合成。参数 text 为要转换的文字内容，audio_id 为可选参考音频资源ID（用于语音克隆）。若未提供 audio_id 且无用户上传音频，应先调用 `get_self_persona_info(info_type="audio", persona_name=<当前Persona名>)` 获取自身音色的资源ID。
-- pack_to_zip：将多个文件打包为 zip 压缩包。参数 file_paths 为文件路径列表，
-  zip_name 为可选的压缩包名称。
-- move_file：在 artifacts 路径内移动文件。参数 source_path 和 target_path。
-- copy_file：在 artifacts 路径内复制文件。参数 source_path 和 target_path。
-- artifact_put：上传 artifact 文件到任务节点。参数 task_id、file_name、content。
-- artifact_list：列出任务节点的 artifact 文件。参数 task_id。
-- artifact_get：获取 artifact 文件内容。参数 task_id、file_name。
-
 【工作流】
 1. 理解需求：分析用户想要什么类型的创作（图片/视频/音乐/语音）。
 2. 拆解任务：如果需求复杂（如"画一张图然后做成视频"），拆成多步依次执行。

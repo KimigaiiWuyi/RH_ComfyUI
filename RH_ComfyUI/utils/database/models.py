@@ -5,9 +5,9 @@ from sqlmodel import Field
 from gsuid_core.webconsole.mount_app import PageSchema, GsAdminModel, site
 from gsuid_core.utils.database.base_models import Bind
 
-from ...rh_config.comfyui_config import RHCOMFYUI_CONFIG
+from ...rh_config.comfyui_config import PLUGIN_CONFIG
 
-DEFAULT_POINT: int = RHCOMFYUI_CONFIG.get_config("Default_Point").data
+DEFAULT_POINT: int = PLUGIN_CONFIG.get_config("Default_Point").data
 
 
 class RHBind(Bind, table=True):

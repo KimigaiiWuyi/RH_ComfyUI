@@ -26,8 +26,8 @@ async def mimo_tts_mapper(
         text=request.prompt,
         mood=request.mood,
         reference_audio=request.reference_audio,
-        model=request.extra.get("model") if request.extra else None,
-        voice=request.extra.get("voice") if request.extra else None,
+        model=request.params.get("model"),
+        voice=request.voice_id or request.params.get("voice"),
     )
 
     if isinstance(audio_bytes, int):

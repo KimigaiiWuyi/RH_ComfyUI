@@ -9,7 +9,7 @@ import httpx
 
 from gsuid_core.logger import logger
 
-from ....rh_config.comfyui_config import RHCOMFYUI_CONFIG
+from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 
 class RHAppAPI:
@@ -23,7 +23,7 @@ class RHAppAPI:
     """
 
     def __init__(self) -> None:
-        self.api_key: str = RHCOMFYUI_CONFIG.get_config("RH_apikey").data
+        self.api_key: str = SERVICE_CONFIG.get_config("RH_apikey").data
         self.base_url = "https://www.runninghub.cn"
 
     def _headers(self) -> Dict[str, str]:

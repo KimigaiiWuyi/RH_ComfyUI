@@ -1,17 +1,26 @@
-"""统一执行器 — 根据 Pipeline 指定的后端分发执行"""
+"""统一执行器 — 根据节点指定的 Adapter 分发执行
+
+所有命令和 AI 工具都走 `execute_generation()`。
+受全局 Semaphore 限流,所有 Adapter 共享同一并发限制。
+生成完成后自动落盘到 OUTPUT_PATH。
+"""
 
 from __future__ import annotations
 
 import time
 import asyncio
+from typing import TYPE_CHECKING
 from pathlib import Path
 
 from gsuid_core.logger import logger
 
+from .types import NodeOutput, ProgressEvent
 from .request import OutputType, GenerationResult, GenerationRequest
-from .pipeline import PipelineDef
 
-# 全局 Semaphore，懒加载（避免在导入时读取配置）
+if TYPE_CHECKING:
+    from .pipeline import NodeDef
+
+# 全局 Semaphore,懒加载
 _generation_semaphore: asyncio.Semaphore | None = None
 
 # 输出文件扩展名映射
@@ -23,12 +32,12 @@ _OUTPUT_EXTENSIONS: dict[OutputType, str] = {
 
 
 def _get_semaphore() -> asyncio.Semaphore:
-    """获取全局并发控制 Semaphore（懒加载）"""
+    """获取全局并发控制 Semaphore(懒加载)"""
     global _generation_semaphore
     if _generation_semaphore is None:
-        from ...rh_config.comfyui_config import RHCOMFYUI_CONFIG
+        from ...rh_config.comfyui_config import PLUGIN_CONFIG
 
-        concurrency = RHCOMFYUI_CONFIG.get_config("Max_Concurrency").data
+        concurrency = PLUGIN_CONFIG.get_config("Max_Concurrency").data
         if not isinstance(concurrency, int) or concurrency < 1:
             concurrency = 1
         _generation_semaphore = asyncio.Semaphore(concurrency)
@@ -36,61 +45,122 @@ def _get_semaphore() -> asyncio.Semaphore:
     return _generation_semaphore
 
 
-def _save_output(result: GenerationResult, task_type_str: str) -> Path:
+def _guess_ext(data: bytes, fallback: str) -> str:
+    """根据文件头嗅探扩展名(用于附加产物,如尾帧图)"""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if data[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if data[:4] == b"GIF8":
+        return ".gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    if data[4:8] == b"ftyp":
+        return ".mp4"
+    if data[:4] == b"RIFF":
+        return ".wav"
+    if data[:3] == b"ID3" or data[:2] in (b"\xff\xfb", b"\xff\xf3"):
+        return ".mp3"
+    return fallback
+
+
+def _save_output(result: NodeOutput, task_type_str: str, default_ext: str = ".bin") -> Path:
     """将生成结果保存到 OUTPUT_PATH
 
+    约定:`result.data` 为主产物;`result.outputs` 只存放**附加**产物
+    (如视频生成的尾帧图),不再重复存放主产物(避免双写)。
+
     Args:
-        result: 生成结果
-        task_type_str: 任务类型字符串（用于子目录）
+        result: 节点输出
+        task_type_str: 任务类型字符串(用于子目录)
+        default_ext: 主产物扩展名兜底
 
     Returns:
-        保存的文件路径
+        主产物的保存路径
     """
     from ...utils.resource.RESOURCE_PATH import OUTPUT_PATH
 
-    ext = _OUTPUT_EXTENSIONS.get(result.output_type, ".bin")
+    ext = _OUTPUT_EXTENSIONS.get(OutputType(result.output_type), default_ext)
     sub_dir = OUTPUT_PATH / task_type_str
     sub_dir.mkdir(parents=True, exist_ok=True)
 
-    filename = f"{int(time.time() * 1000)}{ext}"
-    file_path = sub_dir / filename
+    ts = int(time.time() * 1000)
+    file_path = sub_dir / f"{ts}{ext}"
     file_path.write_bytes(result.data)
     logger.info(f"[Executor] 已保存生成结果: {file_path} ({len(result.data)} bytes)")
+
+    # 落盘附加产物(跳过与主产物同一份字节,扩展名按文件头嗅探)
+    for name, payload in (result.outputs or {}).items():
+        if not isinstance(payload, (bytes, bytearray)):
+            continue
+        if payload is result.data or bytes(payload) == result.data:
+            continue
+        suffix = name.replace("_", "-")
+        extra_ext = _guess_ext(bytes(payload), ext)
+        extra_path = sub_dir / f"{ts}_{suffix}{extra_ext}"
+        try:
+            extra_path.write_bytes(payload)
+            logger.info(f"[Executor] 已保存附加输出 {name}: {extra_path}")
+        except Exception as e:
+            logger.warning(f"[Executor] 保存附加输出 {name} 失败: {e}")
+
     return file_path
 
 
 async def execute_generation(
     request: GenerationRequest,
-    pipeline: PipelineDef,
+    node: NodeDef,
+    *,
+    on_progress=None,
 ) -> GenerationResult:
-    """统一执行入口：根据 Pipeline 指定的后端，分发执行
+    """统一执行入口:根据节点指定的 Adapter,分发执行
 
-    这是整个系统的唯一执行路径，命令和 AI 工具都走这里。
-    受全局 Semaphore 限流控制，所有后端（RH原生/ComfyUI/BLT）共享同一并发限制。
-    生成完成后自动保存到 OUTPUT_PATH。
+    这是整个系统的唯一执行路径,命令和 AI 工具都走这里。
+    受全局 Semaphore 限流控制,所有 Adapter 共享同一并发限制。
+    生成完成后自动保存到 OUTPUT_PATH,并包装为 GenerationResult。
+
+    Args:
+        request: 统一请求
+        node: 选中的节点定义
+        on_progress: 可选的进度回调,透传给 Adapter
+
+    Returns:
+        GenerationResult(向下兼容旧 API)
     """
     from ..backends import backend_registry
 
-    backend = backend_registry.get(pipeline.backend)
-    if backend is None:
-        raise RuntimeError(f"后端 {pipeline.backend} 未注册")
+    adapter = backend_registry.get(node.backend)
+    if adapter is None:
+        raise RuntimeError(f"Adapter {node.backend} 未注册")
 
     sem = _get_semaphore()
     async with sem:
-        logger.info(
-            f"[Executor] 执行生成: task={request.task_type.value}, pipeline={pipeline.name}, backend={pipeline.backend}"
-        )
+        logger.info(f"[Executor] 执行生成: task={request.task_type.value}, node={node.name}, backend={node.backend}")
 
-        result = await backend.execute(request, pipeline)
-        result.pipeline_used = pipeline.name
-        result.model_used = pipeline.display_name
-        result.cost_points = pipeline.point_cost
+        node_output: NodeOutput = await adapter.execute(request, node, on_progress=on_progress)
+        node_output.metadata.setdefault("saved_path", "")
 
-        # 保存生成结果到本地
+        # 落盘
         try:
-            saved_path = _save_output(result, request.task_type.value)
-            result.metadata["saved_path"] = str(saved_path)
+            saved_path = _save_output(node_output, request.task_type.value)
+            node_output.metadata["saved_path"] = str(saved_path)
         except Exception as e:
-            logger.warning(f"[Executor] 保存生成结果失败（不影响返回）: {e}")
+            logger.warning(f"[Executor] 保存生成结果失败(不影响返回): {e}")
 
+        # 包装为旧 GenerationResult
+        result = GenerationResult(
+            output_type=OutputType(node_output.output_type),
+            data=node_output.data,
+            mime_type=node_output.mime_type,
+            model_used=node.display_name,
+            pipeline_used=node.name,
+            cost_points=node.point_cost,
+            metadata=node_output.metadata,
+            outputs=node_output.outputs,
+            usage=node_output.usage,
+            raw=node_output.raw,
+        )
         return result
+
+
+__all__ = ["execute_generation", "ProgressEvent"]

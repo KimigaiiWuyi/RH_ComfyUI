@@ -361,7 +361,7 @@ def _get_semaphore() -> asyncio.Semaphore:
     return _generation_semaphore
 ```
 
-- 所有后端（ComfyUI、BLT、RH App）**共享同一个 Semaphore**
+- 所有后端（ComfyUI、GPT-Image2、RH App 等）**共享同一个 Semaphore**
 - 并发数由配置 `Max_Concurrency` 控制（默认 1）
 - 超出并发限制的请求会在 `async with sem:` 处等待
 

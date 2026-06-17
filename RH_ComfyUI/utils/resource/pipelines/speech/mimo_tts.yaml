@@ -1,9 +1,9 @@
-name: "mimo_tts"
-display_name: "MiMo TTS 语音合成"
+name: mimo_tts
+display_name: MiMoTTS 语音合成
 task_type: speech
 backend: mimo
 point_cost: 3
-description: "XiaoMi MiMo-V2.5-TTS 系列语音合成，支持预置音色、音色设计、音色复刻，风格控制丰富"
+description: XiaoMi MiMo-V2.5-TTS 系列语音合成，支持预置音色、音色设计、音色复刻，风格控制丰富
 knowledge_content: |
   XiaoMi MiMo-V2.5-TTS 是小米推出的高质量语音合成系列模型。
   支持三种模式：
@@ -24,3 +24,34 @@ requirements:
   - mimo_apikey
 mode: programmatic
 mapper: "RH_ComfyUI.utils.mappers.mimo_speech:mimo_tts_mapper"
+
+capabilities:
+  priority: 65
+  mode: sync
+
+inputs:
+  prompt:
+    type: text
+    required: true
+    description: 待合成文本
+  mood:
+    type: string
+    required: false
+    description: 情绪/风格控制指令(如 "用慵懒的语调")
+  voice_id:
+    type: string
+    required: false
+    description: 预置音色 ID(可选,留空使用默认)
+  reference_audio:
+    type: audio
+    required: false
+    description: 参考音频(用于音色复刻)
+  params:
+    type: string
+    required: false
+    description: 预留扩展(可指定 model 等)
+
+outputs:
+  audio:
+    type: output_audio
+    description: 生成的语音

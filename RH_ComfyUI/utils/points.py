@@ -8,14 +8,14 @@ from gsuid_core.logger import logger
 from gsuid_core.models import Event
 
 from .database.models import RHBind
-from ..rh_config.comfyui_config import RHCOMFYUI_CONFIG
+from ..rh_config.comfyui_config import PLUGIN_CONFIG
 
 # 积分配置
-Draw_Point: int = RHCOMFYUI_CONFIG.get_config("Draw_Point").data
-Edit_Image_Point: int = RHCOMFYUI_CONFIG.get_config("Edit_Image_Point").data
-Music_Point: int = RHCOMFYUI_CONFIG.get_config("Music_Point").data
-Speech_Point: int = RHCOMFYUI_CONFIG.get_config("Speech_Point").data
-Video_Point: int = RHCOMFYUI_CONFIG.get_config("Video_Point").data
+Draw_Point: int = PLUGIN_CONFIG.get_config("Draw_Point").data
+Edit_Image_Point: int = PLUGIN_CONFIG.get_config("Edit_Image_Point").data
+Music_Point: int = PLUGIN_CONFIG.get_config("Music_Point").data
+Speech_Point: int = PLUGIN_CONFIG.get_config("Speech_Point").data
+Video_Point: int = PLUGIN_CONFIG.get_config("Video_Point").data
 
 
 async def check_point(ev: Event, point: int) -> Tuple[bool, str]:

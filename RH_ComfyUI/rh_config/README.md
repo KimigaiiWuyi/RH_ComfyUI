@@ -24,9 +24,9 @@ rh_config/
 | `Max_Concurrency` | `GsIntConfig` | `1` | 全局最大并发数，限制所有后端同时执行的任务数 |
 | `ComfyUI_BaseURL` | `GsStrConfig` | `"127.0.0.1:8188"` | ComfyUI 服务地址 |
 | `RH_apikey` | `GsStrConfig` | `""` | RunningHub API Key |
-| `BLT_apikey` | `GsStrConfig` | `""` | BLT/OpenAI 兼容 API 的 API Key |
-| `BLT_API_URL` | `GsStrConfig` | `"https://api.bltcy.ai"` | BLT API 的 Base URL |
 | `Default_Point` | `GsIntConfig` | `20` | 新用户默认初始积分 |
+| `GPT_Image2_apikey` | `GsStrConfig` | `""` | GPT-Image2 / OpenAI 兼容生图接口的 API Key |
+| `GPT_Image2_BaseURL` | `GsStrConfig` | `"https://api.openai.com/v1"` | GPT-Image2 / OpenAI 兼容生图接口的 Base URL |
 | `Draw_Point` | `GsIntConfig` | `2` | 每次绘图消耗的积分 |
 | `Edit_Image_Point` | `GsIntConfig` | `4` | 每次图片编辑消耗的积分 |
 | `Music_Point` | `GsIntConfig` | `2` | 每次音乐生成消耗的积分 |
@@ -64,8 +64,8 @@ RHCOMFYUI_CONFIG.set_config("Max_Concurrency", 3)
 Max_Concurrency    ──→ utils/core/executor.py（全局 Semaphore 并发控制）
 ComfyUI_BaseURL    ──→ utils/backends/comfyui/api.py（WebSocket/HTTP 连接地址）
 RH_apikey          ──→ utils/backends/comfyui/api.py + rh_app/api.py（API 认证）
-BLT_apikey         ──→ utils/backends/blt/api.py（API 认证）
-BLT_API_URL        ──→ utils/backends/blt/api.py（API 端点）
+GPT_Image2_apikey  ──→ utils/backends/gpt_image2/api.py（API 认证）
+GPT_Image2_BaseURL ──→ utils/backends/gpt_image2/api.py（API 端点）
 Default_Point      ──→ utils/database/models.py（新用户初始积分）
 *_Point            ──→ utils/points.py（各任务类型的积分消耗）
 ```

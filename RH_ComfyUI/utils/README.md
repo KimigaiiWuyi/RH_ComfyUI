@@ -11,7 +11,7 @@ utils/
 ├── ai_tools.py           # AI 工具函数（已迁移至 to_ai=，文件保留为空）
 ├── points.py             # 积分检查与扣除逻辑
 ├── core/                 # 核心引擎层（请求模型、Pipeline注册表、路由、执行器、解析器）
-├── backends/             # 后端抽象层（ComfyUI、BLT、RH App 三个后端实现）
+├── backends/             # 后端抽象层（ComfyUI、GPT-Image2、RH App 等多后端实现）
 ├── mappers/              # 编程式参数映射函数
 ├── database/             # 数据库模型（积分表）
 └── resource/             # 资源路径管理 + Pipeline YAML 定义 + 工作流 JSON
@@ -22,7 +22,7 @@ utils/
 | 子模块 | 职责 | 详见 |
 |--------|------|------|
 | [`core/`](RH_ComfyUI/utils/core/README.md) | 核心引擎：统一请求模型、Pipeline注册表、智能路由、执行器、命令解析 | 核心架构文档 |
-| [`backends/`](RH_ComfyUI/utils/backends/README.md) | 后端抽象：Backend 基类 + ComfyUI/BLT/RH App 三个实现 | 后端架构文档 |
+| [`backends/`](RH_ComfyUI/utils/backends/README.md) | 后端抽象：Adapter 基类 + ComfyUI/GPT-Image2/RH App 等多实现 | 后端架构文档 |
 | [`mappers/`](RH_ComfyUI/utils/mappers/README.md) | 参数映射：将 GenerationRequest 转换为各后端的工作流参数 | 映射器文档 |
 | [`database/`](RH_ComfyUI/utils/database/README.md) | 数据模型：RHBind 积分表 + Web 控制台注册 | 数据库文档 |
 | [`resource/`](RH_ComfyUI/utils/resource/README.md) | 资源管理：路径常量、Pipeline YAML 定义、工作流 JSON | 资源文档 |

@@ -13,7 +13,7 @@ from PIL import Image
 
 from gsuid_core.logger import logger
 
-from ....rh_config.comfyui_config import RHCOMFYUI_CONFIG
+from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 
 class MiniMaxAPI:
@@ -50,7 +50,7 @@ class MiniMaxAPI:
     @property
     def api_key(self) -> str:
         """动态读取 API Key，避免模块导入时配置未生效"""
-        return RHCOMFYUI_CONFIG.get_config("MiniMax_apikey").data or ""
+        return SERVICE_CONFIG.get_config("MiniMax_apikey").data or ""
 
     def _headers(self) -> Dict[str, str]:
         return {
@@ -62,9 +62,9 @@ class MiniMaxAPI:
         self,
         method: Literal["POST", "GET"],
         url: str,
-        headers: Optional[Dict] = None,
-        json: Optional[Dict] = None,
-    ) -> Union[Dict, int]:
+        headers: Optional[Dict[str, Any]] = None,
+        json: Optional[Dict[str, Any]] = None,
+    ) -> Union[Dict[str, Any], int]:
         """基础 HTTP 请求"""
         logger.info(f"[MiniMax] 请求: {method} {url}")
 
@@ -88,10 +88,10 @@ class MiniMaxAPI:
         self,
         method: Literal["POST", "GET"],
         url: str,
-        headers: Optional[Dict] = None,
-        json: Optional[Dict] = None,
+        headers: Optional[Dict[str, Any]] = None,
+        json: Optional[Dict[str, Any]] = None,
         max_retries: int = 3,
-    ) -> Union[Dict, int]:
+    ) -> Union[Dict[str, Any], int]:
         """带重试机制的 HTTP 请求"""
         fail_count = 0
 
@@ -428,7 +428,7 @@ class MiniMaxAPI:
         bitrate: int = 128000,
         audio_format: str = "mp3",
         channel: int = 2,
-    ) -> Union[Dict, int]:
+    ) -> Union[Dict[str, Any], int]:
         """创建 MiniMax T2A 异步语音合成任务
 
         Args:
@@ -496,7 +496,7 @@ class MiniMaxAPI:
     async def query_t2a_async_task(
         self,
         task_id: str,
-    ) -> Union[Dict, int]:
+    ) -> Union[Dict[str, Any], int]:
         """查询 MiniMax T2A 异步语音合成任务状态
 
         Args:

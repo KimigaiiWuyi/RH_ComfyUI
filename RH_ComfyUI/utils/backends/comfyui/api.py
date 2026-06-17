@@ -6,7 +6,7 @@ import io
 import json
 import uuid
 import asyncio
-from typing import Dict, List, Union, Optional
+from typing import Any, Dict, List, Union, Optional
 from pathlib import Path
 from collections import defaultdict
 
@@ -18,15 +18,15 @@ from websockets import ClientConnection
 from gsuid_core.logger import logger
 
 from ...resource.RESOURCE_PATH import OUTPUT_PATH
-from ....rh_config.comfyui_config import RHCOMFYUI_CONFIG
+from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 
 class ComfyUIAPI:
     """ComfyUI WebSocket API 客户端"""
 
     def __init__(self) -> None:
-        base_url: str = RHCOMFYUI_CONFIG.get_config("ComfyUI_BaseURL").data
-        api_key: str = RHCOMFYUI_CONFIG.get_config("RH_apikey").data
+        base_url: str = SERVICE_CONFIG.get_config("ComfyUI_BaseURL").data
+        api_key: str = SERVICE_CONFIG.get_config("RH_apikey").data
 
         self.is_runninghub = "runninghub" in base_url.lower()
         if self.is_runninghub:
@@ -39,8 +39,33 @@ class ComfyUIAPI:
         self.client_id = str(uuid.uuid4())
         self.ws: Optional[ClientConnection] = None
         self.is_prompt = False
-        self._prompt_events: dict[str, asyncio.Queue] = defaultdict(asyncio.Queue)
-        self._listener_task: Optional[asyncio.Task] = None
+        self._prompt_events: dict[str, asyncio.Queue[Any]] = defaultdict(asyncio.Queue)
+        self._listener_task: Optional[asyncio.Task[None]] = None
+
+        # mapper 可在调用时设置一个"下一帧使用的工作流文件名"覆盖;
+        # adapter 会在生成上传图片后重新加载该工作流。None 表示无覆盖。
+        self.workflow_override: Optional[str] = None
+
+    def set_workflow_override(self, workflow_filename: str) -> None:
+        """指定本次生成使用的工作流文件(覆盖 YAML 中的默认 workflow)
+
+        mapper 可以在检查到当前默认工作流与请求的输入档案不匹配时
+        (例如 0 张图 vs 1+ 张图)调用本方法;adapter 在上传图片后
+        会优先加载本文件名指定的工作流。
+
+        Args:
+            workflow_filename: 仅文件名,例如 "wan2.2_i2v.json"。
+        """
+        self.workflow_override = workflow_filename
+
+    def consume_workflow_override(self) -> Optional[str]:
+        """读取并清空当前的工作流覆盖
+
+        adapter 在准备阶段调用一次,避免影响下一次生成。
+        """
+        name = self.workflow_override
+        self.workflow_override = None
+        return name
 
     async def connect(self) -> None:
         """建立 WebSocket 连接"""
@@ -60,7 +85,7 @@ class ComfyUIAPI:
             logger.info(f"Failed to connect WebSocket: {e}")
             self.ws = None
 
-    async def get_history(self, prompt_id: str, *, log_result: bool = True) -> Dict:
+    async def get_history(self, prompt_id: str, *, log_result: bool = True) -> Dict[str, Any]:
         url = f"{self.url}/history/{prompt_id}"
         async with httpx.AsyncClient(timeout=6000, follow_redirects=True) as client:
             response = await client.get(url, timeout=10.0)
@@ -73,7 +98,7 @@ class ComfyUIAPI:
                     logger.debug(f"Prompt {prompt_id} history is empty.")
             return result
 
-    async def queue_prompt(self, prompt: Dict) -> Dict:
+    async def queue_prompt(self, prompt: Dict[str, Any]) -> Dict[str, Any]:
         if not self.is_runninghub and (not self.ws or self.ws.state != websockets.State.OPEN):
             await self.connect()
 
@@ -86,7 +111,7 @@ class ComfyUIAPI:
         logger.info(f"Prompt ID: {prompt_data}")
         return prompt_data
 
-    def save_image(self, images: List, output_path: Path, image_name: str) -> Optional[Image.Image]:
+    def save_image(self, images: List[Dict[str, Any]], output_path: Path, image_name: str) -> Optional[Image.Image]:
         for itm in images:
             if itm["type"] != "output":
                 continue
@@ -96,7 +121,7 @@ class ComfyUIAPI:
             return image
         return None
 
-    def save_video(self, videos: List, output_path: Path, image_name: str) -> None:
+    def save_video(self, videos: List[Dict[str, Any]], output_path: Path, image_name: str) -> None:
         for itm in videos:
             if itm["type"] != "output":
                 continue
@@ -107,9 +132,9 @@ class ComfyUIAPI:
 
     async def get_image(self, filename: str, subfolder: Path, folder_type: str) -> bytes:
         url = f"{self.url}/view"
-        params = {
+        params: dict[str, Any] = {
             "filename": filename,
-            "subfolder": subfolder,
+            "subfolder": str(subfolder),
             "type": folder_type,
         }
         async with httpx.AsyncClient(timeout=6000, follow_redirects=True) as client:
@@ -117,7 +142,7 @@ class ComfyUIAPI:
             response.raise_for_status()
             return response.content
 
-    async def get_videos(self, prompt_id: str) -> List[Dict]:
+    async def get_videos(self, prompt_id: str) -> List[Dict[str, Any]]:
         output_audios = []
         history = (await self.get_history(prompt_id))[prompt_id]
         for node_id in history["outputs"]:
@@ -134,12 +159,12 @@ class ComfyUIAPI:
                             output_audios.append({"filename": video["filename"], "data": video_data})
         return output_audios
 
-    async def get_images(self, prompt_id: str) -> List[Dict]:
+    async def get_images(self, prompt_id: str) -> List[Dict[str, Any]]:
         output_images = []
         history = (await self.get_history(prompt_id))[prompt_id]
         for node_id in history["outputs"]:
             node_output = history["outputs"][node_id]
-            output_data = {}
+            output_data: Dict[str, Any] = {}
             if "images" in node_output:
                 for image in node_output["images"]:
                     if image["type"] == "output":
@@ -154,7 +179,7 @@ class ComfyUIAPI:
                         output_images.append(output_data)
         return output_images
 
-    async def get_audios(self, prompt_id: str) -> List[Dict]:
+    async def get_audios(self, prompt_id: str) -> List[Dict[str, Any]]:
         output_audios = []
         history = (await self.get_history(prompt_id))[prompt_id]
         for node_id in history["outputs"]:
@@ -216,7 +241,7 @@ class ComfyUIAPI:
                 output_texts.extend(node_output["text"])
         return output_texts
 
-    async def generate_text_by_prompt(self, prompt: Dict) -> list[str]:
+    async def generate_text_by_prompt(self, prompt: Dict[str, Any]) -> list[str]:
         logger.debug(f"🚧 [ComfyUI] 生成文本提示词: {prompt}")
         prompt_data = await self.queue_prompt(prompt)
         prompt_id = prompt_data["prompt_id"]
@@ -227,14 +252,12 @@ class ComfyUIAPI:
 
     async def generate_audio_by_prompt(
         self,
-        prompt: Dict,
+        prompt: Dict[str, Any],
         output_path: Optional[Path] = None,
         file_name: Optional[str] = None,
     ) -> Optional[bytes]:
-        if output_path is None:
-            output_path = OUTPUT_PATH
-        if file_name is None:
-            file_name = f"{uuid.uuid4()}.mp3"
+        resolved_output_path: Path = output_path if output_path is not None else OUTPUT_PATH
+        resolved_file_name: str = file_name if file_name is not None else f"{uuid.uuid4()}.mp3"
 
         logger.debug(f"🚧 [ComfyUI] 生成音频提示词: {prompt}")
         prompt_data = await self.queue_prompt(prompt)
@@ -245,7 +268,7 @@ class ComfyUIAPI:
         if audios and len(audios) > 0:
             audio_object = audios[0]
             audio_data: bytes = audio_object["data"]
-            audio_path = output_path / file_name
+            audio_path = resolved_output_path / resolved_file_name
             with open(audio_path, "wb") as f:
                 f.write(audio_data)
             logger.info(f"✅ [ComfyUI] 音频生成完成！保存路径: {audio_path}")
@@ -254,21 +277,19 @@ class ComfyUIAPI:
 
     async def generate_image_by_prompt(
         self,
-        prompt: Dict,
+        prompt: Dict[str, Any],
         output_path: Optional[Path] = None,
         image_name: Optional[str] = None,
     ) -> Image.Image:
-        if image_name is None:
-            image_name = f"{uuid.uuid4()}.png"
-        if output_path is None:
-            output_path = OUTPUT_PATH
+        resolved_image_name: str = image_name if image_name is not None else f"{uuid.uuid4()}.png"
+        resolved_output_path: Path = output_path if output_path is not None else OUTPUT_PATH
 
         logger.debug(f"🚧 [ComfyUI] 生成图片提示词: {prompt}")
         prompt_data = await self.queue_prompt(prompt)
         prompt_id = prompt_data["prompt_id"]
         await self.track_progress(prompt, prompt_id)
         images = await self.get_images(prompt_id)
-        image = self.save_image(images, output_path, image_name)
+        image = self.save_image(images, resolved_output_path, resolved_image_name)
         if image is None:
             raise ValueError("🚫 [ComfyUI失败] 未知原因生成失败！")
         if self.is_prompt:
@@ -279,14 +300,12 @@ class ComfyUIAPI:
 
     async def generate_video_by_prompt(
         self,
-        prompt: Dict,
+        prompt: Dict[str, Any],
         output_path: Optional[Path] = None,
         video_name: Optional[str] = None,
     ) -> Optional[bytes]:
-        if video_name is None:
-            video_name = f"{uuid.uuid4()}.mp4"
-        if output_path is None:
-            output_path = OUTPUT_PATH
+        resolved_video_name: str = video_name if video_name is not None else f"{uuid.uuid4()}.mp4"
+        resolved_output_path: Path = output_path if output_path is not None else OUTPUT_PATH
 
         logger.debug(f"🚧 [ComfyUI] 生成视频提示词: {prompt}")
         prompt_data = await self.queue_prompt(prompt)
@@ -298,7 +317,7 @@ class ComfyUIAPI:
         if videos and len(videos) > 0:
             video_object = videos[0]
             video_data: bytes = video_object["data"]
-            video_path = output_path / video_name
+            video_path = resolved_output_path / resolved_video_name
             with open(video_path, "wb") as f:
                 f.write(video_data)
             logger.info(f"✅ [ComfyUI] 视频生成完成！保存路径: {video_path}")
@@ -380,7 +399,7 @@ class ComfyUIAPI:
         finally:
             logger.info("WebSocket listener stopped.")
 
-    async def track_progress(self, prompt: Dict, prompt_id: str) -> None:
+    async def track_progress(self, prompt: Dict[str, Any], prompt_id: str) -> None:
         """等待任务完成。
 
         本地 ComfyUI 优先使用 WebSocket 事件；RunningHub 代理的 WebSocket 可能主动返回 1011，
@@ -422,7 +441,7 @@ class ComfyUIAPI:
         raise TimeoutError(f"Prompt {prompt_id} 等待生成结果超时")
 
     @staticmethod
-    def _raise_for_runninghub_failed_history(prompt_id: str, history: Dict) -> None:
+    def _raise_for_runninghub_failed_history(prompt_id: str, history: Dict[str, Any]) -> None:
         """识别 RunningHub history 中的失败响应，并抛出明确错误。"""
         status = history.get("status")
         if status != "FAILED":

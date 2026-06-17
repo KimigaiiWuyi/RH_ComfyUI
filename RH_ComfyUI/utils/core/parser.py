@@ -3,30 +3,42 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from gsuid_core.logger import logger
 
 from .request import TaskType
-from .pipeline import PipelineRegistry, pipeline_registry
+
+if TYPE_CHECKING:
+    from .pipeline import PipelineRegistry, pipeline_registry
+else:
+    pipeline_registry = None  # type: ignore[assignment]
 
 
 def _ensure_registry_loaded(registry: PipelineRegistry) -> None:
-    """确保 Pipeline 注册表已初始化（懒加载兜底）"""
+    """确保 Pipeline 注册表已初始化（懒加载兜底）
+
+    所有重依赖都使用函数内延迟导入，以避免和 backends/ 子包之间的循环。
+    """
     if registry.all_pipelines():
         return
 
-    from ..backends import init_backends, backend_registry
-    from ..resource.RESOURCE_PATH import PIPELINES_PATH, _CP_PIPELINES_PATH
+    # 延迟导入以打破循环:core/parser → backends → base → core/types
+    from .pipeline import pipeline_registry as _registry  # noqa: PLC0415
+    from ..backends import init_backends, backend_registry  # noqa: PLC0415
+    from ..resource.RESOURCE_PATH import (  # noqa: PLC0415
+        PIPELINES_PATH,
+        _CP_PIPELINES_PATH,
+    )
 
-    if not backend_registry.all_backends():
+    if not backend_registry.all():
         init_backends()
 
     if _CP_PIPELINES_PATH.exists():
-        registry.load_from_directory(_CP_PIPELINES_PATH)
-    registry.load_from_directory(PIPELINES_PATH)
+        _registry.load_from_directory(_CP_PIPELINES_PATH)
+    _registry.load_from_directory(PIPELINES_PATH)
 
-    logger.info(f"[Parser] 懒加载 Pipeline 完成: {len(registry.all_pipelines())} 个")
+    logger.info(f"[Parser] 懒加载 Pipeline 完成: {len(_registry.all_pipelines())} 个")
 
 
 def parse_model_from_prompt(
@@ -49,6 +61,13 @@ def parse_model_from_prompt(
     Returns:
         (model_name_or_None, actual_prompt)
     """
+    # 模块级懒加载：避免循环导入
+    global pipeline_registry
+    if pipeline_registry is None:
+        from .pipeline import pipeline_registry as _registry
+
+        pipeline_registry = _registry
+
     if registry is None:
         registry = pipeline_registry
 
@@ -61,12 +80,15 @@ def parse_model_from_prompt(
 
     first_word = parts[0].lower()
 
-    # 尝试模糊匹配（大小写不敏感）
+    # 仅判断 first_word 是否是有效模型 token(是则从 prompt 中剥离),
+    # 但返回原始 token 而非解析后的具体节点名 —— 真正的节点选择交给 router,
+    # 这样 router 能结合实际输入(图片数量等)做输入感知的解析,
+    # 避免 "qwen" 在带图编辑场景被错配到纯文生图的 qwen_2512。
     pipeline = registry.find_by_partial_name(first_word, task_type)
     if pipeline:
         actual_prompt = parts[1] if len(parts) > 1 else ""
-        logger.info(f"[Parser] 模型名解析成功: '{first_word}' -> {pipeline.name}, prompt={actual_prompt[:30]}...")
-        return pipeline.name, actual_prompt
+        logger.info(f"[Parser] 识别到模型 token: '{first_word}'(候选示例 {pipeline.name}), prompt={actual_prompt[:30]}...")
+        return first_word, actual_prompt
 
     # 不匹配任何模型名，整个文本作为 prompt
     # 调试：列出该任务类型的所有 Pipeline 名

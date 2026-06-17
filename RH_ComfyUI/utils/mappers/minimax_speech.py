@@ -33,7 +33,7 @@ async def minimax_t2a_speech_mapper(
     - request.reference_audio → 音色克隆参考音频
     - request.extra.voice_id → 自定义音色 ID
     """
-    voice_id: str = "audiobook_male_1"
+    voice_id: str = request.voice_id or "audiobook_male_1"
 
     # 如果有参考音频，先上传并克隆音色
     if request.reference_audio is not None:
@@ -45,12 +45,10 @@ async def minimax_t2a_speech_mapper(
             raise RuntimeError(
                 "MiniMax 音色复刻失败，已停止生成，避免回退为默认男声。请检查账号是否开通 voice_clone 权限、参考音频是否合规。"
             )
-    elif request.extra and request.extra.get("voice_id"):
-        voice_id = request.extra["voice_id"]
 
-    speed = float(request.extra.get("speed", 1.0)) if request.extra else 1.0
-    model = request.extra.get("model", "speech-2.8-hd") if request.extra else "speech-2.8-hd"
-    language_boost = request.extra.get("language_boost", "auto") if request.extra else "auto"
+    speed = float(request.speed) if request.speed else 1.0
+    model = request.params.get("model", "speech-2.8-hd")
+    language_boost = request.language_boost or "auto"
 
     audio_bytes = await api.generate_speech(
         text=request.prompt,

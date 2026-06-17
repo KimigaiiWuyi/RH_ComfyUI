@@ -53,7 +53,7 @@
 RH_ComfyUI 是一个基于 GsCore 机器人框架的 **AIGC 统一生成插件**（v2.0.0），支持通过聊天机器人命令或 AI Agent 自动调用来完成图片生成、图片编辑、视频生成、音乐创作和语音合成等多种 AIGC 任务。
 
 **核心设计理念：**
-- **多后端统一抽象**：通过 Backend 基类统一 ComfyUI、BLT、RunningHub 三种后端
+- **多后端统一抽象**：通过 Adapter 基类统一 ComfyUI、GPT-Image2、RunningHub 等多种后端
 - **声明式 Pipeline 架构**：通过 YAML 文件定义工作流，无需修改代码即可添加新模型
 - **智能路由**：自动选择最合适的模型，支持用户指定、AI 推荐、优先级兜底
 - **积分经济系统**：通过积分控制生成成本，支持管理员管理
@@ -108,19 +108,22 @@ RH_ComfyUI 是一个基于 GsCore 机器人框架的 **AIGC 统一生成插件**
 │  └────────┬─────────────────┬──────────────────┬───────────────┘  │
 │           │                 │                  │                   │
 │  ┌────────▼────────┐ ┌─────▼──────────┐ ┌─────▼──────────────┐  │
-│  │  ComfyUIBackend │ │  BLTBackend    │ │  RHAppBackend      │  │
-│  │  (WebSocket+    │ │  (OpenAI 兼容  │ │  (RunningHub       │  │
+│  │  ComfyUIAdapter │ │ GPT-Image2     │ │  RHAppAdapter      │  │
+│  │  (WebSocket+    │ │  Adapter       │ │  (RunningHub       │  │
+│  │   工作流 JSON)  │ │  (OpenAI 兼容  │ │   原生应用)        │  │
+│  │                │ │   协议生图)    │ │                   │  │
+│  └────────┬───────┘ └─────┬──────────┘ └─────┬──────────────┘  │
+│  ┌────────▼────────┐ ┌─────▼──────────┐ ┌─────▼──────────────┐  │
+│  │  ComfyUIAPI     │ │  GPTImage2API  │ │  RHAppAPI          │  │
+│  │  WebSocket客户端│ │  HTTP 客户端    │ │  HTTP 客户端        │  │
+│  │   (aiohttp)     │ │  (aiohttp)     │ │  (aiohttp)         │  │
+│  └─────────────────┘ └────────────────┘ └────────────────────┘  │
 │  │   HTTP API)     │ │   REST API)    │ │   OpenAPI v2)      │  │
 │  └────────┬────────┘ └─────┬──────────┘ └─────┬──────────────┘  │
 │           │                 │                  │                   │
-│  ┌────────▼────────┐ ┌─────▼──────────┐ ┌─────▼──────────────┐  │
-│  │  ComfyUIAPI     │ │  BLTAPI        │ │  RHAppAPI          │  │
-│  │  WebSocket客户端│ │  HTTP客户端    │ │  HTTP客户端        │  │
-│  └─────────────────┘ └────────────────┘ └────────────────────┘  │
-│                                                                   │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │                   Mappers (参数映射)                          │  │
-│  │  blt_text2image / image_edit / video / music / speech ...    │  │
+│  │  gpt_image2 / image_edit / video / music / speech ...        │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
@@ -255,7 +258,7 @@ async def _do_generate(request: GenerationRequest, ev: Event, bot: Bot) -> Optio
 | 后端 | 文件 | 标识 | 连接方式 | 特点 |
 |------|------|------|---------|------|
 | ComfyUI | [`comfyui/`](RH_ComfyUI/utils/backends/comfyui/) | `comfyui` | WebSocket + HTTP | 支持工作流 JSON，支持声明式/编程式映射 |
-| BLT | [`blt/`](RH_ComfyUI/utils/backends/blt/) | `blt` | HTTP REST | OpenAI 兼容 API，仅支持编程式映射 |
+| GPT-Image2 | [`gpt_image2/`](RH_ComfyUI/utils/backends/gpt_image2/) | `gpt_image2` | HTTP REST | OpenAI 兼容 API（兼容 OpenAI 官方 / OneAPI / BLT 等），仅支持编程式映射 |
 | RH App | [`rh_app/`](RH_ComfyUI/utils/backends/rh_app/) | `rh_app` | HTTP REST | RunningHub 原生应用，nodeInfoList 映射 |
 
 #### [`mappers/`](RH_ComfyUI/utils/mappers/) — 参数映射函数
@@ -471,9 +474,9 @@ class Backend(ABC):
     @abstractmethod
     async def execute(self, request, pipeline) -> GenerationResult: ...
 
-class ComfyUIBackend(Backend): ...  # WebSocket + 工作流 JSON
-class BLTBackend(Backend): ...      # OpenAI 兼容 REST API
-class RHAppBackend(Backend): ...    # RunningHub 原生应用
+class ComfyUIAdapter(Adapter): ...  # WebSocket + 工作流 JSON
+class GPTImage2Adapter(Adapter): ... # OpenAI 兼容 REST API
+class RHAppAdapter(Adapter): ...    # RunningHub 原生应用
 ```
 
 Executor 不关心具体后端实现，只通过 `Backend.execute()` 接口调用。
@@ -508,7 +511,7 @@ Executor 不关心具体后端实现，只通过 `Backend.execute()` 接口调�
 | **帮助系统** | `RH_ComfyUI/rh_help/` | 帮助命令 + 全局注册 | `send_help()`, `register_help()` |
 | **配置管理** | `RH_ComfyUI/rh_config/` | 插件配置定义与读取 | `RHCOMFYUI_CONFIG`, `CONFIG_DEFAULT` |
 | **核心引擎** | `RH_ComfyUI/utils/core/` | 请求模型、Pipeline、路由、执行 | `GenerationRequest`, `route()`, `execute_generation()` |
-| **后端抽象** | `RH_ComfyUI/utils/backends/` | Backend 基类 + 三个实现 | `Backend`, `ComfyUIBackend`, `BLTBackend`, `RHAppBackend` |
+| **后端抽象** | `RH_ComfyUI/utils/backends/` | Adapter 基类 + 多实现 | `Adapter`, `ComfyUIAdapter`, `GPTImage2Adapter`, `RHAppAdapter` |
 | **参数映射** | `RH_ComfyUI/utils/mappers/` | 编程式参数映射函数 | `banana2_mapper()`, `qwen_edit_mapper()` |
 | **数据库** | `RH_ComfyUI/utils/database/` | 积分表 ORM 模型 | `RHBind` |
 | **资源管理** | `RH_ComfyUI/utils/resource/` | 路径常量 + 工作流加载 | `RESOURCE_PATH`, `load_workflow()` |
@@ -557,7 +560,7 @@ Executor 不关心具体后端实现，只通过 `Backend.execute()` 接口调�
               ┌──────────────┼──────────────┐
               ▼              ▼              ▼
         ┌──────────┐  ┌──────────┐  ┌──────────┐
-        │ ComfyUI  │  │   BLT    │  │  RH App  │
+        │ ComfyUI  │  │ GPT-Image2│  │  RH App  │
         │ WebSocket│  │  REST    │  │  REST    │
         └────┬─────┘  └────┬─────┘  └────┬─────┘
              │              │              │
@@ -589,8 +592,8 @@ rh_config/comfyui_config.py
     ├──→ Max_Concurrency ──→ utils/core/executor.py (Semaphore)
     ├──→ ComfyUI_BaseURL ──→ utils/backends/comfyui/api.py (连接地址)
     ├──→ RH_apikey ────────→ utils/backends/comfyui/api.py + rh_app/api.py
-    ├──→ BLT_apikey ───────→ utils/backends/blt/api.py
-    ├──→ BLT_API_URL ──────→ utils/backends/blt/api.py
+    ├──→ GPT_Image2_apikey ─→ utils/backends/gpt_image2/api.py
+    ├──→ GPT_Image2_BaseURL → utils/backends/gpt_image2/api.py
     ├──→ Default_Point ────→ utils/database/models.py (新用户积分)
     └──→ *_Point ──────────→ utils/points.py (各任务积分消耗)
 ```

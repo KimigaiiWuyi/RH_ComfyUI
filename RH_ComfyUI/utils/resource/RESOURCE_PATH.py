@@ -4,6 +4,7 @@ import sys
 import json
 import random
 import shutil
+from typing import Any
 from pathlib import Path
 
 from gsuid_core.data_store import get_res_path
@@ -12,7 +13,8 @@ MAIN_PATH = get_res_path() / "RHComfyUI"
 sys.path.append(str(MAIN_PATH))
 
 # 配置文件
-CONFIG_PATH = MAIN_PATH / "config.json"
+SERVICE_CONFIG_PATH = MAIN_PATH / "service_config.json"
+PLUGIN_CONFIG_PATH = MAIN_PATH / "plugin_config.json"
 
 _CP_WORKFLOW_PATH = Path(__file__).parent / "workflow"
 WORKFLOW_PATH = MAIN_PATH / "workflow"
@@ -23,17 +25,26 @@ _CP_PIPELINES_PATH = Path(__file__).parent / "pipelines"
 # 运行时 Pipeline 路径（用户可自定义扩展）
 PIPELINES_PATH = MAIN_PATH / "pipelines"
 
-DRAW_TEXT_WORKFLOW_PATH = WORKFLOW_PATH / "文生图"
-DRAW_IMAGE_WORKFLOW_PATH = WORKFLOW_PATH / "图生图"
-EDIT_WORKFLOW_PATH = WORKFLOW_PATH / "图片编辑"
+# 图片生成工作流(文生图/图生图/图片编辑)统一放在一个目录下,
+# YAML 节点按 inputs 端口自动决定是否接受参考图。
+IMAGEGEN_WORKFLOW_PATH = WORKFLOW_PATH / "图片生成"
+# 向后兼容别名(供老代码或自定义 mapper 仍可使用)
+DRAW_TEXT_WORKFLOW_PATH = IMAGEGEN_WORKFLOW_PATH
+DRAW_IMAGE_WORKFLOW_PATH = IMAGEGEN_WORKFLOW_PATH
+EDIT_WORKFLOW_PATH = IMAGEGEN_WORKFLOW_PATH
 MUSIC_WORKFLOW_PATH = WORKFLOW_PATH / "音乐生成"
 SPEECH_WORKFLOW_PATH = WORKFLOW_PATH / "语音生成"
 
-VIDEO_BY_TEXT_WORKFLOW_PATH = WORKFLOW_PATH / "文生视频"
-VIDEO_BY_IMAGE_WORKFLOW_PATH = WORKFLOW_PATH / "图生视频"
+# 视频生成工作流:文生 / 图生 共用一个目录(逻辑上属于同一类任务)
+# - wan2.2_t2v.json   → 0 张图(纯文生视频)
+# - wan2.2_i2v.json   → 1+ 张图(图生视频,首帧)
+VIDEO_WORKFLOW_PATH = WORKFLOW_PATH / "视频生成"
+# 向后兼容别名(供老代码或自定义 mapper 仍可使用)
+VIDEO_BY_TEXT_WORKFLOW_PATH = VIDEO_WORKFLOW_PATH
+VIDEO_BY_IMAGE_WORKFLOW_PATH = VIDEO_WORKFLOW_PATH
 
 
-def load_workflow(path: Path) -> dict:
+def load_workflow(path: Path) -> dict[str, Any]:
     """加载工作流 JSON 并随机化 seed"""
     with open(path, "r", encoding="utf-8") as f:
         workflow = json.load(f)
@@ -52,11 +63,8 @@ def init_dir() -> None:
         WORKFLOW_PATH,
         OUTPUT_PATH,
         PIPELINES_PATH,
-        EDIT_WORKFLOW_PATH,
-        DRAW_TEXT_WORKFLOW_PATH,
-        DRAW_IMAGE_WORKFLOW_PATH,
-        VIDEO_BY_TEXT_WORKFLOW_PATH,
-        VIDEO_BY_IMAGE_WORKFLOW_PATH,
+        IMAGEGEN_WORKFLOW_PATH,
+        VIDEO_WORKFLOW_PATH,
         MUSIC_WORKFLOW_PATH,
         SPEECH_WORKFLOW_PATH,
     ]:
@@ -77,6 +85,7 @@ def init_dir() -> None:
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 for _file in _dir.iterdir():
                     dest_file = dest_dir / _file.name
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(_file, dest_file)
 
 

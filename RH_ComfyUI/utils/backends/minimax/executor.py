@@ -1,4 +1,4 @@
-"""MiniMax 后端执行器 — 实现 Backend 接口，支持图像生成与语音合成"""
+"""MiniMax Adapter — 火山方舟图像生成与语音合成"""
 
 from __future__ import annotations
 
@@ -7,76 +7,118 @@ import io
 from PIL import Image
 
 from .api import minimax_api
-from ..base import Backend
-from ...core.request import OutputType, GenerationResult, GenerationRequest
-from ...core.pipeline import PipelineDef
+from ..base import Adapter
+from ...core.types import NodeOutput, ProgressEvent, CapabilityManifest
+from ...core.request import (
+    TASK_MIME_MAP,
+    TASK_OUTPUT_MAP,
+    OutputType,
+    GenerationResult,
+    GenerationRequest,
+)
+from ...core.pipeline import NodeDef
 
 
-class MiniMaxBackend(Backend):
-    """MiniMax 后端
-
-    通过 MiniMax API 进行：
-    - 图像生成（/v1/image_generation）：文生图、图生图
-    - 语音合成（/v1/t2a_async_v2）：异步语音合成
-    """
+class MiniMaxAdapter(Adapter):
+    """MiniMax 后端 — 图像生成 + T2A 语音合成"""
 
     name = "minimax"
 
     def __init__(self) -> None:
         self.api = minimax_api
 
-    async def check_available(self) -> bool:
-        from ....rh_config.comfyui_config import RHCOMFYUI_CONFIG
+    # ── Adapter 接口 ──
 
-        key: str = RHCOMFYUI_CONFIG.get_config("MiniMax_apikey").data
+    async def check_available(self) -> bool:
+        from ....rh_config.comfyui_config import SERVICE_CONFIG
+
+        key: str = SERVICE_CONFIG.get_config("MiniMax_apikey").data
         return bool(key)
 
     async def get_unavailable_reason(self) -> str:
-        return "未配置 MiniMax API Key，请在 Web 控制台配置 MiniMax_apikey"
+        return "未配置 MiniMax API Key,请在 Web 控制台配置 MiniMax_apikey"
 
-    async def execute(self, request: GenerationRequest, pipeline: PipelineDef) -> GenerationResult:
-        """MiniMax 后端不走工作流，直接调 mapper_func 执行"""
-        if pipeline.mapper_func is None:
-            raise RuntimeError(f"MiniMax Pipeline {pipeline.name} 缺少 mapper_func")
+    def capabilities(self) -> CapabilityManifest:
+        return CapabilityManifest(
+            supported_tasks=["image", "speech"],
+            supported_params=[
+                "prompt",
+                "images",
+                "ratio",
+                "voice_id",
+                "speed",
+                "mood",
+                "language_boost",
+            ],
+            output_mime=["image/png", "audio/mpeg", "audio/wav"],
+            mode="async_poll",
+            priority=70,
+        )
 
-        result = await pipeline.mapper_func(request, self.api)
+    async def execute(
+        self,
+        request: GenerationRequest,
+        node: NodeDef,
+        *,
+        on_progress=None,
+    ) -> NodeOutput:
+        if node.mapper_func is None:
+            raise RuntimeError(f"MiniMax 节点 {node.name} 缺少 mapper_func")
 
-        # mapper_func 可能返回 GenerationResult 或 PIL.Image 列表
-        if isinstance(result, GenerationResult):
+        await _emit(on_progress, ProgressEvent(stage="running", percent=15, message="MiniMax 生成中"))
+        result = await node.mapper_func(request, self.api)
+        await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="完成"))
+
+        # mapper 可能返回多种类型
+        if isinstance(result, NodeOutput):
             return result
+        if isinstance(result, GenerationResult):
+            return NodeOutput.from_result(result)
 
         if isinstance(result, list) and result and isinstance(result[0], Image.Image):
-            # 多张图片时拼接为单张（取第一张）
             img = result[0]
             buf = io.BytesIO()
             img.save(buf, format="PNG")
-            image_bytes = buf.getvalue()
-            return GenerationResult(
-                output_type=OutputType.IMAGE,
-                data=image_bytes,
+            data = buf.getvalue()
+            return NodeOutput(
+                status="ok",
+                output_type="image",
+                data=data,
                 mime_type="image/png",
             )
 
         if isinstance(result, Image.Image):
             buf = io.BytesIO()
             result.save(buf, format="PNG")
-            image_bytes = buf.getvalue()
-            return GenerationResult(
-                output_type=OutputType.IMAGE,
-                data=image_bytes,
+            data = buf.getvalue()
+            return NodeOutput(
+                status="ok",
+                output_type="image",
+                data=data,
                 mime_type="image/png",
             )
 
         if isinstance(result, bytes):
-            # 根据 pipeline 的 task_type 判断输出类型
-            from ...core.request import TASK_MIME_MAP, TASK_OUTPUT_MAP
-
-            output_type = TASK_OUTPUT_MAP.get(pipeline.task_type, OutputType.IMAGE)
-            mime_type = TASK_MIME_MAP.get(pipeline.task_type, "image/png")
-            return GenerationResult(
-                output_type=output_type,
+            output_type = TASK_OUTPUT_MAP.get(node.task_type, OutputType.IMAGE)
+            mime_type = TASK_MIME_MAP.get(node.task_type, "image/png")
+            return NodeOutput(
+                status="ok",
+                output_type=output_type.value,
                 data=result,
                 mime_type=mime_type,
             )
 
-        raise RuntimeError(f"MiniMax Pipeline {pipeline.name} 返回了无法处理的类型: {type(result)}")
+        raise RuntimeError(f"MiniMax 节点 {node.name} 返回了无法处理的类型: {type(result)}")
+
+
+async def _emit(cb, event: ProgressEvent) -> None:
+    if cb is None:
+        return
+    try:
+        await cb(event)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# 向后兼容
+MiniMaxBackend = MiniMaxAdapter

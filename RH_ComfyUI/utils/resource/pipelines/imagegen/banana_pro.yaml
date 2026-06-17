@@ -1,0 +1,50 @@
+name: banana_pro
+display_name: Nano Banana Pro
+task_type: image
+backend: gpt_image2
+backend_model: nano-banana-2-2k
+point_cost: 3
+description: Nano Banana 2.2K 高质量图像生成/编辑模型
+knowledge_content: |
+  Nano Banana 2.2K 高质量图像生成/编辑模型。
+  优势:图像质量非常高,细节丰富细腻,色彩表现优秀,适合专业输出;
+  同时支持图片编辑(传入 1~N 张参考图时自动进入编辑模式)。
+  适用场景:需要最终输出的高质量图像,专业创作场景,商业项目,精细细节的画面,精细图片编辑。
+  不适用场景:快速预览、批量测试(建议用 banana2)。
+requirements:
+  - gpt_image2_apikey
+mode: programmatic
+mapper: "RH_ComfyUI.utils.mappers.gpt_image2:gpt_image2_mapper"
+
+capabilities:
+  priority: 60
+  mode: sync
+
+inputs:
+  prompt:
+    type: text
+    required: true
+    description: 生成描述或编辑指令
+  images:
+    type: list
+    item_type: image
+    required: false
+    min_items: 0
+    max_items: 3
+    description: |
+      参考图片(0~3 张):
+        - 0 张=文生图
+        - 1+ 张=图片编辑
+  width:
+    type: integer
+    default: 720
+    description: 图片宽度(仅文生图模式用于推断比例)
+  height:
+    type: integer
+    default: 1280
+    description: 图片高度(仅文生图模式用于推断比例)
+
+outputs:
+  image:
+    type: output_image
+    description: 生成的图片

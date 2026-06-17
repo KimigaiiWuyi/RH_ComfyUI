@@ -1,10 +1,21 @@
 """核心架构层 — 统一请求模型、Pipeline注册表、智能路由、执行器"""
 
 from .parser import parse_model_from_prompt
-from .router import PRIORITY, ModelUnavailableError, route
+from .router import ModelUnavailableError, route
 from .request import TaskType, OutputType, GenerationResult, GenerationRequest
 from .executor import execute_generation
-from .pipeline import PipelineDef, PipelineRegistry, pipeline_registry
+from .pipeline import NodeDef, PipelineDef, PipelineRegistry, pipeline_registry
+from .types import (
+    CapabilityManifest,
+    ContentItem,
+    ContentItemType,
+    MediaKind,
+    MediaRef,
+    NodeOutput,
+    PortSpec,
+    PortType,
+    ProgressEvent,
+)
 
 __all__ = [
     # request
@@ -13,15 +24,25 @@ __all__ = [
     "TaskType",
     "OutputType",
     # pipeline
+    "NodeDef",
     "PipelineDef",
     "PipelineRegistry",
     "pipeline_registry",
     # router
     "route",
     "ModelUnavailableError",
-    "PRIORITY",
     # executor
     "execute_generation",
     # parser
     "parse_model_from_prompt",
+    # types
+    "PortType",
+    "PortSpec",
+    "MediaKind",
+    "MediaRef",
+    "ContentItemType",
+    "ContentItem",
+    "CapabilityManifest",
+    "ProgressEvent",
+    "NodeOutput",
 ]

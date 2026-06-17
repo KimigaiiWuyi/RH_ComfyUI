@@ -24,13 +24,10 @@ core/
 
 ```python
 class TaskType(str, Enum):
-    TEXT2IMAGE = "text2image"    # 文生图
-    IMAGE2IMAGE = "image2image"  # 图生图
-    IMAGE_EDIT = "image_edit"    # 图片编辑
-    TEXT2VIDEO = "text2video"    # 文生视频
-    IMAGE2VIDEO = "image2video"  # 图生视频
-    MUSIC = "music"              # 音乐生成
-    SPEECH = "speech"            # 语音生成
+    IMAGE = "image"    # 图片生成(文生图 / 图生图 / 图片编辑 统一,按 inputs 端口自动切换)
+    VIDEO = "video"    # 视频生成(文生 / 图生 / 首尾帧 / 多模态 统一,按 inputs 端口自动切换)
+    MUSIC = "music"    # 音乐生成
+    SPEECH = "speech"  # 语音生成
 ```
 
 #### 输出类型 [`OutputType`](RH_ComfyUI/utils/core/request.py:22)
@@ -85,7 +82,7 @@ class PipelineDef:
     name: str                    # Pipeline 唯一名称
     display_name: str            # 显示名称
     task_type: TaskType          # 任务类型
-    backend: str                 # 后端标识（"comfyui" | "blt" | "rh_app"）
+    backend: str                 # 后端标识（"comfyui" | "gpt_image2" | "rh_app" | "minimax" | "mimo" | "seedance"）
     point_cost: int              # 积分消耗
     description: str             # 简短描述
     knowledge_content: str       # 详细说明（AI 知识库用）
@@ -131,14 +128,16 @@ YAML 加载支持两种映射模式：
 **优先级配置 [`PRIORITY`](RH_ComfyUI/utils/core/router.py:24)：**
 
 ```python
+# 仅示例:实际路由不再用 PRIORITY 硬编码,而是按
+# NodeDef.capabilities.priority + 输入档案自适应选择。
+# TaskType 现已统一为 4 类:IMAGE / VIDEO / MUSIC / SPEECH,
+# 同一类内部分形态(0/1/N 张图、文生/图生/多模态)由节点
+# inputs 端口自动匹配。
 PRIORITY = {
-    TaskType.TEXT2IMAGE: ["qwen_2512", "banana2", "banana_pro", "anima"],
-    TaskType.IMAGE2IMAGE: ["qwen_2512_img2img"],
-    TaskType.IMAGE_EDIT: ["qwen_2511_edit", "banana2_edit", "banana_pro_edit"],
-    TaskType.TEXT2VIDEO: ["wan2.2_text2video"],
-    TaskType.IMAGE2VIDEO: ["wan2.2_img2video"],
-    TaskType.MUSIC: ["ace_step1.5"],
-    TaskType.SPEECH: ["IndexTTS2"],
+    TaskType.IMAGE:    ["qwen_2512", "banana2", "banana_pro", "anima", "qwen_2511", "gpt_image2"],
+    TaskType.VIDEO:    ["seedance2", "seedance15_pro", "wan2.2_videogen"],
+    TaskType.MUSIC:    ["ace_step1.5"],
+    TaskType.SPEECH:   ["IndexTTS2"],
 }
 ```
 

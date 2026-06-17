@@ -1,9 +1,9 @@
-name: "ace_step1.5"
-display_name: "ACE Step 1.5"
+name: ace_step1.5
+display_name: ACE-Step 1.5
 task_type: music
 backend: comfyui
 point_cost: 2
-description: "音乐生成模型，支持多种风格和歌词输入"
+description: 音乐生成模型，支持多种风格和歌词输入
 knowledge_content: |
   音乐生成模型。
   优势：可以生成多种风格音乐，支持歌词输入，音乐质量较高。
@@ -11,6 +11,25 @@ knowledge_content: |
   不适用场景：语音合成（建议用 IndexTTS2）。
 requirements:
   - comfyui_url
-workflow: "ace_step1.5.json"
+workflow: ace_step1.5.json
 mode: programmatic
 mapper: "RH_ComfyUI.utils.mappers.music:ace_step_mapper"
+
+capabilities:
+  priority: 70
+  mode: sync
+
+inputs:
+  prompt:
+    type: text
+    required: true
+    description: 音乐风格/主题描述
+  negative_prompt:
+    type: text
+    required: false
+    description: 歌词内容(可选)
+
+outputs:
+  audio:
+    type: output_audio
+    description: 生成的音频
