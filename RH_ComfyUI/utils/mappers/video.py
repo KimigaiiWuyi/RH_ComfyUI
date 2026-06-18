@@ -180,7 +180,27 @@ async def wan_videogen_mapper(
     return workflow
 
 
+async def wan_text2video_mapper(
+    request: GenerationRequest,
+    workflow: dict[str, Any],
+    api: ComfyUIAPI,
+) -> dict[str, Any]:
+    """纯文生视频 mapper —— 无图片输入,走文生视频节点 ID"""
+    return await wan_videogen_mapper(request, workflow, api)
+
+
+async def wan_img2video_mapper(
+    request: GenerationRequest,
+    workflow: dict[str, Any],
+    api: ComfyUIAPI,
+) -> dict[str, Any]:
+    """图生视频 mapper —— 至少 1 张图,走图生视频节点 ID"""
+    return await wan_videogen_mapper(request, workflow, api)
+
+
 __all__ = [
     "wan_videogen_mapper",
+    "wan_text2video_mapper",
+    "wan_img2video_mapper",
     "interpolate_prompt_refs",
 ]

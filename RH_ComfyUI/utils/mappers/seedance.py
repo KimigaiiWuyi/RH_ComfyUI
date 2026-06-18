@@ -283,6 +283,34 @@ async def seedance_video_mapper(
     return await _execute_seedance(request, api, mode="text2video", on_progress=on_progress)
 
 
+async def seedance_text2video_mapper(
+    request: GenerationRequest,
+    api: SeedanceAPI,
+    *,
+    on_progress=None,
+) -> NodeOutput:
+    """纯文生视频 mapper —— 不接受图片/音视频参考,仅文本输入
+
+    适用于 text2video 专用 YAML 节点(无 images/video_refs/audio_refs 端口)。
+    """
+    return await _execute_seedance(request, api, mode="text2video", on_progress=on_progress)
+
+
+async def seedance_draft_mapper(
+    request: GenerationRequest,
+    api: SeedanceAPI,
+    *,
+    on_progress=None,
+) -> NodeOutput:
+    """样片(Draft)模式 mapper —— 设置 draft=True 后走统一分发流程
+
+    适用于 seedance15_pro_draft 等样片 YAML 节点。
+    Draft 预览仅支持 480p,价格约为正式视频 60%。
+    """
+    request.params["draft"] = True
+    return await seedance_video_mapper(request, api, on_progress=on_progress)
+
+
 # 注:
 # - 纯文生视频与多模态/图生均统一走本 mapper,
 #   上面根据 ``request.images / video_refs / audio_refs / ordered_content``
