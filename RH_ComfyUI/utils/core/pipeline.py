@@ -160,7 +160,12 @@ class PipelineRegistry:
         outputs = self._load_ports(data.get("outputs"))
 
         # 内部导入以避免 pipeline ↔ request ↔ types 模块加载阶段的循环
-        from .request import TaskType
+        from .request import TaskType, normalize_task_type
+
+        # 归一化 task_type: 将旧式细分类型(image2image / text2image / image_edit 等)
+        # 映射为当前枚举值(image / video / music / speech)
+        raw_task_type = str(data.get("task_type", "image"))
+        normalized_task_type = normalize_task_type(raw_task_type)
 
         # 如果没有显式声明 inputs,自动从 mappings.source 推断
         if not inputs:
@@ -168,7 +173,7 @@ class PipelineRegistry:
 
         # 默认 outputs(根据 task_type 推断)
         if not outputs:
-            outputs = self._infer_default_outputs(TaskType(data["task_type"]))
+            outputs = self._infer_default_outputs(TaskType(normalized_task_type))
 
         # ── capabilities ──
         capabilities = self._load_capabilities(data)
@@ -176,7 +181,7 @@ class PipelineRegistry:
         return NodeDef(
             name=data["name"],
             display_name=data.get("display_name", data["name"]),
-            task_type=TaskType(data["task_type"]),
+            task_type=TaskType(normalized_task_type),
             backend=data["backend"],
             point_cost=data.get("point_cost", 2),
             description=data.get("description", ""),
@@ -255,10 +260,13 @@ class PipelineRegistry:
     @staticmethod
     def _load_capabilities(data: dict[str, Any]) -> CapabilityManifest:
         """加载 capabilities 块"""
+        from .request import normalize_task_type
+
         cap: dict[str, Any] = data.get("capabilities") or {}
-        # supported_tasks 类型为 list[str]，因此需要把可能的 None/Unknown 转为 str
+        # supported_tasks 类型为 list[str]，因此需要把可能的 None/Unknown 转为 str;
+        # 同时归一化旧式类型(image2image 等)为当前枚举值(image 等)
         raw_supported_tasks = cap.get("supported_tasks") or [data.get("task_type")]
-        supported_tasks: list[str] = [str(t) for t in raw_supported_tasks if t is not None]
+        supported_tasks: list[str] = [normalize_task_type(str(t)) for t in raw_supported_tasks if t is not None]
         return CapabilityManifest(
             supported_tasks=supported_tasks,
             supported_params=cap.get("supported_params") or [],
@@ -271,14 +279,37 @@ class PipelineRegistry:
 
     @staticmethod
     def _import_mapper_module(module_path: str) -> ModuleType:
-        """导入 mapper 模块,兼容嵌套插件加载后的包名前缀"""
+        """导入 mapper 模块,兼容多种包名前缀
+
+        gsuid_core 嵌套加载插件后,模块可能被挂载到不同包名下:
+          1. 原始路径:  RH_ComfyUI.utils.mappers.xxx
+          2. 嵌套路径:  plugins.RH_ComfyUI.RH_ComfyUI.utils.mappers.xxx
+        本方法依次尝试所有可能的前缀,直到成功导入。
+        """
+        # 尝试 1: 原始路径
         try:
             return importlib.import_module(module_path)
-        except ModuleNotFoundError as exc:
-            if not module_path.startswith("RH_ComfyUI.utils."):
-                raise exc
+        except ModuleNotFoundError:
+            pass
+
+        # 尝试 2: 相对导入(从当前包向上跳到 utils 级)
+        if module_path.startswith("RH_ComfyUI.utils."):
             relative_module = ".." + module_path.removeprefix("RH_ComfyUI.utils.")
-            return importlib.import_module(relative_module, package=__package__)
+            try:
+                return importlib.import_module(relative_module, package=__package__)
+            except ModuleNotFoundError:
+                pass
+
+        # 尝试 3: plugins.RH_ComfyUI 前缀
+        if not module_path.startswith("plugins."):
+            plugins_path = "plugins.RH_ComfyUI." + module_path
+            try:
+                return importlib.import_module(plugins_path)
+            except ModuleNotFoundError:
+                pass
+
+        # 所有尝试失败,抛出原始错误
+        raise ModuleNotFoundError(f"无法导入 mapper 模块 {module_path!r} (也尝试了相对导入和 plugins.RH_ComfyUI 前缀)")
 
     # ── 查询 ──
 

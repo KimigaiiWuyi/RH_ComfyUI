@@ -17,6 +17,40 @@ if TYPE_CHECKING:
     from .types import MediaRef, ContentItem
 
 
+# ── 旧式 task_type → 新式 TaskType 归一化映射 ──
+# 外部 data 目录的 YAML 可能使用旧的细分类型(image2image / text2image 等),
+# 但核心路由只按输出模态分类。此映射表在 YAML 加载时将旧值归一化。
+
+_TASK_TYPE_NORMALIZE_MAP: dict[str, str] = {
+    # 图片类(输出 = image)
+    "text2image": "image",
+    "image2image": "image",
+    "image_edit": "image",
+    "img2img": "image",
+    "edit": "image",
+    # 视频类(输出 = video)
+    "text2video": "video",
+    "image2video": "video",
+    "img2video": "video",
+    "first_last_frame2video": "video",
+}
+
+
+def normalize_task_type(raw: str) -> str:
+    """将旧式 task_type 字符串归一化为当前 TaskType 枚举值
+
+    如果 raw 已经是合法的 TaskType 值,直接返回;
+    否则查归一化映射表;映射表也没有则返回原值(后续 TaskType() 会抛 ValueError)。
+    """
+    # 先检查是否已经是合法值
+    try:
+        TaskType(raw)
+        return raw
+    except ValueError:
+        pass
+    return _TASK_TYPE_NORMALIZE_MAP.get(raw, raw)
+
+
 class TaskType(str, Enum):
     """任务类型 = 输出模态
 

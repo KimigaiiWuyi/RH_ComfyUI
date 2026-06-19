@@ -15,16 +15,21 @@ from .seedance import (
 )
 from .gpt_image2 import gpt_image2_mapper
 from .image_edit import qwen_edit_mapper
+from .image2image import qwen_img2img_mapper
 from .mimo_speech import mimo_tts_mapper
 from .minimax_speech import minimax_t2a_speech_mapper
 from .minimax_text2image import minimax_image01_mapper
+from .minimax_image2image import minimax_image01_img2img_mapper
 
 __all__ = [
-    # ── 图片(文生图 + 编辑,按输入形状自适应;走 gpt_image2 / OpenAI 兼容后端) ──
+    # ── 图片(文生图 + 编辑,按输入形状自适应;走 OpenAI 兼容后端) ──
     "gpt_image2_mapper",
     "minimax_image01_mapper",
-    # ── ComfyUI 声明式 mapper (图片编辑) ──
+    # ── 图片(ComfyUI 声明式 mapper) ──
     "qwen_edit_mapper",
+    "qwen_img2img_mapper",
+    # ── 图片(MiniMax 图生图) ──
+    "minimax_image01_img2img_mapper",
     # ── 视频(ComfyUI Wan 统一 videogen mapper) ──
     "wan_videogen_mapper",
     "wan_text2video_mapper",

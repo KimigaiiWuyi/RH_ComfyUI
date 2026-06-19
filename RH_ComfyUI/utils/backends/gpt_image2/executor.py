@@ -34,7 +34,7 @@ class GPTImage2Adapter(Adapter):
         return bool(self.api.api_key)
 
     async def get_unavailable_reason(self) -> str:
-        return "未配置 GPT-Image2 API Key，请在 Web 控制台配置 GPT_Image2_apikey"
+        return "未配置 OpenAI 兼容生图 API Key，请在 Web 控制台配置 OpenAI_Image_apikey"
 
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(

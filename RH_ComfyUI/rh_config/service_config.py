@@ -76,19 +76,19 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "https://ark.cn-beijing.volces.com/api/v3",
         options=["https://ark.cn-beijing.volces.com/api/v3"],
     ),
-    "_divider_gpt_image2": GsDivider(
-        "GPT-Image2（生图模型）",
-        "GPT-Image2 OpenAI 兼容协议生图服务配置",
+    "_divider_openai_image": GsDivider(
+        "OpenAI 兼容生图（文生图 / 图生图 / 编辑）",
+        "OpenAI 兼容协议生图服务配置（支持任意 OpenAI 兼容服务，包括 OpenAI 官方 / OneAPI / NewAPI / OpenRouter / BLT / SiliconFlow 等）",
     ),
-    "GPT_Image2_apikey": GsStrConfig(
-        "GPT-Image2 API Key",
-        "用于设置 GPT-Image2 OpenAI 兼容接口的 API Key",
+    "OpenAI_Image_apikey": GsStrConfig(
+        "OpenAI 兼容生图 API Key",
+        "用于设置 OpenAI 兼容生图接口的 API Key（适用于所有 OpenAI 兼容服务，包括 OpenAI / OneAPI / NewAPI / OpenRouter / BLT 等）",
         "",
         options=["sk-xxx"],
     ),
-    "GPT_Image2_BaseURL": GsStrConfig(
-        "GPT-Image2 Base URL",
-        "用于设置 GPT-Image2 OpenAI 兼容接口的 Base URL（可填任意 OpenAI 兼容服务的地址，包括 OpenAI 官方 / OneAPI / NewAPI / OpenRouter / BLT 等）",
+    "OpenAI_Image_BaseURL": GsStrConfig(
+        "OpenAI 兼容生图 Base URL",
+        "用于设置 OpenAI 兼容生图接口的 Base URL（可填任意 OpenAI 兼容服务的地址，包括 OpenAI 官方 / OneAPI / NewAPI / OpenRouter / BLT 等）",
         "https://api.openai.com/v1",
         options=[
             "https://api.openai.com/v1",
