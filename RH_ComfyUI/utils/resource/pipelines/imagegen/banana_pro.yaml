@@ -1,7 +1,7 @@
 name: banana_pro
 display_name: Nano Banana Pro
 task_type: image
-backend: gpt_image2
+backend: gpt-image-2
 backend_model: nano-banana-2-2k
 point_cost: 3
 description: Nano Banana 2.2K 高质量图像生成/编辑模型

@@ -16,7 +16,7 @@ async def send_help(bot: Bot, ev: Event) -> None:
 🖼️ 图片生成(imagegen)
   生图 [模型名] <描述> — 图片生成(自动适配:不传图=文生、1+张=编辑)
   • 同一模型节点同时支持文生图与图片编辑(按是否带图自动切换)
-  • 带图场景下支持的参考图数量:banana2/banana_pro/qwen_2511 ≤ 3 张;gpt_image2 可接受多张
+  • 带图场景下支持的参考图数量:banana2/banana_pro/qwen_2511 ≤ 3 张;gpt-image-2 可接受多张
 
 🎬 视频生成(videogen)
   生视频 [模型名] <描述> — 视频生成(自动适配:不传图=文生、1张=图生、≥2张=首尾帧/多模态)

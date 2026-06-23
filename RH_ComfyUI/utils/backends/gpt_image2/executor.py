@@ -24,7 +24,7 @@ from ...core.pipeline import NodeDef
 class GPTImage2Adapter(Adapter):
     """GPT-Image2 后端适配器"""
 
-    name = "gpt_image2"
+    name = "gpt-image-2"
 
     def __init__(self) -> None:
         self.api = gpt_image2_api

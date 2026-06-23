@@ -1,7 +1,7 @@
 name: banana2
 display_name: Nano Banana 2
 task_type: image
-backend: gpt_image2
+backend: gpt-image-2
 backend_model: gemini-3.1-flash-image-preview
 point_cost: 2
 description: Gemini 3.1 Flash 图像生成/编辑模型,速度快,适合快速生成和预览

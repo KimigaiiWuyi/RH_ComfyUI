@@ -32,7 +32,7 @@ async def gpt_image2_mapper(
     api: GPTImage2API,
 ) -> NodeOutput:
     """GPT-Image2 的自适应映射+执行 (支持文生图/图生图/图像编辑)"""
-    model = request.params.get("model") or "gpt-image2"
+    model = request.params.get("model") or "gpt-image-2"
     ratio = request.ratio or _calculate_aspect_ratio(request.width, request.height)
 
     # 动态参数判定：如果提供了图片则走 Dall-e 的图生图接口，否则走文生图

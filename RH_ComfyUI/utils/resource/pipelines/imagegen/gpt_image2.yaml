@@ -1,7 +1,7 @@
-name: gpt_image2
+name: gpt-image-2
 display_name: GPT-Image2
 task_type: image   # 主任务,但 capabilities.supported_tasks 同时支持下面三种
-backend: gpt_image2
+backend: gpt-image-2
 point_cost: 2
 description: |
   OpenAI 兼容协议的 GPT-Image2 生图模型。

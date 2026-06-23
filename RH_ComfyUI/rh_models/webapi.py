@@ -76,7 +76,7 @@ async def backend_summary() -> dict[str, object]:
 
     ```
     {
-        "backends": [{"name": "gpt_image2", "available": true, "model_count": 3}, ...],
+        "backends": [{"name": "gpt-image-2", "available": true, "model_count": 3}, ...],
         "totals": {"backends": 6, "models": 12, "available_models": 9},
     }
     ```

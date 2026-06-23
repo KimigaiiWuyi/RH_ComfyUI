@@ -46,8 +46,12 @@ class GPTImage2API:
         return self._base_url or "https://api.openai.com/v1"
 
     def update_urls(self) -> None:
-        self.chat_url = f"{self.base_url}/v1/chat/completions"
-        self.images_url = f"{self.base_url}/v1/images/generations"
+        base = self.base_url.rstrip("/")
+        # base_url 通常已包含 /v1, 避免拼出 /v1/v1/...
+        if base.endswith("/v1"):
+            base = base[: -len("/v1")]
+        self.chat_url = f"{base}/v1/chat/completions"
+        self.images_url = f"{base}/v1/images/generations"
 
     def refresh_config(self) -> None:
         self._api_key = None
@@ -77,6 +81,11 @@ class GPTImage2API:
                     logger.info(f"[GPT-Image2] 响应状态: {resp.status}")
 
                     if resp.status != 200:
+                        try:
+                            err_body = await resp.text()
+                            logger.warning(f"[GPT-Image2] 错误响应体: {err_body[:500]}")
+                        except Exception:
+                            pass
                         return resp.status
 
                     resp_data = await resp.json()
@@ -225,6 +234,18 @@ class GPTImage2API:
             logger.error(f"[GPT-Image2] 解析 Chat Completions 失败: {e}")
             return 500
 
+    # aspect_ratio → OpenAI images API 的 size 参数映射
+    _RATIO_TO_SIZE: Dict[str, str] = {
+        "1:1": "1024x1024",
+        "16:9": "1792x1024",
+        "9:16": "1024x1792",
+        "4:3": "1024x1024",
+        "3:4": "1024x1024",
+        "21:9": "1792x1024",
+        "3:2": "1536x1024",
+        "2:3": "1024x1536",
+    }
+
     async def draw_image(
         self,
         model: str,
@@ -247,7 +268,7 @@ class GPTImage2API:
         }
 
         if aspect_ratio is not None:
-            request_body["aspect_ratio"] = aspect_ratio
+            request_body["size"] = self._RATIO_TO_SIZE.get(aspect_ratio, "1024x1024")
         if image_list is not None:
             request_body["image"] = [base64.b64encode(img_bytes).decode() for img_bytes in image_list]
 
