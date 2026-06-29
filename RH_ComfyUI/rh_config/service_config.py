@@ -14,13 +14,15 @@ from gsuid_core.utils.plugins_config.models import (
     GSC,
     GsDivider,
     GsStrConfig,
+    GsBoolConfig,
 )
 
 # ── ComfyUI 服务 ────────────────────────────────────────────────
 SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
-    "_divider_comfyui": GsDivider(
-        "ComfyUI 本地服务",
-        "ComfyUI 本地服务连接配置",
+    "divider_comfyui": GsDivider(
+        "ComfyUI 配置",
+        "ComfyUI 配置",
+        "ComfyUI 配置",
     ),
     "ComfyUI_BaseURL": GsStrConfig(
         "ComfyUI 服务地址",
@@ -31,17 +33,37 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
             "127.0.0.1:8188",
         ],
     ),
-    "_divider_rh": GsDivider(
-        "RunningHub（RH）",
-        "RunningHub 平台服务连接配置",
-    ),
     "RH_apikey": GsStrConfig(
         "RunningHub API Key",
         "用于设置 RunningHub API Key 的配置",
         "",
     ),
-    "_divider_minimax": GsDivider(
+    "divider_openai_image": GsDivider(
+        "OpenAI 兼容生图（文生图 / 图生图 / 编辑）",
+        "OpenAI 兼容协议生图服务配置（支持任意 OpenAI 兼容服务，包括 OpenAI 官方 / "
+        "OneAPI / NewAPI / OpenRouter / BLT / SiliconFlow 等）",
+        "OpenAI 兼容生图服务配置",
+    ),
+    "OpenAI_Image_apikey": GsStrConfig(
+        "OpenAI 兼容生图 API Key",
+        "用于设置 OpenAI 兼容生图接口的 API Key（适用于所有 OpenAI 兼容服务，"
+        "包括 OpenAI / OneAPI / NewAPI / OpenRouter / BLT 等）",
+        "",
+        options=["sk-xxx"],
+    ),
+    "OpenAI_Image_BaseURL": GsStrConfig(
+        "OpenAI 兼容生图 Base URL",
+        "用于设置 OpenAI 兼容生图接口的 Base URL（可填任意 OpenAI 兼容服务的地址，"
+        "包括 OpenAI 官方 / OneAPI / NewAPI / OpenRouter / BLT 等）",
+        "https://api.openai.com/v1",
+        options=[
+            "https://api.openai.com/v1",
+            "https://api.bltcy.ai",
+        ],
+    ),
+    "divider_minimax": GsDivider(
         "MiniMax（文生图 / 图生图 / T2A 语音）",
+        "MiniMax 文生图 / 图生图 / T2A 语音合成服务连接配置",
         "MiniMax 文生图 / 图生图 / T2A 语音合成服务连接配置",
     ),
     "MiniMax_apikey": GsStrConfig(
@@ -50,8 +72,9 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "",
         options=["eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."],
     ),
-    "_divider_mimo": GsDivider(
+    "divider_mimo": GsDivider(
         "MiMo TTS（小米语音合成）",
+        "MiMo 语音合成服务连接配置",
         "MiMo 语音合成服务连接配置",
     ),
     "MIMO_apikey": GsStrConfig(
@@ -60,39 +83,99 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "",
         options=["sk-xxx"],
     ),
-    "_divider_seedance": GsDivider(
-        "Seedance（火山方舟视频生成）",
-        "火山方舟 Seedance 视频生成服务连接配置",
+    "divider_seedance": GsDivider(
+        "Seedance 视频生成",
+        "Seedance 视频生成服务配置。每个供应商可独立启用/禁用,并配置独立的 API Key 和 Base URL。",
+        "火山官方 Seedance 服务配置",
     ),
-    "Seedance_apikey": GsStrConfig(
-        "Seedance API Key (ARK)",
-        "用于设置火山方舟 Seedance 2.0 视频生成 API 的 Key（Seedance 2.0 / 2.0 Fast / 1.5 Pro / 1.0 Pro 等系列）",
+    "Seedance_apikey_ark": GsStrConfig(
+        "ARK API Key",
+        "火山方舟 Seedance API Key。用于 Seedance 2.0 / 2.0 Fast / 1.5 Pro / 1.0 Pro 等系列模型。",
         "",
         options=["xxxx-xxxx-xxxx"],
     ),
-    "Seedance_BaseURL": GsStrConfig(
-        "Seedance Base URL",
-        "火山方舟 Seedance API 的 Base URL，一般无需修改",
+    "Seedance_BaseURL_ark": GsStrConfig(
+        "ARK Base URL",
+        "火山方舟 Seedance 官方 API 地址。默认值已填,一般无需修改。",
         "https://ark.cn-beijing.volces.com/api/v3",
-        options=["https://ark.cn-beijing.volces.com/api/v3"],
+        options=[
+            "https://ark.cn-beijing.volces.com/api/v3",
+        ],
     ),
-    "_divider_openai_image": GsDivider(
-        "OpenAI 兼容生图（文生图 / 图生图 / 编辑）",
-        "OpenAI 兼容协议生图服务配置（支持任意 OpenAI 兼容服务，包括 OpenAI 官方 / OneAPI / NewAPI / OpenRouter / BLT / SiliconFlow 等）",
+    "Seedance_Enable_ark": GsBoolConfig(
+        "启用 ARK 供应商",
+        "是否启用火山方舟官方 Seedance 供应商。禁用后,该供应商不会参与任务分发。",
+        True,
     ),
-    "OpenAI_Image_apikey": GsStrConfig(
-        "OpenAI 兼容生图 API Key",
-        "用于设置 OpenAI 兼容生图接口的 API Key（适用于所有 OpenAI 兼容服务，包括 OpenAI / OneAPI / NewAPI / OpenRouter / BLT 等）",
+    "divider_seedance_gateway": GsDivider(
+        "Seedance 聚合网关",
+        "聚合网关的 Seedance 服务配置。",
+        "聚合网关 Seedance 服务配置",
+    ),
+    "Seedance_apikey_gateway": GsStrConfig(
+        "网关 API Key",
+        "聚合网关的 Seedance API Key。",
+        "",
+        options=["yh-xxxx"],
+    ),
+    "Seedance_BaseURL_gateway": GsStrConfig(
+        "网关 Base URL",
+        "聚合网关的 Seedance API 地址。必填,无默认值。",
+        "",
+        options=[],
+    ),
+    "Seedance_Enable_gateway": GsBoolConfig(
+        "启用网关供应商",
+        "是否启用聚合网关供应商。禁用后,该供应商不会参与任务分发。",
+        False,
+    ),
+    "divider_seedance_runninghub": GsDivider(
+        "Seedance RunningHub",
+        "RunningHub 平台的 Seedance 服务配置。",
+        "RunningHub Seedance 服务配置",
+    ),
+    "Seedance_apikey_runninghub": GsStrConfig(
+        "RunningHub API Key",
+        "RunningHub 平台的 Seedance API Key。为空时回退使用 RH_apikey。",
         "",
         options=["sk-xxx"],
     ),
-    "OpenAI_Image_BaseURL": GsStrConfig(
-        "OpenAI 兼容生图 Base URL",
-        "用于设置 OpenAI 兼容生图接口的 Base URL（可填任意 OpenAI 兼容服务的地址，包括 OpenAI 官方 / OneAPI / NewAPI / OpenRouter / BLT 等）",
-        "https://api.openai.com/v1",
+    "Seedance_BaseURL_runninghub": GsStrConfig(
+        "RunningHub Base URL",
+        "RunningHub 平台的 Seedance API 地址。默认值已填,一般无需修改。",
+        "https://www.runninghub.cn",
         options=[
-            "https://api.openai.com/v1",
-            "https://api.bltcy.ai",
+            "https://www.runninghub.cn",
         ],
+    ),
+    "Seedance_Enable_runninghub": GsBoolConfig(
+        "启用 RunningHub 供应商",
+        "是否启用 RunningHub 供应商。禁用后,该供应商不会参与任务分发。",
+        False,
+    ),
+    "divider_seedance_lb": GsDivider(
+        "Seedance 负载均衡",
+        "多供应商时的负载均衡与熔断策略配置。",
+        "Seedance 负载均衡",
+    ),
+    "Seedance_Load_Balance": GsStrConfig(
+        "负载均衡策略",
+        "round_robin=轮询分发; weighted=加权随机(官方优先); least_failures=优先选连续失败最少的。"
+        "仅多个供应商同时启用时生效。",
+        "round_robin",
+        options=["round_robin", "weighted", "least_failures"],
+    ),
+    "Seedance_Failure_Threshold": GsStrConfig(
+        "熔断阈值",
+        "供应商连续失败多少次后暂时跳过。0=不熔断。",
+        "3",
+        options=["1", "3", "5", "0"],
+    ),
+    "Seedance_Dry_Run": GsBoolConfig(
+        "Dry-Run(拦截请求 + 打印)",
+        "开启后,所有 Seedance 出站请求会被拦截,抛 SeedanceProviderError(code=DRY_RUN_BLOCKED) 终止;"
+        "同时通过 logger.info 打印被拦截请求的完整内容(method/url/headers[脱敏]/body[全量 JSON])。"
+        "不会真正发送请求,不会消耗配额。",
+        False,
     ),
 }

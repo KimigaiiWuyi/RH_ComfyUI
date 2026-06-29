@@ -90,6 +90,14 @@ class NodeDef:
     # 显式声明的厂商模型 ID(Seedance 等需要)
     backend_model: Optional[str] = None
 
+    # 多供应商模型映射(provider_name -> vendor model id)
+    # 当同一节点支持多家供应商时,key 为 provider name,value 为该家实际模型 ID;
+    # 例: {ark: "doubao-seedance-2-0-260128", gateway: "doubao-seedance-2.0", runninghub: ""}
+    backend_models: dict[str, str] = field(default_factory=dict)
+
+    # 节点级供应商覆盖(可选):固定该节点走某家,忽略全局 Seedance_Enable_* 选择
+    provider: Optional[str] = None
+
     # 映射
     mode: str = "declarative"  # declarative | programmatic
     mappings: dict[str, Any] = field(default_factory=dict)
@@ -189,6 +197,8 @@ class PipelineRegistry:
             requirements=data.get("requirements", []) or [],
             workflow_file=data.get("workflow"),
             backend_model=data.get("backend_model"),
+            backend_models=data.get("backend_models") or {},
+            provider=data.get("provider"),
             mode=data.get("mode", "declarative"),
             mappings=data.get("mappings", {}) or {},
             mapper_func=mapper_func,

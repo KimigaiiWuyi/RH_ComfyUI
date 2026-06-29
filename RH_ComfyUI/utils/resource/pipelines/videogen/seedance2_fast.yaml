@@ -3,6 +3,10 @@ display_name: Seedance 2.0 Fast
 task_type: video
 backend: seedance
 backend_model: doubao-seedance-2-0-fast-260128
+backend_models:
+  ark: doubao-seedance-2-0-fast-260128
+  gateway: doubao-seedance-2.0-fast
+  runninghub: ""
 point_cost: 15
 description: Seedance 2.0 Fast 视频生成,速度更快、价格更低(不支持 1080p)
 knowledge_content: |
@@ -15,9 +19,6 @@ knowledge_content: |
   适用场景:快速预览、低成本批量生成。
 requirements:
   - seedance_apikey
-
-mode: programmatic
-mapper: "RH_ComfyUI.utils.mappers.seedance:seedance_video_mapper"
 
 capabilities:
   priority: 85

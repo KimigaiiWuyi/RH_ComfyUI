@@ -153,6 +153,31 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
     )
 
 
+def _deduplicate_by_name(entries: list[ModelEntry]) -> list[ModelEntry]:
+    """按 name 分组去重,只保留 priority 最高的那一个。
+
+    解决运行时路径存在重复 YAML 副本(内置 + 运行时两份)导致前端看到重复模型的问题。
+    同一 name 视为同一节点(可能是不同路径被加载两次),只保留 priority 最高者;
+    不同 name 的节点即使 backend_model 相同也保留(如 qwen_2512 与 qwen_2512_alt),
+    避免误伤本应独立展示的多入口业务节点。
+    """
+    best: dict[str, ModelEntry] = {}
+    for entry in entries:
+        if entry.name not in best or entry.priority > best[entry.name].priority:
+            best[entry.name] = entry
+
+    result: list[ModelEntry] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if entry.name in seen:
+            continue  # 已被该 name 的优胜者保留,跳过
+        if best[entry.name] is entry:
+            result.append(entry)
+            seen.add(entry.name)
+        # 其余同名节点静默丢弃
+    return result
+
+
 async def build_model_catalog(
     *,
     include_unavailable: bool = True,
@@ -186,6 +211,10 @@ async def build_model_catalog(
         if not include_unavailable and not entry.available:
             continue
         entries.append(entry)
+
+    # 去重:同一 name 只保留 priority 最高的节点
+    # 解决运行时路径存在重复 YAML 副本导致前端看到重复模型的问题
+    entries = _deduplicate_by_name(entries)
 
     # 按 task_type 排序,内部按 priority 倒序
     entries.sort(key=lambda e: (e.task_type, -e.priority, e.display_name))

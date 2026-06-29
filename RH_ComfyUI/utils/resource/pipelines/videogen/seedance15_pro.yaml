@@ -3,6 +3,10 @@ display_name: Seedance 1.5 Pro
 task_type: video
 backend: seedance
 backend_model: doubao-seedance-1-5-pro-251215
+backend_models:
+  ark: doubao-seedance-1-5-pro-251215
+  gateway: doubao-seedance-1.5-pro
+  runninghub: ""
 point_cost: 18
 description: Seedance 1.5 Pro 视频生成,支持离线推理(flex)
 knowledge_content: |
@@ -18,9 +22,6 @@ knowledge_content: |
   但仅支持 480p 且不支持尾帧/flex。
 requirements:
   - seedance_apikey
-
-mode: programmatic
-mapper: "RH_ComfyUI.utils.mappers.seedance:seedance_video_mapper"
 
 capabilities:
   priority: 75

@@ -43,7 +43,8 @@ async def minimax_t2a_speech_mapper(
             logger.info(f"[MiniMax] 使用克隆音色: {voice_id}")
         else:
             raise RuntimeError(
-                "MiniMax 音色复刻失败，已停止生成，避免回退为默认男声。请检查账号是否开通 voice_clone 权限、参考音频是否合规。"
+                "MiniMax 音色复刻失败，已停止生成，避免回退为默认男声。"
+                "请检查账号是否开通 voice_clone 权限、参考音频是否合规。"
             )
 
     speed = float(request.speed) if request.speed else 1.0

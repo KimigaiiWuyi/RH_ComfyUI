@@ -20,6 +20,8 @@ import httpx
 
 from gsuid_core.logger import logger
 
+from .provider import SeedanceProviderError
+
 
 class SeedanceAPI:
     """火山方舟 Seedance 2.0 API 客户端"""
@@ -49,7 +51,7 @@ class SeedanceAPI:
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
+            self._client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
         return self._client
 
     async def aclose(self) -> None:
@@ -156,7 +158,15 @@ class SeedanceAPI:
         client = self._get_client()
         resp = await client.delete(url, headers=self._auth_headers())
         if resp.status_code >= 400:
-            raise RuntimeError(f"Seedance 删除任务失败: {resp.status_code} {resp.text}")
+            # 与新 provider 架构一致:对外携带干净 vendor 文案,
+            # 详细信息(状态码 / body)放 str(exc),仅入日志排查。
+            raise SeedanceProviderError(
+                f"删除任务失败 (HTTP {resp.status_code})",
+                code="DELETE_FAILED",
+                provider="ark",
+                http_status=resp.status_code,
+                user_message="删除任务失败,请稍后重试。",
+            )
 
     # ── 任务列表 ──
 
@@ -224,12 +234,30 @@ class SeedanceAPI:
                 return task
             if status == self.STATUS_FAILED:
                 err = task.get("error") or {}
-                raise RuntimeError(f"Seedance 任务失败: code={err.get('code')}, message={err.get('message')}")
+                # 与新 provider 架构对齐:
+                #   - str(exc) 保留诊断信息(code + message)
+                #   - user_message 仅放供应商原始 message(给前端展示)
+                err_code = err.get("code") or "TASK_FAILED"
+                err_message = err.get("message") or "任务失败,请重试。"
+                raise SeedanceProviderError(
+                    f"ark 任务失败: code={err_code}, message={err_message}",
+                    code="TASK_FAILED",
+                    provider="ark",
+                    user_message=err_message,
+                )
             if status == self.STATUS_EXPIRED:
-                raise RuntimeError(f"Seedance 任务过期: {task_id}")
+                raise SeedanceProviderError(
+                    f"任务已过期:{task_id}",
+                    code="TASK_EXPIRED",
+                    provider="ark",
+                    user_message="生成任务已过期,请重试。",
+                )
 
             elapsed = time.time() - start
             if elapsed > max_wait_seconds:
+                # asyncio.TimeoutError 不是 RuntimeError,不动;
+                # 它没有 user_message 语义,会走 generate_api 的
+                # "TimeoutError: msg" fallback,保持可排查。
                 raise asyncio.TimeoutError(f"Seedance 任务等待超时 ({max_wait_seconds}s): {task_id}")
 
             await asyncio.sleep(interval_seconds)
@@ -249,11 +277,33 @@ class SeedanceAPI:
                 err_body = resp.json()
             except Exception:
                 err_body = {"raw": resp.text}
-            raise RuntimeError(f"Seedance API 错误 {resp.status_code}: {err_body}")
+            # 同步 protocol 层错误:从响应体里尽量抽出供应商给的 message。
+            # 若返回体是 {error: {message, code}} 之类的嵌套结构就解出来;
+            # 否则给一个 fallback,完整 body 仍写在 str(exc) 里供排查。
+            vendor_msg: Optional[str] = None
+            if isinstance(err_body, dict):
+                err_field = err_body.get("error")
+                if isinstance(err_field, dict):
+                    vendor_msg = err_field.get("message") or err_field.get("code")
+                if not vendor_msg:
+                    vendor_msg = err_body.get("message") or err_body.get("msg")
+            raise SeedanceProviderError(
+                f"Seedance API 错误 {resp.status_code}: {err_body}",
+                code="API_HTTP_ERROR",
+                provider="ark",
+                http_status=resp.status_code,
+                user_message=vendor_msg or "上游服务异常,请稍后重试。",
+            )
         try:
             return resp.json()
         except Exception as e:
-            raise RuntimeError(f"Seedance API 返回非 JSON: {e}; raw={resp.text[:500]}")
+            raise SeedanceProviderError(
+                f"Seedance API 返回非 JSON: {e}; raw={resp.text[:500]}",
+                code="API_BAD_RESPONSE",
+                provider="ark",
+                http_status=resp.status_code,
+                user_message="上游返回格式异常,请稍后重试。",
+            )
 
 
 # 全局单例(由 adapter 注入 api_key)

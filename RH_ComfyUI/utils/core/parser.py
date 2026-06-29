@@ -87,7 +87,10 @@ def parse_model_from_prompt(
     pipeline = registry.find_by_partial_name(first_word, task_type)
     if pipeline:
         actual_prompt = parts[1] if len(parts) > 1 else ""
-        logger.info(f"[Parser] 识别到模型 token: '{first_word}'(候选示例 {pipeline.name}), prompt={actual_prompt[:30]}...")
+        logger.info(
+            f"[Parser] 识别到模型 token: '{first_word}'(候选示例 {pipeline.name}),"
+            f" prompt={actual_prompt[:30]}..."
+        )
         return first_word, actual_prompt
 
     # 不匹配任何模型名，整个文本作为 prompt

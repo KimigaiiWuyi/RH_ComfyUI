@@ -3,6 +3,10 @@ display_name: Seedance 2.0
 task_type: video
 backend: seedance
 backend_model: doubao-seedance-2-0-260128
+backend_models:
+  ark: doubao-seedance-2-0-260128
+  gateway: dreamina-seedance-2.0
+  runninghub: ""
 point_cost: 20
 description: Seedance 2.0 统一视频生成,按输入自动切换 文生/图生/首尾帧/多模态,无需手动区分
 knowledge_content: |
@@ -18,9 +22,6 @@ knowledge_content: |
   支持时长:4~15 秒。
 requirements:
   - seedance_apikey
-
-mode: programmatic
-mapper: "RH_ComfyUI.utils.mappers.seedance:seedance_video_mapper"
 
 capabilities:
   priority: 90

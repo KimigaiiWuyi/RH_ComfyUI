@@ -185,6 +185,6 @@ class RHAppAdapter(Adapter):
 | 连接方式 | WebSocket + HTTP | HTTP REST | HTTP REST | HTTP REST | HTTP REST | HTTP REST |
 | 工作流 | JSON 工作流文件 | 无（直接调 API） | WebApp ID | 无（直接调 API） | 无（直接调 API） | 无（直接调 API） |
 | 映射模式 | 声明式 / 编程式 | 仅编程式 | 声明式 | 仅编程式 | 仅编程式 | 仅编程式 |
-| 可用性检查 | ComfyUI_BaseURL | GPT_Image2_apikey | RH_apikey | MiniMax_apikey | MIMO_apikey | Seedance_apikey |
+| 可用性检查 | ComfyUI_BaseURL | GPT_Image2_apikey | RH_apikey | MiniMax_apikey | MIMO_apikey | Seedance_apikey_ark/_gateway/_runninghub |
 | 支持任务 | 全部 | 图片生成/编辑 | 全部 | 图片/语音 | 语音 | 视频 |
 | 代理支持 | RunningHub 代理 | 任意 OpenAI 兼容网关 | 原生 | 原生 | 原生 | 原生 |
