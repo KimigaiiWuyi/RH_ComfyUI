@@ -20,6 +20,34 @@ from gsuid_core.logger import logger
 from ...resource.RESOURCE_PATH import OUTPUT_PATH
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
+# ── RunningHub 代理模式轮询配置 ────────────────────────────────────────────────
+# 轮询每 5s 一次:
+# - _RUNNINGHUB_MAX_POLLS = 600  → 最长等待约 50 分钟
+# - _RUNNINGHUB_WARN_AFTER = 12  → 连续 ~60s 无产物时打印 warning 快照
+# - _RUNNINGHUB_FAIL_AFTER = 120 → 连续 ~600s(10 分钟)无产物判定为失败
+# 修改此处即可调整超时/告警阈值,无需改动 _poll_history_until_complete 主体。
+_RUNNINGHUB_MAX_POLLS = 600
+_RUNNINGHUB_WARN_AFTER = 12
+_RUNNINGHUB_FAIL_AFTER = 120
+
+# RunningHub /openapi/v2/query / 通用 REST 风格响应中的失败状态(大写比较)
+_RUNNINGHUB_FAILURE_STATUSES = frozenset({
+    "FAILED",
+    "ERROR",
+    "CANCELLED",
+    "TIMEOUT",
+    "INTERRUPTED",
+})
+
+# ComfyUI /history 风格响应中嵌套 status.status_str 的失败状态(小写比较)
+_RUNNINGHUB_FAILURE_NESTED_STATUSES = frozenset({
+    "failed",
+    "error",
+    "cancelled",
+    "timeout",
+    "interrupted",
+})
+
 
 class ComfyUIAPI:
     """ComfyUI WebSocket API 客户端"""
@@ -430,27 +458,37 @@ class ComfyUIAPI:
     async def _poll_history_until_complete(self, prompt_id: str) -> None:
         """通过 /history 轮询等待 RunningHub 代理任务完成
 
-        RunningHub 代理的 /history 端点在任务失败时可能返回空响应或
-        ComfyUI 风格的嵌套格式(没有顶层 status 字段),导致
-        _raise_for_runninghub_failed_history 无法检测到失败。
-        因此在连续收到空响应后,回退到 /openapi/v2/query 端点
-        获取真实的任务状态。
+        关键设计:
+        - empty_streak 仅在 history 真正包含产物 (outputs 非空) 时才清零。
+          RunningHub 代理在任务失败时常返回 {"<prompt_id>": {"outputs": {}, ...}}
+          这种"伪运行中"响应,如果按 prompt_id 是否存在来清零会导致
+          fallback 永远不触发,因此改为按"是否有产物"清零。
+        - 持续空响应 / 无产物达到 WARN_AFTER 时主动打印 warning 快照,
+          方便排查"卡在 history 哪一步"。
+        - 持续无产物达到 FAIL_AFTER 时直接抛出 RuntimeError,
+          不再依赖已经失效的 /openapi/v2/query fallback
+          (代理模式下 prompt_id ≠ RunningHub OpenAPI v2 taskId,
+          原 fallback 永远查不到任何东西)。
+        - 超时由内建 TimeoutError 改为 RuntimeError,与下游
+          `except Exception` 的失败传播路径一致。
+        - 网络 / 解析异常从 debug 提升为 warning,生产环境可见。
 
         日志策略:
-        - 启动 / 完成 → info(用户可见)
-        - 每 ~30s 心跳 / fallback 触发 → info(便于排查"卡在哪一步")
-        - 其它轮询 → debug(默认不刷屏)
+        - 启动 / 完成 / 异常 → info
+        - 每 ~30s 心跳 / 空响应告警 → info
+        - 其它轮询 → debug
         """
         empty_streak = 0
         logger.info(f"[ComfyUI] 开始轮询任务 {prompt_id} 状态 (RunningHub 代理模式)")
-        for i in range(1200):
+        for i in range(_RUNNINGHUB_MAX_POLLS):
             try:
                 history = await self.get_history(prompt_id, log_result=False)
                 self._raise_for_runninghub_failed_history(prompt_id, history)
+                # 任务完成:outputs 非空
                 if prompt_id in history and history[prompt_id].get("outputs"):
                     logger.success(f"Prompt {prompt_id} finished by history polling.")
                     return
-                # 阶段化日志:启动 + 30s/60s/90s 心跳都打 info,避免长任务时前端以为卡死
+                # 阶段化日志:启动 + 30s/60s/... 心跳都打 info,避免长任务时前端以为卡死
                 if i == 0:
                     logger.info(f"[ComfyUI] 任务 {prompt_id} 已提交,等待代理返回 history")
                 elif i % 6 == 0:
@@ -460,102 +498,154 @@ class ComfyUIAPI:
                     )
                 else:
                     logger.debug(f"[ComfyUI] 轮询任务 {prompt_id} 状态中...")
-                # history 为空时累加计数;有数据(任务仍在运行)则重置
-                if not history or prompt_id not in history:
-                    empty_streak += 1
-                else:
+                # empty_streak 仅在历史记录确实有产物时才清零;
+                # 其余情形(history 空、不含 prompt_id、记录存在但 outputs 为空)都累加。
+                if prompt_id in history and history[prompt_id].get("outputs"):
                     empty_streak = 0
-                # 连续空响应后,回退到 /openapi/v2/query 检查真实状态
-                if empty_streak >= 3:
-                    logger.info(
-                        f"[ComfyUI] 任务 {prompt_id} history 连续 {empty_streak} 次为空,"
-                        f"fallback 到 /openapi/v2/query 查询真实状态"
+                else:
+                    empty_streak += 1
+                # 持续无产物:达到告警阈值时打印 history 快照,便于排查
+                if empty_streak == _RUNNINGHUB_WARN_AFTER or (
+                    empty_streak > _RUNNINGHUB_WARN_AFTER
+                    and empty_streak % (_RUNNINGHUB_WARN_AFTER * 2) == 0
+                ):
+                    logger.warning(
+                        f"[ComfyUI] 任务 {prompt_id} 已连续 {empty_streak} 次"
+                        f"(约 {empty_streak * 5}s)未拿到产物,深入检查 history"
                     )
-                    task_data = await self._query_runninghub_task(prompt_id)
-                    if task_data:
-                        self._raise_for_runninghub_failed_history(prompt_id, task_data)
-                        # 如果 query 端点有结果但 history 没有,说明任务可能已完成
-                        query_status = (task_data.get("status") or "").upper()
-                        if query_status == "SUCCESS":
-                            logger.info(f"[ComfyUI] 任务 {prompt_id} 通过 query 端点确认完成")
-                            return
+                    if prompt_id in history:
+                        record = history[prompt_id]
+                        snapshot = {
+                            k: record.get(k) for k in ("status", "outputs", "messages")
+                        }
+                        logger.warning(
+                            f"[ComfyUI] 任务 {prompt_id} history 快照: {snapshot}"
+                        )
+                # 持续无产物达到失败阈值:主动判定失败,不再无限轮询
+                if empty_streak >= _RUNNINGHUB_FAIL_AFTER:
+                    raise RuntimeError(
+                        f"RunningHub 任务 {prompt_id} 失败 - 代理 history 连续 "
+                        f"{empty_streak} 次(约 {empty_streak * 5}s)未返回产物,"
+                        f"判定为无响应失败"
+                    )
             except httpx.HTTPStatusError as e:
-                logger.debug(f"Prompt {prompt_id} history not ready: {e}")
+                logger.warning(
+                    f"[ComfyUI] 任务 {prompt_id} history HTTP 错误: {e}"
+                )
                 empty_streak += 1
             except RuntimeError:
                 raise
             except Exception as e:
-                logger.debug(f"Prompt {prompt_id} history check error: {e}")
+                logger.warning(
+                    f"[ComfyUI] 任务 {prompt_id} history 解析错误: {e}"
+                )
                 empty_streak += 1
             await asyncio.sleep(5)
-        raise TimeoutError(f"Prompt {prompt_id} 等待生成结果超时")
-
-    async def _query_runninghub_task(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """回退查询 RunningHub /openapi/v2/query 端点获取任务真实状态。
-
-        当 /proxy/history 端点返回空响应时,通过此方法获取失败详情。
-        """
-        url = "https://www.runninghub.cn/openapi/v2/query"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        try:
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                resp = await client.post(url, headers=headers, json={"taskId": task_id})
-                resp.raise_for_status()
-                return resp.json()
-        except Exception as e:
-            logger.debug(f"[ComfyUI] 查询 RunningHub 任务状态失败: {e}")
-            return None
+        raise RuntimeError(
+            f"RunningHub 任务 {prompt_id} 等待生成结果超时 "
+            f"(已轮询 {_RUNNINGHUB_MAX_POLLS} 次 / 约 {_RUNNINGHUB_MAX_POLLS * 5}s)"
+        )
 
     @staticmethod
     def _raise_for_runninghub_failed_history(prompt_id: str, history: Dict[str, Any]) -> None:
         """识别 RunningHub history 中的失败响应,并抛出明确错误。
 
-        兼容两种响应格式:
-        - /openapi/v2/query 风格: 顶层 status/errorMessage/failedReason
+        兼容多种响应格式:
+        - RunningHub /openapi/v2/query 风格: 顶层 status/errorMessage/failedReason/code
         - ComfyUI /history 风格: {prompt_id: {status: {status_str: "failed"}}}
+        - 通用 REST 错误: 顶层 success: false / errorCode
+
+        识别大小写不敏感的失败标志:
+        FAILED / ERROR / CANCELLED / TIMEOUT / INTERRUPTED
+        同时识别顶层 code != 0 / success: false / errorCode 非 0 / errorMessage 单独存在。
         """
-        # ── 顶层 status (RunningHub /openapi/v2/query 格式) ──
+        # ── 顶层 status (RunningHub /openapi/v2/query / 通用 REST 格式) ──
         status = history.get("status")
-        if status == "FAILED":
-            error_message = history.get("errorMessage")
-            failed_reason = history.get("failedReason")
-            if isinstance(failed_reason, dict):
-                exception_type = failed_reason.get("exception_type")
-                exception_message = failed_reason.get("exception_message")
-                node_name = failed_reason.get("node_name")
-                node_id = failed_reason.get("node_id")
-                details = [f"RunningHub 任务 {prompt_id} 失败"]
+        if isinstance(status, str):
+            normalized = status.strip().upper()
+            if normalized in _RUNNINGHUB_FAILURE_STATUSES:
+                error_message = history.get("errorMessage")
+                failed_reason = history.get("failedReason")
+                if isinstance(failed_reason, dict):
+                    exception_type = failed_reason.get("exception_type")
+                    exception_message = failed_reason.get("exception_message")
+                    node_name = failed_reason.get("node_name")
+                    node_id = failed_reason.get("node_id")
+                    details = [f"RunningHub 任务 {prompt_id} 失败 ({normalized})"]
+                    if isinstance(error_message, str) and error_message:
+                        details.append(error_message)
+                    if isinstance(exception_type, str) and exception_type:
+                        details.append(exception_type)
+                    if isinstance(exception_message, str) and exception_message:
+                        details.append(exception_message)
+                    if isinstance(node_name, str) and node_name:
+                        if isinstance(node_id, str) and node_id:
+                            details.append(f"失败节点: {node_name}({node_id})")
+                        else:
+                            details.append(f"失败节点: {node_name}")
+                    raise RuntimeError(" - ".join(details))
+
                 if isinstance(error_message, str) and error_message:
-                    details.append(error_message)
-                if isinstance(exception_type, str) and exception_type:
-                    details.append(exception_type)
-                if isinstance(exception_message, str) and exception_message:
-                    details.append(exception_message)
-                if isinstance(node_name, str) and node_name:
-                    if isinstance(node_id, str) and node_id:
-                        details.append(f"失败节点: {node_name}({node_id})")
-                    else:
-                        details.append(f"失败节点: {node_name}")
-                raise RuntimeError(" - ".join(details))
+                    raise RuntimeError(
+                        f"RunningHub 任务 {prompt_id} 失败 ({normalized}) - {error_message}"
+                    )
 
-            if isinstance(error_message, str) and error_message:
-                raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 - {error_message}")
+                raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 ({normalized})")
 
-            raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败")
+        # ── 顶层 code != 0 ──
+        code = history.get("code")
+        if isinstance(code, int) and code != 0:
+            msg = history.get("msg") or history.get("message") or "未知错误"
+            raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 (code={code}) - {msg}")
+
+        # ── 顶层 success: false ──
+        success = history.get("success")
+        if success is False:
+            msg = (
+                history.get("errorMessage")
+                or history.get("msg")
+                or history.get("message")
+                or "未知错误"
+            )
+            raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 - {msg}")
+
+        # ── 顶层 errorCode 非 0 / errorMessage 单独存在 ──
+        error_code = history.get("errorCode")
+        if error_code and error_code != 0:
+            msg = history.get("errorMessage") or "未知错误"
+            raise RuntimeError(
+                f"RunningHub 任务 {prompt_id} 失败 (errorCode={error_code}) - {msg}"
+            )
+        if (
+            not status
+            and isinstance(history.get("errorMessage"), str)
+            and history["errorMessage"]
+        ):
+            raise RuntimeError(
+                f"RunningHub 任务 {prompt_id} 失败 - {history['errorMessage']}"
+            )
 
         # ── 嵌套 status (ComfyUI /history 格式) ──
         prompt_data = history.get(prompt_id)
         if isinstance(prompt_data, dict):
             nested_status = prompt_data.get("status")
+            # 嵌套 status 可能是 dict 或 字符串
             if isinstance(nested_status, dict):
-                status_str = (nested_status.get("status_str") or "").lower()
-                if status_str == "failed":
+                status_str = (nested_status.get("status_str") or "").strip().lower()
+                if status_str in _RUNNINGHUB_FAILURE_NESTED_STATUSES:
                     messages = nested_status.get("messages") or []
-                    error_msg = " | ".join(str(m) for m in messages) if messages else "未知原因"
-                    raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 - {error_msg}")
+                    error_msg = (
+                        " | ".join(str(m) for m in messages) if messages else "未知原因"
+                    )
+                    raise RuntimeError(
+                        f"RunningHub 任务 {prompt_id} 失败 ({status_str}) - {error_msg}"
+                    )
+            elif isinstance(nested_status, str):
+                normalized_nested = nested_status.strip().lower()
+                if normalized_nested in _RUNNINGHUB_FAILURE_NESTED_STATUSES:
+                    raise RuntimeError(
+                        f"RunningHub 任务 {prompt_id} 失败 ({normalized_nested})"
+                    )
 
     async def reboot(self) -> None:
         if self.is_prompt:

@@ -77,20 +77,20 @@ class _ContentArrayMixin:
                 if not url:
                     continue
                 key = _TYPE_KEY[seg.media.kind]
-                d: dict[str, Any] = {"type": key, key: {"url": url}}
+                d = {"type": key, key: {"url": url}}
                 d["role"] = self._role_str(seg.media.role, seg.media.kind)
 
                 if seg.media.kind == MediaKind.IMAGE:
                     img_idx += 1
-                    text_parts.append(f"图片{img_idx}")
+                    text_parts.append(f"【图片{img_idx}】")
                     images.append(d)
                 elif seg.media.kind == MediaKind.VIDEO:
                     vid_idx += 1
-                    text_parts.append(f"视频{vid_idx}")
+                    text_parts.append(f"【视频{vid_idx}】")
                     videos.append(d)
                 elif seg.media.kind == MediaKind.AUDIO:
                     aud_idx += 1
-                    text_parts.append(f"音频{aud_idx}")
+                    text_parts.append(f"【音频{aud_idx}】")
                     audios.append(d)
 
             items: list[dict[str, Any]] = []
@@ -109,11 +109,7 @@ class _ContentArrayMixin:
 
         items = []
         if spec.prompt:
-            text = (
-                self.transform_prompt(spec.prompt)
-                if isinstance(self, SeedanceProvider)
-                else spec.prompt
-            )
+            text = self.transform_prompt(spec.prompt) if isinstance(self, SeedanceProvider) else spec.prompt
             items.append({"type": "text", "text": text})
         for m, url in zip(spec.media, urls):
             if not url:
