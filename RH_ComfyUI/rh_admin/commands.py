@@ -6,13 +6,19 @@
 """
 
 from typing import Tuple, Optional, Annotated
+from datetime import datetime, timezone, timedelta
 
 from msgspec import Meta
 
 from gsuid_core.models import Event
 from gsuid_core.ai_core.register import ai_tools
 
-from ..utils.database.models import RHBind
+from ..utils.database.models import RHBind, RHComfyuiTaskRecord
+from ..utils.database.consumption import (
+    to_beijing,
+    build_user_consumption_payload,
+    build_admin_consumption_payload,
+)
 
 # ============================================================
 # 参数解析函数
@@ -202,3 +208,272 @@ async def query_user_points(
     )
 
     return f"👤 用户 [{target_user_id}] 的当前积分: {current_point}"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  任务执行统计 AI 工具
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@ai_tools
+async def query_task_records(
+    target_user_id: Annotated[str, Meta(description="目标用户 ID")],
+    ev: Event,
+    status: Annotated[Optional[str], Meta(description="ok/failed,留空=全部")] = None,
+    task_type: Annotated[Optional[str], Meta(description="image/video/music/speech,留空=全部")] = None,
+    days: Annotated[int, Meta(description="查询最近 N 天,默认 7")] = 7,
+    limit: Annotated[int, Meta(description="最多返回条数,默认 20")] = 20,
+) -> str:
+    """查询某用户最近的任务执行记录(管理员 / 本人可查本人)"""
+    if ev.user_pm != 0 and target_user_id != ev.user_id:
+        return "🚫 无权查询其他用户的任务记录"
+
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    records = await RHComfyuiTaskRecord.list_by_user(
+        user_id=target_user_id,
+        bot_id=ev.bot_id,
+        status=status,
+        task_type=task_type,
+        start_time=start,
+        end_time=end,
+        limit=limit,
+    )
+
+    if not records:
+        return f"📭 用户 {target_user_id} 在最近 {days} 天内无任务记录"
+
+    lines = [f"📊 用户 {target_user_id} 最近 {days} 天任务记录(共 {len(records)} 条):\n"]
+    for r in records:
+        # DB 存 UTC,bot 给用户看时统一转北京(UTC+8);_format_record_line 同理
+        ts = to_beijing(r.created_at).strftime("%Y-%m-%d %H:%M:%S")
+        status_icon = "✅" if r.is_success else "❌"
+        elapsed_text = f"{r.elapsed_ms}ms" if r.elapsed_ms is not None else "?ms"
+        lines.append(f"{status_icon} [{ts}] {r.task_name}({r.task_type}) {elapsed_text} 积分={r.point_cost}")
+        if r.error_message:
+            lines.append(f"   错误: {r.error_message[:200]}")
+    return "\n".join(lines)
+
+
+@ai_tools
+async def task_stats_summary(
+    ev: Event,
+    days: Annotated[int, Meta(description="统计最近 N 天,默认 7")] = 7,
+) -> str:
+    """查询最近 N 天的全局任务执行摘要(管理员限定)"""
+    if ev.user_pm != 0:
+        return "🚫 仅管理员可查全局统计"
+
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    summary = await RHComfyuiTaskRecord.get_summary(start_time=start, end_time=end)
+
+    lines = [
+        f"📈 最近 {days} 天任务统计:",
+        f"  总数: {summary['total']}",
+        f"  成功: {summary['success']}",
+        f"  失败: {summary['failed']}",
+        f"  成功率: {summary['success_rate'] * 100:.2f}%",
+        f"  平均耗时: {summary['avg_elapsed_ms']}ms",
+        "  按类型: " + ", ".join(f"{k}={v}" for k, v in summary["by_task_type"].items()),
+    ]
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  消费记录查看(用户 / 管理员命令行直接调用)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+_TASK_TYPE_LABEL: dict[str, str] = {
+    "image": "图片",
+    "video": "视频",
+    "music": "音乐",
+    "speech": "语音",
+}
+
+
+def _format_record_line(record: "RHComfyuiTaskRecord", *, show_user: bool = False) -> str:
+    """把单条任务记录格式化为一行文本"""
+    status_icon = "✅" if record.is_success else "❌"
+    # DB 存 UTC,bot 给用户看时统一转北京(UTC+8)
+    ts = to_beijing(record.created_at).strftime("%m-%d %H:%M")
+    type_label = _TASK_TYPE_LABEL.get(record.task_type, record.task_type)
+    user_part = f" [{record.user_id}]" if show_user else ""
+    elapsed = f"{record.elapsed_ms}ms" if record.elapsed_ms is not None else "?ms"
+    line = f"{status_icon} {ts}{user_part} {record.task_name}({type_label}) -{record.point_cost}积分 {elapsed}"
+    if not record.is_success and record.error_message:
+        # 错误摘要单行截断,避免刷屏
+        err = record.error_message.splitlines()[0][:60]
+        line += f"\n   ↳ 失败: {err}"
+    return line
+
+
+async def format_user_consumption(
+    user_id: str,
+    bot_id: str,
+    *,
+    limit: int = 10,
+    days: Optional[int] = None,
+) -> str:
+    """生成某用户的消费记录文本(供 sv_user 命令调用)
+
+    实现:`build_user_consumption_payload` 取数 + 聚合,本函数只负责渲染。
+    保证与 canvas_backend HTTP 接口口径一致。
+
+    Args:
+        user_id: 目标用户 ID
+        bot_id: Bot 平台
+        limit: 最多返回条数
+        days: 仅统计最近 N 天(None 表示不限制时间)
+    """
+    payload = await build_user_consumption_payload(
+        user_id=user_id,
+        bot_id=bot_id,
+        limit=limit,
+        days=days,
+    )
+    return _render_user_text(payload)
+
+
+def _render_user_text(payload: dict) -> str:
+    """把 user-view payload 渲染为 bot 消息文本(emoji 风格保持兼容)。"""
+    records = payload.get("records", [])
+    if not records:
+        return f"📭 用户 {payload['user_id']} 在{payload['scope']}内暂无任务记录"
+
+    # 把 record dict 重新套成轻量对象,复用 _format_record_line 的字段访问
+    record_objs = [_DictRecord(d) for d in records]
+
+    lines: list[str] = [
+        f"📊 用户 {payload['user_id']} 的消费记录"
+        f"(共 {payload['total_count']} 条,共消耗 {payload['total_points']} 积分):",
+        "",
+    ]
+    lines.extend(_format_record_line(r) for r in record_objs)
+
+    lines.append("")
+    lines.append(f"📈 成功 {payload['success_count']} / 失败 {payload['failed_count']}")
+
+    if payload.get("by_task_type"):
+        lines.append("📋 任务类型分布:")
+        for entry in payload["by_task_type"]:
+            ttype = entry["task_type"]
+            label = _TASK_TYPE_LABEL.get(ttype, ttype)
+            lines.append(f"  · {label}({ttype}): {entry['count']}次 / {entry['points']}积分")
+    return "\n".join(lines)
+
+
+class _DictRecord:
+    """轻量 record 适配器,让 _format_record_line 接受 dict 输入。"""
+
+    __slots__ = ("_d",)
+
+    def __init__(self, d: dict) -> None:
+        self._d = d
+
+    @property
+    def is_success(self) -> bool:
+        return bool(self._d.get("is_success"))
+
+    @property
+    def created_at(self):
+        # payload 里的 created_at 已经被 _record_to_dict 转过北京时区了;
+        # 此处直接返回,_format_record_line 的 strftime 拿到的就是 +08 时间
+        return self._d.get("created_at")
+
+    @property
+    def task_name(self) -> str:
+        return str(self._d.get("task_name", ""))
+
+    @property
+    def task_type(self) -> str:
+        return str(self._d.get("task_type", ""))
+
+    @property
+    def user_id(self) -> str:
+        return str(self._d.get("user_id", ""))
+
+    @property
+    def elapsed_ms(self):
+        return self._d.get("elapsed_ms")
+
+    @property
+    def point_cost(self) -> int:
+        return int(self._d.get("point_cost", 0) or 0)
+
+    @property
+    def error_message(self) -> str:
+        return str(self._d.get("error_message", "") or "")
+
+
+async def format_admin_consumption(
+    bot_id: str,
+    *,
+    limit: int = 20,
+    days: Optional[int] = None,
+    top_users: int = 10,
+) -> str:
+    """生成全员消费记录文本(供 sv_admin/pm=0 命令调用)
+
+    实现:`build_admin_consumption_payload` 取数 + 聚合,本函数只负责渲染。
+
+    Args:
+        bot_id: Bot 平台
+        limit: 最多列出多少条原始记录
+        days: 仅统计最近 N 天(None 表示不限制)
+        top_users: 顶部用户消费榜显示多少名
+    """
+    payload = await build_admin_consumption_payload(
+        bot_id=bot_id,
+        limit=limit,
+        days=days,
+        top_users=top_users,
+    )
+    return _render_admin_text(payload)
+
+
+def _render_admin_text(payload: dict) -> str:
+    """把 admin-view payload 渲染为 bot 消息文本。"""
+    scope = payload.get("scope", "")
+    summary = payload.get("summary") or {}
+    records = payload.get("records", [])
+    user_summaries = payload.get("user_summaries") or []
+
+    lines: list[str] = [
+        f"📊 全员消费记录({scope})",
+        "",
+        "📈 全局汇总:",
+        f"  · 总任务: {summary.get('total', 0)} 条",
+        f"  · 成功: {summary.get('success', 0)} / 失败: {summary.get('failed', 0)}",
+        f"  · 成功率: {summary.get('success_rate', 0.0) * 100:.2f}%",
+        f"  · 平均耗时: {summary.get('avg_elapsed_ms', 0)}ms",
+    ]
+    by_type = summary.get("by_task_type") or {}
+    if by_type:
+        lines.append("  · 任务类型分布:")
+        # 字典在 JSON 路径上保留为 dict,按总积分降序
+        for ttype, cnt in sorted(by_type.items(), key=lambda kv: -kv[1]):
+            label = _TASK_TYPE_LABEL.get(ttype, ttype)
+            lines.append(f"      {label}({ttype}): {cnt}条")
+
+    lines.append("")
+    if records:
+        record_objs = [_DictRecord(d) for d in records]
+        lines.append(f"📝 最近 {len(records)} 条原始记录:")
+        lines.extend(_format_record_line(r, show_user=True) for r in record_objs)
+    else:
+        lines.append(f"📭 {scope}内暂无任务记录")
+
+    lines.append("")
+    if user_summaries:
+        lines.append(f"🏆 用户消费榜 TOP {len(user_summaries)}:")
+        for i, u in enumerate(user_summaries, 1):
+            lines.append(
+                f"  {i}. {u['user_id']} — {u['total']}条 / "
+                f"{u['total_points']}积分 (成功{u['success']}/失败{u['failed']})"
+            )
+    else:
+        lines.append("🏆 用户消费榜: 暂无数据")
+
+    return "\n".join(lines)

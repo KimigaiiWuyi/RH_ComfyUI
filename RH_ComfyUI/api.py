@@ -63,6 +63,8 @@ async def submit(
     prompt: str,
     task_type: Optional[str] = None,
     on_progress: Optional[ProgressCallback] = None,
+    bot_id: Optional[str] = None,
+    group_id: Optional[str] = None,
     **kwargs: Any,
 ) -> GenerationResult:
     """提交生成任务:同步阻塞到完成。
@@ -73,6 +75,10 @@ async def submit(
         task_type: 可选,任务类型过滤(image / video / music / speech / text)。
                    若提供,会校验与节点声明的 task_type 是否一致。
         on_progress: 进度回调(仅视频等异步任务有效)。
+        bot_id: 触发者 Bot 平台 ID(如 "qq" / "discord"),透传到
+                `executor.execute_generation` 写入 `RHComfyuiTaskRecord.bot_id`。
+                不传则记为 ""(老行为,与 bot 命令路径不兼容时会丢失统计维度)。
+        group_id: 触发者群号(私聊为空),同上。
         **kwargs: 透传给 `execute_generation` 的动态参数
                   (images / video_refs / audio_refs / width / height /
                    ratio / resolution / duration / seed / ...)。
@@ -156,7 +162,13 @@ async def submit(
                     )
 
     # 4) 执行(通过 executor 复用全局并发限流 + 自动落盘)
-    result = await execute_generation(request, node, on_progress=on_progress)
+    result = await execute_generation(
+        request,
+        node,
+        on_progress=on_progress,
+        bot_id=bot_id or "",
+        group_id=group_id or "",
+    )
 
     # 5) 包装为对外的 GenerationResult
     outputs_bytes: dict[str, bytes] = {}
@@ -274,6 +286,12 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
         "language_boost",
         "model",
         "params",
+        # 上下文:由调用方注入,落到 GenerationRequest.user_id / trace_id,
+        # 最终在 statistics.record_task() 写入 RHComfyuiTaskRecord.user_id。
+        # 之前漏写时会被吞到 passthrough → params,导致 record_task 拿不到 user_id
+        # 全部回落到 "unknown",这是 #73 之前的 bug 根因。
+        "user_id",
+        "trace_id",
     }
 
     req_kwargs: dict[str, Any] = {"task_type": TaskType(task_type), "prompt": prompt}

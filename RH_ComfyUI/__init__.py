@@ -38,10 +38,18 @@ async def init_pipeline_system() -> None:
 
     from gsuid_core.logger import logger
 
+    from .utils.database.models import RHComfyuiTaskRecord
+
+    # 4. 触发统计模块加载(语法/import 错误在启动期立即暴露,优于运行时爆炸)
+    from .utils.database.statistics import record_task
+
+    _ = (record_task, RHComfyuiTaskRecord)
+
     # AdapterRegistry 未暴露公开长度接口,这里使用 .backends 公开 dict(若存在),
     # 否则仅打印 Pipeline 数。两者都依赖于 registry 的内部状态,但由于运行时安全,
     # 使用 getattr 避免静态分析报告未知属性。
     backend_count = len(getattr(registry, "backends", {}) or getattr(registry, "_backends", {}))
     logger.info(
-        f"[RHComfyUI] 初始化完成: {len(pipeline_registry.all_pipelines())} 个 Pipeline, {backend_count} 个 Backend"
+        f"[RHComfyUI] 初始化完成: {len(pipeline_registry.all_pipelines())} 个 Pipeline, "
+        f"{backend_count} 个 Backend, 统计模块已就绪"
     )

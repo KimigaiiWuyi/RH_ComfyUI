@@ -33,6 +33,18 @@ from .RH_ComfyUI.utils.core.types import ProgressEvent  # noqa: F401
 # 触发内层 __init__.py(执行 Plugins(...) + 注册命令 + @on_core_start 钩子)
 from .RH_ComfyUI.utils.core.pipeline import NodeDef, pipeline_registry  # noqa: F401
 
+# RHBind 积分表(供 canvas_backend 的 credit_rh 跨插件调用,与 bot 命令共用同一笔账)
+from .RH_ComfyUI.utils.database.models import RHBind  # noqa: F401
+
+# 结构化查询入口(供 canvas_backend HTTP / 其它下游插件使用)
+# 在此显式 re-export,让 `from RH_ComfyUI import build_*_payload` 直接可用,
+# 外部消费者无需依赖 `RH_ComfyUI.utils.database.consumption` 这条隐式子包路径。
+from .RH_ComfyUI.utils.database.consumption import (  # noqa: F401
+    build_admin_records_payload,
+    build_user_consumption_payload,
+    build_admin_consumption_payload,
+)
+
 __all__ = [
     # 公开 API
     "submit",
@@ -47,4 +59,10 @@ __all__ = [
     "AdapterRegistry",
     "backend_registry",
     "init_backends",
+    # 结构化查询入口(供 canvas_backend HTTP / 其它下游插件使用)
+    "build_user_consumption_payload",
+    "build_admin_consumption_payload",
+    "build_admin_records_payload",
+    # 跨插件积分扣减(canvas_backend credit_rh 使用)
+    "RHBind",
 ]

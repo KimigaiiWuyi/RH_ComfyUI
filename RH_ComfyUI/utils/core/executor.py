@@ -2,20 +2,21 @@
 
 所有命令和 AI 工具都走 `execute_generation()`。
 受全局 Semaphore 限流,所有 Adapter 共享同一并发限制。
-生成完成后自动落盘到 OUTPUT_PATH。
+生成完成后自动落盘到 OUTPUT_PATH,并记录统计。
 """
 
 from __future__ import annotations
 
 import time
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from pathlib import Path
 
 from gsuid_core.logger import logger
 
 from .types import NodeOutput, ProgressEvent
 from .request import OutputType, GenerationResult, GenerationRequest
+from ..database.statistics import record_task
 
 if TYPE_CHECKING:
     from .pipeline import NodeDef
@@ -112,6 +113,8 @@ async def execute_generation(
     node: NodeDef,
     *,
     on_progress=None,
+    bot_id: str = "",
+    group_id: str = "",
 ) -> GenerationResult:
     """统一执行入口:根据节点指定的 Adapter,分发执行
 
@@ -123,6 +126,8 @@ async def execute_generation(
         request: 统一请求
         node: 选中的节点定义
         on_progress: 可选的进度回调,透传给 Adapter
+        bot_id: 触发者 Bot 平台(Event.bot_id),用于任务统计
+        group_id: 触发者群号(Event.group_id),用于任务统计
 
     Returns:
         GenerationResult(向下兼容旧 API)
@@ -134,33 +139,57 @@ async def execute_generation(
         raise RuntimeError(f"Adapter {node.backend} 未注册")
 
     sem = _get_semaphore()
+    start_ts = time.monotonic()
+    status = "ok"
+    error_repr: Optional[str] = None
+    result: Optional[GenerationResult] = None
+
     async with sem:
         logger.info(f"[Executor] 执行生成: task={request.task_type.value}, node={node.name}, backend={node.backend}")
-
-        node_output: NodeOutput = await adapter.execute(request, node, on_progress=on_progress)
-        node_output.metadata.setdefault("saved_path", "")
-
-        # 落盘
         try:
-            saved_path = _save_output(node_output, request.task_type.value)
-            node_output.metadata["saved_path"] = str(saved_path)
-        except Exception as e:
-            logger.warning(f"[Executor] 保存生成结果失败(不影响返回): {e}")
+            node_output: NodeOutput = await adapter.execute(request, node, on_progress=on_progress)
+            node_output.metadata.setdefault("saved_path", "")
 
-        # 包装为旧 GenerationResult
-        result = GenerationResult(
-            output_type=OutputType(node_output.output_type),
-            data=node_output.data,
-            mime_type=node_output.mime_type,
-            model_used=node.display_name,
-            pipeline_used=node.name,
-            cost_points=node.point_cost,
-            metadata=node_output.metadata,
-            outputs=node_output.outputs,
-            usage=node_output.usage,
-            raw=node_output.raw,
-        )
-        return result
+            # 落盘失败不影响主流程,统计仍可标为成功
+            try:
+                saved_path = _save_output(node_output, request.task_type.value)
+                node_output.metadata["saved_path"] = str(saved_path)
+            except Exception as e:
+                logger.warning(f"[Executor] 保存生成结果失败(不影响返回): {e}")
+
+            # 包装为旧 GenerationResult
+            result = GenerationResult(
+                output_type=OutputType(node_output.output_type),
+                data=node_output.data,
+                mime_type=node_output.mime_type,
+                model_used=node.display_name,
+                pipeline_used=node.name,
+                cost_points=node.point_cost,
+                metadata=node_output.metadata,
+                outputs=node_output.outputs,
+                usage=node_output.usage,
+                raw=node_output.raw,
+            )
+            return result
+        except Exception as e:
+            status = "failed"
+            error_repr = repr(e)
+            raise
+        finally:
+            # 成功 / 失败两条路径都被 finally 覆盖
+            # record_task() 内部 try/except 兜底,失败仅打日志
+            elapsed_ms = int((time.monotonic() - start_ts) * 1000)
+            await record_task(
+                request=request,
+                result=result,
+                node=node,
+                status=status,
+                elapsed_ms=elapsed_ms,
+                error=error_repr,
+                bot_id=bot_id,
+                group_id=group_id,
+                trace_id=request.trace_id or "",
+            )
 
 
 __all__ = ["execute_generation", "ProgressEvent"]

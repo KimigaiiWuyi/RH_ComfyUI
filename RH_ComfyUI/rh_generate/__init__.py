@@ -22,7 +22,7 @@ from ..utils.core.router import ModelUnavailableError, route
 from ..utils.core.request import TaskType, GenerationResult, GenerationRequest
 from ..utils.core.executor import execute_generation
 from ..utils.core.pipeline import pipeline_registry
-from ..utils.database.models import RHBind
+from ..utils.database.models import RHBind, RHComfyuiTaskRecord
 
 sv_gen = SV("AI生成")
 
@@ -89,12 +89,28 @@ async def _do_generate(
 
     # 4. 执行
     try:
-        result = await execute_generation(request, node, on_progress=_wrapped_progress)
+        # 把 bot_id / group_id 传入 executor,以便 record_task 写入统计
+        result = await execute_generation(
+            request,
+            node,
+            on_progress=_wrapped_progress,
+            bot_id=ev.bot_id,
+            group_id=ev.group_id,
+        )
         ai_return(f"生成完成，使用模型: {node.display_name}")
         return result
     except Exception as e:
         logger.exception(f"[RHComfyUI] 生成失败: {e}")
         await RHBind.add_point(ev.user_id, ev.bot_id, node.point_cost)
+        # 标记最近一条失败任务为已退积分(同样用 @with_session)
+        try:
+            await RHComfyuiTaskRecord.mark_last_failed_refunded(
+                user_id=ev.user_id,
+                bot_id=ev.bot_id,
+                task_name=node.name,
+            )
+        except Exception as me:  # noqa: BLE001
+            logger.warning(f"[RHComfyUI] mark refunded 失败(已忽略): {me}")
         refund_msg = f"已退回{node.point_cost}积分。"
         ai_return(
             f"错误：生成失败 - {str(e)}。{refund_msg}"
