@@ -31,7 +31,12 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 7. 模型 `name` 是主键,改名 = 下线旧 + 上线新(统计断档),慎改;
 8. `RHComfyuiTaskRecord` 既有列不改名不删;新列必须带默认值;
 9. 每个新目录必须有 README.md(目录职责 + 维护须知);
-10. 遵守 `E:\MyPyProject\gsuid_core\docs\LLM.md` 的框架级开发规范。
+10. 遵守 `E:\MyPyProject\gsuid_core\docs\LLM.md` 的框架级开发规范;
+11. **不在 `__init__` 里把 `api_key` / `base_url` 缓存到实例属性**。
+    Web 控制台改完必须**立即生效**,不重启进程。统一用 `@property` /
+    `refresh_config()` / `update_credentials()` 三选一(详见
+    [§11](./11-credential-hot-reload.md))。违反症状:`LocalProtocolError:
+    Illegal header value b'Bearer '`。
 
 ## 8.3 上线自查清单
 
@@ -57,3 +62,4 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 | 参数改了前端没变 | 前端读的是 `input_schema` 序列化,确认改的是 defs 的 PortSpec |
 | 通道频繁切换/全挂 | 熔断日志;`ChannelError.retryable` 是否误标 |
 | import 报 `cannot import name 'dispatcher' from 'dispatch'` | 用 `importlib.import_module`(02 章 2.1 的坑) |
+| 配完 key 不重启直接报 `LocalProtocolError: Illegal header value b'Bearer '` | 老 [§11](./11-credential-hot-reload.md) 现象:单例把空 key 冻在 `__init__`,httpx 拒收 `Bearer `(尾空格)。修法见 §9.4 / §11 |

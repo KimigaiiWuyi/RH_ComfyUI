@@ -53,18 +53,10 @@ class ComfyUIAPI:
     """ComfyUI WebSocket API 客户端"""
 
     def __init__(self) -> None:
-        base_url: str = SERVICE_CONFIG.get_config("ComfyUI_BaseURL").data
-        api_key: str = SERVICE_CONFIG.get_config("RH_apikey").data
-
-        self.is_runninghub = "runninghub" in base_url.lower()
-        if self.is_runninghub:
-            self.server_address = f"www.runninghub.cn/proxy/{api_key}"
-            self.url = f"https://www.runninghub.cn/proxy/{api_key}"
-        else:
-            self.server_address = base_url.removeprefix("http://").removeprefix("https://")
-            self.url = base_url if base_url.startswith(("http://", "https://")) else f"http://{base_url}"
-
-        self.api_key = api_key
+        # ⚠️ 不要在 __init__ 里缓存 base_url / api_key / url / server_address。
+        # Web 控制台改了 `ComfyUI_BaseURL` 或 `RH_apikey` 之后,这些字段必须立刻
+        # 反映新值,否则下一次请求会带着旧的 host 或旧的 runninghub proxy 路径。
+        # 全部用 property 按需重读 SERVICE_CONFIG。
         self.client_id = str(uuid.uuid4())
         self.ws: Optional[ClientConnection] = None
         self.is_prompt = False
@@ -74,6 +66,43 @@ class ComfyUIAPI:
         # mapper 可在调用时设置一个"下一帧使用的工作流文件名"覆盖;
         # adapter 会在生成上传图片后重新加载该工作流。None 表示无覆盖。
         self.workflow_override: Optional[str] = None
+
+    # ── 动态配置字段(任何修改都会在下次访问时生效) ──
+
+    @property
+    def _raw_base_url(self) -> str:
+        return SERVICE_CONFIG.get_config("ComfyUI_BaseURL").data or ""
+
+    @property
+    def _raw_api_key(self) -> str:
+        return SERVICE_CONFIG.get_config("RH_apikey").data or ""
+
+    @property
+    def api_key(self) -> str:
+        """动态读取 RunningHub API Key。
+
+        RunningHub 代理模式 (url 形如 ``runninghub.cn/proxy/{key}``) 需要把
+        key 嵌进 URL,因此 api_key 一变,URL 也得跟着重算 —— 见 ``url`` /
+        ``server_address`` 两个 property。
+        """
+        return self._raw_api_key
+
+    @property
+    def is_runninghub(self) -> bool:
+        return "runninghub" in self._raw_base_url.lower()
+
+    @property
+    def server_address(self) -> str:
+        if self.is_runninghub:
+            return f"www.runninghub.cn/proxy/{self._raw_api_key}"
+        return self._raw_base_url.removeprefix("http://").removeprefix("https://")
+
+    @property
+    def url(self) -> str:
+        if self.is_runninghub:
+            return f"https://www.runninghub.cn/proxy/{self._raw_api_key}"
+        base_url = self._raw_base_url
+        return base_url if base_url.startswith(("http://", "https://")) else f"http://{base_url}"
 
     def set_workflow_override(self, workflow_filename: str) -> None:
         """指定本次生成使用的工作流文件(覆盖 YAML 中的默认 workflow)

@@ -65,11 +65,13 @@ class SeedanceAdapter(Adapter):
 
         凭证(enabled/api_key/base_url)由注册表的 config_resolver 解析,
         外部插件注册的供应商可用自己插件的配置面板供给凭证。
-        """
-        cached = self._provider_cache.get(provider_name)
-        if cached is not None:
-            return cached
 
+        每次调用都会**重新解析凭证**,并与缓存实例对比:
+        - 凭证未变 → 复用缓存实例(避免无谓重建 httpx 客户端);
+        - 凭证已变 → 调 ``provider.update_credentials()`` 热更新,
+          保证 Web 控制台改完 key/URL 后下一次请求立刻生效,
+          不必重启进程。
+        """
         reg = get_registration(provider_name)
         if reg is None:
             logger.warning(f"[Seedance] 供应商 {provider_name} 未注册,跳过")
@@ -80,6 +82,31 @@ class SeedanceAdapter(Adapter):
             logger.warning(f"[Seedance] 供应商 {provider_name} 无可用 Base URL,请求将失败。")
         else:
             logger.info(f"[Seedance] 供应商 {provider_name} 使用 URL: {creds.base_url}")
+
+        cached = self._provider_cache.get(provider_name)
+        if cached is not None:
+            # 凭证可能变了 —— 比对一次,变了就热更新。
+            # 先记下"老值"再调 update_credentials(),否则日志里看到的
+            # cached.api_key 已经被覆写,无法反映"是否真的变了"。
+            old_key = cached.api_key
+            old_url = cached.base_url
+            cached_dry_run = bool(getattr(cached, "dry_run", False))
+            if (
+                old_key != creds.api_key
+                or old_url != creds.base_url
+                or cached_dry_run != self._get_dry_run()
+            ):
+                cached.update_credentials(
+                    api_key=creds.api_key,
+                    base_url=creds.base_url,
+                    dry_run=self._get_dry_run(),
+                )
+                logger.info(
+                    f"[Seedance] 供应商 {provider_name} 凭证已热更新 "
+                    f"(key_changed={old_key != creds.api_key}, "
+                    f"url_changed={old_url != creds.base_url})"
+                )
+            return cached
 
         provider = get_provider(
             provider_name,

@@ -36,6 +36,7 @@ description: >
 | 八 | 测试、代码红线与上线自查清单 | [references/08-testing-and-redlines.md](./references/08-testing-and-redlines.md) |
 | 九 | 后端 Adapter、映射器与配置体系(六后端、Seedance Provider 子层、SERVICE/PLUGIN_CONFIG 全键) | [references/09-backends-and-config.md](./references/09-backends-and-config.md) |
 | 十 | 命令清单与数据库(触发词、to_ai、RHBind、RHComfyuiTaskRecord 全列) | [references/10-commands-and-database.md](./references/10-commands-and-database.md) |
+| 十一 | 凭证热更新(中途改 key 不重启)— `@property` / `refresh_config` / `update_credentials` 三种写法 | [references/11-credential-hot-reload.md](./references/11-credential-hot-reload.md) |
 
 ## 快速决策表(先看这里)
 

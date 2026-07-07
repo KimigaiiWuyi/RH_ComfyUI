@@ -23,19 +23,44 @@ class RHAppAPI:
     """
 
     def __init__(self) -> None:
-        self.api_key: str = SERVICE_CONFIG.get_config("RH_apikey").data
+        # 不在 __init__ 中缓存 api_key，否则用户在 Web 控制台配置后
+        # 不重启进程也能立刻生效 —— 见下面 @property 的实现。
         self.base_url = "https://www.runninghub.cn"
 
+    @property
+    def api_key(self) -> str:
+        """动态读取 API Key。
+
+        必须以 property 形式读取配置，否则单例 `rh_app_api` 会在模块导入时
+        把当时（很可能为空）的 key 缓存到实例属性上，后续即便用户在 Web 控制台
+        写入新 key 也不会刷新，进而导致 _headers() 输出 `Bearer ` 这种
+        非法头部，触发 httpx `LocalProtocolError: Illegal header value b'Bearer '`。
+        """
+        return SERVICE_CONFIG.get_config("RH_apikey").data or ""
+
+    def _require_api_key(self) -> str:
+        key = self.api_key
+        if not key:
+            raise RuntimeError(
+                "[RHApp] 未配置 RunningHub API Key，请在 Web 控制台配置 RH_apikey 后重试"
+            )
+        return key
+
     def _headers(self) -> Dict[str, str]:
-        return {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
+        # 即便上游误传空 key，也只在 key 非空时才拼 Bearer，避免 httpx 抛
+        # `Illegal header value b'Bearer '`（这种异常会冒泡到远端并以
+        # 不友好的 traceback 呈现给最终用户）。
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        key = self.api_key
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        return headers
 
     async def get_node_info(self, webapp_id: str) -> List[Dict[str, Any]]:
         """获取 AI 应用的可修改节点信息列表（nodeInfoList）"""
+        api_key = self._require_api_key()
         url = f"{self.base_url}/api/webapp/apiCallDemo"
-        params = {"apiKey": self.api_key, "webappId": webapp_id}
+        params = {"apiKey": api_key, "webappId": webapp_id}
 
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
             response = await client.get(url, params=params)
@@ -52,8 +77,9 @@ class RHAppAPI:
         filename: str = "input.png",
     ) -> str:
         """上传文件到 RunningHub，返回 fileName（用于 nodeInfoList.fieldValue）"""
+        api_key = self._require_api_key()
         url = f"{self.base_url}/openapi/v2/media/upload/binary"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        headers = {"Authorization": f"Bearer {api_key}"}
 
         files = {"file": (filename, file_data)}
 
@@ -106,6 +132,7 @@ class RHAppAPI:
 
     async def query_task(self, task_id: str) -> Dict[str, Any]:
         """查询任务状态和结果（OpenAPI v2）"""
+        self._require_api_key()
         url = f"{self.base_url}/openapi/v2/query"
         payload = {"taskId": task_id}
 
