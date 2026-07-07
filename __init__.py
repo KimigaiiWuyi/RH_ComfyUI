@@ -22,6 +22,7 @@ from .RH_ComfyUI.api import (  # noqa: F401
     list_models,
     is_available,
     get_point_cost,
+    get_model_input_schema,
 )
 from .RH_ComfyUI.utils.backends import (  # noqa: F401
     AdapterRegistry,
@@ -51,6 +52,7 @@ __all__ = [
     "get_point_cost",
     "list_models",
     "is_available",
+    "get_model_input_schema",
     "GenerationResult",
     "ProgressEvent",
     # 高级(允许需要写 Adapter / Pipeline 的下游插件访问内部注册表)

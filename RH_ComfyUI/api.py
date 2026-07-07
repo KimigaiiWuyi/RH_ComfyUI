@@ -257,6 +257,26 @@ def list_models(task_type: Optional[str] = None) -> list[dict[str, Any]]:
     return out
 
 
+def get_model_input_schema(model: str) -> dict[str, Any]:
+    """返回模型的 input_schema(与 webapi 模型目录同源);模型不存在返回 {}。
+
+    下游插件(如画布 Agent)用它判断模型能力——例如 input_schema 含
+    ``frame_mode`` 字段即支持 Seedance 系的多参考(reference)语义。
+    """
+    from .rh_models.api import _port_to_schema
+    from .utils.core.pipeline import pipeline_registry
+
+    if not pipeline_registry.all_pipelines():
+        from .utils.core.router import _ensure_runtime_initialized
+
+        _ensure_runtime_initialized(pipeline_registry)
+
+    for n in pipeline_registry.all_pipelines():
+        if n.name == model:
+            return _port_to_schema(n.inputs)
+    return {}
+
+
 def is_available() -> bool:
     """RH_ComfyUI 引擎是否可用(已注册至少 1 个模型)。"""
     from .core.routing.registry import model_registry

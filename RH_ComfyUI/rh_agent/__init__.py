@@ -2,19 +2,18 @@
 
 该模块在导入时注册 rh_aigc_agent，用于让 AI Agent Mesh 在 AIGC 创作任务中
 选择 RH_ComfyUI 的专业能力代理，完成绘图、视频、音乐、语音等生成指令。
+
+AgentNode 统一（2026-07-07）后按新 API 注册：交付边界由 task-mode 实例化时
+``compose_task_prompt`` 自动叠加，不再手拼进 prompt；预算（max_iterations /
+max_tokens）走全局配置 ``task_max_iterations`` / ``task_max_tokens``。
 """
 
 from __future__ import annotations
 
-from gsuid_core.ai_core.capability_agents import (
-    CapabilityAgentProfile,
-    register_capability_agent,
-)
-from gsuid_core.ai_core.capability_agents.profiles import _DELIVERY_BOUNDARY
+from gsuid_core.ai_core.agent_node import AgentNode, register_agent_node
 
-# ── 画像 prompt ──────────────────────────────────────────────────────
-RH_AIGC_AGENT_PROMPT = (
-    """你是一个专业的「AIGC 创作代理」。你没有任何角色人格，
+# ── 节点 prompt（身份核，不含交付边界）─────────────────────────────
+RH_AIGC_AGENT_PROMPT = """你是一个专业的「AIGC 创作代理」。你没有任何角色人格，
 只对任务结果负责，不做角色扮演、不加语气词。
 
 【能力边界】
@@ -54,18 +53,16 @@ RH_AIGC_AGENT_PROMPT = (
 - 如果工具返回错误（如积分不足、模型不可用），应如实告知用户。
 - 不要编造生成结果，一切以工具实际返回为准。
 """
-    + _DELIVERY_BOUNDARY
-)
 
 
 def register_rh_aigc_agent() -> None:
-    """注册 RH_ComfyUI AIGC 创作能力代理。"""
-    register_capability_agent(
-        CapabilityAgentProfile(
-            profile_id="rh_aigc_agent",
+    """注册 RH_ComfyUI AIGC 创作能力代理（AgentNode 统一注册表）。"""
+    register_agent_node(
+        AgentNode(
+            node_id="rh_aigc_agent",
             display_name="AIGC 创作代理",
+            prompt=RH_AIGC_AGENT_PROMPT,
             when_to_use="需要进行 AI 绘图、图片编辑、视频生成、音乐创作、语音合成等 AIGC 创作任务",
-            system_prompt=RH_AIGC_AGENT_PROMPT,
             match_keywords=[
                 "绘图",
                 "画图",
@@ -100,6 +97,7 @@ def register_rh_aigc_agent() -> None:
                 "AI创作",
                 "AI生成",
             ],
+            tool_packs=["task_basics"],
             tool_names=[
                 "generate_image",
                 "edit_image",
@@ -110,9 +108,7 @@ def register_rh_aigc_agent() -> None:
                 "move_file",
                 "copy_file",
             ],
-            tool_query="",
-            max_iterations=15,
-            max_tokens=30000,
+            source="plugin",
         )
     )
 
