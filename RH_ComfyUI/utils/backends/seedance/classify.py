@@ -2,17 +2,24 @@
 
 唯一的"按输入自动匹配任务形态"入口,被所有 Provider 共享使用。
 判定顺序(命中即定):
-  1. 显式 ordered_content / params["shape"] 覆盖
-  2. 含视频或音频参考 → MULTIMODAL(图/视频/音频均 reference)
-  3. 图片 >= 2         → FIRST_LAST_FRAME(图1=首帧, 图2=尾帧, 其余 reference)
-  4. 图片 == 1         → IMAGE2VIDEO(图1=首帧)
-  5. 其余              → TEXT2VIDEO
+  1. 显式 ordered_content(逐素材 role)/ params["shape"] 覆盖
+  2. params["frame_mode"] 半显式覆盖(前端 API,声明在模型 schema 里):
+       - "reference":  全部图片仅作参考 → MULTIMODAL(多参考生成)
+       - "first_last": 强制首尾帧(图1=首帧, 图2=尾帧, 其余 reference)
+       - "auto"/缺省:  走下方自动判定
+  3. 含视频或音频参考 → MULTIMODAL(图/视频/音频均 reference)
+  4. 图片 >= 2         → FIRST_LAST_FRAME(图1=首帧, 图2=尾帧, 其余 reference)
+  5. 图片 == 1         → IMAGE2VIDEO(图1=首帧)
+  6. 其余              → TEXT2VIDEO
+
+"2 张图到底是首尾帧还是双参考"仅靠图片数量无法分辨 —— HTTP 简单调用用
+frame_mode 区分;无限画布连线场景用 ordered_content 的 role 字段逐素材指定。
 """
 
 from __future__ import annotations
 
-import hashlib
 import re
+import hashlib
 from typing import Mapping, Optional
 
 from .spec import (
@@ -194,8 +201,16 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     n_img = len([m for m in media if m.kind == MediaKind.IMAGE])
     has_av = any(m.kind in (MediaKind.VIDEO, MediaKind.AUDIO) for m in media)
 
+    frame_mode = str(params.get("frame_mode") or "auto").strip().lower()
+
     if shape_override is not None:
         shape = shape_override
+    elif frame_mode == "reference":
+        # 全部图片仅作参考素材(多参考生成),不指定首尾帧
+        shape = VideoTaskShape.MULTIMODAL if (n_img or has_av) else VideoTaskShape.TEXT2VIDEO
+    elif frame_mode == "first_last":
+        # 强制首尾帧;若同时带音视频参考,形态仍是多模态,但图1/图2 的首尾帧角色保留
+        shape = VideoTaskShape.MULTIMODAL if has_av else VideoTaskShape.FIRST_LAST_FRAME
     elif has_av:
         shape = VideoTaskShape.MULTIMODAL
     elif n_img >= 2:
@@ -205,9 +220,9 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     else:
         shape = VideoTaskShape.TEXT2VIDEO
 
-    # 媒体默认角色按形态回填:ordered_content 已显式带 role 的尊重原值;否则按形态赋值
+    # 媒体默认角色回填:ordered_content 已显式带 role 的尊重原值;否则按形态/frame_mode 赋值
     if not request.ordered_content:
-        media = _apply_default_roles(media, shape)
+        media = _apply_default_roles(media, shape, frame_mode)
 
     return VideoGenSpec(
         shape=shape,
@@ -227,17 +242,22 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     )
 
 
-def _apply_default_roles(media: list[SpecMedia], shape: VideoTaskShape) -> list[SpecMedia]:
-    """未显式提供 ordered_content 时,按形态回填首帧/尾帧/参考。"""
-    if shape == VideoTaskShape.FIRST_LAST_FRAME:
-        images = [m for m in media if m.kind == MediaKind.IMAGE]
+def _apply_default_roles(
+    media: list[SpecMedia], shape: VideoTaskShape, frame_mode: str = "auto"
+) -> list[SpecMedia]:
+    """未显式提供 ordered_content 时,按形态/frame_mode 回填首帧/尾帧/参考。"""
+    if frame_mode == "reference":
+        return media  # 全部保持 REFERENCE
+    images = [m for m in media if m.kind == MediaKind.IMAGE]
+    if frame_mode == "first_last" or shape == VideoTaskShape.FIRST_LAST_FRAME:
         if len(images) >= 2:
             images[0].role = MediaRole.FIRST_FRAME
             images[1].role = MediaRole.LAST_FRAME
             for m in images[2:]:
                 m.role = MediaRole.REFERENCE
+        elif images:
+            images[0].role = MediaRole.FIRST_FRAME
     elif shape == VideoTaskShape.IMAGE2VIDEO:
-        images = [m for m in media if m.kind == MediaKind.IMAGE]
         if images:
             images[0].role = MediaRole.FIRST_FRAME
     return media

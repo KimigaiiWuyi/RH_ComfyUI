@@ -75,6 +75,10 @@ class ModelEntry:
     input_schema: dict[str, Any] = field(default_factory=dict)
     output_schema: dict[str, Any] = field(default_factory=dict)
     requirements: list[str] = field(default_factory=list)
+    # ── 2026-07-02 ABC 重构新增(只增不改,前端不读则行为不变) ──
+    card: dict[str, Any] = field(default_factory=dict)
+    channels: list[dict[str, Any]] = field(default_factory=list)
+    execution_mode: str = "sync"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -125,15 +129,34 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
         reason = f"后端 {node.backend} 未注册"
     else:
         try:
-            available = await adapter.check_available()
+            available = await adapter.check_node_available(node)
         except Exception as e:  # noqa: BLE001
-            reason = f"check_available 异常: {e}"
+            reason = f"check_node_available 异常: {e}"
             available = False
         if not available and reason is None:
             try:
-                reason = await adapter.get_unavailable_reason()
+                reason = await adapter.get_node_unavailable_reason(node)
             except Exception:  # noqa: BLE001
                 reason = "后端不可用"
+
+    # ABC 注册表侧的增强元数据(桥接/编程式模型都有;查不到则留默认值)
+    card: dict[str, Any] = {}
+    channels: list[dict[str, Any]] = []
+    execution_mode = "sync"
+    from ..core.routing.registry import model_registry
+
+    model_obj = model_registry.get(node.name)
+    if model_obj is not None:
+        card = model_obj.card.to_dict()
+        execution_mode = model_obj.execution_mode
+        for b in model_obj.channel_bindings():
+            channels.append(
+                {
+                    "name": b.channel.name,
+                    "vendor_model": b.vendor_model,
+                    "available": await b.channel.check_available(),
+                }
+            )
 
     return ModelEntry(
         name=node.name,
@@ -150,6 +173,9 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
         input_schema=_port_to_schema(node.inputs),
         output_schema=_port_to_schema(node.outputs),
         requirements=list(node.requirements),
+        card=card,
+        channels=channels,
+        execution_mode=execution_mode,
     )
 
 

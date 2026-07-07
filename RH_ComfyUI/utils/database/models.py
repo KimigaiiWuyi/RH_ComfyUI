@@ -206,6 +206,9 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     # ── 关联 ──
     trace_id: str = Field(default="", title="调用链追踪ID(由 GenerationRequest.trace_id 传入)", max_length=64)
 
+    # ── 入口维度(2026-07-02 ABC 重构新增;旧记录为空串) ──
+    entry_point: str = Field(default="", title="触发入口 command/agent/http", max_length=16)
+
     # ── 时间戳 ──
     # 索引单列 + 部分数据库可优化按 user_id 时间范围扫描的复合索引
     created_at: datetime = Field(
@@ -531,6 +534,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         raw_response_json: str,
         trace_id: str,
         created_at: datetime,
+        entry_point: str = "",
     ) -> int:
         """插入一条任务执行记录;返回新行 id。供 statistics.record_task 调用。
 
@@ -563,6 +567,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             raw_response_json=raw_response_json,
             trace_id=trace_id,
             created_at=created_at,
+            entry_point=entry_point,
         )
         session.add(record)
         await session.flush()  # 获取 id
@@ -620,5 +625,6 @@ class RHComfyuiTaskRecordAdmin(GsAdminModel):
 exec_list.extend(
     [
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN prompt TEXT DEFAULT ""',
+        'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN entry_point VARCHAR(16) DEFAULT ""',
     ]
 )

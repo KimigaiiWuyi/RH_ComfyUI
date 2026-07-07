@@ -272,7 +272,7 @@ class ComfyUIAdapter(Adapter):
         elif root == "resolution":
             value = request.resolution
         elif root == "generate_audio":
-            value = request.generate_audio
+            value = bool(request.generate_audio)
         elif root == "watermark":
             value = request.watermark
         elif root == "camera_fixed":
@@ -350,9 +350,6 @@ class ComfyUIAdapter(Adapter):
         """按文件名解析工作流路径(不依赖 node.workflow_file)"""
         if not filename:
             return None
-        yaml_dir = node.yaml_path.parent / filename if node.yaml_path else None
-        if yaml_dir and yaml_dir.exists():
-            return yaml_dir
         task_cn = TASK_DISPLAY_NAME.get(node.task_type, node.task_type.value)
         workflow_in_data = WORKFLOW_PATH / task_cn / filename
         if workflow_in_data.exists():
@@ -367,7 +364,3 @@ async def _emit(cb, event: ProgressEvent) -> None:
         await cb(event)
     except Exception:  # noqa: BLE001
         pass
-
-
-# 向后兼容
-ComfyUIBackend = ComfyUIAdapter

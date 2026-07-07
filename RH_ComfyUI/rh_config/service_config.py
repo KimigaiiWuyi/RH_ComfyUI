@@ -70,7 +70,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "MiniMax API Key",
         "用于设置 MiniMax API 的 Key（文生图 / 图生图 / T2A 语音合成）",
         "",
-        options=["eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."],
+        options=["eyJhbGciOiJSUzI1Ni........."],
     ),
     "divider_mimo": GsDivider(
         "MiMo TTS（小米语音合成）",
@@ -106,28 +106,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "启用 ARK 供应商",
         "是否启用火山方舟官方 Seedance 供应商。禁用后,该供应商不会参与任务分发。",
         True,
-    ),
-    "divider_seedance_gateway": GsDivider(
-        "Seedance 聚合网关",
-        "聚合网关的 Seedance 服务配置。",
-        "聚合网关 Seedance 服务配置",
-    ),
-    "Seedance_apikey_gateway": GsStrConfig(
-        "网关 API Key",
-        "聚合网关的 Seedance API Key。",
-        "",
-        options=["yh-xxxx"],
-    ),
-    "Seedance_BaseURL_gateway": GsStrConfig(
-        "网关 Base URL",
-        "聚合网关的 Seedance API 地址。必填,无默认值。",
-        "",
-        options=[],
-    ),
-    "Seedance_Enable_gateway": GsBoolConfig(
-        "启用网关供应商",
-        "是否启用聚合网关供应商。禁用后,该供应商不会参与任务分发。",
-        False,
     ),
     "divider_seedance_runninghub": GsDivider(
         "Seedance RunningHub",

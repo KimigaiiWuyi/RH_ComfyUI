@@ -91,21 +91,20 @@ async def submit(
         RuntimeError: 后端 Adapter 未注册。
         Exception: Adapter 自身抛出的错误。
     """
-    # 延迟导入:避免 RH_ComfyUI 导入阶段就触发整个 Pipeline 加载链。
-    # 必须在 canvas_backend 等下游插件被加载前保证 Pipeline 已初始化
+    # 延迟导入:避免 RH_ComfyUI 导入阶段就触发整个模型注册链。
+    # 必须在 canvas_backend 等下游插件被加载前保证注册表已初始化
     # (由 RH_ComfyUI/__init__.py 的 @on_core_start 钩子负责)。
     from .utils.core.types import MediaRef
     from .utils.core.request import TaskType
-    from .utils.core.executor import execute_generation
-    from .utils.core.pipeline import pipeline_registry
+    from .core.routing.registry import model_registry
 
-    # 1) 解析节点
-    node = pipeline_registry.get(model)
-    if node is None:
+    # 1) 解析模型
+    model_obj = model_registry.get(model)
+    if model_obj is None:
         raise ValueError(f"未知模型: {model!r}")
 
     # 2) 校验 task_type
-    node_task_type = node.task_type.value
+    model_task_type = model_obj.modality.value
     if task_type:
         # 先确保是合法 TaskType,非法立刻抛清晰错误(避免后续字符串比较误判)
         try:
@@ -115,15 +114,13 @@ async def submit(
             raise ValueError(
                 f"未知 task_type: {task_type!r},合法值: {valid}"
             ) from None
-        # supported_tasks 是 list[str],直接做字符串比对即可
-        supported_tasks = node.capabilities.supported_tasks or []
-        if task_type != node_task_type and task_type not in supported_tasks:
+        if task_type != model_task_type:
             raise ValueError(
-                f"模型 {model!r} 的 task_type={node_task_type} 与请求 {task_type!r} 不一致"
+                f"模型 {model!r} 的 task_type={model_task_type} 与请求 {task_type!r} 不一致"
             )
         final_task_type = task_type
     else:
-        final_task_type = node_task_type
+        final_task_type = model_task_type
 
     # 3) 构造 GenerationRequest
     #    - 直接字段
@@ -161,14 +158,26 @@ async def submit(
                         text=item.text,
                     )
 
-    # 4) 执行(通过 executor 复用全局并发限流 + 自动落盘)
-    result = await execute_generation(
-        request,
-        node,
+    # 4) 执行:统一调度器(路由/校验/限流/统计;计费为 ExternalPrepaidPolicy,
+    #    即调用方已在外部记账,引擎侧只记账不扣费)
+    from .core.billing.policy import BillingContext
+    from .core.dispatch.context import DispatchContext
+    from .core.dispatch.dispatcher import dispatch
+    from .core.billing.external_policy import ExternalPrepaidPolicy
+
+    request.model = model
+    ctx = DispatchContext(
+        billing=BillingContext(
+            user_id=str(request.user_id or ""),
+            bot_id=bot_id or "",
+            entry_point="http",
+        ),
+        policy=ExternalPrepaidPolicy(),
         on_progress=on_progress,
-        bot_id=bot_id or "",
         group_id=group_id or "",
+        trace_id=request.trace_id or "",
     )
+    result = await dispatch(request, ctx)
 
     # 5) 包装为对外的 GenerationResult
     outputs_bytes: dict[str, bytes] = {}
@@ -176,13 +185,18 @@ async def submit(
         if isinstance(v, (bytes, bytearray)):
             outputs_bytes[k] = bytes(v)
 
+    backend_name = str((result.metadata or {}).get("channel", ""))
+    node = getattr(model_obj, "node", None)
+    if node is not None:
+        backend_name = node.backend
+
     return GenerationResult(
         kind=final_task_type,
-        model=node.name,
-        backend=node.backend,
+        model=model_obj.name,
+        backend=backend_name,
         data=result.data,
         outputs=outputs_bytes,
-        point_cost=result.cost_points or node.point_cost,
+        point_cost=result.cost_points or model_obj.point_cost,
         elapsed_ms=int((result.metadata or {}).get("elapsed_ms", 0)),
         mime_type=result.mime_type,
         usage=result.usage or {},
@@ -200,10 +214,10 @@ def get_point_cost(model: str) -> Optional[int]:
     Returns:
         积分值,模型不存在则返回 None。
     """
-    from .utils.core.pipeline import pipeline_registry
+    from .core.routing.registry import model_registry
 
-    node = pipeline_registry.get(model)
-    return node.point_cost if node else None
+    m = model_registry.get(model)
+    return m.point_cost if m else None
 
 
 def list_models(task_type: Optional[str] = None) -> list[dict[str, Any]]:
@@ -222,31 +236,32 @@ def list_models(task_type: Optional[str] = None) -> list[dict[str, Any]]:
                 "point_cost": 20,
             }
     """
-    from .utils.core.pipeline import pipeline_registry
+    from .core.routing.registry import model_registry
 
-    nodes = pipeline_registry.all_pipelines()
     out: list[dict[str, Any]] = []
-    for n in nodes:
-        if task_type and n.task_type.value != task_type:
+    for m in model_registry.all_models():
+        if task_type and m.modality.value != task_type:
             continue
+        node = getattr(m, "node", None)
+        backend = node.backend if node is not None else ""
         out.append(
             {
-                "name": n.name,
-                "display_name": n.display_name,
-                "task_type": n.task_type.value,
-                "backend": n.backend,
-                "point_cost": n.point_cost,
-                "description": n.description,
+                "name": m.name,
+                "display_name": m.display_name,
+                "task_type": m.modality.value,
+                "backend": backend,
+                "point_cost": m.point_cost,
+                "description": m.card.description,
             }
         )
     return out
 
 
 def is_available() -> bool:
-    """RH_ComfyUI 引擎是否可用(已加载至少 1 个 Pipeline)。"""
-    from .utils.core.pipeline import pipeline_registry
+    """RH_ComfyUI 引擎是否可用(已注册至少 1 个模型)。"""
+    from .core.routing.registry import model_registry
 
-    return len(pipeline_registry.all_pipelines()) > 0
+    return len(model_registry.all_models()) > 0
 
 
 # ═══════════════════════════════════════════════════════════════════════

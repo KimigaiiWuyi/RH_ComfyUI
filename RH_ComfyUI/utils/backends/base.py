@@ -76,6 +76,19 @@ class Adapter(ABC):
         """
         ...
 
+    # ── 节点级可用性(可覆盖) ──
+
+    async def check_node_available(self, node: NodeDef) -> bool:
+        """指定节点是否可执行;默认等同后端级可用性
+
+        多供应商后端(如 Seedance)应覆盖本方法:同一后端下,
+        不同节点绑定的供应商配置状态可能不同。
+        """
+        return await self.check_available()
+
+    async def get_node_unavailable_reason(self, node: NodeDef) -> str:
+        return await self.get_unavailable_reason()
+
     # ── 便捷方法(向后兼容) ──
 
     async def execute_legacy(

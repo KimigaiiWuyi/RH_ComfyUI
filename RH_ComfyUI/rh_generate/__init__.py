@@ -15,16 +15,20 @@ from gsuid_core.segment import MessageSegment
 from gsuid_core.utils.image.convert import convert_img
 from gsuid_core.ai_core.trigger_bridge import ai_return
 
-from ..utils.points import check_point
+from ..core.base.errors import GenerationError
 from ..utils.core.types import audio_ref
 from ..utils.core.parser import parse_mood_from_prompt, parse_model_from_prompt
-from ..utils.core.router import ModelUnavailableError, route
 from ..utils.core.request import TaskType, GenerationResult, GenerationRequest
-from ..utils.core.executor import execute_generation
-from ..utils.core.pipeline import pipeline_registry
-from ..utils.database.models import RHBind, RHComfyuiTaskRecord
+from ..core.billing.policy import BillingContext
+from ..core.base.generation import AIGCGenerationBase
+from ..core.dispatch.context import DispatchContext
+from ..core.routing.registry import model_registry
+from ..core.dispatch.dispatcher import dispatch
+from ..core.billing.points_policy import PointsBillingPolicy
 
 sv_gen = SV("AI生成")
+
+_POINTS_POLICY = PointsBillingPolicy()
 
 
 def _has_transparency(image: Image.Image) -> bool:
@@ -61,24 +65,18 @@ async def _do_generate(
     *,
     on_progress=None,
 ) -> Optional[GenerationResult]:
-    """通用生成执行流程：路由 → 积分检查 → 执行"""
-    # 1. 路由
-    try:
-        node = await route(request)
-    except ModelUnavailableError as e:
-        ai_return(f"错误：{e.reason}")
-        await bot.send(f"❌ {e.reason}")
-        return None
+    """通用生成执行流程 — 只负责协议翻译,路由/计费/退款/统计都在 dispatch() 里"""
+    selected: dict[str, str] = {"display_name": "", "cost": "0"}
 
-    # 2. 积分检查
-    success, msg = await check_point(ev, node.point_cost)
-    if not success:
-        ai_return(f"错误：积分不足，需要{node.point_cost}积分")
-        await bot.send(msg)
-        return None
-    await bot.send(f"{msg}\n🎯 使用模型: {node.display_name}")
+    async def _on_selected(model: AIGCGenerationBase, cost: int) -> None:
+        selected["display_name"] = model.display_name
+        selected["cost"] = str(cost)
+        now_point = await _current_point(ev)
+        await bot.send(
+            f"💪 积分充足！已扣除{cost}积分!\n📋 当前积分: {now_point}\n"
+            f"✅ 正在生成，预计将等待1分钟...\n🎯 使用模型: {model.display_name}"
+        )
 
-    # 3. 进度回调(包装后透传给 executor)
     async def _wrapped_progress(event) -> None:
         await bot.send(f"⏳ {event.message}")
         if on_progress is not None:
@@ -87,38 +85,39 @@ async def _do_generate(
             except Exception:  # noqa: BLE001
                 pass
 
-    # 4. 执行
+    entry_point = "agent" if type(bot).__name__ == "MockBot" else "command"
+    ctx = DispatchContext(
+        billing=BillingContext(user_id=ev.user_id, bot_id=ev.bot_id, entry_point=entry_point),
+        policy=_POINTS_POLICY,
+        on_progress=_wrapped_progress,
+        on_model_selected=_on_selected,
+        group_id=ev.group_id or "",
+    )
+
     try:
-        # 把 bot_id / group_id 传入 executor,以便 record_task 写入统计
-        result = await execute_generation(
-            request,
-            node,
-            on_progress=_wrapped_progress,
-            bot_id=ev.bot_id,
-            group_id=ev.group_id,
-        )
-        ai_return(f"生成完成，使用模型: {node.display_name}")
+        result = await dispatch(request, ctx)
+        ai_return(f"生成完成，使用模型: {result.model_used}")
         return result
+    except GenerationError as e:
+        ai_return(f"错误：{e.user_message}")
+        await bot.send(f"❌ {e.user_message}")
+        return None
     except Exception as e:
         logger.exception(f"[RHComfyUI] 生成失败: {e}")
-        await RHBind.add_point(ev.user_id, ev.bot_id, node.point_cost)
-        # 标记最近一条失败任务为已退积分(同样用 @with_session)
-        try:
-            await RHComfyuiTaskRecord.mark_last_failed_refunded(
-                user_id=ev.user_id,
-                bot_id=ev.bot_id,
-                task_name=node.name,
-            )
-        except Exception as me:  # noqa: BLE001
-            logger.warning(f"[RHComfyUI] mark refunded 失败(已忽略): {me}")
-        refund_msg = f"已退回{node.point_cost}积分。"
+        refund_msg = f"已退回{selected['cost']}积分。" if selected["display_name"] else ""
         ai_return(
             f"错误：生成失败 - {str(e)}。{refund_msg}"
             "不要在同一轮对话中盲目切换到未确认可用的云端 TTS 后端重试；"
             "如果错误码是 MiniMax 2038，表示账号未开通 voice_clone 权限，代码无法绕过。"
         )
-        await bot.send(f"❌ 生成失败: {e}\n↩️ {refund_msg}")
+        await bot.send(f"❌ 生成失败: {e}" + (f"\n↩️ {refund_msg}" if refund_msg else ""))
         return None
+
+
+async def _current_point(ev: Event) -> int:
+    from ..utils.database.models import RHBind
+
+    return await RHBind.get_point(ev.user_id, ev.bot_id)
 
 
 # ── 生图命令 ──
@@ -426,13 +425,11 @@ async def generate_speech(bot: Bot, ev: Event) -> None:
 
 @sv_gen.on_fullmatch("模型列表", block=True)
 async def list_models(bot: Bot, ev: Event) -> None:
-    """列出所有可用模型"""
-    from ..utils.backends import backend_registry
-
+    """列出所有可用模型(数据源:model_registry,含外部注入模型)"""
     lines = ["📋 可用模型列表：\n"]
     for task_type in TaskType:
-        pipelines = pipeline_registry.get_by_task(task_type)
-        if not pipelines:
+        models = model_registry.by_modality(task_type)
+        if not models:
             continue
 
         type_names = {
@@ -443,10 +440,9 @@ async def list_models(bot: Bot, ev: Event) -> None:
         }
         lines.append(f"\n{type_names.get(task_type, task_type.value)}：")
 
-        for p in pipelines:
-            backend = backend_registry.get(p.backend)
-            available = "✅" if backend and await backend.check_available() else "❌"
-            lines.append(f"  {available} {p.name} — {p.display_name} ({p.point_cost}积分)")
+        for m in models:
+            available = "✅" if await m.check_available() else "❌"
+            lines.append(f"  {available} {m.name} — {m.display_name} ({m.point_cost}积分)")
 
     await bot.send("\n".join(lines))
 
@@ -455,18 +451,36 @@ async def list_models(bot: Bot, ev: Event) -> None:
 async def model_detail(bot: Bot, ev: Event) -> None:
     """查看模型详细信息"""
     model_name = ev.text.strip()
-    pipeline = pipeline_registry.get(model_name)
-    if not pipeline:
+    model = model_registry.get(model_name)
+    if not model:
         await bot.send(f"未找到模型: {model_name}，发送 模型列表 查看所有模型")
         return
 
+    channels = "、".join(b.channel.name for b in model.channel_bindings())
     info = (
-        f"📋 模型详情：{pipeline.display_name}\n\n"
-        f"🔹 名称: {pipeline.name}\n"
-        f"🔹 任务类型: {pipeline.task_type.value}\n"
-        f"🔹 后端: {pipeline.backend}\n"
-        f"🔹 积分消耗: {pipeline.point_cost}\n"
-        f"🔹 描述: {pipeline.description}\n\n"
-        f"📖 详细说明:\n{pipeline.knowledge_content}"
+        f"📋 模型详情：{model.display_name}\n\n"
+        f"🔹 名称: {model.name}\n"
+        f"🔹 任务类型: {model.modality.value}\n"
+        f"🔹 通道: {channels}\n"
+        f"🔹 积分消耗: {model.point_cost}\n"
+        f"🔹 描述: {model.card.description}\n\n"
+        f"📖 详细说明:\n"
+        f"{model.card.to_knowledge_text(name=model.name, display_name=model.display_name, point_cost=model.point_cost)}"
     )
     await bot.send(info)
+
+
+@sv_gen.on_fullmatch("通道状态", block=True)
+async def channel_status(bot: Bot, ev: Event) -> None:
+    """展示各模型通道的熔断/失败计数(运维排障)"""
+    from ..core.routing.balancer import get_default_balancer
+
+    snapshot = get_default_balancer().health_snapshot()
+    if not snapshot:
+        await bot.send("📡 所有通道健康,无失败/熔断记录")
+        return
+    lines = ["📡 通道状态："]
+    for key, state in snapshot.items():
+        breaker = "🔴 熔断中" if state["circuit_open"] else "🟢 正常"
+        lines.append(f"  {key}: 失败 {state['failure_count']} 次 {breaker}")
+    await bot.send("\n".join(lines))

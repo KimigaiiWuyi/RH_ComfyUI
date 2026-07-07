@@ -1,6 +1,6 @@
 """ComfyUI 后端"""
 
 from .api import ComfyUIAPI
-from .executor import ComfyUIBackend
+from .executor import ComfyUIAdapter
 
-__all__ = ["ComfyUIAPI", "ComfyUIBackend"]
+__all__ = ["ComfyUIAPI", "ComfyUIAdapter"]

@@ -26,17 +26,14 @@ def _ensure_registry_loaded(registry: PipelineRegistry) -> None:
     # 延迟导入以打破循环:core/parser → backends → base → core/types
     from .pipeline import pipeline_registry as _registry  # noqa: PLC0415
     from ..backends import init_backends, backend_registry  # noqa: PLC0415
-    from ..resource.RESOURCE_PATH import (  # noqa: PLC0415
-        PIPELINES_PATH,
-        _CP_PIPELINES_PATH,
-    )
 
     if not backend_registry.all():
         init_backends()
 
-    if _CP_PIPELINES_PATH.exists():
-        _registry.load_from_directory(_CP_PIPELINES_PATH)
-    _registry.load_from_directory(PIPELINES_PATH)
+    # 2026-07 起模型定义全编程式:懒加载兜底改走 discover_builtin_models
+    from ...models import discover_builtin_models  # noqa: PLC0415
+
+    discover_builtin_models()
 
     logger.info(f"[Parser] 懒加载 Pipeline 完成: {len(_registry.all_pipelines())} 个")
 

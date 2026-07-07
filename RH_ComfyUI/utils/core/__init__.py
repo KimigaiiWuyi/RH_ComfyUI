@@ -15,7 +15,7 @@ from .parser import parse_model_from_prompt
 from .router import ModelUnavailableError, route
 from .request import TaskType, OutputType, GenerationResult, GenerationRequest
 from .executor import execute_generation
-from .pipeline import NodeDef, PipelineDef, PipelineRegistry, pipeline_registry
+from .pipeline import NodeDef, PipelineRegistry, pipeline_registry
 
 __all__ = [
     # request
@@ -25,7 +25,6 @@ __all__ = [
     "OutputType",
     # pipeline
     "NodeDef",
-    "PipelineDef",
     "PipelineRegistry",
     "pipeline_registry",
     # router

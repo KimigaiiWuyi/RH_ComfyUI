@@ -121,6 +121,7 @@ async def record_task(
     bot_id: str = "",
     group_id: str = "",
     trace_id: str = "",
+    entry_point: str = "",
 ) -> Optional[int]:
     """记录一次任务执行(模块函数,从 executor.py 直接调用)。
 
@@ -192,6 +193,7 @@ async def record_task(
             raw_response_json=raw_json,
             trace_id=trace_id[:64] if trace_id else "",
             created_at=datetime.now(timezone.utc),
+            entry_point=entry_point[:16] if entry_point else "",
         )
 
         logger.info(

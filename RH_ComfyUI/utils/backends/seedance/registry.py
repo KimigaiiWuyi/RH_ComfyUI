@@ -1,13 +1,22 @@
-"""Seedance Provider 注册表与选择器
+"""Seedance Provider 注册表与负载均衡(开源/外部插件统一扩展点)
 
-每个供应商通过 Seedance_Enable_{name} 开关独立启用/禁用,
-启用的供应商按负载均衡策略排序后参与任务分发。
+供应商通过 register_provider() 注册进本表:
+- 开源内置:ark / runninghub(本模块 import 时注册)
+- 外部插件:如 aigc_system 在自己的 @on_core_start 里注册 gateway 供应商,
+  与内置供应商共享同一套负载均衡、熔断计数与计费/统计链路。
 
-配置:
-  - Seedance_Enable_ark / Seedance_Enable_gateway / Seedance_Enable_runninghub: bool
-    各供应商启用开关
+每个注册项携带:
+- cls:            SeedanceProvider 子类
+- weight:         weighted 负载均衡权重
+- config_resolver: 凭证解析回调,返回 ProviderCredentials(enabled/api_key/base_url);
+                   凭证可以来自任意插件自己的配置面板
+- accepts_model_field: 创建请求体是否接受 model 字段(RunningHub 端点即模型,为 False)
+
+跨插件模型映射:register_vendor_models() 允许外部插件为既有 Pipeline
+(如 seedance2)补充"该供应商下的厂商模型 ID",使其参与该 Pipeline 的负载均衡。
+
+负载均衡配置(SERVICE_CONFIG):
   - Seedance_Load_Balance: "round_robin" | "weighted" | "least_failures"
-    负载均衡策略
   - Seedance_Failure_Threshold: 连续失败次数阈值,超过后熔断该供应商(默认 3)
 """
 
@@ -16,31 +25,125 @@ from __future__ import annotations
 import time
 import random
 import threading
-from typing import Any, Optional
+from typing import Any, Callable, Optional
+from dataclasses import dataclass
 
 from gsuid_core.logger import logger
 
 from .provider import SeedanceProvider
-from .providers import (
-    ArkSeedanceProvider,
-    GatewaySeedanceProvider,
-    RunningHubSeedanceProvider,
-)
-
-_PROVIDERS: dict[str, type[SeedanceProvider]] = {
-    "ark": ArkSeedanceProvider,
-    "gateway": GatewaySeedanceProvider,
-    "runninghub": RunningHubSeedanceProvider,
-}
+from .providers import ArkSeedanceProvider, RunningHubSeedanceProvider
 
 DEFAULT_PROVIDER = "ark"
 
-# ── 负载均衡状态(进程级) ──
-_lb_lock = threading.Lock()
-_health_lock = threading.Lock()  # 保护 _failure_counts / _circuit_breaker_until
-_rr_index: int = 0  # round_robin 全局索引
-_failure_counts: dict[str, int] = {}  # provider_name → 连续失败次数
-_circuit_breaker_until: dict[str, float] = {}  # provider_name → 熔断恢复时间戳
+
+@dataclass(frozen=True)
+class ProviderCredentials:
+    """一次凭证解析的结果(由 config_resolver 返回)"""
+
+    enabled: bool = False
+    api_key: str = ""
+    base_url: Optional[str] = None
+
+
+ConfigResolver = Callable[[], ProviderCredentials]
+
+
+@dataclass(frozen=True)
+class ProviderRegistration:
+    """一条供应商注册项"""
+
+    cls: type[SeedanceProvider]
+    weight: int = 1
+    config_resolver: Optional[ConfigResolver] = None
+    accepts_model_field: bool = True
+
+    def credentials(self) -> ProviderCredentials:
+        if self.config_resolver is not None:
+            return self.config_resolver()
+        return _service_config_credentials(self.cls.name, self.cls.DEFAULT_BASE_URL)
+
+
+def _service_config_credentials(name: str, default_base_url: str) -> ProviderCredentials:
+    """内置供应商的默认凭证方案:读 RH_ComfyUI 自己的 SERVICE_CONFIG
+
+    键名约定: Seedance_Enable_{name} / Seedance_apikey_{name} / Seedance_BaseURL_{name};
+    runninghub 的 key 为空时回退 RH_apikey。
+    """
+    from ....rh_config.comfyui_config import SERVICE_CONFIG
+
+    def _get(key: str) -> Any:
+        try:
+            return SERVICE_CONFIG.get_config(key).data
+        except Exception:
+            return None
+
+    enabled = bool(_get(f"Seedance_Enable_{name}"))
+    api_key = str(_get(f"Seedance_apikey_{name}") or "")
+    if name == "runninghub" and not api_key:
+        api_key = str(_get("RH_apikey") or "")
+    base_url = str(_get(f"Seedance_BaseURL_{name}") or "").strip() or None
+    return ProviderCredentials(
+        enabled=enabled, api_key=api_key, base_url=base_url or (default_base_url or None)
+    )
+
+
+# ── 注册表状态 ──
+
+_registry_lock = threading.Lock()
+_REGISTRY: dict[str, ProviderRegistration] = {}
+# provider_name → {pipeline_name → vendor model id}(外部插件为既有模型补充映射)
+_VENDOR_MODELS: dict[str, dict[str, str]] = {}
+
+
+def register_provider(
+    cls: type[SeedanceProvider],
+    *,
+    weight: int = 1,
+    config_resolver: Optional[ConfigResolver] = None,
+    accepts_model_field: bool = True,
+) -> None:
+    """注册一个 Seedance 供应商(同名后注册者覆盖并告警)"""
+    name = cls.name
+    if not name:
+        raise ValueError(f"供应商类 {cls.__qualname__} 缺少 name 属性")
+    with _registry_lock:
+        if name in _REGISTRY:
+            logger.warning(f"[Seedance] 供应商 {name} 被重复注册,新实现覆盖旧实现")
+        _REGISTRY[name] = ProviderRegistration(
+            cls=cls,
+            weight=weight,
+            config_resolver=config_resolver,
+            accepts_model_field=accepts_model_field,
+        )
+    logger.info(f"[Seedance] 注册供应商: {name} (weight={weight})")
+
+
+def get_registration(name: str) -> Optional[ProviderRegistration]:
+    return _REGISTRY.get(name)
+
+
+def registered_providers() -> dict[str, ProviderRegistration]:
+    """全部已注册供应商(只读快照)"""
+    return dict(_REGISTRY)
+
+
+def known_providers() -> list[str]:
+    return list(_REGISTRY.keys())
+
+
+def register_vendor_models(provider_name: str, mapping: dict[str, str]) -> None:
+    """为既有 Pipeline 补充该供应商下的厂商模型 ID(外部插件扩展点)
+
+    例: register_vendor_models("gateway", {"seedance2": "dreamina-seedance-2.0"})
+    使 seedance2 的负载均衡候选中加入 gateway 通道。
+    """
+    with _registry_lock:
+        _VENDOR_MODELS.setdefault(provider_name, {}).update(mapping)
+    logger.info(f"[Seedance] 供应商 {provider_name} 补充 {len(mapping)} 条模型映射")
+
+
+def vendor_model_for(provider_name: str, pipeline_name: str) -> Optional[str]:
+    return _VENDOR_MODELS.get(provider_name, {}).get(pipeline_name) or None
 
 
 def get_provider(
@@ -50,117 +153,56 @@ def get_provider(
     base_url: Optional[str] = None,
     dry_run: bool = False,
 ) -> SeedanceProvider:
-    """根据名称实例化 Provider(名称非法时回退到 ARK)。"""
-    cls = _PROVIDERS.get(name, ArkSeedanceProvider)
-    return cls(api_key=api_key, base_url=base_url, dry_run=dry_run)
+    """根据名称实例化 Provider。未注册的名称抛 KeyError。"""
+    reg = _REGISTRY.get(name)
+    if reg is None:
+        raise KeyError(f"Seedance 供应商 {name!r} 未注册(已注册: {known_providers()})")
+    return reg.cls(api_key=api_key, base_url=base_url, dry_run=dry_run)
 
 
-def resolve_provider_name(
+# ── 负载均衡状态(进程级;跨插件供应商共享同一份) ──
+_lb_lock = threading.Lock()
+_health_lock = threading.Lock()  # 保护 _failure_counts / _circuit_breaker_until
+_rr_index: int = 0  # round_robin 全局索引
+_failure_counts: dict[str, int] = {}  # provider_name → 连续失败次数
+_circuit_breaker_until: dict[str, float] = {}  # provider_name → 熔断恢复时间戳
+
+
+def order_candidates(
+    enabled_names: list[str],
     *,
-    node_provider: Optional[str],
-    configured: Optional[str],
-    base_url: Optional[str],
-) -> str:
-    """优先级:节点级 > 全局选择器 > base_url 自动识别 > 默认 ark。(兼容旧逻辑)"""
-    if node_provider:
-        return node_provider
-    if configured and configured != "auto":
-        return configured
-    if base_url:
-        low = base_url.lower()
-        if "volces.com" in low:
-            return "ark"
-        if "runninghub.cn" in low:
-            return "runninghub"
-        return "gateway"
-    return DEFAULT_PROVIDER
-
-
-def resolve_provider_candidates(
-    *,
-    node_provider: Optional[str],
-    configured: Optional[str],
-    base_url: Optional[str],
     load_balance_mode: str = "round_robin",
-    failure_threshold: int = 3,
-    circuit_breaker_duration: float = 120.0,
-    _enabled_names: Optional[list[str]] = None,
 ) -> list[str]:
-    """返回有序候选 provider 名列表,用于负载均衡 + 故障切换。
-
-    Args:
-        node_provider: YAML 节点级固定供应商(有值时直接返回单元素列表)
-        configured: 已弃用,保留兼容
-        base_url: 已弃用,保留兼容
-        load_balance_mode: "round_robin" / "weighted" / "least_failures"
-        failure_threshold: 连续失败多少次后熔断
-        circuit_breaker_duration: 熔断持续时间(秒)
-        _enabled_names: 已启用的供应商名列表(由上层按 Seedance_Enable_* 过滤)
+    """把已启用的供应商按负载均衡策略排序,熔断中的暂时剔除。
 
     Returns:
-        候选 provider 名列表,排在前面的是优先使用的。
-        列表为空表示没有可用供应商。
+        候选 provider 名列表,排在前面的优先使用;空表示没有可用供应商。
     """
-    # 节点级固定供应商 → 单元素列表,不做负载均衡
-    if node_provider:
-        return [node_provider]
-
-    # 确定可用候选:优先使用上层传入的启用列表
-    if _enabled_names is not None:
-        candidate_pool = _enabled_names
-    elif configured and configured not in ("auto", "all"):
-        # 兼容旧配置:全局指定了具体供应商
-        return [configured]
-    else:
-        candidate_pool = list(_PROVIDERS.keys())
-
-    # 按 base_url 推断偏好(仅当 _enabled_names 未指定时)
-    preferred: Optional[str] = None
-    if base_url and _enabled_names is None:
-        low = base_url.lower()
-        if "volces.com" in low:
-            preferred = "ark"
-        elif "runninghub.cn" in low:
-            preferred = "runninghub"
-        else:
-            preferred = "gateway"
-
     # 过滤掉熔断中的供应商
     now = time.time()
     available: list[str] = []
     with _health_lock:
-        for name in candidate_pool:
-            expire_at = _circuit_breaker_until.get(name, 0)
-            if now < expire_at:
+        for name in enabled_names:
+            if now < _circuit_breaker_until.get(name, 0):
                 continue  # 仍在熔断期,跳过
             available.append(name)
 
     if not available:
-        # 全部熔断:逐个检查各供应商的熔断剩余时间,让剩余最短的那个先"自然解封",
-        # 而不是清空全局熔断窗口。这样单个持续失败的供应商不会周期性解除
-        # 全部供应商的熔断,避免放大故障面。
+        # 全部熔断:提示最短剩余时间,并回退到完整候选池兜底
+        # (让剩余最短的先"自然解封",而不是清空全局熔断窗口)
         with _health_lock:
             earliest = min(
                 _circuit_breaker_until.items(),
                 key=lambda kv: kv[1],
                 default=(None, float("inf")),
             )
-            if earliest[0] is not None:
-                remaining = earliest[1] - now
-                logger.warning(
-                    f"[Seedance] 全部供应商已熔断,最短剩余 {remaining:.0f}s "
-                    f"({earliest[0]}),等待自然解封"
-                )
-            # 极端兜底:如果全部熔断时 `_circuit_breaker_until` 已被外部清空
-            # (理论上不会发生),回退到完整候选池。
-            available = list(candidate_pool)
+        if earliest[0] is not None:
+            logger.warning(
+                f"[Seedance] 全部供应商已熔断,最短剩余 {earliest[1] - now:.0f}s "
+                f"({earliest[0]}),兜底重试完整候选池"
+            )
+        available = list(enabled_names)
 
-    # 如果 base_url 指定了偏好供应商,将其排在首位
-    if preferred and preferred in available:
-        available.remove(preferred)
-        available.insert(0, preferred)
-
-    # 按负载均衡策略排序
     if len(available) <= 1:
         return available
 
@@ -169,31 +211,22 @@ def resolve_provider_candidates(
             global _rr_index
             idx = _rr_index % len(available)
             _rr_index += 1
-        # 轮转:从 idx 位置开始
         return available[idx:] + available[:idx]
 
-    elif load_balance_mode == "weighted":
-        # 权重:ark=3, gateway=2, runninghub=1(官方优先)
-        weights = {"ark": 3, "gateway": 2, "runninghub": 1}
+    if load_balance_mode == "weighted":
         weighted: list[str] = []
         for name in available:
-            w = max(weights.get(name, 1), 1)
+            reg = _REGISTRY.get(name)
+            w = max(reg.weight if reg else 1, 1)
             weighted.extend([name] * w)
         chosen = random.choice(weighted)
-        # 排首位,其余保持原序
-        result = [chosen]
-        for n in available:
-            if n != chosen:
-                result.append(n)
-        return result
+        return [chosen] + [n for n in available if n != chosen]
 
-    elif load_balance_mode == "least_failures":
-        # 按连续失败次数升序排列(失败最少的排前面)
+    if load_balance_mode == "least_failures":
         with _health_lock:
             return sorted(available, key=lambda n: _failure_counts.get(n, 0))
 
-    else:
-        return available
+    return available
 
 
 def record_provider_success(provider_name: str) -> None:
@@ -209,12 +242,17 @@ def record_provider_failure(
     failure_threshold: int = 3,
     circuit_breaker_duration: float = 120.0,
 ) -> None:
-    """记录供应商失败,超过阈值后熔断。"""
+    """记录供应商失败,超过阈值后熔断。failure_threshold<=0 表示不熔断。"""
     with _health_lock:
         count = _failure_counts.get(provider_name, 0) + 1
         _failure_counts[provider_name] = count
-        if count >= failure_threshold:
+        if failure_threshold > 0 and count >= failure_threshold:
             _circuit_breaker_until[provider_name] = time.time() + circuit_breaker_duration
+
+
+def get_failure_count(provider_name: str) -> int:
+    with _health_lock:
+        return _failure_counts.get(provider_name, 0)
 
 
 def get_provider_health() -> dict[str, dict[str, Any]]:
@@ -222,7 +260,7 @@ def get_provider_health() -> dict[str, dict[str, Any]]:
     now = time.time()
     result: dict[str, dict[str, Any]] = {}
     with _health_lock:
-        for name in _PROVIDERS:
+        for name in _REGISTRY:
             expire_at = _circuit_breaker_until.get(name, 0)
             result[name] = {
                 "failure_count": _failure_counts.get(name, 0),
@@ -232,26 +270,25 @@ def get_provider_health() -> dict[str, dict[str, Any]]:
     return result
 
 
-def known_providers() -> list[str]:
-    return list(_PROVIDERS.keys())
-
-
-def get_all_providers() -> dict[str, type[SeedanceProvider]]:
-    """返回全部已注册的供应商类型映射表(只读)。
-
-    替代直接 import _PROVIDERS 的私有成员访问方式。
-    """
-    return dict(_PROVIDERS)
+# ── 内置供应商注册(import 即注册) ──
+register_provider(ArkSeedanceProvider, weight=3)
+register_provider(RunningHubSeedanceProvider, weight=1, accepts_model_field=False)
 
 
 __all__ = [
+    "ProviderCredentials",
+    "ProviderRegistration",
+    "register_provider",
+    "register_vendor_models",
+    "vendor_model_for",
+    "get_registration",
+    "registered_providers",
     "get_provider",
-    "resolve_provider_name",
-    "resolve_provider_candidates",
+    "order_candidates",
     "record_provider_success",
     "record_provider_failure",
+    "get_failure_count",
     "get_provider_health",
     "known_providers",
-    "get_all_providers",
     "DEFAULT_PROVIDER",
 ]

@@ -1,15 +1,16 @@
 """视频生成映射函数(统一 videogen 入口)
 
 设计要点:
-- 一个 mapper 兼容 0 / 1 / N 张图三种输入形态:
+- 一个 mapper 兼容 0 / 1 / 2 张图三种输入形态(Wan 2.2 的实际能力):
     * 0 张图  → 纯文生视频
     * 1 张图  → 图生视频(首帧)
-    * N 张图  → 首尾帧生视频(图片 1=首帧,图片 2=尾帧,其余为参考)
+    * 2 张图  → 首尾帧生视频(images[0]=首帧, images[1]=尾帧)
+- 超过 2 张图不会到这里:`Wan22VideoModel.validate()` 已硬拒绝并引导去 Seedance。
 - 支持 prompt 位置插值:
-    用户可在 prompt 中用 "图片1" / "图片2" / ... 指代传入的多张参考图,
+    用户可在 prompt 中用 "图片1" / "图片2" 指代传入的图,
     mapper 会按位置把代号替换为对应节点的标签文字,例如:
         "图片1 走向 图片2"
-    表示"图 1 走向 图 2"。这与 Seedance 的多模态引用保持一致心智模型。
+    表示"首帧 走向 尾帧"。这与 Seedance 的多模态引用保持一致心智模型。
 - 多模态(音/视频参考)输入由 Seedance 后端在
   `mappers/seedance.py` 中通过 `ordered_content` 处理;
   本 mapper 只关注 ComfyUI Wan 工作流这一支。
@@ -34,38 +35,36 @@ from ..backends.comfyui.api import ComfyUIAPI
 #
 # 匹配 "图片1"、"图片2"、"视频1"、"音频1" 等中文代号,
 # 允许 "图片 1"(中间带空格)的形式。
-# 注意: 必须同时兼容"图片1"和"图片N",其中 N 最大为 9(与 YAML 中
-# image 端口的 max_items=9 保持一致)。
+# 索引上限 2:Wan 2.2 只支持首尾帧,没有 "图片3+";
+# Seedance 等多参考节点若需要支持 3+ 图,请在其自己的 mapper 里扩展。
 
 _PROMPT_REF_PATTERN = re.compile(r"(图片|视频|音频)\s*(\d{1,2})")
+# Wan 2.2 实际能消费的图索引上限(首帧=1, 尾帧=2)
+_MAX_WAN_IMAGE_INDEX = 2
 
 
 def _build_image_position_labels(n: int) -> list[str]:
-    """生成第 i 张图在 prompt 中的位置插值标签
+    """生成第 i 张图在 prompt 中的位置插值标签(Wan 2.2 版本)
 
-    例如 n=2 时返回 ["首帧图", "尾帧图"];n=3 时返回
-    ["首帧图", "尾帧图", "参考图1"];n=1 时返回 ["首帧图"]。
+    n=0 → []
+    n=1 → ["首帧图"]
+    n=2 → ["首帧图", "尾帧图"]
     """
     if n <= 0:
         return []
     if n == 1:
         return ["首帧图"]
-    if n == 2:
-        return ["首帧图", "尾帧图"]
-    labels = ["首帧图", "尾帧图"]
-    for i in range(3, n + 1):
-        labels.append(f"参考图{i - 2}")
-    return labels
+    # n >= 2
+    return ["首帧图", "尾帧图"]
 
 
 def interpolate_prompt_refs(prompt: str, *, image_count: int) -> str:
     """把 prompt 中的 "图片1/图片2/..." 替换为对应的位置标签
 
-    规则:
+    规则(Wan 2.2 视角):
     - "图片1" / "图片 1" → "首帧图"
     - "图片2" / "图片 2" → "尾帧图"
-    - "图片3+"            → "参考图N"
-    - 只在 prompt 中存在相应代号时才替换;越界的代号(>image_count)保持原样
+    - "图片3+"            → 越界,保持原样(路由层不会让 Wan 2.2 收到 3+ 张图)
     - 其他类型("视频1"/"音频1")不在 ComfyUI Wan 工作流中支持,保持原样
     """
     if not prompt or image_count <= 0:
@@ -89,7 +88,8 @@ def interpolate_prompt_refs(prompt: str, *, image_count: int) -> str:
 #   * 文生视频(wan2.2_t2v.json):节点 37=prompt, 33=duration,
 #                                 44=width, 34=height
 #   * 图生视频(wan2.2_i2v.json):节点 102=prompt, 294=duration,
-#                                289=width, 290=height, 67=image
+#                                289=width, 290=height, 67=start_image
+#                                67_end=end_image(可选,工作流扩展时启用)
 
 _TEXT2VIDEO_NODE_IDS: dict[str, str] = {
     "prompt": "37",
@@ -103,12 +103,17 @@ _IMG2VIDEO_NODE_IDS: dict[str, str] = {
     "width": "289",
     "height": "290",
     "duration": "294",
-    "image": "67",
+    "image": "67",  # start_image
 }
 
 # 与上述节点 ID 一一对应的工作流文件名
 _T2V_WORKFLOW = "wan2.2_t2v.json"
 _I2V_WORKFLOW = "wan2.2_i2v.json"
+
+# 可选:首尾帧工作流中"尾帧"图像节点 ID(若工作流未配置则静默跳过)。
+# 由用户在 workflow JSON 中维护;当前内置的 wan2.2_i2v.json 只支持 start_image,
+# 因此 2 张图场景下尾帧会被忽略并打印 info(不报错 —— 行为可降级)。
+_END_IMAGE_NODE_ID = "67_end"
 
 
 def _pick_node_ids(image_count: int) -> dict[str, str]:
@@ -132,7 +137,9 @@ async def wan_videogen_mapper(
     """Wan 2.2 统一视频生成 mapper
 
     - 0 张图 → 走文生视频节点 ID(37/33/44/34)
-    - 1+ 张图 → 走图生视频节点 ID(102/289/290/294/67),自动上传首帧
+    - 1 张图 → 走图生视频节点 ID(102/289/290/294/67),上传首帧
+    - 2 张图 → 走图生视频节点 ID,上传首帧;若工作流提供了 67_end 节点
+      (扩展版首尾帧工作流)则同时上传尾帧,否则降级只消费首帧并打 info。
 
     节点 ID 集合硬编码在工作流 JSON 中,见
     `resource/workflow/视频生成/wan2.2_*.json`。
@@ -169,12 +176,30 @@ async def wan_videogen_mapper(
     if "duration" in node_ids:
         workflow[node_ids["duration"]]["inputs"]["value"] = request.duration
 
-    # 图生视频:上传首帧
+    # 图生视频:上传首帧(并按工作流能力尽量上传尾帧)
     if image_count >= 1 and "image" in node_ids:
-        # 首帧 = images[0];若用户传 2+ 张,尾帧暂不上传(交给更专业
-        # 的 Seedance 多模态节点处理;此处保留首帧即可)
+        # 首帧 = images[0];Wan 2.2 i2v 工作流只暴露 start_image
         workflow[node_ids["image"]]["inputs"]["image"] = await api.upload_image(
             request.images[0],
+        )
+
+    # 尾帧(可选,仅当传入 2 张图且工作流扩展出 67_end 节点时启用)
+    if image_count >= 2 and _END_IMAGE_NODE_ID in workflow:
+        end_node = workflow[_END_IMAGE_NODE_ID]
+        # 兼容性:节点可能是 LoadImage(image=...)或直接接收 image 字段;
+        # 仅在节点确实持有 inputs.image 时写入,避免未知节点类型报错。
+        if "inputs" in end_node and "image" in end_node.get("inputs", {}):
+            end_node["inputs"]["image"] = await api.upload_image(request.images[1])
+    elif image_count >= 2:
+        # 当前内置的 wan2.2_i2v.json 只支持 start_image,
+        # 尾帧会被忽略(不报错);提示用户升级工作流以真正消费尾帧。
+        from gsuid_core.logger import logger
+
+        logger.info(
+            "[Wan 2.2] 收到首尾帧请求,但当前工作流仅支持 start_image;"
+            "尾帧暂未使用。如需启用尾帧,请在工作流中新增 end_image 节点"
+            "(默认节点 ID: %s) 并接到 WanVideoImageToVideoEncode 的 end_image。",
+            _END_IMAGE_NODE_ID,
         )
 
     return workflow
@@ -194,7 +219,11 @@ async def wan_img2video_mapper(
     workflow: dict[str, Any],
     api: ComfyUIAPI,
 ) -> dict[str, Any]:
-    """图生视频 mapper —— 至少 1 张图,走图生视频节点 ID"""
+    """图生视频 mapper —— 至少 1 张图,走图生视频节点 ID
+
+    注意:首尾帧(2 张图)也走该 mapper;尾帧由 wan_videogen_mapper 内部按工作流
+    能力自动尝试注入 67_end 节点。
+    """
     return await wan_videogen_mapper(request, workflow, api)
 
 

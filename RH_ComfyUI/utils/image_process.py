@@ -177,3 +177,38 @@ __all__ = [
     "build_process_pipeline",
     "preprocess_for_video",
 ]
+
+
+def _has_transparency(image: Any) -> bool:
+    """判断图片是否包含透明通道(入参为 PIL.Image.Image,惰性导入故用 Any)"""
+    if image.mode in ("RGBA", "LA"):
+        alpha = image.getchannel("A")
+        transparent_mask = alpha.point(lambda value: 255 - value)
+        return transparent_mask.getbbox() is not None
+    return image.mode == "P" and "transparency" in image.info
+
+
+def flatten_transparent_to_white(image_bytes: bytes) -> bytes:
+    """将透明图片合成到白色背景,非透明图片保持原始字节
+
+    自 rh_generate._flatten_transparent_image_to_white 平移,
+    供 core.base.image.ImageGenerationBase.normalize() 统一调用。
+    """
+    import io
+
+    from PIL import Image
+
+    image = Image.open(io.BytesIO(image_bytes))
+    if not _has_transparency(image):
+        return image_bytes
+
+    rgba_image = image.convert("RGBA")
+    background = Image.new("RGBA", rgba_image.size, (255, 255, 255, 255))
+    background.alpha_composite(rgba_image)
+
+    output = io.BytesIO()
+    background.convert("RGB").save(output, format="PNG")
+    return output.getvalue()
+
+
+__all__.append("flatten_transparent_to_white")

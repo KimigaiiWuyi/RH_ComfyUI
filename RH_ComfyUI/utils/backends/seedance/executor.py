@@ -23,17 +23,20 @@ from ..base import Adapter
 from .classify import classify_video_spec
 from .provider import (
     NormalizedTask,
+    DryRunInterrupt,
     SeedanceProvider,
     SeedanceProviderError,
-    DryRunInterrupt,
     UnsupportedProviderShapeError,
 )
 from .registry import (
     get_provider,
-    get_all_providers,
+    vendor_model_for,
+    get_registration,
+    order_candidates,
+    get_failure_count,
+    registered_providers,
     record_provider_failure,
     record_provider_success,
-    resolve_provider_candidates,
 )
 from ...core.types import NodeOutput, ProgressEvent, CapabilityManifest
 from ...core.request import GenerationRequest
@@ -51,135 +54,93 @@ class SeedanceAdapter(Adapter):
 
     # ── 凭证与供应商解析 ──
 
-    def _get_api_key(self, provider_name: str) -> str:
-        """按 provider 取凭证。优先 per-provider key,runninghub 额外回退 RH_apikey。"""
-        from ....rh_config.comfyui_config import SERVICE_CONFIG
-
-        per_key = SERVICE_CONFIG.get_config(f"Seedance_apikey_{provider_name}").data or ""
-        if provider_name == "runninghub":
-            rh_key = SERVICE_CONFIG.get_config("RH_apikey").data or ""
-            return per_key or rh_key
-        return per_key
-
-    def _is_provider_enabled(self, provider_name: str) -> bool:
-        """检查供应商是否已启用(Seedance_Enable_ark/_gateway/_runninghub)。"""
-        from ....rh_config.comfyui_config import SERVICE_CONFIG
-
-        try:
-            return bool(SERVICE_CONFIG.get_config(f"Seedance_Enable_{provider_name}").data)
-        except Exception:
-            return True  # 默认启用
-
     def _get_dry_run(self) -> bool:
         """读取 Seedance_Dry_Run 开关。"""
         from ....rh_config.comfyui_config import SERVICE_CONFIG
 
         return bool(SERVICE_CONFIG.get_config("Seedance_Dry_Run").data)
 
-    def _resolve_base_url(self, provider_name: str) -> tuple[Optional[str], str]:
-        """解析指定 provider 应使用的 base_url + 来源标签。
+    def _get_or_create_provider(self, provider_name: str) -> Optional[SeedanceProvider]:
+        """获取或创建 provider 实例(带缓存);未注册返回 None。
 
-        优先级: per-provider URL → provider 内置 DEFAULT_BASE_URL。
-        来源标签用于日志区分(per-provider / default / missing)。
+        凭证(enabled/api_key/base_url)由注册表的 config_resolver 解析,
+        外部插件注册的供应商可用自己插件的配置面板供给凭证。
         """
-        from .registry import get_all_providers
-        from ....rh_config.comfyui_config import SERVICE_CONFIG
-
-        # 1. per-provider URL 优先(Seedance_BaseURL_ark / _gateway / _runninghub)
-        try:
-            per_url = SERVICE_CONFIG.get_config(f"Seedance_BaseURL_{provider_name}").data
-        except Exception:
-            per_url = None
-        if per_url:
-            return per_url.strip(), "per-provider"
-
-        # 2. 回退到 provider 内置默认(ark/runninghub 有内置默认, gateway 无)
-        all_providers = get_all_providers()
-        cls = all_providers.get(provider_name)
-        if cls is not None and cls.DEFAULT_BASE_URL:
-            return cls.DEFAULT_BASE_URL, "default"
-
-        return None, "missing"
-
-    def _get_or_create_provider(self, provider_name: str) -> SeedanceProvider:
-        """获取或创建 provider 实例(带缓存)。"""
         cached = self._provider_cache.get(provider_name)
         if cached is not None:
             return cached
 
-        api_key = self._get_api_key(provider_name)
-        dry = self._get_dry_run()
-        base_url, url_source = self._resolve_base_url(provider_name)
+        reg = get_registration(provider_name)
+        if reg is None:
+            logger.warning(f"[Seedance] 供应商 {provider_name} 未注册,跳过")
+            return None
 
-        # 来源日志,方便用户在日志里看清每个供应商实际使用的 URL
-        if url_source == "per-provider":
-            logger.info(f"[Seedance] 供应商 {provider_name} 使用独立 URL: {base_url}")
-        elif url_source == "default":
-            logger.info(
-                f"[Seedance] 供应商 {provider_name} 未配置 Seedance_BaseURL_{provider_name},"
-                f"使用内置默认: {base_url}"
-            )
-        else:  # missing
-            logger.warning(
-                f"[Seedance] 供应商 {provider_name} 无可用 URL,请求将失败。"
-                f"请配置 Seedance_BaseURL_{provider_name}。"
-            )
+        creds = reg.credentials()
+        if not creds.base_url:
+            logger.warning(f"[Seedance] 供应商 {provider_name} 无可用 Base URL,请求将失败。")
+        else:
+            logger.info(f"[Seedance] 供应商 {provider_name} 使用 URL: {creds.base_url}")
 
         provider = get_provider(
             provider_name,
-            api_key=api_key,
-            base_url=base_url,
-            dry_run=dry,
+            api_key=creds.api_key,
+            base_url=creds.base_url,
+            dry_run=self._get_dry_run(),
         )
-        if not api_key:
+        if not creds.api_key:
             logger.warning(
-                f"[Seedance] 供应商 {provider_name} 实例化时 API Key 为空,"
-                f"请求将被跳过。请配置 Seedance_apikey_{provider_name}"
-                + (f" 或 RH_apikey" if provider_name == "runninghub" else "")
+                f"[Seedance] 供应商 {provider_name} 实例化时 API Key 为空,请求将被跳过。"
             )
         self._provider_cache[provider_name] = provider
         return provider
 
+    def _provider_serves_node(self, name: str, reg: Any, node: NodeDef) -> bool:
+        """指定供应商是否参与该节点的分发(不含凭证检查)
+
+        - 需要 model 字段的供应商:节点映射(backend_models / 跨插件注入 /
+          默认供应商兜底)必须解析出非空 vendor model id;
+        - 端点即模型的供应商(如 RunningHub):必须在 node.backend_models 中
+          挂名(值可为空串),避免"仅网关可用"的模型被错误分发到它头上。
+        """
+        if reg.accepts_model_field:
+            return bool(self._resolve_model_for_provider(name, node))
+        return name in (node.backend_models or {})
+
     def _resolve_candidates(self, node: NodeDef) -> list[str]:
         """解析候选 provider 列表。
 
-        优先使用节点级固定供应商;否则按 Seedance_Enable_{name} 开关
-        收集所有启用的供应商,再按负载均衡策略排序。
+        优先使用节点级固定供应商;否则收集所有"已启用且参与该节点"
+        的供应商,再按负载均衡策略排序(跨插件供应商共享同一套熔断状态)。
         """
-        from .registry import get_all_providers
         from ....rh_config.comfyui_config import SERVICE_CONFIG
 
         # 节点级固定供应商 → 单元素列表
-        node_provider = node.provider
-        if node_provider:
-            return [node_provider]
+        if node.provider:
+            return [node.provider]
 
-        # 收集所有已启用的供应商
         enabled: list[str] = []
-        for name in get_all_providers():
-            if self._is_provider_enabled(name):
-                enabled.append(name)
+        for name, reg in registered_providers().items():
+            if not reg.credentials().enabled:
+                continue
+            if not self._provider_serves_node(name, reg, node):
+                continue
+            enabled.append(name)
 
         if not enabled:
-            logger.warning("[Seedance] 所有供应商均已禁用,任务将失败")
+            logger.warning("[Seedance] 所有供应商均已禁用或无模型映射,任务将失败")
             return []
 
-        # 读取负载均衡策略
         lb_mode = SERVICE_CONFIG.get_config("Seedance_Load_Balance").data or "round_robin"
-        threshold_str = SERVICE_CONFIG.get_config("Seedance_Failure_Threshold").data or "3"
-        try:
-            threshold = int(threshold_str)
-        except (TypeError, ValueError):
-            threshold = 3
+        return order_candidates(enabled, load_balance_mode=lb_mode)
 
-        return resolve_provider_candidates(
-            node_provider=None,
-            configured="all",
-            base_url=None,
-            load_balance_mode=lb_mode,
-            failure_threshold=threshold,
-            _enabled_names=enabled,
-        )
+    def _get_failure_threshold(self) -> int:
+        from ....rh_config.comfyui_config import SERVICE_CONFIG
+
+        raw = SERVICE_CONFIG.get_config("Seedance_Failure_Threshold").data or "3"
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 3
 
     def _resolve_model_for_provider(
         self, provider_name: str, node: NodeDef
@@ -187,38 +148,65 @@ class SeedanceAdapter(Adapter):
         """解析指定 provider 应使用的 vendor model ID。
 
         优先级:
-        1. ``node.backend_models[provider_name]``(YAML 显式多供应商映射)
-        2. ``node.backend_model``(旧 YAML 兜底;仅 ark 兼容)
+        1. ``node.backend_models[provider_name]``(节点显式多供应商映射)
+        2. ``register_vendor_models()`` 注入的跨插件映射
+        3. ``node.backend_model``(仅默认供应商 ark 兜底)
 
         注意:**不接受** ``request.model`` 作为 fallback —— 它是用户指定的
         Pipeline 名(如 ``"seedance2"``),不是 vendor model id;若误塞进
-        请求体,会被 ARK / Gateway 直接以 "model 不存在" 拒掉。
+        请求体,会被上游直接以 "model 不存在" 拒掉。
 
-        RunningHub 端点本身即模型,不需要也不接受 ``model`` 字段,
-        一律返回 None。
+        不接受 model 字段的供应商(如 RunningHub,端点即模型)一律返回 None。
         """
-        # RunningHub 端点即模型,无需发送 model 字段
-        if provider_name == "runninghub":
+        reg = get_registration(provider_name)
+        if reg is not None and not reg.accepts_model_field:
             return None
 
-        backend_models = getattr(node, "backend_models", None) or {}
-        node_model: Optional[str] = None
-        if isinstance(backend_models, dict):
-            node_model = backend_models.get(provider_name) or None
-
-        # 兜底:旧 YAML 仅有顶层 backend_model 字段时,ark 仍可读取
+        node_model = (node.backend_models or {}).get(provider_name) or None
+        if not node_model:
+            node_model = vendor_model_for(provider_name, node.name)
         if not node_model and provider_name == "ark":
             node_model = node.backend_model
-
         return node_model
 
     # ── Adapter 接口 ──
 
+    @staticmethod
+    def _provider_configured(reg: Any) -> bool:
+        """供应商已启用且凭证齐全(enabled + api_key + base_url)"""
+        creds = reg.credentials()
+        return bool(creds.enabled and creds.api_key and creds.base_url)
+
     async def check_available(self) -> bool:
-        return True  # 真正的可用性以 provider 持有的 key 为准;execute 内会校验
+        """后端级可用性:至少一家供应商已启用且凭证齐全"""
+        return any(self._provider_configured(reg) for reg in registered_providers().values())
 
     async def get_unavailable_reason(self) -> str:
-        return "未配置 Seedance API Key,请在 Web 控制台配置 Seedance_apikey_ark/_gateway/_runninghub"
+        return (
+            "Seedance 无已配置的供应商:请在 Web 控制台配置 "
+            "Seedance_apikey_ark/_runninghub(或安装并配置外部供应商插件)"
+        )
+
+    async def check_node_available(self, node: NodeDef) -> bool:
+        """节点级可用性:候选供应商中至少一家凭证齐全且参与该节点"""
+        if node.provider:
+            reg = get_registration(node.provider)
+            return reg is not None and self._provider_configured(reg)
+        for name, reg in registered_providers().items():
+            if not self._provider_configured(reg):
+                continue
+            if not self._provider_serves_node(name, reg, node):
+                continue
+            return True
+        return False
+
+    async def get_node_unavailable_reason(self, node: NodeDef) -> str:
+        if node.provider:
+            reg = get_registration(node.provider)
+            if reg is None:
+                return f"供应商 {node.provider} 未注册(对应插件未安装?)"
+            return f"供应商 {node.provider} 未配置(需要启用开关 + API Key + Base URL)"
+        return await self.get_unavailable_reason()
 
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(
@@ -255,7 +243,7 @@ class SeedanceAdapter(Adapter):
         if not candidates:
             raise RuntimeError(
                 "Seedance 无可用供应商(所有候选均被熔断或配置错误),"
-                "请检查 Seedance_Enable_ark/_gateway/_runninghub 是否至少启用了一家"
+                "请检查 Seedance_Enable_ark/_runninghub(或外部供应商插件的启用开关)是否至少启用了一家"
             )
 
         spec: VideoGenSpec = classify_video_spec(request)
@@ -269,10 +257,15 @@ class SeedanceAdapter(Adapter):
         last_error: Optional[Exception] = None
         attempted: list[str] = []
 
+        threshold = self._get_failure_threshold()
+
         for provider_name in candidates:
             provider = self._get_or_create_provider(provider_name)
             model_id = model_map.get(provider_name)
 
+            if provider is None:
+                attempted.append(f"{provider_name}(未注册)")
+                continue
             if not provider.api_key:
                 logger.warning(f"[Seedance] 供应商 {provider_name} 缺少 API Key,跳过")
                 attempted.append(f"{provider_name}(无key)")
@@ -296,10 +289,10 @@ class SeedanceAdapter(Adapter):
                 raise
             except SeedanceProviderError as exc:
                 last_error = exc
-                record_provider_failure(provider_name)
+                record_provider_failure(provider_name, failure_threshold=threshold)
                 logger.warning(
                     f"[Seedance] 供应商 {provider_name} 失败({exc.code or exc}),"
-                    f"连续失败={self._get_failure_count(provider_name)},"
+                    f"连续失败={get_failure_count(provider_name)},"
                     f"{'将尝试下一个供应商' if provider_name != candidates[-1] else '已无更多候选'}"
                 )
                 continue
@@ -321,10 +314,10 @@ class SeedanceAdapter(Adapter):
                 # 想保留异常链只能手动赋值 __cause__。这样 logger.exception
                 # / 后续 traceback 仍能看到原始 httpx.ReadTimeout。
                 last_error.__cause__ = exc
-                record_provider_failure(provider_name)
+                record_provider_failure(provider_name, failure_threshold=threshold)
                 logger.warning(
                     f"[Seedance] 供应商 {provider_name} 网络错误({type(exc).__name__}: {exc}),"
-                    f"连续失败={self._get_failure_count(provider_name)},"
+                    f"连续失败={get_failure_count(provider_name)},"
                     f"{'将尝试下一个供应商' if provider_name != candidates[-1] else '已无更多候选'}"
                 )
                 continue
@@ -389,18 +382,6 @@ class SeedanceAdapter(Adapter):
         raise RuntimeError(
             f"Seedance 所有供应商均不可用(已尝试: {attempted_str}),且无更多错误信息"
         )
-
-    @staticmethod
-    def _get_failure_count(provider_name: str) -> int:
-        """获取供应商连续失败次数(供日志使用)。"""
-        from .registry import _failure_counts
-        return _failure_counts.get(provider_name, 0)
-
-
-# ── 向后兼容 ──
-
-SeedanceBackend = SeedanceAdapter
-
 
 # ── helpers ──
 
@@ -474,7 +455,7 @@ async def _safe_emit(cb: Optional[Any], event: ProgressEvent) -> None:
         pass
 
 
-__all__ = ["SeedanceAdapter", "SeedanceBackend"]
+__all__ = ["SeedanceAdapter"]
 
 
 def _user_msg_for_network_error(exc: BaseException) -> str:

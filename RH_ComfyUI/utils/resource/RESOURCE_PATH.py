@@ -20,9 +20,8 @@ _CP_WORKFLOW_PATH = Path(__file__).parent / "workflow"
 WORKFLOW_PATH = MAIN_PATH / "workflow"
 OUTPUT_PATH = MAIN_PATH / "output"
 
-# Pipeline 定义文件（内置，随插件发布）
-_CP_PIPELINES_PATH = Path(__file__).parent / "pipelines"
-# 运行时 Pipeline 路径（用户可自定义扩展）
+# 2026-07 起模型定义全编程式(models/*/defs.py),不再有内置 pipelines YAML;
+# 运行时路径仅保留目录常量供旧数据排查,启动时不再加载
 PIPELINES_PATH = MAIN_PATH / "pipelines"
 
 # 图片生成工作流(文生图/图生图/图片编辑)统一放在一个目录下,
@@ -76,17 +75,6 @@ def init_dir() -> None:
             pa = WORKFLOW_PATH / _dir.name / _file.name
             pa.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(_file, pa)
-
-    # 将内置 pipelines 复制到运行时路径
-    if _CP_PIPELINES_PATH.exists():
-        for _dir in _CP_PIPELINES_PATH.iterdir():
-            if _dir.is_dir():
-                dest_dir = PIPELINES_PATH / _dir.name
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                for _file in _dir.iterdir():
-                    dest_file = dest_dir / _file.name
-                    dest_file.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(_file, dest_file)
 
 
 init_dir()

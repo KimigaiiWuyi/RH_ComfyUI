@@ -104,9 +104,9 @@ async def _is_available(node: NodeDef, backend_registry: "AdapterRegistry") -> b
     if adapter is None:
         return False
     try:
-        return await adapter.check_available()
+        return await adapter.check_node_available(node)
     except Exception as e:  # noqa: BLE001
-        logger.debug(f"[Router] {node.backend} check_available 异常: {e}")
+        logger.debug(f"[Router] {node.backend} check_node_available 异常: {e}")
         return False
 
 
@@ -116,16 +116,16 @@ async def _collect_unavailable_reasons(
 ) -> str:
     seen: dict[str, str] = {}
     for node in candidates:
-        if node.backend in seen:
-            continue
         adapter = backend_registry.get(node.backend)
         if adapter is None:
             seen[node.backend] = f"后端 {node.backend} 未注册"
             continue
         try:
-            seen[node.backend] = await adapter.get_unavailable_reason()
+            reason = await adapter.get_node_unavailable_reason(node)
         except Exception:  # noqa: BLE001
-            seen[node.backend] = f"后端 {node.backend} 不可用"
+            reason = f"后端 {node.backend} 不可用"
+        # 同一后端的不同节点可能给出不同原因(如固定供应商未配置),按原因去重
+        seen[reason] = reason
     return "\n".join(f"- {reason}" for reason in seen.values())
 
 
@@ -241,7 +241,6 @@ def get_display_name(task_type: TaskType) -> str:
 def _ensure_runtime_initialized(registry: PipelineRegistry) -> None:
     """注册表为空时的懒加载兜底(热重载 / 启动钩子未执行)"""
     from ..backends import init_backends, backend_registry
-    from ..resource.RESOURCE_PATH import PIPELINES_PATH, _CP_PIPELINES_PATH
 
     if not backend_registry.all():
         init_backends()
@@ -249,7 +248,8 @@ def _ensure_runtime_initialized(registry: PipelineRegistry) -> None:
     if registry.all_pipelines():
         return
 
-    if _CP_PIPELINES_PATH.exists():
-        registry.load_from_directory(_CP_PIPELINES_PATH)
-    registry.load_from_directory(PIPELINES_PATH)
+    # 2026-07 起模型定义全编程式:懒加载兜底改走 discover_builtin_models
+    from ...models import discover_builtin_models
+
+    discover_builtin_models()
     logger.info(f"[Router] 懒加载节点完成: {len(registry.all_pipelines())} 个")

@@ -223,7 +223,7 @@ class RHAppAdapter(Adapter):
         elif root == "resolution":
             value = request.resolution
         elif root == "generate_audio":
-            value = request.generate_audio
+            value = bool(request.generate_audio)
         elif root == "watermark":
             value = request.watermark
         elif root == "camera_fixed":

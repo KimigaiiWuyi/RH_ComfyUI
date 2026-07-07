@@ -192,7 +192,8 @@ class GenerationRequest:
     seed: Optional[int] = None
 
     # ── 是否生成有声视频(Seedance 等) ──
-    generate_audio: bool = False
+    # 默认开启;调用方显式传值即覆盖。不支持有声的模型在 normalize 中静默置 False。
+    generate_audio: bool = True
 
     # ── 水印 ──
     watermark: bool = True
