@@ -1,0 +1,9 @@
+{
+  "extraPaths": ["../../../"],
+  "executionEnvironments": [
+    { "root": "..", "extraPaths": ["../../../"] }
+  ],
+  "venvPath": "../../../",
+  "venv": ".venv",
+  "typeCheckingMode": "basic"
+}

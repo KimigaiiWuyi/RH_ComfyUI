@@ -34,7 +34,7 @@ class _RecordNode:
 
 def _node_view(model: "AIGCGenerationBase", output: Optional[NodeOutput]) -> _RecordNode:
     """把模型实例(可能是 YAML 桥接模型)投影为统计所需的节点视图"""
-    node = getattr(model, "node", None)
+    node = model.node
     channel = ""
     vendor_model = ""
     if output is not None:
@@ -86,6 +86,8 @@ async def record_dispatch(
 
     from ...utils.database.statistics import record_task
 
+    key_prefix = str(output.metadata.get("key_prefix", "")) if output is not None else ""
+
     await record_task(
         request=request,
         result=result,
@@ -97,6 +99,7 @@ async def record_dispatch(
         group_id=ctx.group_id,
         trace_id=request.trace_id or ctx.trace_id,
         entry_point=ctx.billing.entry_point,
+        backend_key_prefix=key_prefix,
     )
 
 

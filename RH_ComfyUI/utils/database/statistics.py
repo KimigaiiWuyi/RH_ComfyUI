@@ -122,6 +122,7 @@ async def record_task(
     group_id: str = "",
     trace_id: str = "",
     entry_point: str = "",
+    backend_key_prefix: str = "",
 ) -> Optional[int]:
     """记录一次任务执行(模块函数,从 executor.py 直接调用)。
 
@@ -177,6 +178,7 @@ async def record_task(
             backend=node.backend[:32] if node.backend else "",
             backend_model=model_id[:128],
             backend_provider=provider[:32],
+            backend_key_prefix=backend_key_prefix[:16],
             duration_seconds=core.get("duration_seconds"),
             width=core.get("width"),
             height=core.get("height"),

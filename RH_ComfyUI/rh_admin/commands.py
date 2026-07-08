@@ -5,7 +5,7 @@
 所有核心函数都同时作为 AI Tools 注册.
 """
 
-from typing import Tuple, Optional, Annotated
+from typing import Tuple, Optional, Protocol, Annotated
 from datetime import datetime, timezone, timedelta
 
 from msgspec import Meta
@@ -293,11 +293,33 @@ _TASK_TYPE_LABEL: dict[str, str] = {
 }
 
 
-def _format_record_line(record: "RHComfyuiTaskRecord", *, show_user: bool = False) -> str:
+class _RecordLike(Protocol):
+    """_format_record_line 需要的字段(RHComfyuiTaskRecord 与 _DictRecord 都满足)。"""
+
+    @property
+    def is_success(self) -> bool: ...
+    @property
+    def created_at(self) -> Optional[datetime]: ...
+    @property
+    def task_name(self) -> str: ...
+    @property
+    def task_type(self) -> str: ...
+    @property
+    def user_id(self) -> str: ...
+    @property
+    def elapsed_ms(self) -> Optional[int]: ...
+    @property
+    def point_cost(self) -> int: ...
+    @property
+    def error_message(self) -> str: ...
+
+
+def _format_record_line(record: _RecordLike, *, show_user: bool = False) -> str:
     """把单条任务记录格式化为一行文本"""
     status_icon = "✅" if record.is_success else "❌"
     # DB 存 UTC,bot 给用户看时统一转北京(UTC+8)
-    ts = to_beijing(record.created_at).strftime("%m-%d %H:%M")
+    bj = to_beijing(record.created_at)
+    ts = bj.strftime("%m-%d %H:%M") if bj is not None else "--"
     type_label = _TASK_TYPE_LABEL.get(record.task_type, record.task_type)
     user_part = f" [{record.user_id}]" if show_user else ""
     elapsed = f"{record.elapsed_ms}ms" if record.elapsed_ms is not None else "?ms"

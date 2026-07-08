@@ -167,6 +167,11 @@ class ComfyUIAPI:
             req.raise_for_status()
             prompt_data = req.json()
         logger.info(f"Prompt ID: {prompt_data}")
+        # RunningHub 代理在失败时返回 HTTP 200 + {"code":...,"msg":"NOT_FOUND",...},
+        # raise_for_status() 抓不到;若无 prompt_id 直接抛错,避免下游
+        # prompt_data["prompt_id"] 抛出难以定位的 KeyError。
+        if not isinstance(prompt_data, dict) or "prompt_id" not in prompt_data:
+            raise RuntimeError(f"[ComfyUI] 提交工作流失败,响应缺少 prompt_id: {prompt_data}")
         return prompt_data
 
     def save_image(self, images: List[Dict[str, Any]], output_path: Path, image_name: str) -> Optional[Image.Image]:
@@ -396,20 +401,24 @@ class ComfyUIAPI:
             suffix = "png"
 
         if isinstance(image_path, Image.Image):
-            image_bytes = io.BytesIO()
-            image_path.save(image_bytes, format="PNG")
-            image_bytes.seek(0)
+            buffer = io.BytesIO()
+            image_path.save(buffer, format="PNG")
+            data = buffer.getvalue()
             image_name = f"{uuid.uuid4()}.{suffix}"
         elif isinstance(image_path, bytes):
-            image_bytes = io.BytesIO(image_path)
+            data = image_path
             image_name = f"{uuid.uuid4()}.{suffix}"
         else:
-            with open(image_path, "rb") as file:
-                image_bytes = file.read()
+            data = image_path.read_bytes()
             image_name = image_path.name
 
+        # RunningHub 代理不暴露 ComfyUI 原生 POST /upload/image(会返回
+        # {"code":404,"msg":"NOT_FOUND"}),必须改走 OpenAPI v2 二进制上传接口。
+        if self.is_runninghub:
+            return await self._upload_image_runninghub(data, image_name)
+
         files = {
-            "image": (image_name, image_bytes, type),
+            "image": (image_name, data, type),
             "type": (None, "input"),
             "overwrite": (None, "true"),
         }
@@ -417,11 +426,41 @@ class ComfyUIAPI:
         async with httpx.AsyncClient(timeout=6000, follow_redirects=True) as client:
             response = await client.post(f"{self.url}/upload/image", files=files)
             try:
-                upload_name = response.json()["name"]
-                return upload_name
-            except Exception:
-                logger.info(response.text)
-                return ""
+                return response.json()["name"]
+            except Exception as exc:
+                # 以前这里静默 return "",导致工作流带着空 LoadImage 提交,
+                # 最终以难以定位的 KeyError: 'prompt_id' 收场。改为抛出明确错误。
+                logger.error(f"[ComfyUI] 图片上传失败({response.status_code}): {response.text}")
+                raise RuntimeError(f"[ComfyUI] 图片上传失败: {response.text}") from exc
+
+    async def _upload_image_runninghub(self, data: bytes, filename: str) -> str:
+        """RunningHub 代理模式下上传图片,返回可供 LoadImage 引用的 fileName。
+
+        RunningHub 代理并不提供 ComfyUI 原生的 ``/upload/image``,而是通过
+        OpenAPI v2 的二进制上传接口接收媒体(见 ``rh_app/api.py``)。
+        """
+        key = self._raw_api_key
+        if not key:
+            raise RuntimeError("[ComfyUI] 未配置 RunningHub API Key(RH_apikey),无法上传图片")
+
+        url = "https://www.runninghub.cn/openapi/v2/media/upload/binary"
+        headers = {"Authorization": f"Bearer {key}"}
+        files = {"file": (filename, data)}
+
+        async with httpx.AsyncClient(timeout=6000, follow_redirects=True) as client:
+            response = await client.post(url, headers=headers, files=files)
+            response.raise_for_status()
+            payload = response.json()
+
+        if payload.get("code") != 0:
+            raise RuntimeError(f"[ComfyUI] RunningHub 图片上传失败: {payload}")
+
+        file_name = payload.get("data", {}).get("fileName")
+        if not file_name:
+            raise RuntimeError(f"[ComfyUI] RunningHub 图片上传返回异常: {payload}")
+
+        logger.info(f"[ComfyUI] RunningHub 图片上传成功: {file_name}")
+        return file_name
 
     async def _ws_listener(self) -> None:
         """从 WebSocket 接收消息的后台任务"""

@@ -1,9 +1,9 @@
-"""LoadBalancer — 通用负载均衡 + 熔断(自 backends/seedance/registry.py 提炼泛化)
+"""LoadBalancer — 通用负载均衡 + 熔断
 
-变化点(相对 seedance 版):
-- 状态从模块级全局字典 → LoadBalancer 实例属性,按 (scope, member) 二级 key
-- scope 通常是模型名;同一模型的多个通道共享一套熔断计数
-- 策略与阈值读 PLUGIN_CONFIG 通用键,Seedance_* 旧键迁移期兜底
+全模态统一的通道级负载均衡:
+- 状态按 (scope, member) 二级 key 记在 LoadBalancer 实例属性上;
+  scope=模型名,member=通道名;同一模型的多个通道共享一套熔断计数;
+- 策略与阈值读 SERVICE_CONFIG 通用键 Load_Balance_Mode / Failure_Threshold。
 """
 
 from __future__ import annotations
@@ -119,12 +119,15 @@ def get_default_balancer() -> LoadBalancer:
         try:
             from ...rh_config.comfyui_config import SERVICE_CONFIG
 
-            raw_mode = SERVICE_CONFIG.get_config("Seedance_Load_Balance").data
+            raw_mode = SERVICE_CONFIG.get_config("Load_Balance_Mode").data
             if isinstance(raw_mode, str) and raw_mode:
                 mode = raw_mode
-            raw_threshold = SERVICE_CONFIG.get_config("Seedance_Failure_Threshold").data
-            if isinstance(raw_threshold, int):
-                threshold = raw_threshold
+            raw_threshold = SERVICE_CONFIG.get_config("Failure_Threshold").data
+            if raw_threshold is not None:
+                try:
+                    threshold = int(raw_threshold)
+                except (TypeError, ValueError):
+                    pass
         except KeyError:
             # 配置键不存在(如测试环境):用内置默认策略
             pass

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 from datetime import datetime, timezone
 
 from sqlmodel import Field, SQLModel, col
@@ -14,6 +14,17 @@ from gsuid_core.utils.database.base_models import Bind, with_session
 
 from ..core.request import TaskType
 from ...rh_config.comfyui_config import PLUGIN_CONFIG
+
+
+class TaskSummary(TypedDict):
+    """RHComfyuiTaskRecord.get_summary() 的固定返回结构。"""
+
+    total: int
+    success: int
+    failed: int
+    success_rate: float
+    avg_elapsed_ms: int
+    by_task_type: dict[str, int]
 
 DEFAULT_POINT: int = PLUGIN_CONFIG.get_config("Default_Point").data
 
@@ -179,6 +190,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     backend: str = Field(default="", title="后端 comfyui/rh_app/seedance/...", max_length=32)
     backend_model: str = Field(default="", title="实际使用的厂商模型ID", max_length=128)
     backend_provider: str = Field(default="", title="供应商(ark/gateway/runninghub/...)", max_length=32)
+    backend_key_prefix: str = Field(default="", title="供应商 Key 前6位(审计用)", max_length=16)
 
     # ── 核心输入参数 ──
     duration_seconds: Optional[int] = Field(default=None, title="视频/音频时长(秒)")
@@ -294,7 +306,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         session: AsyncSession,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
-    ) -> dict[str, Any]:
+    ) -> TaskSummary:
         """聚合统计:总任务数 / 成功数 / 失败数 / 各类型计数 / 平均耗时"""
         conds: list[ColumnElement[bool]] = []
         if start_time is not None:
@@ -518,6 +530,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         backend: str,
         backend_model: str,
         backend_provider: str,
+        backend_key_prefix: str,
         duration_seconds: Optional[int],
         width: Optional[int],
         height: Optional[int],
@@ -551,6 +564,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             backend=backend,
             backend_model=backend_model,
             backend_provider=backend_provider,
+            backend_key_prefix=backend_key_prefix,
             duration_seconds=duration_seconds,
             width=width,
             height=height,
@@ -626,5 +640,6 @@ exec_list.extend(
     [
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN prompt TEXT DEFAULT ""',
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN entry_point VARCHAR(16) DEFAULT ""',
+        'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN backend_key_prefix VARCHAR(16) DEFAULT ""',
     ]
 )

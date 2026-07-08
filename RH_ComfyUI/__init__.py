@@ -10,11 +10,6 @@ Plugins(
 )
 
 # 触发 rh_models 的 setup():挂载 /RH_ComfyUI/models 系列 FastAPI 路由 + 注册命令
-from . import rh_models  # noqa: F401, E402
-
-# 确保配置在初始化时被注册到 gsuid_core 网页控制台
-from .rh_config.comfyui_config import PLUGIN_CONFIG, SERVICE_CONFIG  # noqa: F401, E402
-
 # 其余业务子包在此显式装载(顺序确定),配合下方模块身份统一,
 # 无论本树经哪条路径先被 import(嵌套加载器 / 跨插件 re-export / 测试),
 # 加载器后续的 cached_import 都会直接复用,不再 exec 出第二棵模块树。
@@ -25,12 +20,16 @@ from . import (  # noqa: F401, E402
     rh_help,
     rh_admin,
     rh_agent,
+    rh_models,  # noqa: F401, E402
     rh_generate,
 )
 
 # ── 模块身份统一:三种 import 前缀共享同一棵模块树 ──
 # (防止注册表 / 负载均衡熔断状态分裂、@on_core_start 钩子重复执行)
 from .utils.module_identity import unify_module_identity  # noqa: E402
+
+# 确保配置在初始化时被注册到 gsuid_core 网页控制台
+from .rh_config.comfyui_config import PLUGIN_CONFIG, SERVICE_CONFIG  # noqa: F401, E402
 
 unify_module_identity(__name__)
 

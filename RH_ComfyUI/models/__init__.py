@@ -2,9 +2,9 @@
 
 discover_builtin_models() 在 on_core_start 时被调用:
 1. 实例化四个模态 defs.py 里的全部模型类(每个模型一个类,继承模态基类);
-2. 每个模型的 NodeDef 同步注册进 pipeline_registry
-   (Adapter 执行 / AI 知识库 / HTTP 契约仍消费 NodeDef,数据源改为代码);
-3. 模型实例注册进 core.routing.model_registry;
+2. 模型实例注册进 core.routing.model_registry(单一事实来源);
+3. NodeDef 目录(pipeline_registry)由 model_registry 派生 —— Adapter 执行 /
+   AI 知识库 / HTTP 契约仍消费 NodeDef,但不再单独注册,避免两表漂移;
 4. 加载 pip entry points 提供的外部模型(闭源接入途径之一)。
 """
 
@@ -22,14 +22,12 @@ def discover_builtin_models() -> int:
     from .music.defs import ALL_MODELS as MUSIC_MODELS
     from .video.defs import ALL_MODELS as VIDEO_MODELS
     from .speech.defs import ALL_MODELS as SPEECH_MODELS
-    from ..utils.core.pipeline import pipeline_registry
     from ..core.routing.registry import model_registry, load_entry_point_models
 
+    # NodeDef 目录(pipeline_registry)现由 model_registry 派生,无需再单独注册
     count = 0
     for cls in (*IMAGE_MODELS, *MUSIC_MODELS, *SPEECH_MODELS, *VIDEO_MODELS):
-        model = cls()
-        pipeline_registry.register(model.node)
-        model_registry.register(model)
+        model_registry.register(cls())
         count += 1
 
     external = load_entry_point_models()

@@ -1,9 +1,10 @@
 """模型清单核心 API — 聚合 PipelineRegistry + AdapterRegistry
 
 数据来源:
-- `pipeline_registry.all_pipelines()` — 节点定义(从 YAML 加载)
-- `backend_registry.all()` — 后端 Adapter 实例
-- `adapter.check_available()` — 后端是否真的可用(配置是否完整)
+- `pipeline_registry.all_pipelines()` — 节点定义(编程式 defs.py)
+- `model_registry` — ABC 模型实例;可用性 = 任一通道可用
+  (含外部插件经 channel_registry 注入的通道,如网关);无 ABC 模型的历史
+  节点才回退按 `backend_registry` 的 Adapter 判定
 
 设计要点:
 1. 复用 router 模块的 `_is_available`,但避免循环依赖,这里直接调用
@@ -79,6 +80,10 @@ class ModelEntry:
     card: dict[str, Any] = field(default_factory=dict)
     channels: list[dict[str, Any]] = field(default_factory=list)
     execution_mode: str = "sync"
+    # ── 输入能力显式标注:纯文生图模型 accepts_images=False,前端/agent 不必解析
+    #    input_schema 即可判定是否可传参考图,以及最多几张 ──
+    accepts_images: bool = False
+    max_input_images: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -121,32 +126,28 @@ def _port_to_schema(port_dict: dict) -> dict[str, Any]:
 
 
 async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
-    """从 NodeDef 构建 ModelEntry,带后端可用性检查"""
-    adapter = backend_registry.get(node.backend)
+    """从 NodeDef 构建 ModelEntry;可用性以 ABC 模型为准(任一通道可用即可用)"""
+    from ..core.routing.registry import model_registry
+
     available = False
     reason: Optional[str] = None
-    if adapter is None:
-        reason = f"后端 {node.backend} 未注册"
-    else:
-        try:
-            available = await adapter.check_node_available(node)
-        except Exception as e:  # noqa: BLE001
-            reason = f"check_node_available 异常: {e}"
-            available = False
-        if not available and reason is None:
-            try:
-                reason = await adapter.get_node_unavailable_reason(node)
-            except Exception:  # noqa: BLE001
-                reason = "后端不可用"
-
-    # ABC 注册表侧的增强元数据(桥接/编程式模型都有;查不到则留默认值)
     card: dict[str, Any] = {}
     channels: list[dict[str, Any]] = []
     execution_mode = "sync"
-    from ..core.routing.registry import model_registry
 
     model_obj = model_registry.get(node.name)
     if model_obj is not None:
+        # 以模型的通道为准:内置 + 外部插件注入的通道(如网关/Azure)任一可用即可用。
+        # 不能再按 backend Adapter 判定 —— Seedance/Gemini 已无 Adapter。
+        try:
+            available = await model_obj.check_available()
+        except Exception as e:  # noqa: BLE001
+            reason = f"check_available 异常: {e}"
+        if not available and reason is None:
+            try:
+                reason = await model_obj.unavailable_reason()
+            except Exception:  # noqa: BLE001
+                reason = "无可用通道"
         card = model_obj.card.to_dict()
         execution_mode = model_obj.execution_mode
         for b in model_obj.channel_bindings():
@@ -157,6 +158,26 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
                     "available": await b.channel.check_available(),
                 }
             )
+    else:
+        # 回退:无 ABC 模型的历史节点仍按后端 Adapter 判定
+        adapter = backend_registry.get(node.backend)
+        if adapter is None:
+            reason = f"后端 {node.backend} 未注册"
+        else:
+            try:
+                available = await adapter.check_node_available(node)
+            except Exception as e:  # noqa: BLE001
+                reason = f"check_node_available 异常: {e}"
+            if not available and reason is None:
+                try:
+                    reason = await adapter.get_node_unavailable_reason(node)
+                except Exception:  # noqa: BLE001
+                    reason = "后端不可用"
+
+    # 输入能力:是否可传参考图 + 上限(纯文生图 / 纯文本模型无 images 端口)
+    img_port = node.inputs.get("images") or node.inputs.get("image")
+    accepts_images = img_port is not None
+    max_input_images = int(img_port.max_items) if img_port is not None and img_port.max_items else 0
 
     return ModelEntry(
         name=node.name,
@@ -176,6 +197,8 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
         card=card,
         channels=channels,
         execution_mode=execution_mode,
+        accepts_images=accepts_images,
+        max_input_images=max_input_images,
     )
 
 

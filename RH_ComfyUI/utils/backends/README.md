@@ -64,8 +64,13 @@ backend_registry.register(GPTImage2Adapter())
 backend_registry.register(RHAppAdapter())
 backend_registry.register(MiniMaxAdapter())
 backend_registry.register(MIMOAdapter())
-backend_registry.register(SeedanceAdapter())
 ```
+
+> Seedance 不再是 Adapter：每家供应商(ark/runninghub/网关)= 一个
+> `SeedanceProviderChannel`([`seedance/channel.py`](RH_ComfyUI/utils/backends/seedance/channel.py:1)),
+> 由通用 `LoadBalancer` 统一排序 / 熔断 / 故障切换。SeedanceProvider 的
+> render/parse/poll 机制([`seedance/provider.py`](RH_ComfyUI/utils/backends/seedance/provider.py:1))
+> 保留,通道只是薄包装。
 
 ### 3. ComfyUI 后端 [`comfyui/`](RH_ComfyUI/utils/backends/comfyui/)
 

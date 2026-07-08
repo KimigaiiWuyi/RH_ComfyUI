@@ -16,7 +16,7 @@ from ...core.request import (
     OutputType,
     GenerationRequest,
 )
-from ...core.pipeline import NodeDef
+from ...core.pipeline import NodeDef, MappingRule
 
 
 class RHAppAdapter(Adapter):
@@ -156,33 +156,9 @@ class RHAppAdapter(Adapter):
         return node_info_list
 
     @staticmethod
-    def _normalize_mappings(mappings: dict[str, Any] | list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if isinstance(mappings, list):
-            return mappings
-
-        normalized: list[dict[str, Any]] = []
-        for source, mapping in mappings.items():
-            if not isinstance(mapping, dict):
-                raise RuntimeError(f"[RHApp] 旧版声明式映射必须是字典: {source}")
-
-            if "target" in mapping:
-                rule = dict(mapping)
-                if "source" not in rule and "value" not in rule:
-                    rule["source"] = source
-                normalized.append(rule)
-                continue
-
-            if "node_id" not in mapping or "field_name" not in mapping:
-                raise RuntimeError(f"[RHApp] 旧版声明式映射缺少 node_id/field_name: {source}")
-            rule = {
-                "source": source,
-                "target": f"{mapping['node_id']}.{mapping['field_name']}",
-            }
-            for key in ("default", "type", "template", "optional", "value", "description"):
-                if key in mapping:
-                    rule[key] = mapping[key]
-            normalized.append(rule)
-        return normalized
+    def _normalize_mappings(mappings: list[MappingRule]) -> list[dict[str, Any]]:
+        # 复制成可变 dict,供下游 resolver 读取(不改动 NodeDef 上的规则)
+        return [dict(m) for m in mappings]
 
     async def _resolve_mapping_value(self, request: GenerationRequest, rule: dict[str, Any]) -> Any:
         if "value" in rule:

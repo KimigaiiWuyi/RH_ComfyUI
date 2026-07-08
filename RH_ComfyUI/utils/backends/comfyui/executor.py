@@ -27,7 +27,7 @@ from ...core.request import (
     OutputType,
     GenerationRequest,
 )
-from ...core.pipeline import NodeDef
+from ...core.pipeline import NodeDef, MappingRule
 from ...resource.RESOURCE_PATH import WORKFLOW_PATH, load_workflow
 
 
@@ -162,7 +162,7 @@ class ComfyUIAdapter(Adapter):
     async def _apply_declarative_mappings(
         self,
         request: GenerationRequest,
-        mappings: dict[str, Any] | list[dict[str, Any]],
+        mappings: list[MappingRule],
         workflow: dict[str, Any],
     ) -> dict[str, Any]:
         """将声明式映射规则应用到工作流"""
@@ -208,31 +208,9 @@ class ComfyUIAdapter(Adapter):
         return workflow
 
     @staticmethod
-    def _normalize_mappings(mappings: dict[str, Any] | list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if isinstance(mappings, list):
-            return mappings
-
-        normalized: list[dict[str, Any]] = []
-        for source, mapping in mappings.items():
-            if not isinstance(mapping, dict):
-                raise RuntimeError(f"旧版声明式映射必须是字典: {source}")
-            if "target" in mapping:
-                rule: dict[str, Any] = dict(mapping)
-                if "source" not in rule and "value" not in rule:
-                    rule["source"] = source
-                normalized.append(rule)
-                continue
-            if "node_id" not in mapping or "input_key" not in mapping:
-                raise RuntimeError(f"旧版声明式映射缺少 node_id/input_key: {source}")
-            rule = {
-                "source": source,
-                "target": f"{mapping['node_id']}.inputs.{mapping['input_key']}",
-            }
-            for key in ("default", "type", "template", "optional", "value"):
-                if key in mapping:
-                    rule[key] = mapping[key]
-            normalized.append(rule)
-        return normalized
+    def _normalize_mappings(mappings: list[MappingRule]) -> list[dict[str, Any]]:
+        # 复制成可变 dict,供下游 resolver 读取(不改动 NodeDef 上的规则)
+        return [dict(m) for m in mappings]
 
     async def _resolve_mapping_value(self, request: GenerationRequest, rule: dict[str, Any]) -> Any:
         if "value" in rule:

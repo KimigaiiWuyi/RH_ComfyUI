@@ -16,17 +16,18 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable, Optional, Awaitable
+from typing import TYPE_CHECKING, Optional
 
-from ..core.types import NodeOutput, ProgressEvent, CapabilityManifest
+from ..core.types import (
+    NodeOutput,
+    ProgressEvent,
+    ProgressCallback,
+    CapabilityManifest,
+)
 from ..core.request import GenerationResult, GenerationRequest
 
 if TYPE_CHECKING:
     from ..core.pipeline import NodeDef
-
-
-# 进度回调类型(可选)
-ProgressCallback = Callable[[ProgressEvent], Awaitable[None]]
 
 
 class Adapter(ABC):

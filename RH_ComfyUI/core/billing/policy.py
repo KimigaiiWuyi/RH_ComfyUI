@@ -4,7 +4,7 @@
 - PointsBillingPolicy   : RHBind 积分(bot 命令 / AI Agent 入口默认)
 - ExternalPrepaidPolicy : 调用方已在外部记账(canvas_backend 走 account_system),
                           引擎侧只记账不扣费
-- 企业自定义            : 企业插件实现本 ABC 后在自己的入口注入
+- 生态自定义            : 另外的兼容插件生态实现本 ABC 后在自己的入口注入
 """
 
 from __future__ import annotations

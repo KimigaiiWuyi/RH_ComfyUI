@@ -15,7 +15,7 @@ from typing import Any, Optional
 from ..core.base.image import ImageGenerationBase
 from ..core.base.music import MusicGenerationBase
 from ..core.base.video import VideoTaskShape, VideoGenerationBase
-from ..core.base.errors import ChannelError
+from ..core.base.errors import ChannelError, GenerationError
 from ..core.base.speech import DigitalHumanSpeechBase
 from ..core.schema.card import ModelCard
 from ..core.schema.types import PortSpec, NodeOutput, ProgressCallback
@@ -23,6 +23,7 @@ from ..core.schema.request import TaskType, GenerationRequest
 from ..utils.core.pipeline import NodeDef
 from ..core.base.generation import AIGCGenerationBase
 from ..core.channels.channel import ChannelBinding, ProviderChannel
+from ..core.channels.registry import channel_registry
 
 
 class AdapterChannel(ProviderChannel):
@@ -52,11 +53,23 @@ class AdapterChannel(ProviderChannel):
         adapter = self._adapter()
         if adapter is None:
             raise ChannelError(f"后端 {self.name} 未注册", retryable=False)
-        return await adapter.execute(
-            kwargs["request"],
-            kwargs["node"],
-            on_progress=kwargs.get("on_progress"),
-        )
+        try:
+            return await adapter.execute(
+                kwargs["request"],
+                kwargs["node"],
+                on_progress=kwargs.get("on_progress"),
+            )
+        except GenerationError:
+            # ChannelError/ValidationError 等已有明确语义,原样抛(含 retryable 标注)
+            raise
+        except Exception as e:
+            # 后端/上游失败翻译成可切换通道错误,让 run() 尝试下一路供应商
+            raise ChannelError(
+                f"后端 {self.name} 执行失败: {e}",
+                retryable=True,
+                channel=self.name,
+                user_message=str(e),
+            ) from e
 
 
 class _PipelineBackedMixin:
@@ -84,7 +97,10 @@ class _PipelineBackedMixin:
         return super().output_schema()  # type: ignore[misc]
 
     def channel_bindings(self) -> list[ChannelBinding]:
-        return [ChannelBinding(channel=self._channel, vendor_model=self.node.backend_model)]
+        # 内置直连通道 + 外部插件为本模型注入的通道(如另一家供应商)
+        bindings = [ChannelBinding(channel=self._channel, vendor_model=self.node.backend_model)]
+        bindings.extend(channel_registry.bindings_for(self.name))
+        return bindings
 
     async def unavailable_reason(self) -> str:
         return await self._channel.unavailable_reason()
@@ -96,10 +112,13 @@ class _PipelineBackedMixin:
         *,
         on_progress: Optional[ProgressCallback] = None,
     ) -> NodeOutput:
-        output = await binding.channel.invoke(request=request, node=self.node, on_progress=on_progress)
-        # 统计口径:provider 由 Adapter 决定(如 Seedance 内部 LB),回落 backend 名
-        output.metadata.setdefault("channel", self.node.provider or self.node.backend)
-        return output
+        # provider 归属由通道决定;run() 落 metadata["channel"]=binding.channel.name
+        return await binding.channel.invoke(
+            request=request,
+            node=self.node,
+            on_progress=on_progress,
+            vendor_model=binding.vendor_model,
+        )
 
 
 class ImagePipelineModel(_PipelineBackedMixin, ImageGenerationBase):

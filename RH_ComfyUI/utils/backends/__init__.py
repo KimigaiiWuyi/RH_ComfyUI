@@ -46,15 +46,15 @@ def init_backends() -> AdapterRegistry:
     from .rh_app.executor import RHAppAdapter
     from .comfyui.executor import ComfyUIAdapter
     from .minimax.executor import MiniMaxAdapter
-    from .seedance.executor import SeedanceAdapter
     from .gpt_image2.executor import GPTImage2Adapter
 
     backend_registry.register(ComfyUIAdapter())
     backend_registry.register(RHAppAdapter())
     backend_registry.register(MiniMaxAdapter())
     backend_registry.register(MIMOAdapter())
-    backend_registry.register(SeedanceAdapter())
     backend_registry.register(GPTImage2Adapter())
+    # Seedance / Gemini 不是 Adapter:各供应商 = 一个 ProviderChannel,
+    # 由通用 LoadBalancer 统一调度(见 seedance/channel.py、gemini_image/channel.py)。
 
     return backend_registry
 

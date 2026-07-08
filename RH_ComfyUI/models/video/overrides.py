@@ -10,12 +10,18 @@ validate() 的跨字段约束里 —— 这正是"参数处理回到代码"的�
 
 from __future__ import annotations
 
+from typing import Optional
+
 from ..bridge import VideoPipelineModel
 from ...core.base.video import VideoTaskShape
 from ...core.base.errors import ValidationError
 from ...core.schema.card import ModelCard
+from ...core.schema.types import NodeOutput, ProgressCallback
 from ...core.schema.request import GenerationRequest
 from ...utils.core.pipeline import NodeDef
+from ...core.channels.channel import ChannelBinding
+from ...core.channels.registry import channel_registry
+from ...utils.backends.seedance.channel import builtin_seedance_channels
 
 
 class SeedanceVideoModel(VideoPipelineModel):
@@ -47,6 +53,66 @@ class SeedanceVideoModel(VideoPipelineModel):
             raise ValidationError(f"{self.display_name} 最多接受 3 段参考视频,当前 {len(request.video_refs)} 段")
         if len(request.audio_refs) > 3:
             raise ValidationError(f"{self.display_name} 最多接受 3 段参考音频,当前 {len(request.audio_refs)} 段")
+
+    # ── 多供应商通道(交给通用 LoadBalancer 排序 / 熔断 / 故障切换) ──
+
+    def _vendor_model_for(self, provider_name: str) -> Optional[str]:
+        """该供应商应使用的 vendor model ID(ark 兜底 backend_model;端点即模型的供应商返回 None)。"""
+        node = self.node
+        vm = (node.backend_models or {}).get(provider_name) or None
+        if not vm and provider_name == "ark":
+            vm = node.backend_model
+        return vm
+
+    def _serves(self, provider_name: str, channel) -> bool:
+        """内置供应商是否参与本节点的分发。
+
+        - 需要 model 字段的供应商(ark):必须解析出非空 vendor model id;
+        - 端点即模型的供应商(runninghub):必须在 node.backend_models 中挂名
+          (值可为空串),避免"仅网关可用"的模型被错误分发到它头上。
+        """
+        if channel.accepts_model_field:
+            return bool(self._vendor_model_for(provider_name))
+        return provider_name in (self.node.backend_models or {})
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        node = self.node
+        builtins = builtin_seedance_channels()
+        external = channel_registry.bindings_for(node.name)
+
+        # 节点级固定供应商 → 只走该供应商的通道
+        if node.provider:
+            ch = builtins.get(node.provider)
+            if ch is not None:
+                return [ChannelBinding(ch, vendor_model=self._vendor_model_for(node.provider))]
+            return [b for b in external if b.channel.name == node.provider]
+
+        bindings: list[ChannelBinding] = []
+        for name, ch in builtins.items():
+            if self._serves(name, ch):
+                bindings.append(ChannelBinding(ch, vendor_model=self._vendor_model_for(name)))
+        bindings.extend(external)
+        return bindings
+
+    async def execute_on_channel(
+        self,
+        request: GenerationRequest,
+        binding: ChannelBinding,
+        *,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> NodeOutput:
+        return await binding.channel.invoke(
+            request=request,
+            node=self.node,
+            on_progress=on_progress,
+            vendor_model=binding.vendor_model,
+        )
+
+    async def unavailable_reason(self) -> str:
+        return (
+            f"{self.display_name} 无可用供应商:请在 Web 控制台配置 "
+            "Seedance_apikey_ark / _runninghub(或安装并配置外部供应商插件)"
+        )
 
 
 class Wan22VideoModel(VideoPipelineModel):

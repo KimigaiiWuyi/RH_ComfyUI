@@ -17,15 +17,27 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict, overload
 from datetime import datetime, timezone, timedelta
 
 from .models import RHComfyuiTaskRecord
+
+
+class TaskTypeBreakdown(TypedDict):
+    """按任务类型聚合的一行(_aggregate_by_task_type 的元素)。"""
+
+    task_type: str
+    count: int
+    points: int
 
 # 北京时区(UTC+8,固定偏移;不用 zoneinfo 是因为 Windows 上 zoneinfo 不可用)
 BEIJING_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 
+@overload
+def to_beijing(dt: datetime) -> datetime: ...
+@overload
+def to_beijing(dt: None) -> None: ...
 def to_beijing(dt: Optional[datetime]) -> Optional[datetime]:
     """把任意带 tzinfo 的 datetime 转北京时区(UTC+8)。
 
@@ -45,11 +57,7 @@ def to_beijing(dt: Optional[datetime]) -> Optional[datetime]:
 
 
 def _record_to_dict(r: RHComfyuiTaskRecord) -> dict[str, Any]:
-    """把单条 RHComfyuiTaskRecord 序列化为 dict(JSON 可序列化)。
-
-    prompt 字段(2026-07-01 新增)在旧表里可能没有(SQLite ALTER 之前),
-    用 getattr 兜空串以保证历史记录也能序列化。
-    """
+    """把单条 RHComfyuiTaskRecord 序列化为 dict(JSON 可序列化)。"""
     return {
         "id": r.id,
         "user_id": r.user_id,
@@ -67,7 +75,7 @@ def _record_to_dict(r: RHComfyuiTaskRecord) -> dict[str, Any]:
         "resolution": r.resolution,
         "seed": r.seed,
         "voice_id": r.voice_id,
-        "prompt": getattr(r, "prompt", "") or "",
+        "prompt": r.prompt or "",
         "status": r.status,
         "is_success": r.is_success,
         "elapsed_ms": r.elapsed_ms,
@@ -79,7 +87,7 @@ def _record_to_dict(r: RHComfyuiTaskRecord) -> dict[str, Any]:
     }
 
 
-def _aggregate_by_task_type(records: list[RHComfyuiTaskRecord]) -> list[dict[str, Any]]:
+def _aggregate_by_task_type(records: list[RHComfyuiTaskRecord]) -> list[TaskTypeBreakdown]:
     """基于 records 列表聚合任务类型分布(按总积分降序)。
 
     返回 `[{task_type, count, points}, ...]`,空 records 时返回 `[]`。

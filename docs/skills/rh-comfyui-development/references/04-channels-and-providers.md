@@ -54,10 +54,27 @@ def channel_bindings(self) -> list[ChannelBinding]:
     ]
 ```
 
-对桥接模型(defs.py 里的类):Seedance 系列的多供应商仍由 Adapter 内部
-处理(`backend_models` 字段声明各家的模型 ID:ark/gateway/runninghub),
-在 `node_def()` 的 `backend_models` 里加一项即可;全新模型建议直接用
-多 ChannelBinding 方式。
+Seedance 系列(`SeedanceVideoModel`)已改为多 ChannelBinding:
+`channel_bindings()` 用 `builtin_seedance_channels()` 拼出 ark + runninghub,
+`backend_models`(node_def)提供各家 vendor model id;加一家内置供应商就在
+这里加一个 `SeedanceProviderChannel`。
+
+### 4.3.1 外部插件为既有模型加一家供应商(通用扩展点)
+
+不改开源仓库、给任意已注册模型追加一条通道:外部插件构造自己的
+`ProviderChannel`(自带凭证面板),经 `channel_registry.register_binding()`
+注入:
+
+```python
+from RH_ComfyUI.core import channel_registry
+channel_registry.register_binding("gpt-image-2", MyAzureChannel())
+```
+
+所有桥接模型(`_PipelineBackedMixin.channel_bindings()`)都会自动并入
+`channel_registry.bindings_for(self.name)`,与内置通道一起参与负载均衡。
+通道自身的 `check_available()` 决定是否被选用(没填 key / 并发占满 →
+返回 False 自动让路),`invoke()` 出错抛 `ChannelError(retryable=True)`
+则切下一通道。
 
 ## 4.4 负载均衡与熔断(core/routing/balancer.py)
 
@@ -66,8 +83,8 @@ def channel_bindings(self) -> list[ChannelBinding]:
 - `order_candidates()` 按策略(优先级/权重/随机)排序候选;
 - `record_failure()` 达到阈值触发熔断,冷却期内该通道被排到最后/跳过;
   `record_success()` 恢复;
-- 策略与阈值读 `PLUGIN_CONFIG` 通用键;`Seedance_*` 旧键仅迁移期兜底,
-  **不要新增依赖**;
+- 策略与阈值读 SERVICE_CONFIG 通用键 `Load_Balance_Mode` / `Failure_Threshold`
+  (旧 `Seedance_Load_Balance` / `Seedance_Failure_Threshold` 已迁移至此);
 - 熔断只由 `ChannelError(retryable=True)` 触发,业务校验错误不影响通道健康度。
 
 ## 4.5 轮询型上游

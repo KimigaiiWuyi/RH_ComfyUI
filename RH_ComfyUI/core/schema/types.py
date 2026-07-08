@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Awaitable
-
 from ...utils.core.types import (
     MediaRef,
     PortSpec,
@@ -17,6 +15,7 @@ from ...utils.core.types import (
     ContentItem,
     ProgressEvent,
     ContentItemType,
+    ProgressCallback,
     CapabilityManifest,
     audio_ref,
     image_ref,
@@ -27,9 +26,6 @@ from ...utils.core.types import (
     video_item,
     draft_task_item,
 )
-
-# 进度回调:async 回调(与 utils.backends.base.ProgressCallback 语义一致)
-ProgressCallback = Callable[[ProgressEvent], Awaitable[Optional[None]]]
 
 __all__ = [
     "PortType",

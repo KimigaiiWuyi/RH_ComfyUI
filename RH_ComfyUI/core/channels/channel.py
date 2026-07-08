@@ -37,6 +37,10 @@ class ProviderChannel(ABC):
         实现方须把上游错误翻译为 ChannelError(retryable 标注是否可切换通道)。
         """
 
+    def audit_key_prefix(self) -> str:
+        """审计用:当前生效凭证 key 前 6 位(默认空;持密钥的通道覆盖)"""
+        return ""
+
 
 @dataclass
 class ChannelBinding:

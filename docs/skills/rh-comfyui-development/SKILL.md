@@ -37,6 +37,7 @@ description: >
 | 九 | 后端 Adapter、映射器与配置体系(六后端、Seedance Provider 子层、SERVICE/PLUGIN_CONFIG 全键) | [references/09-backends-and-config.md](./references/09-backends-and-config.md) |
 | 十 | 命令清单与数据库(触发词、to_ai、RHBind、RHComfyuiTaskRecord 全列) | [references/10-commands-and-database.md](./references/10-commands-and-database.md) |
 | 十一 | 凭证热更新(中途改 key 不重启)— `@property` / `refresh_config` / `update_credentials` 三种写法 | [references/11-credential-hot-reload.md](./references/11-credential-hot-reload.md) |
+| 十二 | 供应商通道 / Gemini 生图 / 能力一致性 — 单层负载均衡、AdapterChannel 翻错、/models 可用性、Gemini SDK 双模、图在 steps、input_schema 与能力同步、计费退款 | [references/12-provider-channels-and-gemini.md](./references/12-provider-channels-and-gemini.md) |
 
 ## 快速决策表(先看这里)
 
@@ -49,8 +50,10 @@ description: >
 | 改模型积分价格 | defs 类的 `point_cost`(node_def 里) | 三 |
 | 排查"扣了积分没出图" | dispatch 失败语义 + 统计表 `status/refunded` | 五 |
 | 前端画布要新字段 | HTTP 契约只增不改,`ModelEntry` 加带默认值的字段 | 六 |
-| 写闭源/企业模型 | 独立插件 `model_registry.register()` 或 entry points | 七 |
+| 写闭源 / 另外的兼容插件生态模型 | 独立插件 `model_registry.register()` 或 entry points | 七 |
 | 接一个全新上游 API | backends 新 Adapter(或 ProviderChannel)+ 配置键 | 九、四 |
+| 加/改一个图片供应商(如 Gemini)/ 给模型加第二家供应商 | ProviderChannel + `channel_registry.register_binding` | 十二、四 |
+| 改模型能不能传参考图 / 参考图上限 | defs 的 `images` 端口(有无 + `max_items`),需与 `supported_shapes`/`supports_edit` 同步 | 十二、三 |
 | 改请求组装 / workflow 注入 | `utils/mappers/` 对应函数 | 九 |
 | 改命令触发词 / to_ai 文案 | rh_generate(触发词是兼容承诺,慎改) | 十 |
 | 加统计维度 / 查积分逻辑 | RHComfyuiTaskRecord / RHBind | 十、五 |
@@ -59,7 +62,7 @@ description: >
 
 1. **不要绕过 `core.dispatch.dispatch()` 直接调 `model.run()`** —— 计费与统计会丢。
 2. **`check_available()` / `validate()` 禁止网络请求与副作用** —— 路由阶段会批量调用。
-3. **开源仓库零闭源内容** —— 不写企业 URL、不写条件 import、不留 `if enterprise` 分支。
+3. **开源仓库零闭源内容** —— 不写另外的兼容插件生态的 URL、不写条件 import、不留按来源分叉的条件分支。
 
 ## 验证命令
 

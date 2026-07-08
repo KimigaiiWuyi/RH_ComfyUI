@@ -35,7 +35,9 @@ from .RH_ComfyUI.utils.core.types import ProgressEvent  # noqa: F401
 from .RH_ComfyUI.utils.core.pipeline import NodeDef, pipeline_registry  # noqa: F401
 
 # RHBind 积分表(供 canvas_backend 的 credit_rh 跨插件调用,与 bot 命令共用同一笔账)
-from .RH_ComfyUI.utils.database.models import RHBind  # noqa: F401
+# RHComfyuiTaskRecord 消费记录表:HTTP 生成自管积分(charge_rh/refund_rh),不经引擎
+# billing,失败退款后需由调用方 mark_last_failed_refunded 把消费记录标为已退款。
+from .RH_ComfyUI.utils.database.models import RHBind, RHComfyuiTaskRecord  # noqa: F401
 
 # 结构化查询入口(供 canvas_backend HTTP / 其它下游插件使用)
 # 在此显式 re-export,让 `from RH_ComfyUI import build_*_payload` 直接可用,
@@ -67,4 +69,5 @@ __all__ = [
     "build_admin_records_payload",
     # 跨插件积分扣减(canvas_backend credit_rh 使用)
     "RHBind",
+    "RHComfyuiTaskRecord",
 ]

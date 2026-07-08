@@ -11,6 +11,7 @@ from ..bridge import ImagePipelineModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType
 from ...utils.core.pipeline import NodeDef
+from ...core.channels.channel import ChannelBinding
 from ...utils.mappers.gpt_image2 import gpt_image2_mapper as _gpt_image2_mapper
 from ...utils.mappers.image_edit import qwen_edit_mapper as _qwen_edit_mapper
 from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minimax_image01_mapper
@@ -68,7 +69,11 @@ class AnimaDef(ImagePipelineModel):
 
 
 class Banana2Def(ImagePipelineModel):
-    """Nano Banana 2 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)"""
+    """Nano Banana 2 — 走原生 Gemini Interactions API(非 OpenAI 兼容网关)
+
+    独立于 gpt-image-2:唯一通道是 GeminiImageChannel(填 Project ID 走 VertexAI,
+    留空走 AI Studio)。请求 Nano Banana 2 不会经过 gpt-image-2 后端。
+    """
 
     def __init__(self) -> None:
         super().__init__(self.node_def())
@@ -79,37 +84,44 @@ class Banana2Def(ImagePipelineModel):
             name="banana2",
             display_name="Nano Banana 2",
             task_type=TaskType("image"),
-            backend="gpt-image-2",
+            backend="gemini-image",
             point_cost=2,
-            description="Gemini 3.1 Flash 图像生成/编辑模型,速度快,适合快速生成和预览",
+            description="Gemini 3.1 Flash 图像生成/编辑模型(原生 Interactions API),速度快",
             knowledge_content=(
-                "Nano Banana 2 图像生成/编辑模型(Gemini 3.1 Flash)。"
+                "Nano Banana 2 图像生成/编辑模型(Gemini 3.1 Flash,原生 Interactions API)。"
                 "\n"
-                "优势:生成速度非常快,支持快速迭代测试,质量稳定可控,适合批量生成;"
+                "优势:生成速度快,质量稳定,支持图片编辑(传入 1~N 张参考图自动进入编辑)。"
                 "\n"
-                "同时支持图片编辑(传入 1~N 张参考图时自动进入编辑模式)。"
-                "\n"
-                "适用场景:需要较快速度但保持较好质量的图像,精细画面,快速图片编辑。"
+                "适用场景:较快速度但保持较好质量的图像,精细画面,快速图片编辑。"
                 "\n"
                 "不适用场景:需要极高细节的专业商业图(建议用 banana_pro)。"
                 "\n"
+                "凭证:VertexAI(填 Project ID,key 作 Bearer)或 AI Studio(仅需 key)。"
+                "\n"
             ),
-            requirements=["gpt_image2_apikey"],
+            requirements=["gemini_image_apikey"],
             backend_model="gemini-3.1-flash-image-preview",
-            mode="programmatic",
-            mapper_func=_gpt_image2_mapper,
             inputs={
                 "prompt": PortSpec(type=PortType.TEXT, required=True, description="生成描述或编辑指令"),
                 "images": PortSpec(
                     type=PortType.LIST,
                     min_items=0,
-                    max_items=3,
+                    max_items=14,
                     item_type=PortType.IMAGE,
-                    description="参考图片(0~3 张):\n  - 0 张=文生图\n  - 1+ 张=图片编辑",
+                    description="参考图片(0~14 张):\n  - 0 张=文生图\n  - 1+ 张=图片编辑/多图参考",
                 ),
-                "width": PortSpec(type=PortType.INTEGER, default=720, description="图片宽度(仅文生图模式用于推断比例)"),
-                "height": PortSpec(
-                    type=PortType.INTEGER, default=1280, description="图片高度(仅文生图模式用于推断比例)"
+                # Gemini 只吃 aspect_ratio + image_size,不吃宽高像素
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="1:1",
+                    values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    description="宽高比",
+                ),
+                "image_size": PortSpec(
+                    type=PortType.ENUM,
+                    default="2K",
+                    values=["512", "1K", "2K", "4K"],
+                    description="输出尺寸档位(512/1K/2K/4K)",
                 ),
             },
             outputs={
@@ -121,6 +133,17 @@ class Banana2Def(ImagePipelineModel):
                 priority=70,
             ),
         )
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...core.channels.registry import channel_registry
+        from ...utils.backends.gemini_image.channel import GeminiImageChannel
+
+        bindings = [ChannelBinding(GeminiImageChannel(), vendor_model=self.node.backend_model)]
+        bindings.extend(channel_registry.bindings_for(self.name))
+        return bindings
+
+    async def unavailable_reason(self) -> str:
+        return "Nano Banana 2 未配置 Gemini API Key(Gemini_Image_apikey)"
 
 
 class BananaProDef(ImagePipelineModel):

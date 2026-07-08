@@ -43,6 +43,7 @@ def test_partial_name_and_modality():
     reg = ModelRegistry()
     reg.register(FakeModel("qwen_2512"))
     reg.register(FakeModel("banana2"))
-    assert reg.find_by_partial_name("qwen", TaskType.IMAGE).name == "qwen_2512"
+    m = reg.find_by_partial_name("qwen", TaskType.IMAGE)
+    assert m is not None and m.name == "qwen_2512"
     assert reg.find_by_partial_name("qwen", TaskType.VIDEO) is None
     assert len(reg.by_modality(TaskType.IMAGE)) == 2

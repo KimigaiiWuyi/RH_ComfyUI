@@ -45,8 +45,20 @@ from .routing import (
     get_default_balancer,
     load_entry_point_models,
 )
-from .channels import LocalChannel, ChannelBinding, ProviderChannel
+from .channels import (
+    LocalChannel,
+    ChannelBinding,
+    ProviderChannel,
+    channel_registry,
+)
 from .dispatch import DispatchContext, dispatch
+
+# Seedance 供应商通道:外部插件(自带凭证面板)可复用本类把自己的
+# SeedanceProvider 包装成通道,经 channel_registry 注入宿主模型的候选列表。
+from ..utils.backends.seedance.channel import (
+    ProviderCredentials,
+    SeedanceProviderChannel,
+)
 
 __all__ = [
     # ABC 五件套
@@ -71,6 +83,9 @@ __all__ = [
     "ProviderChannel",
     "ChannelBinding",
     "LocalChannel",
+    "channel_registry",
+    "ProviderCredentials",
+    "SeedanceProviderChannel",
     # 注册与路由
     "model_registry",
     "register_model",

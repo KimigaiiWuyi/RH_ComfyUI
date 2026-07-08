@@ -60,6 +60,32 @@ class Seedance15ProDef(SeedanceVideoModel):
             mode="declarative",
             inputs={
                 "prompt": PortSpec(type=PortType.TEXT, required=True, description="视频生成提示词"),
+                # 与 Seedance 2.0 一致:按输入自动决定 文生/图生/首尾帧/多模态
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=9,
+                    item_type=PortType.IMAGE,
+                    description="参考图片(0~9 张):0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考",
+                ),
+                "video_refs": PortSpec(
+                    type=PortType.LIST,
+                    max_items=3,
+                    item_type=PortType.VIDEO,
+                    description='参考视频(0~3 段),prompt 中用 "视频1/视频2/..." 引用',
+                ),
+                "audio_refs": PortSpec(
+                    type=PortType.LIST,
+                    max_items=3,
+                    item_type=PortType.AUDIO,
+                    description='参考音频(0~3 段),prompt 中用 "音频1/音频2/..." 引用',
+                ),
+                "frame_mode": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "first_last", "reference"],
+                    description="多图角色:auto(2 图默认首尾帧)/ first_last(强制首尾帧)/ reference(全部参考)",
+                ),
                 "ratio": PortSpec(
                     type=PortType.ENUM,
                     default="16:9",
@@ -239,14 +265,14 @@ class Seedance2MiniDef(SeedanceVideoModel):
                 "\n"
                 "适用场景:低成本批量生成、对画质要求不苛刻的场景。"
                 "\n"
-                "注:官方 ARK 暂无 Mini 档,通道由外部供应商插件(如 aigc_system 聚合网关)提供;"
+                "注:官方 ARK 暂无 Mini 档,通道由外部供应商插件提供;"
                 "\n"
                 "未安装/未配置外部供应商时本模型不可用。"
                 "\n"
             ),
             requirements=[],
             # ark 暂无 Mini 档;不挂 runninghub(端点即 2.0 标准档)。
-            # gateway 通道由 aigc_system 经 register_vendor_models() 注入。
+            # 该通道由外部供应商插件经 channel_registry.register_binding() 注入。
             backend_model=None,
             backend_models={},
             mode="declarative",
@@ -300,6 +326,32 @@ class Seedance2FastDef(SeedanceVideoModel):
             mode="declarative",
             inputs={
                 "prompt": PortSpec(type=PortType.TEXT, required=True, description="视频生成提示词"),
+                # 与 Seedance 2.0 一致:按输入自动决定 文生/图生/首尾帧/多模态
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=9,
+                    item_type=PortType.IMAGE,
+                    description="参考图片(0~9 张):0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考",
+                ),
+                "video_refs": PortSpec(
+                    type=PortType.LIST,
+                    max_items=3,
+                    item_type=PortType.VIDEO,
+                    description='参考视频(0~3 段),prompt 中用 "视频1/视频2/..." 引用',
+                ),
+                "audio_refs": PortSpec(
+                    type=PortType.LIST,
+                    max_items=3,
+                    item_type=PortType.AUDIO,
+                    description='参考音频(0~3 段),prompt 中用 "音频1/音频2/..." 引用',
+                ),
+                "frame_mode": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "first_last", "reference"],
+                    description="多图角色:auto(2 图默认首尾帧)/ first_last(强制首尾帧)/ reference(全部参考)",
+                ),
                 "ratio": PortSpec(
                     type=PortType.ENUM,
                     default="16:9",

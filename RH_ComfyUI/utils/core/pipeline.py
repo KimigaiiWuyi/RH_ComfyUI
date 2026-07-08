@@ -12,13 +12,31 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional, TypedDict
 from dataclasses import field, dataclass
 
 from .types import PortSpec, CapabilityManifest
 
 if TYPE_CHECKING:
     from .request import TaskType
+
+
+class MappingRule(TypedDict, total=False):
+    """声明式映射规则(NodeDef.mappings 的元素)。
+
+    键含义见 executor 的 _normalize_mappings / _resolve_mapping_value:
+    source=取值来源路径, target='nodeId.field', value=直接常量,
+    default=缺省值, type/template=上传或模板处理, optional=可缺省。
+    """
+
+    source: str
+    target: str
+    value: Any
+    default: Any
+    type: str
+    template: str
+    description: str
+    optional: bool
 
 
 @dataclass
@@ -51,7 +69,7 @@ class NodeDef:
     # 多供应商模型映射(provider_name -> vendor model id)
     # 当同一节点支持多家供应商时,key 为 provider name,value 为该家实际模型 ID;
     # 例: {ark: "doubao-seedance-2-0-260128", runninghub: ""}
-    # 外部插件还可通过 seedance registry 的 register_vendor_models() 补充映射。
+    # 外部插件还可通过 channel_registry.register_binding() 追加自带 vendor_model 的通道。
     backend_models: dict[str, str] = field(default_factory=dict)
 
     # 节点级供应商覆盖(可选):固定该节点走某家,忽略全局启用开关与负载均衡
@@ -59,7 +77,7 @@ class NodeDef:
 
     # 映射
     mode: str = "declarative"  # declarative | programmatic
-    mappings: dict[str, Any] = field(default_factory=dict)
+    mappings: list[MappingRule] = field(default_factory=list)
     mapper_func: Optional[Callable[..., Any]] = None
 
     # 类型化端口
@@ -71,63 +89,64 @@ class NodeDef:
 
 
 class PipelineRegistry:
-    """节点注册表 — 由 discover_builtin_models() 与外部插件编程式装载
+    """节点(NodeDef)目录 —— core.routing.model_registry 的派生只读视图。
 
-    对外暴露:
-    - register(node) / get(name) / get_by_task(task_type) / all_pipelines()
-    - find_by_partial_name(partial, task_type) — 模糊匹配
+    单一事实来源是 model_registry:凡注册进去的模型若带 `.node`(桥接/声明式
+    模型),其 NodeDef 即出现在本目录,供 AI 知识库 / HTTP 契约 / 命令解析消费。
+    如此外部插件用 register_model() 注册的模型会自动进目录,不再和 model_registry
+    漂移。register() 仅为兼容极少数"直接登记裸 NodeDef"的历史调用保留。
     """
 
     def __init__(self) -> None:
-        self._pipelines: dict[str, NodeDef] = {}
-        self._by_task: dict[TaskType, list[NodeDef]] = {}
-
-    # ── 注册与查询 ──
+        self._extra: dict[str, NodeDef] = {}
 
     def register(self, node: NodeDef) -> None:
-        from .request import TaskType
+        # 兼容路径:登记一个不经模型的 NodeDef(正常流程不会走到)
+        self._extra[node.name] = node
 
-        self._pipelines[node.name] = node
-        tasks = node.capabilities.supported_tasks if node.capabilities.supported_tasks else [node.task_type]
-        for task in tasks:
-            try:
-                task_type = TaskType(task)
-            except ValueError:
-                continue
-            bucket = self._by_task.setdefault(task_type, [])
-            # 去重:同名节点重复注册时只保留最新一份
-            bucket[:] = [n for n in bucket if n.name != node.name]
-            bucket.append(node)
+    def _all_nodes(self) -> list[NodeDef]:
+        from ...core.routing.registry import model_registry
+
+        seen: dict[str, NodeDef] = {}
+        for model in model_registry.all_models():
+            if model.node is not None:
+                seen[model.node.name] = model.node
+        for name, node in self._extra.items():
+            seen.setdefault(name, node)  # model_registry 优先
+        return list(seen.values())
 
     def get(self, name: str) -> Optional[NodeDef]:
-        return self._pipelines.get(name)
+        from ...core.routing.registry import model_registry
+
+        model = model_registry.get(name)
+        if model is not None and model.node is not None:
+            return model.node
+        return self._extra.get(name)
 
     def get_by_task(self, task_type: TaskType) -> list[NodeDef]:
-        return self._by_task.get(task_type, [])
+        from .request import TaskType
+
+        out: list[NodeDef] = []
+        for node in self._all_nodes():
+            tasks = node.capabilities.supported_tasks if node.capabilities.supported_tasks else [node.task_type]
+            for task in tasks:
+                try:
+                    tt = TaskType(task)
+                except ValueError:
+                    continue
+                if tt == task_type:
+                    out.append(node)
+                    break
+        return out
 
     def all_pipelines(self) -> list[NodeDef]:
-        return list(self._pipelines.values())
+        return self._all_nodes()
 
     def find_by_partial_name(self, partial: str, task_type: TaskType) -> Optional[NodeDef]:
-        """通过部分名称模糊匹配
+        """精确 → 前缀 → 包含 三级模糊匹配(与 ModelRegistry 共用同一实现)"""
+        from ...core.routing.registry import match_partial_name
 
-        例如 "qwen" 可匹配 "qwen_2512","banana" 可匹配 "banana2"。
-        返回当前任务类型下优先级最高的候选。
-        """
-        candidates = self.get_by_task(task_type)
-        # 精确匹配
-        for p in candidates:
-            if partial == p.name:
-                return p
-        # 前缀匹配
-        for p in candidates:
-            if p.name.startswith(partial):
-                return p
-        # 包含匹配
-        for p in candidates:
-            if partial in p.name:
-                return p
-        return None
+        return match_partial_name(self.get_by_task(task_type), partial, lambda n: n.name)
 
 
 # 全局单例

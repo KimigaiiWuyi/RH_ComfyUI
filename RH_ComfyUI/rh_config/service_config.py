@@ -61,6 +61,41 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
             "https://api.bltcy.ai",
         ],
     ),
+    "divider_gemini_image": GsDivider(
+        "Gemini 生图(Interactions API,走 google-genai SDK)",
+        "Gemini 3.1 Flash Image。默认走 AI Studio 个人版(只需 API Key);打开"
+        "「使用 VertexAI」开关才走组织版(需 project + ADC/服务账号,不用 API Key)。",
+        "Gemini 生图服务配置",
+    ),
+    "Gemini_Image_apikey": GsStrConfig(
+        "Gemini API Key(AI Studio)",
+        "AI Studio 个人版 API Key。默认模式(未开 VertexAI)用此项鉴权。",
+        "",
+        options=["AIzaSy..."],
+    ),
+    "Gemini_Image_Use_Vertex": GsBoolConfig(
+        "使用 VertexAI(组织版)",
+        "关=AI Studio(用 API Key);开=VertexAI(用下方 Project ID + ADC/服务账号,"
+        "此时忽略 API Key)。SDK 限制:project 与 api_key 互斥,只能二选一。",
+        False,
+    ),
+    "Gemini_Image_Project_ID": GsStrConfig(
+        "VertexAI Project ID",
+        "填写即走 VertexAI 组织版;留空走 AI Studio 个人版。",
+        "",
+    ),
+    "Gemini_Image_Location": GsStrConfig(
+        "VertexAI 区域",
+        "VertexAI 区域(仅 Project ID 非空时生效)。",
+        "global",
+        options=["global", "us-central1"],
+    ),
+    "Gemini_Image_SA_File": GsStrConfig(
+        "VertexAI 服务账号 JSON 路径(可选)",
+        "VertexAI 鉴权用的服务账号 JSON 文件绝对路径;留空则用环境 ADC"
+        "(GOOGLE_APPLICATION_CREDENTIALS / gcloud auth application-default login)。",
+        "",
+    ),
     "divider_minimax": GsDivider(
         "MiniMax（文生图 / 图生图 / T2A 语音）",
         "MiniMax 文生图 / 图生图 / T2A 语音合成服务连接配置",
@@ -131,21 +166,21 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "是否启用 RunningHub 供应商。禁用后,该供应商不会参与任务分发。",
         False,
     ),
-    "divider_seedance_lb": GsDivider(
-        "Seedance 负载均衡",
-        "多供应商时的负载均衡与熔断策略配置。",
-        "Seedance 负载均衡",
+    "divider_load_balance": GsDivider(
+        "负载均衡",
+        "多通道模型(同一模型由多家供应商提供)时的负载均衡与熔断策略,全模态通用。",
+        "负载均衡",
     ),
-    "Seedance_Load_Balance": GsStrConfig(
+    "Load_Balance_Mode": GsStrConfig(
         "负载均衡策略",
-        "round_robin=轮询分发; weighted=加权随机(官方优先); least_failures=优先选连续失败最少的。"
-        "仅多个供应商同时启用时生效。",
+        "round_robin=轮询分发; weighted=加权随机(官方直连权重高); least_failures=优先选连续失败最少的。"
+        "仅同一模型有多个通道同时可用时生效。",
         "round_robin",
         options=["round_robin", "weighted", "least_failures"],
     ),
-    "Seedance_Failure_Threshold": GsStrConfig(
+    "Failure_Threshold": GsStrConfig(
         "熔断阈值",
-        "供应商连续失败多少次后暂时跳过。0=不熔断。",
+        "通道连续失败多少次后暂时跳过(冷却期内排到末尾)。0=不熔断。",
         "3",
         options=["1", "3", "5", "0"],
     ),

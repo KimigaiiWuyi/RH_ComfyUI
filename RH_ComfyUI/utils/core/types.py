@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Union, Optional
+from typing import Any, Union, Callable, Optional, Awaitable
 from dataclasses import field, dataclass
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -451,6 +451,10 @@ class ProgressEvent:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+# 进度回调:async 回调,全项目唯一定义(其余模块一律 re-import 此符号)
+ProgressCallback = Callable[[ProgressEvent], Awaitable[Optional[None]]]
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  NodeOutput — 统一节点输出
 # ═══════════════════════════════════════════════════════════════════════
@@ -522,6 +526,7 @@ __all__ = [
     "ContentItem",
     "CapabilityManifest",
     "ProgressEvent",
+    "ProgressCallback",
     "NodeOutput",
     # 便利构造器
     "image_ref",

@@ -31,6 +31,7 @@ from ..channels.channel import ChannelBinding
 if TYPE_CHECKING:
     # 运行时延迟导入,避免 base ↔ routing 的循环(registry 依赖本模块)
     from ..routing.balancer import LoadBalancer
+    from ...utils.core.pipeline import NodeDef
 
 
 class AIGCGenerationBase(ABC):
@@ -45,6 +46,10 @@ class AIGCGenerationBase(ABC):
     name: str
     display_name: str
     modality: TaskType
+
+    # 声明式/桥接模型携带的 NodeDef 投影;纯编程式模型为 None。
+    # PipelineRegistry 目录即由此派生(见 utils/core/pipeline.py)。
+    node: Optional["NodeDef"] = None
 
     # ── 元数据与计费 ──
     card: ModelCard
@@ -182,6 +187,7 @@ class AIGCGenerationBase(ABC):
             self.balancer().record_success(scope=self.name, member=binding.channel.name)
             output.metadata.setdefault("channel", binding.channel.name)
             output.metadata.setdefault("vendor_model", binding.vendor_model or "")
+            output.metadata.setdefault("key_prefix", binding.channel.audit_key_prefix())
             return self.postprocess(output)
 
         raise AllChannelsFailedError(f"{self.display_name} 所有通道均失败", cause=last_error)

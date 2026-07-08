@@ -2,5 +2,13 @@
 
 from .channel import LocalChannel, ChannelBinding, ProviderChannel
 from .polling import PollingChannelMixin
+from .registry import ChannelExtensionRegistry, channel_registry
 
-__all__ = ["ProviderChannel", "ChannelBinding", "LocalChannel", "PollingChannelMixin"]
+__all__ = [
+    "ProviderChannel",
+    "ChannelBinding",
+    "LocalChannel",
+    "PollingChannelMixin",
+    "channel_registry",
+    "ChannelExtensionRegistry",
+]

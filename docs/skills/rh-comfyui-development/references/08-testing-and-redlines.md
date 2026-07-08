@@ -27,7 +27,7 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
    顺序不许动;
 4. **HTTP 契约只增不改**(`/RH_ComfyUI/models*` 与 `api.submit` 签名);
 5. **`core/` 不 import 上层**(models/、utils/、入口包);
-6. **开源仓库零闭源内容**(URL/凭证/条件 import/enterprise 分支);
+6. **开源仓库零闭源内容**(URL/凭证/条件 import/按来源分叉的条件分支);
 7. 模型 `name` 是主键,改名 = 下线旧 + 上线新(统计断档),慎改;
 8. `RHComfyuiTaskRecord` 既有列不改名不删;新列必须带默认值;
 9. 每个新目录必须有 README.md(目录职责 + 维护须知);

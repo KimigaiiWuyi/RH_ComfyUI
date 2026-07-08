@@ -16,12 +16,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from dataclasses import field, dataclass
 
 # 避免在模块导入时触发 Pipeline 加载(由插件 __init__.py 的 on_core_start 钩子触发),
 # 这里仅暴露类型与函数定义,内部使用延迟 import。
-from .utils.core.types import ProgressEvent  # noqa: F401  - 透出给外部使用
+from .utils.core.types import ProgressEvent, ProgressCallback  # noqa: F401  - 透出给外部使用
 
 if TYPE_CHECKING:
     from .utils.core.types import MediaRef, MediaKind, ContentItem
@@ -46,10 +46,6 @@ class GenerationResult:
     usage: dict[str, Any] = field(default_factory=dict)  # 用量统计
     raw: Any = None  # 厂商原始响应
     metadata: dict[str, Any] = field(default_factory=dict)  # 落盘路径等
-
-
-# 进度回调类型:可选
-ProgressCallback = Callable[[ProgressEvent], None]
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -186,9 +182,8 @@ async def submit(
             outputs_bytes[k] = bytes(v)
 
     backend_name = str((result.metadata or {}).get("channel", ""))
-    node = getattr(model_obj, "node", None)
-    if node is not None:
-        backend_name = node.backend
+    if model_obj.node is not None:
+        backend_name = model_obj.node.backend
 
     return GenerationResult(
         kind=final_task_type,
@@ -242,8 +237,7 @@ def list_models(task_type: Optional[str] = None) -> list[dict[str, Any]]:
     for m in model_registry.all_models():
         if task_type and m.modality.value != task_type:
             continue
-        node = getattr(m, "node", None)
-        backend = node.backend if node is not None else ""
+        backend = m.node.backend if m.node is not None else ""
         out.append(
             {
                 "name": m.name,

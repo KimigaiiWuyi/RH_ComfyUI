@@ -9,10 +9,20 @@
 |---|---|---|---|
 | `comfyui` | `comfyui/` | 本地/远程 ComfyUI | WebSocket + workflow JSON;`set_workflow_override()` 支持 mapper 按输入切换工作流(如 Wan t2v/i2v) |
 | `gpt-image-2` | `gpt_image2/` | OpenAI 兼容协议 | 文生图/图生图/编辑自适应;凭证可指向 OneAPI/NewAPI 等网关(注意名字带**连字符**) |
+
+> **Gemini 不是 Adapter**:`gemini_image/` 提供一个 `GeminiImageChannel`,内部走
+> **官方 google-genai SDK 的 `interactions.create`**(不手拼 REST)。留空 Project ID
+> 走 AI Studio(`Client(api_key=)`);填 Project ID 走 VertexAI
+> (`Client(vertexai=True, project=, location=)`,鉴权用 ADC 或服务账号 JSON——
+> SDK 限制 project 与 api_key 互斥)。banana2(Nano Banana 2)是**原生 Gemini 模型**,
+> 在 `Banana2Def.channel_bindings()` 里唯一挂这条通道,与 gpt-image-2 完全独立。
 | `rh_app` | `rh_app/` | RunningHub AI 应用 | webapp id 即 `workflow_file` |
 | `minimax` | `minimax/` | MiniMax | 图片 + 语音(T2A) |
 | `mimo` | `mimo/` | MiMo TTS | 语音 |
-| `seedance` | `seedance/` | 字节 Seedance 系列 | 内部有独立的 Provider 层(ARK/Gateway/RunningHub 三供应商)+ 负载均衡 + 熔断 + Dry-Run |
+
+> **Seedance 不在此表**:它不再是 Adapter。每家供应商(ark/runninghub/网关)
+> = 一个 `SeedanceProviderChannel`(`seedance/channel.py`),由通用 `LoadBalancer`
+> 统一排序/熔断/故障切换(见下)。
 
 Adapter 协议(5 成员):`name` / `check_available()` / `get_unavailable_reason()` /
 `capabilities()` / `execute(request, node, on_progress) -> NodeOutput`。
@@ -21,12 +31,20 @@ Adapter 协议(5 成员):`name` / `check_available()` / `get_unavailable_reason(
 `AdapterChannel`(models/bridge.py)把 Adapter 适配为 ProviderChannel 供
 ABC 执行链使用。新上游 = 新 Adapter(或直接写 ProviderChannel,见 04 章)。
 
-### Seedance 的 Provider 子层
+### Seedance 的 Provider 子层与多通道(2026-07 起单层负载均衡)
 
 `backends/seedance/` 内部:`provider.py`(SeedanceProvider 细粒度抽象:
-render/parse/poll + 形态/分辨率支持声明)+ `registry.py`(供应商选择)。
-模型 YAML 时代的 `backend_models`(ark/gateway/runninghub → 各家模型 ID)
-现在声明在 defs.py 的 `node_def()` 里;节点级 `provider` 字段可固定走某家。
+render/parse/poll + 形态/分辨率支持声明)保留;`channel.py`
+(`SeedanceProviderChannel` 把一个 SeedanceProvider 包装成通用 `ProviderChannel`
++ `builtin_seedance_channels()` 构造内置 ark/runninghub 通道)。
+
+各家供应商 = 一个通道,`models/video/overrides.py` 的 `SeedanceVideoModel`
+在 `channel_bindings()` 里组装 ark + runninghub +(外部插件经
+`channel_registry` 注入的网关),统一交给通用 `LoadBalancer`(core/routing/balancer.py)
+排序/熔断/故障切换 —— **不再有后端内部的第二层负载均衡**(旧
+`registry.order_candidates` / `SeedanceAdapter` 已删)。
+`backend_models`(ark/runninghub → 各家模型 ID)声明在 defs.py 的 `node_def()`
+里,做各通道的 `vendor_model`;节点级 `provider` 字段可固定走某家。
 
 ## 9.2 映射器(utils/mappers)
 
@@ -39,6 +57,7 @@ ComfyUI 字段注入。
 | 文件 | 服务的模型 |
 |---|---|
 | `gpt_image2.py` | banana2 / banana_pro / gpt-image-2 |
+| `gemini_image.py` | banana2 的 Gemini 通道(Interactions API 双模,vendor=gemini-3.1-flash-image-preview) |
 | `image_edit.py` | qwen_2511(图片编辑) |
 | `minimax_text2image.py` | minimax_image01 |
 | `video.py` | wan2.2_videogen(含 t2v/i2v 工作流切换) |
@@ -60,9 +79,11 @@ PortSpec。两者必须同步(mapper 消费的字段要在 inputs 里声明)。
 | `ComfyUI_BaseURL` | ComfyUI 地址 |
 | `RH_apikey` | RunningHub |
 | `OpenAI_Image_apikey` / `OpenAI_Image_BaseURL` | OpenAI 兼容生图 |
+| `Gemini_Image_apikey` / `Gemini_Image_Project_ID` / `Gemini_Image_Location` / `Gemini_Image_SA_File` | Gemini 生图(填 Project ID 走 VertexAI+ADC/SA,否则 AI Studio+key) |
 | `MiniMax_apikey` / `MIMO_apikey` | MiniMax / MiMo |
-| `Seedance_apikey_{ark,gateway,runninghub}` + `Seedance_BaseURL_*` + `Seedance_Enable_*` | Seedance 三供应商 |
-| `Seedance_Load_Balance` / `Seedance_Failure_Threshold` / `Seedance_Dry_Run` | 负载均衡策略/熔断阈值/干跑 |
+| `Seedance_apikey_{ark,runninghub}` + `Seedance_BaseURL_*` + `Seedance_Enable_*` | Seedance 内置供应商凭证(网关凭证在外部插件自己的面板) |
+| `Seedance_Dry_Run` | Seedance 干跑(拦截出站请求 + 打印) |
+| `Load_Balance_Mode` / `Failure_Threshold` | 全模态通用的负载均衡策略 / 熔断阈值(旧 `Seedance_Load_Balance` / `Seedance_Failure_Threshold` 已迁移至此) |
 
 **PLUGIN_CONFIG(plugin_config.py)— 插件行为**
 
@@ -93,7 +114,7 @@ header value b'Bearer '` 或旧 URL 持续报错。
 | `gpt-image-2` | `OpenAI_Image_apikey` / `BaseURL` | `api_key` 用懒加载 + `refresh_config()` | ✅ executor 入口每次 `refresh` |
 | `rh_app` | `RH_apikey` | `@property api_key` + `_require_api_key()` | ✅ 每次请求即时 |
 | `comfyui` | `ComfyUI_BaseURL` + `RH_apikey` | `url` / `server_address` / `api_key` 全 `@property` | ✅ 每次请求即时 |
-| `seedance` | `Seedance_apikey_*` + `Seedance_BaseURL_*` | provider 用 `update_credentials()` | ✅ executor `_get_or_create_provider` 每次比对新旧值再热更新 |
+| `seedance` | `Seedance_apikey_*` + `Seedance_BaseURL_*` | provider 用 `update_credentials()` | ✅ `SeedanceProviderChannel._get_provider` 每次比对新旧值再热更新 |
 
 ### 红线:不要在 `__init__` 里把 `api_key` 存成实例属性
 
@@ -134,14 +155,14 @@ executor 在 `check_available()` / `execute()` 入口先调 `refresh_config()`�
 ✅ 正例三: 显式 `update_credentials()`(`seedance` 用法)
 
 provider 内部存 `self.api_key`,但保留 `update_credentials()`;
-executor 的 provider 缓存按"凭证是否变了"决定要不要调:
+`SeedanceProviderChannel` 的 provider 缓存按"凭证是否变了"决定要不要调:
 
 ```python
-cached = self._provider_cache.get(name)
+cached = self._cached
 if cached is not None:
     old_key, old_url = cached.api_key, cached.base_url
     if old_key != creds.api_key or old_url != creds.base_url:
-        cached.update_credentials(api_key=creds.api_key, base_url=creds.base_url)
+        cached.update_credentials(api_key=creds.api_key, base_url=creds.base_url, dry_run=dry_run)
     return cached
 ```
 

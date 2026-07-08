@@ -108,7 +108,7 @@ class DryRunInterrupt(BaseException):
     触发场景:
     - ``SeedanceProvider._request`` 在 ``dry_run=True`` 时拦截出站请求,
       打印完整四元组后抛出。
-    - ``SeedanceAdapter.execute`` 捕获后透传,不触发熔断 / fallback。
+    - ``SeedanceProviderChannel.invoke`` 捕获后透传,不触发熔断 / 通道切换。
     """
 
 
@@ -212,7 +212,7 @@ class SeedanceProvider(ABC):
     ) -> None:
         self.api_key = api_key
         self.base_url = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
-        # Dry-Run 开关(由 SeedanceAdapter 在构造时注入): 开启后拦截出站请求并打印内容
+        # Dry-Run 开关(由 SeedanceProviderChannel 在构造/热更新时注入): 开启后拦截出站请求并打印内容
         self.dry_run = dry_run
         self._client: Optional[httpx.AsyncClient] = None
 
