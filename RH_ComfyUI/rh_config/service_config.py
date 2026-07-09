@@ -15,7 +15,20 @@ from gsuid_core.utils.plugins_config.models import (
     GsDivider,
     GsStrConfig,
     GsBoolConfig,
+    GsRepeatGroupConfig,
 )
+
+# model_real_name 下拉项: 现有图片模型名(与 models/image/defs.py::ALL_MODELS 对齐)。
+# 用静态常量避免在配置模块加载期 import defs 触发循环导入; 新增模型时同步此表即可。
+_IMAGE_MODEL_REAL_NAMES = [
+    "anima",
+    "banana2",
+    "banana_pro",
+    "gpt-image-2",
+    "minimax_image01",
+    "qwen_2511",
+    "qwen_2512",
+]
 
 # ── ComfyUI 服务 ────────────────────────────────────────────────
 SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
@@ -165,6 +178,43 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "启用 RunningHub 供应商",
         "是否启用 RunningHub 供应商。禁用后,该供应商不会参与任务分发。",
         False,
+    ),
+    "divider_openai_image_pool": GsDivider(
+        "OpenAI 兼容生图供应商池",
+        "为现有模型追加任意数量的 OpenAI 兼容生图供应商(如百度千帆)。同一内部模型可挂多家,"
+        "自动参与负载均衡与熔断;前端只看到一个模型,后端按供应商分发并入库(含 Key 前缀)。",
+        "OpenAI 兼容生图供应商池",
+    ),
+    "OpenAI_Image_Providers": GsRepeatGroupConfig(
+        "OpenAI 兼容生图供应商",
+        "每行一家供应商:填 Base URL / API Key,并把『现有模型』映射到『供应商侧模型名』。"
+        "百度千帆示例:Base URL=https://qianfan.baidubce.com/v2,模型映射 qwen_2512=qwen-image。",
+        data=[],
+        template={
+            "enable": GsBoolConfig("启用", "是否启用该供应商", True),
+            "name": GsStrConfig("供应商名称", "唯一标识(负载均衡成员名 + 审计 backend_provider)", ""),
+            "base_url": GsStrConfig(
+                "Base URL",
+                "OpenAI 兼容生图根地址,端点自动拼 /images/generations",
+                "https://qianfan.baidubce.com/v2",
+                options=["https://qianfan.baidubce.com/v2", "https://api.openai.com/v1"],
+            ),
+            "api_key": GsStrConfig("API Key", "供应商访问令牌(作 Bearer)", "", secret=True),
+            "models": GsRepeatGroupConfig(
+                "提供的模型",
+                "把现有内部模型映射到该供应商侧的模型名",
+                data=[],
+                template={
+                    "model_real_name": GsStrConfig(
+                        "内部模型",
+                        "从现有模型中选择(决定参数与负载均衡归属)",
+                        "",
+                        options=_IMAGE_MODEL_REAL_NAMES,
+                    ),
+                    "model_id": GsStrConfig("供应商模型名", "请求发给供应商的 model 字段(如 qwen-image)", ""),
+                },
+            ),
+        },
     ),
     "divider_load_balance": GsDivider(
         "负载均衡",

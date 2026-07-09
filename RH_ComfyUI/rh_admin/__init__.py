@@ -29,6 +29,22 @@ sv_admin = SV("积分管理", pm=0)
 sv_user = SV("用户积分")
 
 
+@sv_admin.on_command(("刷新供应商", "刷新供应商池", "同步供应商"), block=True)
+async def refresh_providers(bot: Bot, ev: Event) -> None:
+    """按当前配置重新挂载 OpenAI 兼容供应商池(增删供应商/改模型映射后调用)。
+
+    凭证(key/base_url)本身每请求实时读,无需刷新;仅供应商增删或模型映射变动需要。
+    """
+    from ..utils.backends.openai_image import sync_openai_image_providers
+    from ..utils.backends.openai_image.providers import resolve_provider_entries
+
+    sync_openai_image_providers()
+    entries = resolve_provider_entries()
+    enabled = [e for e in entries if e.enable]
+    bindings = sum(len(e.models) for e in enabled)
+    await bot.send(f"✅ 供应商池已刷新: {len(enabled)} 家启用, {bindings} 条模型绑定")
+
+
 @sv_admin.on_command(("增加积分", "加积分"), block=True)
 async def add_points(bot: Bot, ev: Event) -> None:
     """管理员增加用户积分命令处理器.
