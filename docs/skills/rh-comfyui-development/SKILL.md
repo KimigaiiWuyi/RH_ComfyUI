@@ -38,6 +38,7 @@ description: >
 | 十 | 命令清单与数据库(触发词、to_ai、RHBind、RHComfyuiTaskRecord 全列) | [references/10-commands-and-database.md](./references/10-commands-and-database.md) |
 | 十一 | 凭证热更新(中途改 key 不重启)— `@property` / `refresh_config` / `update_credentials` 三种写法 | [references/11-credential-hot-reload.md](./references/11-credential-hot-reload.md) |
 | 十二 | 供应商通道 / Gemini 生图 / 能力一致性 — 单层负载均衡、AdapterChannel 翻错、/models 可用性、Gemini SDK 双模、图在 steps、input_schema 与能力同步、计费退款 | [references/12-provider-channels-and-gemini.md](./references/12-provider-channels-and-gemini.md) |
+| 十三 | OpenAI 兼容供应商池(网页配置零代码挂供应商、`OpenAI_Image_Providers`、`rh 刷新供应商`、resync 语义) | [references/13-openai-provider-pool.md](./references/13-openai-provider-pool.md) |
 
 ## 快速决策表(先看这里)
 
@@ -53,6 +54,7 @@ description: >
 | 写闭源 / 另外的兼容插件生态模型 | 独立插件 `model_registry.register()` 或 entry points | 七 |
 | 接一个全新上游 API | backends 新 Adapter(或 ProviderChannel)+ 配置键 | 九、四 |
 | 加/改一个图片供应商(如 Gemini)/ 给模型加第二家供应商 | ProviderChannel + `channel_registry.register_binding` | 十二、四 |
+| 给图片模型挂一家 OpenAI 兼容供应商(如千帆,零代码) | 网页控制台 `OpenAI_Image_Providers` + `rh 刷新供应商` | 十三 |
 | 改模型能不能传参考图 / 参考图上限 | defs 的 `images` 端口(有无 + `max_items`),需与 `supported_shapes`/`supports_edit` 同步 | 十二、三 |
 | 改请求组装 / workflow 注入 | `utils/mappers/` 对应函数 | 九 |
 | 改命令触发词 / to_ai 文案 | rh_generate(触发词是兼容承诺,慎改) | 十 |
@@ -67,7 +69,8 @@ description: >
 ## 验证命令
 
 ```bash
-# 在插件根目录(E:\AIProject\gsuid_core\gsuid_core\plugins\RH_ComfyUI)
-python -m pytest tests/ -q        # 内核单测,全离线,必须全绿
+# 在插件根目录(<gsuid_core 仓库>/gsuid_core/plugins/RH_ComfyUI)
+# 用 gsuid_core 的 venv 解释器跑(系统 Python 的 fastapi/starlette 版本可能不配套)
+python -m pytest tests/ -q        # 内核单测,全离线,必须全绿(2026-07-10: 54 passed)
 ruff check RH_ComfyUI             # 代码风格
 ```

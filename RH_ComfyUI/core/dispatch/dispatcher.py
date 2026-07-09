@@ -7,11 +7,14 @@
   4. 并发闸 + model.run()
        成功 → policy.commit() → record_dispatch(status=ok)
        失败 → record_dispatch(status=failed) → policy.refund() → 原样抛出
+       取消/中断(BaseException,如 CancelledError / DryRunInterrupt)
+            → record_dispatch(status=cancelled|failed) → 退款 → 原样抛出
 """
 
 from __future__ import annotations
 
 import time
+import asyncio
 from typing import Optional
 
 from gsuid_core.logger import logger
@@ -71,15 +74,19 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
             ctx=ctx,
         )
         return result
-    except Exception as e:
+    except BaseException as e:
+        # 必须接 BaseException:任务取消(CancelledError)与后端的
+        # Dry-Run 中断信号(DryRunInterrupt,继承 BaseException)同样意味着
+        # "预扣了积分但没有产物",漏接会导致积分被吞、统计缺行。
         elapsed_ms = int((time.monotonic() - start) * 1000)
+        status = "cancelled" if isinstance(e, asyncio.CancelledError) else "failed"
         # 先落统计(status=failed),再退款并标记 refunded,顺序保证标记能找到记录
         await record_dispatch(
             request=request,
             result=None,
             output=output,
             model=model,
-            status="failed",
+            status=status,
             elapsed_ms=elapsed_ms,
             error=repr(e),
             ctx=ctx,
@@ -87,7 +94,10 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
         await ctx.policy.refund(reservation)
         if reservation.refunded:
             await ctx.policy.post_refund(reservation, model_name=model.name)
-        logger.exception(f"[dispatch] 模型 {model.name} 执行失败")
+        if isinstance(e, Exception):
+            logger.exception(f"[dispatch] 模型 {model.name} 执行失败")
+        else:
+            logger.warning(f"[dispatch] 模型 {model.name} 执行中断({type(e).__name__}),已退款")
         raise
 
 

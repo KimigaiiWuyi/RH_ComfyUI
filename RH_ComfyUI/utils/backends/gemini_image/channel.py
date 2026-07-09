@@ -39,12 +39,14 @@ class GeminiImageChannel(ProviderChannel):
     async def invoke(self, **kwargs: Any) -> NodeOutput:
         request = kwargs["request"]
         vendor_model: Optional[str] = kwargs.get("vendor_model")
-        if not self._api.api_key:
+        # Vertex 模式合法地没有 api_key(走 ADC / 服务账号),守卫必须与
+        # check_available 同源用 is_configured(),否则 Vertex 永远打不通
+        if not self._api.is_configured():
             raise ChannelError(
-                "Gemini 生图未配置 API Key",
+                "Gemini 生图未配置(AI Studio 需 API Key;Vertex 需 Project ID)",
                 retryable=True,
                 channel=self.name,
-                user_message="该供应商未配置 API Key。",
+                user_message="该供应商未配置完整凭证。",
             )
         if vendor_model:
             request.params["model"] = vendor_model

@@ -22,8 +22,15 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
   vendor_model=)`(从 `RH_ComfyUI.core` 顶层公开)。所有桥接模型
   (`_PipelineBackedMixin`)自动并入外部通道。**RH_ComfyUI 代码/文档不得出现
   具体外部插件名或其来源暗示,只留通用接口。
-- 熔断只由 `ChannelError(retryable=True)` 触发;`AllChannelsFailedError` 现继承
+- 熔断只由 `ChannelError(retryable=True)` 触发(retryable=False 不记失败、不切换,
+  2026-07-10 起代码与此语义一致);`AllChannelsFailedError` 现继承
   最后一路 `cause.user_message`,保住供应商干净失败文案。
+- **生成成功但取件失败 ≠ 通道失败**:Seedance 下载 video_url 失败翻译成
+  `ChannelError(retryable=False, code=RESULT_DOWNLOAD_FAILED)` —— 切通道会重新
+  生成(重复烧钱),只给干净文案让用户重试。
+- **Dry-Run 中断会退款**:`DryRunInterrupt` 继承 `BaseException` 绕过 run() 的
+  熔断/切换,dispatcher 现按 BaseException 兜底 —— 落统计(failed)+ 退款后原样抛出
+  (2026-07-10 修复,此前干跑会吞积分)。
 
 ## 2. 消费统计维度
 
@@ -46,6 +53,10 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
     `Gemini_Image_SA_File` 服务账号 JSON,**忽略 api_key**。
   - **别再用"填了 project_id 就走 Vertex"推断** —— 用户填了 key+project 会被迫
     走 Vertex、报 ADC 缺失(踩坑现场)。
+- **通道内所有守卫用 `is_configured()`,不要按 `api_key` 判**:Vertex 模式合法地
+  没有 api_key,`GeminiImageChannel.invoke` 曾按 `api_key` 拒绝导致 Vertex 打不通
+  (check_available 放行、invoke 秒拒,2026-07-10 修复)。守卫必须与
+  check_available 同源。
 - **图片在 `steps` 里,不在 `outputs`**:interactions 响应 `outputs` 常为空,图在
   `steps[*].content[*]` 的 `{type:"image", data:<base64>}`(**inline base64,不是
   uri**)。`usage.output_tokens_by_modality` 里有 image 即已出图。`steps` 是 SDK
@@ -97,7 +108,6 @@ input 端口**。现全部 Seedance 变体端口已对齐。
 ## 验证
 
 ```bash
-python -m pytest tests/ -q     # 43 passed(含 test_gemini_image / test_seedance_channel /
-                               #             test_channel_failover / test_model_catalog / test_model_schema)
+python -m pytest tests/ -q     # 全绿(2026-07-10: 54 passed;完整测试清单见 08 章 §8.1)
 ruff check RH_ComfyUI
 ```

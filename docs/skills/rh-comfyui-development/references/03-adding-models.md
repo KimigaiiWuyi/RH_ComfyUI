@@ -31,7 +31,8 @@ class NewImageDef(ImagePipelineModel):
                 "适用场景:...\n"
                 "不适用场景:...\n"
             ),
-            requirements=["comfyui_url"],        # 可用性所需配置键
+            requirements=["comfyui_url"],        # 仅 HTTP 清单展示用(informational);
+                                                 # 实际可用性由通道 check_available() 判定
             workflow_file="new_image.json",      # ComfyUI 工作流(如适用)
             mode="declarative",                  # declarative | programmatic
             mappings=[                           # declarative:字段 → workflow 节点
@@ -89,7 +90,8 @@ class NewVideoModel(VideoPipelineModel):
    `input_schema()` / `channel_bindings()` / `execute_on_channel()`,
    声明 `required_config`;
 4. 用 `@register_model` 装饰(类须可无参构造),并在 `models/__init__.py`
-   import 该模块使装饰器生效(此路径无需 NodeDef);
+   import 该模块使装饰器生效(此路径无需 NodeDef;命令/Agent/HTTP 清单
+   均自动可见 —— HTTP 清单对无 NodeDef 模型的补录 2026-07-10 起生效);
 5. 配置键在 `rh_config/comfyui_config.py` 注册(网页控制台可配)。
 
 ## 3.4 常改字段速查

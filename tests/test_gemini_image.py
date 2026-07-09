@@ -104,6 +104,30 @@ def test_banana2_served_by_gemini_only():
     assert "width" not in schema and "height" not in schema
 
 
+def test_vertex_invoke_passes_guard_without_api_key(monkeypatch):
+    # 回归:Vertex 模式(ADC/SA 鉴权)合法地没有 api_key,invoke 的守卫
+    # 必须与 check_available 同源用 is_configured(),不能按 api_key 拒绝
+    import RH_ComfyUI.utils.backends.gemini_image.channel as gchan
+    from RH_ComfyUI.core.schema.types import NodeOutput
+    from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
+
+    monkeypatch.setattr(
+        gapi,
+        "SERVICE_CONFIG",
+        _FakeConfig({"Gemini_Image_Use_Vertex": True, "Gemini_Image_Project_ID": "proj-1"}),
+    )
+
+    async def _fake_mapper(request, api):
+        return NodeOutput(output_type="image", data=b"IMG")
+
+    monkeypatch.setattr(gchan, "gemini_flash_image_mapper", _fake_mapper)
+    ch = GeminiImageChannel()
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    out = asyncio.run(ch.invoke(request=req, vendor_model="gemini-3.1-flash-image-preview"))
+    assert out.data == b"IMG"
+    assert out.metadata["channel"] == "gemini-vertex"
+
+
 def test_gemini_channel_availability(monkeypatch):
     ch = GeminiImageChannel()
     monkeypatch.setattr(gapi, "SERVICE_CONFIG", _FakeConfig({}))

@@ -178,9 +178,13 @@ class AIGCGenerationBase(ABC):
             try:
                 output = await self.execute_on_channel(request, binding, on_progress=on_progress)
             except ChannelError as e:
-                self.balancer().record_failure(scope=self.name, member=binding.channel.name)
                 last_error = e
-                if not e.retryable or len(ordered) == 1:
+                if not e.retryable:
+                    # 参数类失败(换通道也没用)不计入熔断:通道本身是健康的,
+                    # 用户反复提交坏请求不应把通道推入冷却期
+                    raise
+                self.balancer().record_failure(scope=self.name, member=binding.channel.name)
+                if len(ordered) == 1:
                     raise
                 logger.warning(f"[{self.name}] 通道 {binding.channel.name} 失败({e}),切换下一通道")
                 continue

@@ -24,6 +24,11 @@
 > = 一个 `SeedanceProviderChannel`(`seedance/channel.py`),由通用 `LoadBalancer`
 > 统一排序/熔断/故障切换(见下)。
 
+> **openai_image 也不是 Adapter**:`openai_image/` 是"OpenAI 兼容供应商池"——
+> 网页控制台 `OpenAI_Image_Providers` 每行一家供应商,`sync_openai_image_providers()`
+> 把每家包成 `OpenAIImageChannel` 经 `channel_registry` 挂到现有图片模型上。
+> 详见 [13 章](./13-openai-provider-pool.md)。
+
 Adapter 协议(5 成员):`name` / `check_available()` / `get_unavailable_reason()` /
 `capabilities()` / `execute(request, node, on_progress) -> NodeOutput`。
 
@@ -79,11 +84,12 @@ PortSpec。两者必须同步(mapper 消费的字段要在 inputs 里声明)。
 | `ComfyUI_BaseURL` | ComfyUI 地址 |
 | `RH_apikey` | RunningHub |
 | `OpenAI_Image_apikey` / `OpenAI_Image_BaseURL` | OpenAI 兼容生图 |
-| `Gemini_Image_apikey` / `Gemini_Image_Project_ID` / `Gemini_Image_Location` / `Gemini_Image_SA_File` | Gemini 生图(填 Project ID 走 VertexAI+ADC/SA,否则 AI Studio+key) |
+| `Gemini_Image_apikey` / `Gemini_Image_Use_Vertex` / `Gemini_Image_Project_ID` / `Gemini_Image_Location` / `Gemini_Image_SA_File` | Gemini 生图(**显式开关** `Use_Vertex` 决定模式:开=VertexAI+ADC/SA(忽略 key),关=AI Studio+key;不再由 Project ID 推断) |
 | `MiniMax_apikey` / `MIMO_apikey` | MiniMax / MiMo |
 | `Seedance_apikey_{ark,runninghub}` + `Seedance_BaseURL_*` + `Seedance_Enable_*` | Seedance 内置供应商凭证(网关凭证在外部插件自己的面板) |
-| `Seedance_Dry_Run` | Seedance 干跑(拦截出站请求 + 打印) |
-| `Load_Balance_Mode` / `Failure_Threshold` | 全模态通用的负载均衡策略 / 熔断阈值(旧 `Seedance_Load_Balance` / `Seedance_Failure_Threshold` 已迁移至此) |
+| `Seedance_Dry_Run` | Seedance 干跑(拦截出站请求 + 打印;抛 `DryRunInterrupt` 终止,积分自动退款) |
+| `OpenAI_Image_Providers` | OpenAI 兼容供应商池(重复组,每行一家;见 13 章;增删/改映射后需 `rh 刷新供应商`) |
+| `Load_Balance_Mode` / `Failure_Threshold` | 全模态通用的负载均衡策略 / 熔断阈值(每次决策实时读取,改完即生效;旧 `Seedance_Load_Balance` / `Seedance_Failure_Threshold` 已迁移至此) |
 
 **PLUGIN_CONFIG(plugin_config.py)— 插件行为**
 
@@ -115,6 +121,9 @@ header value b'Bearer '` 或旧 URL 持续报错。
 | `rh_app` | `RH_apikey` | `@property api_key` + `_require_api_key()` | ✅ 每次请求即时 |
 | `comfyui` | `ComfyUI_BaseURL` + `RH_apikey` | `url` / `server_address` / `api_key` 全 `@property` | ✅ 每次请求即时 |
 | `seedance` | `Seedance_apikey_*` + `Seedance_BaseURL_*` | provider 用 `update_credentials()` | ✅ `SeedanceProviderChannel._get_provider` 每次比对新旧值再热更新 |
+| `openai_image` 供应商池 | `OpenAI_Image_Providers` 行内 key/url | `credentials_resolver` 每请求实时解析 | ✅ 凭证即时;增删供应商/改映射需 `rh 刷新供应商` |
+| `gemini_image` | `Gemini_Image_*` | 全 `@property` 直读 | ✅ 每次请求即时 |
+| 负载均衡器 | `Load_Balance_Mode` / `Failure_Threshold` | `config_resolver` 每次决策实时读 | ✅ 改完即生效(2026-07-10 起) |
 
 ### 红线:不要在 `__init__` 里把 `api_key` 存成实例属性
 

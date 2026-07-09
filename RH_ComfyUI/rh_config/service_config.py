@@ -236,9 +236,9 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "Seedance_Dry_Run": GsBoolConfig(
         "Dry-Run(拦截请求 + 打印)",
-        "开启后,所有 Seedance 出站请求会被拦截,抛 SeedanceProviderError(code=DRY_RUN_BLOCKED) 终止;"
-        "同时通过 logger.info 打印被拦截请求的完整内容(method/url/headers[脱敏]/body[全量 JSON])。"
-        "不会真正发送请求,不会消耗配额。",
+        "开启后,所有 Seedance 出站请求会被拦截,抛 DryRunInterrupt 直接终止(不触发熔断/通道切换,"
+        "已预扣的积分自动退款);同时通过 logger.info 打印被拦截请求的完整内容"
+        "(method/url/headers[脱敏]/body[全量 JSON])。不会真正发送请求,不会消耗配额。",
         False,
     ),
 }

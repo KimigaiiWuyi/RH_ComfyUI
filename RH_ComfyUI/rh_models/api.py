@@ -202,6 +202,65 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
     )
 
 
+async def _build_entry_from_model(model) -> ModelEntry:  # noqa: ANN001
+    """为无 NodeDef 的纯编程式模型(路径 C / 闭源 ABC 模型)构建 ModelEntry。
+
+    这类模型只存在于 model_registry(model.node is None),不经 pipeline_registry;
+    没有它们清单就违背了"注册即三入口可见"的承诺。backend 留空(无 Adapter)。
+    """
+    available = False
+    reason: Optional[str] = None
+    try:
+        available = await model.check_available()
+    except Exception as e:  # noqa: BLE001
+        reason = f"check_available 异常: {e}"
+    if not available and reason is None:
+        try:
+            reason = await model.unavailable_reason()
+        except Exception:  # noqa: BLE001
+            reason = "无可用通道"
+
+    channels: list[dict[str, Any]] = []
+    bindings = []
+    try:
+        bindings = model.channel_bindings()
+    except Exception:  # noqa: BLE001
+        pass
+    for b in bindings:
+        channels.append(
+            {
+                "name": b.channel.name,
+                "vendor_model": b.vendor_model,
+                "available": await b.channel.check_available(),
+            }
+        )
+
+    input_schema = model.input_schema()
+    img_port = input_schema.get("images") or input_schema.get("image")
+    accepts_images = img_port is not None
+    max_input_images = int(img_port.max_items) if img_port is not None and img_port.max_items else 0
+
+    return ModelEntry(
+        name=model.name,
+        display_name=model.display_name,
+        task_type=model.modality.value,
+        backend="",
+        description=model.card.description,
+        point_cost=model.point_cost,
+        priority=model.priority,
+        available=available,
+        unavailable_reason=None if available else reason,
+        supported_tasks=[model.modality.value],
+        input_schema=_port_to_schema(input_schema),
+        output_schema=_port_to_schema(model.output_schema()),
+        card=model.card.to_dict(),
+        channels=channels,
+        execution_mode=model.execution_mode,
+        accepts_images=accepts_images,
+        max_input_images=max_input_images,
+    )
+
+
 def _deduplicate_by_name(entries: list[ModelEntry]) -> list[ModelEntry]:
     """按 name 分组去重,只保留 priority 最高的那一个。
 
@@ -257,6 +316,21 @@ async def build_model_catalog(
     entries: list[ModelEntry] = []
     for n in nodes:
         entry = await _build_entry(n)
+        if not include_unavailable and not entry.available:
+            continue
+        entries.append(entry)
+
+    # 纯编程式模型(model.node is None,如闭源 ABC 模型)不经 pipeline_registry,
+    # 单独从 model_registry 补进清单,保证"注册即三入口可见"
+    from ..core.routing.registry import model_registry
+
+    node_names = {n.name for n in nodes}
+    for model in model_registry.all_models():
+        if model.node is not None or model.name in node_names:
+            continue
+        if target_task is not None and model.modality != target_task:
+            continue
+        entry = await _build_entry_from_model(model)
         if not include_unavailable and not entry.available:
             continue
         entries.append(entry)
@@ -337,17 +411,37 @@ async def build_backend_summary() -> dict[str, Any]:
                 "model_count": len(models),
             }
         )
-    total = len(pipeline_registry.all_pipelines())
-    available_models = sum(
-        1
-        for n in pipeline_registry.all_pipelines()
-        if any(b["name"] == n.backend and b["available"] for b in backends_info)
-    )
+    # 模型可用性以 ABC 模型的通道为准(Seedance/Gemini 无 Adapter,
+    # 按 backend 判定会把它们永远算成不可用);无 ABC 模型的历史节点才回退按后端
+    from ..core.routing.registry import model_registry
+
+    nodes = pipeline_registry.all_pipelines()
+    node_names = {n.name for n in nodes}
+    pure_models = [m for m in model_registry.all_models() if m.node is None and m.name not in node_names]
+
+    available_models = 0
+    for n in nodes:
+        model_obj = model_registry.get(n.name)
+        if model_obj is not None:
+            try:
+                if await model_obj.check_available():
+                    available_models += 1
+            except Exception:  # noqa: BLE001
+                pass
+        elif any(b["name"] == n.backend and b["available"] for b in backends_info):
+            available_models += 1
+    for m in pure_models:
+        try:
+            if await m.check_available():
+                available_models += 1
+        except Exception:  # noqa: BLE001
+            pass
+
     return {
         "backends": backends_info,
         "totals": {
             "backends": len(backends_info),
-            "models": total,
+            "models": len(nodes) + len(pure_models),
             "available_models": available_models,
         },
     }

@@ -86,3 +86,48 @@ def test_run_falls_over_to_next_provider():
     req = GenerationRequest(task_type=TaskType.IMAGE, prompt="hi")
     out = asyncio.run(model.run(req))
     assert out.data == b"ok"
+
+
+class _RejectChannel(ProviderChannel):
+    name = "reject"
+
+    async def check_available(self) -> bool:
+        return True
+
+    async def invoke(self, **kwargs: Any) -> NodeOutput:
+        raise ChannelError("参数被拒", retryable=False)
+
+
+class _NonRetryableModel(AIGCGenerationBase):
+    modality = TaskType.IMAGE
+    card = ModelCard(description="x")
+
+    def __init__(self, balancer: LoadBalancer) -> None:
+        self.name = "nonretry_model"
+        self.display_name = "nonretry_model"
+        self._balancer = balancer
+
+    def input_schema(self) -> dict:
+        return {"prompt": PortSpec(type=PortType.TEXT, required=True)}
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        return [ChannelBinding(_RejectChannel()), ChannelBinding(_GoodChannel())]
+
+    async def execute_on_channel(
+        self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+    ) -> NodeOutput:
+        return await binding.channel.invoke(request=request)
+
+    def balancer(self) -> LoadBalancer:
+        return self._balancer
+
+
+def test_non_retryable_error_skips_breaker_and_failover():
+    # retryable=False:不切换通道、不计入熔断(通道是健康的,坏的是参数)
+    lb = LoadBalancer(BalancerConfig(mode="least_failures", failure_threshold=1))
+    model = _NonRetryableModel(lb)
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="hi")
+    with pytest.raises(ChannelError) as ei:
+        asyncio.run(model.run(req))
+    assert ei.value.retryable is False
+    assert lb.health_snapshot() == {}  # 未记失败、未熔断

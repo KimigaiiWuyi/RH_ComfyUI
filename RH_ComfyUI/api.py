@@ -451,5 +451,6 @@ __all__ = [
     "submit",
     "get_point_cost",
     "list_models",
+    "get_model_input_schema",
     "is_available",
 ]

@@ -10,7 +10,11 @@
 | 2. validate() | `ValidationError` | 不扣费(★校验先于扣费) | 不落库 |
 | 3. policy.reserve() | `BillingDeniedError` | 不扣费 | 不落库 |
 | 4. model.run() 失败 | 原样抛出 | **先落统计(failed)再退款**(幂等) | status=failed |
+| 4. model.run() 取消/中断 | `BaseException`(CancelledError / DryRunInterrupt)原样抛出 | 同样退款(2026-07-10 起;此前 BaseException 绕过退款吞积分) | CancelledError→status=cancelled,其余=failed |
 | 4. model.run() 成功 | — | commit | status=ok |
+
+注意:失败路径的 `record_dispatch()` 整体 try/except 兜底**永不抛出**
+(它排在退款之前,一旦抛出退款会被跳过);"先落统计再退款"的顺序不许动。
 
 排查"扣了积分没出图":查 `RHComfyuiTaskRecord` 该次记录 —— status=failed
 且退款标记为真 = 已退,用户看错了;记录缺失 = 有代码绕过了 dispatch(严重,

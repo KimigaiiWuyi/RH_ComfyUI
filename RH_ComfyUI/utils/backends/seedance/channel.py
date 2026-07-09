@@ -233,7 +233,18 @@ class SeedanceProviderChannel(ProviderChannel):
 
         if on_progress is not None:
             await _safe_emit(on_progress, _evt("downloading", 90, "下载视频"))
-        video = await _download(final.video_url)
+        try:
+            video = await _download(final.video_url)
+        except (httpx.HTTPError, asyncio.TimeoutError, OSError) as exc:
+            # 生成已成功、只是取件失败:换通道会重新生成(重复烧钱),
+            # 故 retryable=False,翻译成干净文案而非裸 httpx traceback
+            raise ChannelError(
+                f"{self.name} 下载生成结果失败({type(exc).__name__}: {exc})",
+                retryable=False,
+                channel=self.name,
+                code="RESULT_DOWNLOAD_FAILED",
+                user_message="视频已生成但下载失败,请稍后重试。",
+            ) from exc
 
         outputs: dict[str, Any] = {}
         if final.last_frame_url:

@@ -131,6 +131,70 @@ def test_failure_refunds(monkeypatch):
         model_registry.unregister(model.name)
 
 
+class _Interrupt(BaseException):
+    """模拟 DryRunInterrupt 这类继承 BaseException 的中断信号"""
+
+
+class _InterruptModel(FakeModel):
+    name = "fake_interrupt_model"
+
+    async def execute_on_channel(
+        self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+    ) -> NodeOutput:
+        raise _Interrupt("dry-run")
+
+
+def test_base_exception_still_refunds(monkeypatch):
+    # 回归:DryRunInterrupt(BaseException)曾绕过 except Exception,
+    # 预扣的积分一去不回;dispatcher 现按 BaseException 兜底退款后原样抛出
+    recorded: list[str] = []
+    _capture_recording(monkeypatch, recorded)
+    model = _InterruptModel()
+    model_registry.register(model)
+    try:
+        policy = FakePolicy()
+        with pytest.raises(_Interrupt):
+            asyncio.run(
+                dispatch(
+                    GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                    _ctx(policy),
+                )
+            )
+        assert policy.refunds == 1 and policy.balance == 100
+        assert recorded == ["failed"]
+    finally:
+        model_registry.unregister(model.name)
+
+
+class _CancelModel(FakeModel):
+    name = "fake_cancel_model"
+
+    async def execute_on_channel(
+        self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+    ) -> NodeOutput:
+        raise asyncio.CancelledError()
+
+
+def test_cancellation_refunds_and_records_cancelled(monkeypatch):
+    recorded: list[str] = []
+    _capture_recording(monkeypatch, recorded)
+    model = _CancelModel()
+    model_registry.register(model)
+    try:
+        policy = FakePolicy()
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(
+                dispatch(
+                    GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                    _ctx(policy),
+                )
+            )
+        assert policy.refunds == 1 and policy.balance == 100
+        assert recorded == ["cancelled"]
+    finally:
+        model_registry.unregister(model.name)
+
+
 def _mute_recording(monkeypatch):
     """统计落库依赖真实数据库,单测中静音"""
     import importlib
@@ -143,3 +207,16 @@ def _mute_recording(monkeypatch):
         return None
 
     monkeypatch.setattr(disp, "record_dispatch", _noop)
+
+
+def _capture_recording(monkeypatch, statuses: list):
+    """静音统计落库,同时捕获 status 供断言"""
+    import importlib
+
+    disp = importlib.import_module("RH_ComfyUI.core.dispatch.dispatcher")
+
+    async def _capture(**kwargs):
+        statuses.append(kwargs.get("status"))
+        return None
+
+    monkeypatch.setattr(disp, "record_dispatch", _capture)

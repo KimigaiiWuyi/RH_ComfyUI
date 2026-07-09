@@ -51,10 +51,12 @@
 | `RH_ComfyUI/utils/core/` | NodeDef/PipelineRegistry/旧 router(兼容层) | 一般不动 |
 | `RH_ComfyUI/rh_generate/` | 命令入口(rh 生图/生视频/...)+ to_ai | 改命令交互时 |
 | `RH_ComfyUI/rh_models/` | HTTP 模型清单(/RH_ComfyUI/models*) | 改清单展示时(契约只增不改) |
+| `RH_ComfyUI/rh_agent/` | AgentNode 注册(rh_aigc_agent,AIGC 创作代理身份核 prompt) | 改 Agent Mesh 里的代理行为时 |
+| `RH_ComfyUI/rh_admin/` | 积分管理命令 + `刷新供应商` + @ai_tools 管理工具 | 改积分/记录/供应商池命令时 |
 | `RH_ComfyUI/api.py` | canvas_backend 调用的编程接口(submit 等) | 改画布对接时 |
 | `RH_ComfyUI/utils/database/` | RHComfyuiTaskRecord 统计表 | 加统计维度时 |
 | `tests/` | 内核单测(全离线) | 每次改 core/models |
-| `docs/ABC_ARCHITECTURE.md` | 架构长文档 | 架构级变更时同步 |
+| `docs/skills/rh-comfyui-development/` | 本 SKILL(架构事实来源) | 架构级变更时同步 |
 
 ## 1.4 一次生成的完整数据流(画布参考音频为例)
 
@@ -79,5 +81,13 @@
   (knowledge_content)与 HTTP 清单消费。
 
 **两者都由 `models.discover_builtin_models()` 在启动时从代码填充**
-(每个模型类的 `node_def()`),不再有 YAML 装载路径。写不依赖 Adapter 的
-新模型时可以只进 model_registry(用 `@register_model`),无需 NodeDef。
+(每个模型类的 `node_def()`),不再有 YAML 装载路径;pipeline_registry 现在是
+model_registry 的**派生只读视图**(带 `.node` 的模型自动出现,不再单独注册)。
+写不依赖 Adapter 的新模型时可以只进 model_registry(用 `@register_model`),
+无需 NodeDef —— 这类"纯编程式模型"(`model.node is None`)自 2026-07-10 起也会
+出现在 HTTP 清单(`build_model_catalog` 从 model_registry 补录),三入口可见性一致。
+
+启动顺序(`RH_ComfyUI/__init__.py::init_pipeline_system`):
+`init_backends()` → `discover_builtin_models()` →
+`sync_openai_image_providers()`(供应商池,见 13 章,须在模型注册后)→
+注册 AI 知识库 → 触发统计模块加载。

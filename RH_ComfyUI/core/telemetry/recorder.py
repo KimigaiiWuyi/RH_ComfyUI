@@ -80,27 +80,34 @@ async def record_dispatch(
     error: Optional[str],
     ctx: "DispatchContext",
 ) -> None:
-    """统计落库(内部兜底,永不抛出)"""
-    if output is not None and status == "ok":
-        _save_output(output, request.task_type.value)
+    """统计落库(内部兜底,永不抛出)
 
-    from ...utils.database.statistics import record_task
+    调用点在 dispatcher 的失败路径里位于 refund 之前 —— 这里一旦抛出,
+    退款就会被跳过,所以整体 try/except 兜底(record_task 内部另有一层)。
+    """
+    try:
+        if output is not None and status == "ok":
+            _save_output(output, request.task_type.value)
 
-    key_prefix = str(output.metadata.get("key_prefix", "")) if output is not None else ""
+        from ...utils.database.statistics import record_task
 
-    await record_task(
-        request=request,
-        result=result,
-        node=_node_view(model, output),  # type: ignore[arg-type]  # duck-typed NodeDef 视图
-        status=status,
-        elapsed_ms=elapsed_ms,
-        error=error,
-        bot_id=ctx.billing.bot_id,
-        group_id=ctx.group_id,
-        trace_id=request.trace_id or ctx.trace_id,
-        entry_point=ctx.billing.entry_point,
-        backend_key_prefix=key_prefix,
-    )
+        key_prefix = str(output.metadata.get("key_prefix", "")) if output is not None else ""
+
+        await record_task(
+            request=request,
+            result=result,
+            node=_node_view(model, output),  # type: ignore[arg-type]  # duck-typed NodeDef 视图
+            status=status,
+            elapsed_ms=elapsed_ms,
+            error=error,
+            bot_id=ctx.billing.bot_id,
+            group_id=ctx.group_id,
+            trace_id=request.trace_id or ctx.trace_id,
+            entry_point=ctx.billing.entry_point,
+            backend_key_prefix=key_prefix,
+        )
+    except Exception as e:  # noqa: BLE001 — 统计失败不能影响主流程(尤其是退款)
+        logger.warning(f"[Telemetry] record_dispatch 失败(已忽略): {e}")
 
 
 __all__ = ["record_dispatch"]

@@ -30,10 +30,12 @@ Plugins(name="RH_ComfyUI", force_prefix=["rh", "cf", "RH"], allow_empty_prefix=F
 | `增加积分` / `加积分`、`减少积分` / `扣积分` | 管理员 |
 | `查询积分` / `查看积分`、`消费记录` / `我的记录` 等 | 用户 |
 | `全员消费记录` / `全局记录` 等 | 管理员 |
+| `刷新供应商` / `刷新供应商池` / `同步供应商`(重挂 OpenAI 兼容供应商池,见 13 章) | 管理员 |
 
 另有 `rh_models/`(`模型列表`/`模型清单`/`可用模型` 命令 + HTTP 路由)、
-`rh_help/`(`帮助` fullmatch)。管理类纯 AI 工具用 `@ai_tools`
-(rh_admin/commands.py),与 to_ai 互斥。
+`rh_help/`(`帮助` fullmatch)、`rh_agent/`(注册 AgentNode `rh_aigc_agent`,
+Agent Mesh 的 AIGC 创作代理,import 即注册,无命令面)。管理类纯 AI 工具用
+`@ai_tools`(rh_admin/commands.py),与 to_ai 互斥。
 
 改 to_ai 文案 = 改 Agent 的工具说明书,措辞影响 Agent 何时调用、怎么传参,
 改动后要人工对话验证(触发词本身是兼容承诺,不要改)。
@@ -51,7 +53,7 @@ Plugins(name="RH_ComfyUI", force_prefix=["rh", "cf", "RH"], allow_empty_prefix=F
 | 身份 | `user_id` / `bot_id` / `group_id` |
 | 任务 | `task_type` / `task_name`(=模型 name)/ `backend` / `backend_model` / `backend_provider` |
 | 参数 | `duration_seconds` / `width` / `height` / `ratio` / `resolution` / `seed` / `voice_id` / `extra_params_json` / `prompt`(≤4000) |
-| 结果 | `status`(ok/failed/cancelled)/ `elapsed_ms` / `point_cost` / `refunded` / `error_message`(≤2KB)/ `raw_response_json`(≤64KB) |
+| 结果 | `status`(ok/failed/cancelled;cancelled=任务被 CancelledError 中断,2026-07-10 起实际写入)/ `elapsed_ms` / `point_cost` / `refunded` / `error_message`(≤2KB)/ `raw_response_json`(≤64KB) |
 | 追踪 | `trace_id` / `entry_point`(command/agent/http)/ `created_at` |
 
 规则(同 05 章):既有列不改名不删;加列必须带默认值(gsuid_core

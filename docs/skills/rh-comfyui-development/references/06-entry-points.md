@@ -40,7 +40,8 @@ Agent 智能选型的数据源(用户没指定模型时):
 
 - `api.submit()`:canvas_backend 调用的编程接口,内部构造
   `ExternalPrepaidPolicy`(调用方已扣费,引擎只记账)+
-  `entry_point="canvas"` 走 dispatch;
+  `entry_point="http"` 走 dispatch(统计表 entry_point 三个取值:
+  command / agent / http,**没有 "canvas" 这个值**);
   **签名与返回类型不变**(`submit / get_point_cost / list_models / is_available`);
 - `rh_models/api.py`:`GET /RH_ComfyUI/models`、`/models/{task_type}`、
   `/models/summary` 三个路由的聚合逻辑(`build_model_catalog()`)。

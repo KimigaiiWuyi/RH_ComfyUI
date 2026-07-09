@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import io
 from typing import Optional
-
-from PIL import Image
 
 from gsuid_core.sv import SV
 from gsuid_core.bot import Bot
@@ -20,6 +17,7 @@ from ..utils.core.types import audio_ref
 from ..utils.core.parser import parse_mood_from_prompt, parse_model_from_prompt
 from ..utils.core.request import TaskType, GenerationResult, GenerationRequest
 from ..core.billing.policy import BillingContext
+from ..utils.image_process import flatten_transparent_to_white
 from ..core.base.generation import AIGCGenerationBase
 from ..core.dispatch.context import DispatchContext
 from ..core.routing.registry import model_registry
@@ -29,30 +27,6 @@ from ..core.billing.points_policy import PointsBillingPolicy
 sv_gen = SV("AI生成")
 
 _POINTS_POLICY = PointsBillingPolicy()
-
-
-def _has_transparency(image: Image.Image) -> bool:
-    """判断图片是否包含透明通道。"""
-    if image.mode in ("RGBA", "LA"):
-        alpha = image.getchannel("A")
-        transparent_mask = alpha.point(lambda value: 255 - value)
-        return transparent_mask.getbbox() is not None
-    return image.mode == "P" and "transparency" in image.info
-
-
-def _flatten_transparent_image_to_white(image_bytes: bytes) -> bytes:
-    """将透明图片合成到白色背景，非透明图片保持原始字节。"""
-    image = Image.open(io.BytesIO(image_bytes))
-    if not _has_transparency(image):
-        return image_bytes
-
-    rgba_image = image.convert("RGBA")
-    background = Image.new("RGBA", rgba_image.size, (255, 255, 255, 255))
-    background.alpha_composite(rgba_image)
-
-    output = io.BytesIO()
-    background.convert("RGB").save(output, format="PNG")
-    return output.getvalue()
 
 
 # ── 内部通用执行函数 ──
@@ -164,7 +138,7 @@ async def generate_image(bot: Bot, ev: Event) -> None:
         from gsuid_core.utils.resource_manager import RM
 
         image_bytes = await RM.get(ev.image_id)
-        request.images = [_flatten_transparent_image_to_white(image_bytes)]
+        request.images = [flatten_transparent_to_white(image_bytes)]
 
     # 执行生成
     result = await _do_generate(request, ev, bot)
@@ -211,7 +185,7 @@ async def edit_image(bot: Bot, ev: Event) -> None:
 
     from gsuid_core.utils.resource_manager import RM
 
-    images = [_flatten_transparent_image_to_white(await RM.get(img_id)) for img_id in image_id_list]
+    images = [flatten_transparent_to_white(await RM.get(img_id)) for img_id in image_id_list]
 
     request = GenerationRequest(
         task_type=TaskType.IMAGE,
