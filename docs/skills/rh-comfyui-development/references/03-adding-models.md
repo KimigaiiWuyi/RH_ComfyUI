@@ -41,8 +41,9 @@ class NewImageDef(ImagePipelineModel):
             # mode="programmatic" 时改用:
             # mapper_func=my_mapper,             # from ...utils.mappers.xxx import
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="生成描述"),
-                "width": PortSpec(type=PortType.INTEGER, default=720, minimum=256, maximum=2048),
+                # title=前端面板短标题(几个字);description=完整说明(Agent 消费,缺 title 时前端回退用它)
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述"),
+                "width": PortSpec(type=PortType.INTEGER, default=720, minimum=256, maximum=2048, title="宽度"),
             },
             outputs={"image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片")},
             capabilities=CapabilityManifest(

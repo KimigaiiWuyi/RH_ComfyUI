@@ -22,6 +22,7 @@ from gsuid_core.utils.plugins_config.models import (
 # 用静态常量避免在配置模块加载期 import defs 触发循环导入; 新增模型时同步此表即可。
 _IMAGE_MODEL_REAL_NAMES = [
     "anima",
+    "banana1",
     "banana2",
     "banana_pro",
     "gpt-image-2",
@@ -185,6 +186,10 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "自动参与负载均衡与熔断;前端只看到一个模型,后端按供应商分发并入库(含 Key 前缀)。",
         "OpenAI 兼容生图供应商池",
     ),
+    # 供应商池配置键按「协议_模态_Providers」命名:图片=OpenAI_Image_Providers;
+    # 未来扩展语音/视频池时新增 OpenAI_Speech_Providers / OpenAI_Video_Providers,
+    # 行结构(enable/name/base_url/api_key/weight/models)保持一致即可复用同一套
+    # 解析与挂载逻辑(见 utils/backends/openai_image/providers.py 的池规格注释)。
     "OpenAI_Image_Providers": GsRepeatGroupConfig(
         "OpenAI 兼容生图供应商",
         "每行一家供应商:填 Base URL / API Key,并把『现有模型』映射到『供应商侧模型名』。"
@@ -195,11 +200,19 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
             "name": GsStrConfig("供应商名称", "唯一标识(负载均衡成员名 + 审计 backend_provider)", ""),
             "base_url": GsStrConfig(
                 "Base URL",
-                "OpenAI 兼容生图根地址,端点自动拼 /images/generations",
+                "OpenAI 兼容生图根地址;纯文生图自动拼 /images/generations,"
+                "带参考图自动拼 /images/edits(标准 multipart 协议)",
                 "https://qianfan.baidubce.com/v2",
                 options=["https://qianfan.baidubce.com/v2", "https://api.openai.com/v1"],
             ),
             "api_key": GsStrConfig("API Key", "供应商访问令牌(作 Bearer)", "", secret=True),
+            "weight": GsStrConfig(
+                "负载权重",
+                "weighted 负载均衡策略下的相对权重(≥1 的整数;数值越大分到的请求越多);"
+                "其他策略下不生效",
+                "1",
+                options=["1", "2", "3", "5"],
+            ),
             "models": GsRepeatGroupConfig(
                 "提供的模型",
                 "把现有内部模型映射到该供应商侧的模型名",

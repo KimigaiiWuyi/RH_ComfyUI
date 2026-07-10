@@ -281,6 +281,60 @@ async def task_stats_summary(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  供应商对账(管理员命令: 供应商统计)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def format_provider_stats(days: Optional[int] = None) -> str:
+    """按供应商聚合成功率/平均耗时/消耗积分,并附当前熔断快照
+
+    数据源:RHComfyuiTaskRecord(持久化,重启不丢)+ LoadBalancer 内存健康
+    快照(重启即清零,只反映本次运行期)。多供应商运维的核心问题
+    "这家到底稳不稳/值不值"由此命令回答。
+    """
+    start: Optional[datetime] = None
+    if days is not None:
+        start = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = await RHComfyuiTaskRecord.get_provider_summaries(start_time=start)
+
+    from ..core.routing.balancer import get_default_balancer
+
+    snapshot = get_default_balancer().health_snapshot()
+    scope = f"最近 {days} 天" if days is not None else "全部时间"
+    return _render_provider_stats(rows, snapshot, scope)
+
+
+def _render_provider_stats(rows: list, snapshot: dict, scope: str) -> str:
+    """把供应商聚合行 + 熔断快照渲染为 bot 消息文本(纯函数,可单测)。"""
+    lines: list[str] = [f"📊 供应商对账({scope})"]
+    if not rows:
+        lines.append("📭 暂无带供应商维度的任务记录")
+    else:
+        lines.append("")
+        for r in rows:
+            rate = f"{r['success_rate'] * 100:.1f}%"
+            lines.append(
+                f"· {r['provider']}: {r['total']}单 成功率{rate} "
+                f"均耗时{r['avg_elapsed_ms']}ms 消耗{r['total_points']}积分"
+                f"(成功{r['success']}/失败{r['failed']})"
+            )
+
+    open_circuits = [key for key, st in snapshot.items() if st.get("circuit_open")]
+    counting = {key: st for key, st in snapshot.items() if not st.get("circuit_open") and st.get("failure_count")}
+    lines.append("")
+    if open_circuits:
+        lines.append("🔴 熔断中(本次运行期): " + ", ".join(sorted(open_circuits)))
+    if counting:
+        lines.append(
+            "🟡 有连续失败计数: "
+            + ", ".join(f"{key}×{st['failure_count']}" for key, st in sorted(counting.items()))
+        )
+    if not open_circuits and not counting:
+        lines.append("🟢 当前所有通道健康(无熔断/无连续失败)")
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  消费记录查看(用户 / 管理员命令行直接调用)
 # ═══════════════════════════════════════════════════════════════════════
 

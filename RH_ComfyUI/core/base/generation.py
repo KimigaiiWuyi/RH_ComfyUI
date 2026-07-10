@@ -7,6 +7,7 @@
       ├─ 2. normalize(request)           # 默认值填充 / 单位归一化(可覆盖)
       ├─ 3. balancer.order_candidates()  # 负载均衡选通道(多通道时)
       ├─ 4. execute_on_channel(...)      # ★ 子类核心:组装请求并执行
+      │     ├─ 瞬时失败(transient,如 429/503)→ 原通道退避重试一次
       │     └─ 失败且可重试 → 记熔断 → 换下一个通道
       └─ 5. postprocess(output)          # 输出归一化(可覆盖)
 
@@ -17,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar, Optional
 
@@ -54,6 +56,9 @@ class AIGCGenerationBase(ABC):
     # ── 元数据与计费 ──
     card: ModelCard
     point_cost: int = 2
+
+    # ── 弹性:瞬时错误(429/503)在原通道退避重试一次的间隔秒数 ──
+    transient_retry_delay: ClassVar[float] = 2.0
 
     # ── 路由 ──
     priority: int = 50  # 数字越大越优先
@@ -111,6 +116,17 @@ class AIGCGenerationBase(ABC):
     def normalize(self, request: GenerationRequest) -> GenerationRequest:
         """默认值填充与归一化(如把 "1080P" 统一成 "1080p"),默认原样返回"""
         return request
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """本次请求的预估扣费(动态计费钩子)
+
+        dispatcher 在校验通过后调用本方法确定 reserve 金额;默认恒等于
+        point_cost(静态计费)。按参数分档计费的模型(如视频按分辨率×时长、
+        flex/draft 档折扣)覆盖本方法,返回值即预扣与落库的积分数。
+        必须是纯函数:只读 request,不做 IO,不抛业务异常(非法参数由
+        validate() 先行拦截)。
+        """
+        return self.point_cost
 
     def supports(self, request: GenerationRequest) -> bool:
         """路由用输入档案匹配:该请求的输入形状是否落在本模型能力内"""
@@ -175,18 +191,33 @@ class AIGCGenerationBase(ABC):
         for binding in ordered:
             if not await binding.channel.check_available():
                 continue
-            try:
-                output = await self.execute_on_channel(request, binding, on_progress=on_progress)
-            except ChannelError as e:
-                last_error = e
-                if not e.retryable:
-                    # 参数类失败(换通道也没用)不计入熔断:通道本身是健康的,
-                    # 用户反复提交坏请求不应把通道推入冷却期
-                    raise
-                self.balancer().record_failure(scope=self.name, member=binding.channel.name)
-                if len(ordered) == 1:
-                    raise
-                logger.warning(f"[{self.name}] 通道 {binding.channel.name} 失败({e}),切换下一通道")
+            output = None
+            retried_transient = False
+            while output is None:
+                try:
+                    output = await self.execute_on_channel(request, binding, on_progress=on_progress)
+                except ChannelError as e:
+                    last_error = e
+                    if not e.retryable:
+                        # 参数类失败(换通道也没用)不计入熔断:通道本身是健康的,
+                        # 用户反复提交坏请求不应把通道推入冷却期
+                        raise
+                    if e.transient and not retried_transient:
+                        # 瞬时限流/过载(429/503):切通道会整单重跑更烧钱,
+                        # 先在原通道退避重试一次;不计失败(通道是健康的)
+                        retried_transient = True
+                        logger.warning(
+                            f"[{self.name}] 通道 {binding.channel.name} 瞬时失败({e}),"
+                            f"{self.transient_retry_delay:.1f}s 后原通道重试"
+                        )
+                        await asyncio.sleep(self.transient_retry_delay)
+                        continue
+                    self.balancer().record_failure(scope=self.name, member=binding.channel.name)
+                    if len(ordered) == 1:
+                        raise
+                    logger.warning(f"[{self.name}] 通道 {binding.channel.name} 失败({e}),切换下一通道")
+                    break
+            if output is None:
                 continue
             self.balancer().record_success(scope=self.name, member=binding.channel.name)
             output.metadata.setdefault("channel", binding.channel.name)

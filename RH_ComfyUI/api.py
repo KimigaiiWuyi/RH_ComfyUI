@@ -90,7 +90,6 @@ async def submit(
     # 延迟导入:避免 RH_ComfyUI 导入阶段就触发整个模型注册链。
     # 必须在 canvas_backend 等下游插件被加载前保证注册表已初始化
     # (由 RH_ComfyUI/__init__.py 的 @on_core_start 钩子负责)。
-    from .utils.core.types import MediaRef
     from .utils.core.request import TaskType
     from .core.routing.registry import model_registry
 
@@ -128,31 +127,9 @@ async def submit(
         kwargs=kwargs,
     )
 
-    # 3.5) 视频生成任务:对传入图片做预处理(等比缩放最长边 ≤ 800px + EXIF 校正)
-    if request.task_type == TaskType.VIDEO:
-        from .utils.image_process import preprocess_for_video
-
-        if request.images:
-            request.images = [preprocess_for_video(img) for img in request.images]
-
-        if request.ordered_content:
-            from .utils.core.types import ContentItem as _CI, ContentItemType as _CIT
-
-            for i, item in enumerate(request.ordered_content):
-                if item.type == _CIT.IMAGE and item.media and item.media.data:
-                    request.ordered_content[i] = _CI(
-                        type=item.type,
-                        media=MediaRef(
-                            kind=item.media.kind,
-                            data=preprocess_for_video(item.media.data),
-                            url=item.media.url,
-                            role=item.media.role,
-                            mime_type=item.media.mime_type,
-                            filename=item.media.filename,
-                        ),
-                        role=item.role,
-                        text=item.text,
-                    )
+    # (视频参考图与 ordered_content 图片项的预处理已下沉到
+    #  VideoGenerationBase.normalize(),dispatch → model.run() 内统一执行,
+    #  三入口共享同一实现,入口层不再重复)
 
     # 4) 执行:统一调度器(路由/校验/限流/统计;计费为 ExternalPrepaidPolicy,
     #    即调用方已在外部记账,引擎侧只记账不扣费)

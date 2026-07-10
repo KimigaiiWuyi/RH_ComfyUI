@@ -47,9 +47,9 @@ class IndexTTS2Def(IndexTTS2Model):
             mode="programmatic",
             mapper_func=_index_tts2_mapper,
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="待合成文本"),
-                "reference_audio": PortSpec(type=PortType.AUDIO, description="参考音频(用于音色复刻)"),
-                "mood": PortSpec(type=PortType.STRING, description="情绪描述"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="合成文本", description="待合成文本"),
+                "reference_audio": PortSpec(type=PortType.AUDIO, title="参考音频", description="参考音频,用于音色复刻"),
+                "mood": PortSpec(type=PortType.STRING, title="情绪", description="情绪描述"),
             },
             outputs={
                 "audio": PortSpec(type=PortType.OUTPUT_AUDIO, description="生成的语音"),
@@ -113,11 +113,15 @@ class MimoTtsDef(SpeechPipelineModel):
             mode="programmatic",
             mapper_func=_mimo_tts_mapper,
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="待合成文本"),
-                "mood": PortSpec(type=PortType.STRING, description='情绪/风格控制指令(如 "用慵懒的语调")'),
-                "voice_id": PortSpec(type=PortType.STRING, description="预置音色 ID(可选,留空使用默认)"),
-                "reference_audio": PortSpec(type=PortType.AUDIO, description="参考音频(用于音色复刻)"),
-                "params": PortSpec(type=PortType.STRING, description="预留扩展(可指定 model 等)"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="合成文本", description="待合成文本"),
+                "mood": PortSpec(
+                    type=PortType.STRING, title="情绪风格", description='情绪/风格控制指令,如 "用慵懒的语调"'
+                ),
+                "voice_id": PortSpec(
+                    type=PortType.STRING, title="预置音色", description="预置音色 ID,可选,留空使用默认"
+                ),
+                "reference_audio": PortSpec(type=PortType.AUDIO, title="参考音频", description="参考音频,用于音色复刻"),
+                "params": PortSpec(type=PortType.STRING, title="扩展参数", description="预留扩展,可指定 model 等"),
             },
             outputs={
                 "audio": PortSpec(type=PortType.OUTPUT_AUDIO, description="生成的语音"),
@@ -169,20 +173,33 @@ class MinimaxT2aSpeechDef(SpeechPipelineModel):
             mode="programmatic",
             mapper_func=_minimax_t2a_speech_mapper,
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="待合成文本"),
-                "voice_id": PortSpec(type=PortType.STRING, description="预置音色 ID,留空使用默认 audiobook_male_1"),
-                "reference_audio": PortSpec(type=PortType.AUDIO, description="参考音频(用于音色克隆)"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="合成文本", description="待合成文本"),
+                "voice_id": PortSpec(
+                    type=PortType.STRING, title="预置音色", description="预置音色 ID,留空使用默认 audiobook_male_1"
+                ),
+                "reference_audio": PortSpec(type=PortType.AUDIO, title="参考音频", description="参考音频,用于音色克隆"),
                 "mood": PortSpec(
                     type=PortType.STRING,
-                    description="情绪(happy/sad/angry/fearful/disgusted/surprised/calm/fluent/whisper)",
+                    title="情绪",
+                    description="情绪:happy/sad/angry/fearful/disgusted/surprised/calm/fluent/whisper",
                 ),
                 "speed": PortSpec(
-                    type=PortType.NUMBER, default=1.0, minimum=0.5, maximum=2.0, description="语速(0.5~2.0)"
+                    type=PortType.NUMBER,
+                    default=1.0,
+                    minimum=0.5,
+                    maximum=2.0,
+                    title="语速",
+                    description="语速,0.5~2.0",
                 ),
                 "language_boost": PortSpec(
-                    type=PortType.STRING, default="auto", description="语言增强(auto / zh / en / ja ...)"
+                    type=PortType.STRING,
+                    default="auto",
+                    title="语言增强",
+                    description="语言增强:auto / zh / en / ja ...",
                 ),
-                "params": PortSpec(type=PortType.STRING, description="预留扩展(可指定 model=speech-2.8-hd 等)"),
+                "params": PortSpec(
+                    type=PortType.STRING, title="扩展参数", description="预留扩展,可指定 model=speech-2.8-hd 等"
+                ),
             },
             outputs={
                 "audio": PortSpec(type=PortType.OUTPUT_AUDIO, description="生成的语音"),

@@ -70,13 +70,36 @@ class VideoGenerationBase(AIGCGenerationBase):
                 )
 
     def normalize(self, request: GenerationRequest) -> GenerationRequest:
-        """视频通用预处理:分辨率统一小写 + 参考图等比缩放/EXIF 校正"""
+        """视频通用预处理:分辨率统一小写 + 参考图等比缩放/EXIF 校正
+
+        images 与 ordered_content 里的图片项统一走 preprocess_for_video
+        (等比缩放最长边 ≤ 800px);入口层(api.submit / bot 命令)不再各自
+        预处理,run() 是唯一执行路径所以此处天然覆盖三入口。
+        """
         if request.resolution:
             request.resolution = request.resolution.lower()
         from ...utils.image_process import preprocess_for_video
 
         if request.images:
             request.images = [preprocess_for_video(img) for img in request.images]
+        if request.ordered_content:
+            from ..schema.types import MediaRef, ContentItem, ContentItemType
+
+            for i, item in enumerate(request.ordered_content):
+                if item.type == ContentItemType.IMAGE and item.media and item.media.data:
+                    request.ordered_content[i] = ContentItem(
+                        type=item.type,
+                        media=MediaRef(
+                            kind=item.media.kind,
+                            data=preprocess_for_video(item.media.data),
+                            url=item.media.url,
+                            role=item.media.role,
+                            mime_type=item.media.mime_type,
+                            filename=item.media.filename,
+                        ),
+                        role=item.role,
+                        text=item.text,
+                    )
         return request
 
     # ── 端口构造器:子类拼 input_schema 的积木 ──

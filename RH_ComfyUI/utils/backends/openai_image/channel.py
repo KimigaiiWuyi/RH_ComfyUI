@@ -83,9 +83,11 @@ class OpenAIImageChannel(ProviderChannel):
                 size=size,
             )
         except OpenAIImageError as exc:
+            # 429/503 是瞬时限流/过载:标 transient,run() 先在原通道退避重试一次
             raise ChannelError(
                 str(exc),
                 retryable=True,
+                transient=exc.http_status in (429, 503),
                 channel=self.name,
                 user_message=exc.user_message,
             ) from exc

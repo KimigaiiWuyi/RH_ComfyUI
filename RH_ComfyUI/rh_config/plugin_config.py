@@ -22,9 +22,17 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "Max_Concurrency": GsIntConfig(
         "全局最大并发数",
-        "限制所有后端（RH 原生 / ComfyUI / GPT-Image2 等）同时执行的最大任务数，防止过载",
+        "限制所有后端（RH 原生 / ComfyUI / GPT-Image2 等）同时执行的最大任务数，防止过载。"
+        "改动即刻生效（新任务按新上限；已在执行中的任务不受影响，收缩上限时并发会随旧任务完成逐渐收敛）",
         1,
         options=[1, 2, 3, 5, 10],
+    ),
+    "Dispatch_Timeout": GsIntConfig(
+        "单任务超时预算（秒）",
+        "一次生成从进入排队到完成的总时长上限；超时按失败处理（落统计并退款），"
+        "防止卡死的上游长期占用全局并发闸。0=不限制。改动即刻生效",
+        1800,
+        options=[0, 600, 1200, 1800, 3600],
     ),
     "_divider_point": GsDivider(
         "积分规则",

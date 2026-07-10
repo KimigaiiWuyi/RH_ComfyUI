@@ -79,9 +79,13 @@ class GeminiImageAPI:
         prompt: str,
         images: Optional[list[bytes]] = None,
         aspect_ratio: str = "1:1",
-        image_size: str = "2K",
+        image_size: Optional[str] = "2K",
     ) -> bytes:
-        """生成一张图并返回原始字节;失败抛 RuntimeError(带上游文案)。"""
+        """生成一张图并返回原始字节;失败抛 RuntimeError(带上游文案)。
+
+        image_size=None 时整个字段不发(一代 gemini-2.5-flash-image 不支持
+        image_config.image_size,发了会被上游拒)。
+        """
         client = self._build_client()
 
         if images:
@@ -95,14 +99,17 @@ class GeminiImageAPI:
         img_sizes = ", ".join(f"{len(b)}B" for b in (images or [])) or "无"
         logger.info(
             f"[Gemini-Image] interactions.create model={model} vertex={self.is_vertex} "
-            f"ratio={aspect_ratio} size={image_size} 参考图={len(images or [])} 张"
+            f"ratio={aspect_ratio} size={image_size or '-'} 参考图={len(images or [])} 张"
         )
         logger.debug(f"[Gemini-Image] 请求 prompt={prompt[:120]!r} 参考图=[{img_sizes}] modalities=['image']")
+        image_config: dict[str, Any] = {"aspect_ratio": aspect_ratio}
+        if image_size:
+            image_config["image_size"] = image_size
         interaction = await client.aio.interactions.create(
             model=model,
             input=model_input,
             response_modalities=["image"],
-            generation_config={"image_config": {"aspect_ratio": aspect_ratio, "image_size": image_size}},
+            generation_config={"image_config": image_config},
         )
 
         status = getattr(interaction, "status", None)

@@ -195,6 +195,110 @@ def test_cancellation_refunds_and_records_cancelled(monkeypatch):
         model_registry.unregister(model.name)
 
 
+class _TieredCostModel(FakeModel):
+    """动态计费:按参数分档(模拟 1080p 比 480p 贵)"""
+
+    name = "fake_tiered_model"
+    point_cost = 5
+
+    def input_schema(self) -> dict[str, PortSpec]:
+        return {
+            "prompt": PortSpec(type=PortType.TEXT, required=True),
+            "resolution": PortSpec(type=PortType.TEXT),
+        }
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        return 12 if request.resolution == "1080p" else self.point_cost
+
+
+def test_estimate_cost_drives_reserve_and_result(monkeypatch):
+    # 动态计费钩子:reserve 金额与 result.cost_points 都以 estimate_cost 为准
+    _mute_recording(monkeypatch)
+    model = _TieredCostModel()
+    model_registry.register(model)
+    try:
+        policy = FakePolicy()
+        result = asyncio.run(
+            dispatch(
+                GenerationRequest(
+                    task_type=TaskType.IMAGE, prompt="cat", model=model.name, resolution="1080p"
+                ),
+                _ctx(policy),
+            )
+        )
+        assert result.cost_points == 12
+        assert policy.balance == 88  # 扣的是动态金额,不是静态 point_cost=5
+
+        result2 = asyncio.run(
+            dispatch(
+                GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                _ctx(policy),
+            )
+        )
+        assert result2.cost_points == 5  # 默认档 = 静态 point_cost
+    finally:
+        model_registry.unregister(model.name)
+
+
+class _SlowModel(FakeModel):
+    name = "fake_slow_model"
+
+    async def execute_on_channel(
+        self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+    ) -> NodeOutput:
+        await asyncio.sleep(0.5)
+        return NodeOutput(output_type="image", data=b"png")
+
+
+def test_dispatch_timeout_refunds_and_records_failed(monkeypatch):
+    # 超时预算:卡死的上游不能无限占并发闸;超时按失败处理(落统计 + 退款)
+    import importlib
+
+    recorded: list[str] = []
+    _capture_recording(monkeypatch, recorded)
+    disp = importlib.import_module("RH_ComfyUI.core.dispatch.dispatcher")
+    monkeypatch.setattr(disp, "_resolve_timeout", lambda: 0.05)
+
+    model = _SlowModel()
+    model_registry.register(model)
+    try:
+        policy = FakePolicy()
+        with pytest.raises(Exception) as ei:
+            asyncio.run(
+                dispatch(
+                    GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                    _ctx(policy),
+                )
+            )
+        assert "超时" in str(getattr(ei.value, "user_message", "")) or "超" in str(ei.value)
+        assert policy.refunds == 1 and policy.balance == 100
+        assert recorded == ["failed"]  # 超时是失败,不能记成 cancelled
+    finally:
+        model_registry.unregister(model.name)
+
+
+def test_dispatch_timeout_zero_means_unlimited(monkeypatch):
+    import importlib
+
+    _mute_recording(monkeypatch)
+    disp = importlib.import_module("RH_ComfyUI.core.dispatch.dispatcher")
+    monkeypatch.setattr(disp, "_resolve_timeout", lambda: 0.0)
+
+    model = _SlowModel()
+    model_registry.register(model)
+    try:
+        policy = FakePolicy()
+        result = asyncio.run(
+            dispatch(
+                GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                _ctx(policy),
+            )
+        )
+        assert result.data == b"png" and policy.commits == 1
+    finally:
+        model_registry.unregister(model.name)
+
+
 def _mute_recording(monkeypatch):
     """统计落库依赖真实数据库,单测中静音"""
     import importlib

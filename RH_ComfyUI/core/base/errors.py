@@ -29,19 +29,26 @@ class ModelUnavailableError(GenerationError):
 
 
 class ChannelError(GenerationError):
-    """通道执行失败;retryable=True 时调度切换下一通道"""
+    """通道执行失败;retryable=True 时调度切换下一通道
+
+    transient=True 表示"瞬时性失败"(如上游 429 限流 / 503 过载):通道本身健康,
+    稍等片刻在原通道重试大概率成功。run() 会先在原通道退避重试一次,再走通道切换;
+    该标注仅在 retryable=True 时有意义。
+    """
 
     def __init__(
         self,
         message: str,
         *,
         retryable: bool = False,
+        transient: bool = False,
         channel: str = "",
         code: str = "",
         user_message: Optional[str] = None,
     ) -> None:
         super().__init__(message, user_message=user_message)
         self.retryable = retryable
+        self.transient = transient
         self.channel = channel
         self.code = code
 

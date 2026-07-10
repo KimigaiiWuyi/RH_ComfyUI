@@ -130,14 +130,41 @@ def _invoke(channel, model="m"):
     )
 
 
-def test_provider_error_becomes_retryable_channel_error():
-    err = SeedanceProviderError("boom", code="TASK_FAILED", user_message="供应商内部错误")
+def test_provider_error_retryable_propagates():
+    # 供应商标 retryable=True(如任务在该家跑挂)→ 通道错误可切换
+    err = SeedanceProviderError("boom", code="TASK_FAILED", retryable=True, user_message="供应商内部错误")
     ch = _make_channel(name="fake", raise_exc=err)
     with pytest.raises(ChannelError) as ei:
         _invoke(ch)
     assert ei.value.retryable is True
     assert ei.value.user_message == "供应商内部错误"
     assert ei.value.channel == "fake"
+
+
+def test_provider_param_error_not_retryable():
+    # 回归:供应商显式标 retryable=False(参数类 VID-* 错误)不得再盲目 failover
+    err = SeedanceProviderError("参数无效", code="VID-INPUT_INVALID", retryable=False, user_message="参数无效")
+    ch = _make_channel(name="fake", raise_exc=err)
+    with pytest.raises(ChannelError) as ei:
+        _invoke(ch)
+    assert ei.value.retryable is False
+
+
+def test_provider_429_maps_to_transient():
+    # 429/503 → transient:run() 会先在原通道退避重试一次
+    err = SeedanceProviderError("限流", code="HTTP_ERROR", retryable=True, http_status=429)
+    ch = _make_channel(name="fake", raise_exc=err)
+    with pytest.raises(ChannelError) as ei:
+        _invoke(ch)
+    assert ei.value.retryable is True and ei.value.transient is True
+
+
+def test_http_status_retryable_policy():
+    from RH_ComfyUI.utils.backends.seedance.provider import http_status_retryable
+
+    assert http_status_retryable(500) and http_status_retryable(503)
+    assert http_status_retryable(429) and http_status_retryable(401)
+    assert not http_status_retryable(400) and not http_status_retryable(422)
 
 
 def test_unsupported_shape_is_not_retryable():

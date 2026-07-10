@@ -32,6 +32,9 @@ class MyGatewayChannel(ProviderChannel):
     async def invoke(self, **kwargs) -> NodeOutput:
         try:
             ...  # 调 utils/backends 里的客户端
+        except RateLimitedError as e:
+            # 瞬时限流/过载:原通道退避重试一次比切通道整单重跑省钱
+            raise ChannelError(f"限流: {e}", retryable=True, transient=True)
         except TimeoutError as e:
             raise ChannelError(f"网关超时: {e}", retryable=True)   # 可切下一通道
         except UpstreamRejectedError as e:
@@ -40,7 +43,10 @@ class MyGatewayChannel(ProviderChannel):
 
 **错误翻译是通道的义务**:上游异常必须翻译为 `ChannelError`,
 `retryable` 决定 run() 是否切换下一通道并记熔断;参数类错误(换通道也没用)
-必须 `retryable=False`,避免无谓重试烧钱。
+必须 `retryable=False`,避免无谓重试烧钱;HTTP 429/503 这类瞬时错误
+**加标 `transient=True`**(retryable 仍为 True),run() 会先在原通道退避
+`transient_retry_delay`(默认 2s)重试一次、不计熔断,仍失败才切换。
+`openai_image` 通道已按 http_status 自动标注,新通道照做。
 
 ## 4.3 给现有模型加一家供应商
 

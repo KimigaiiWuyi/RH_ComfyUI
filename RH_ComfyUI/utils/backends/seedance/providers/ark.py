@@ -30,8 +30,12 @@ _TYPE_KEY: dict[MediaKind, str] = {
 }
 
 
-class _ContentArrayMixin:
-    """共享的 content[] 渲染逻辑(ARK / Gateway 共用)。"""
+class ContentArrayMixin:
+    """共享的 content[] 渲染逻辑(ARK 系 content[] 协议的供应商共用)。
+
+    公开导出:外部供应商插件可继承本 mixin 复用有序多模态渲染
+    (此前的私有名 ``_ContentArrayMixin`` 保留为别名,勿新增使用)。
+    """
 
     @staticmethod
     def _role_str(role: MediaRole, kind: MediaKind) -> str:
@@ -121,7 +125,11 @@ class _ContentArrayMixin:
         return items
 
 
-class ArkSeedanceProvider(_ContentArrayMixin, SeedanceProvider):
+# 向后兼容别名(存量外部代码用私有名导入)
+_ContentArrayMixin = ContentArrayMixin
+
+
+class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
     """火山方舟 Seedance 官方后端
 
     当 base_url 为非 ARK 默认值(通常为聚合网关)时,
@@ -165,13 +173,13 @@ class ArkSeedanceProvider(_ContentArrayMixin, SeedanceProvider):
         """根据运行模式返回正确的端点路径。"""
         return self._GATEWAY_ENDPOINT if self._is_gateway_mode else self._ARK_ENDPOINT
 
-    def _auth_headers(self) -> dict[str, str]:
-        """网关模式下注入 Idempotency-Key,防重试重复计费。
+    def _create_headers(self) -> dict[str, str]:
+        """创建请求专用头:网关模式注入 Idempotency-Key,防重复计费。
 
-        ARK 原生模式不需要 —— ARK 端点本身有请求级去重。
-        网关模式与 GatewaySeedanceProvider 行为一致。
+        只在创建时生成(一次 create 一个 key);查询/删除不需要,ARK 原生
+        模式也不需要(端点本身有请求级去重)。
         """
-        headers = super()._auth_headers()
+        headers = self._auth_headers()
         if self._is_gateway_mode:
             headers["Idempotency-Key"] = str(uuid.uuid4())
         return headers
@@ -238,7 +246,7 @@ class ArkSeedanceProvider(_ContentArrayMixin, SeedanceProvider):
         exec_exp = spec.params.get("execution_expires_after")
         if exec_exp is not None:
             body["execution_expires_after"] = exec_exp
-        return "POST", f"{self.base_url}{self._endpoint}", self._auth_headers(), body
+        return "POST", f"{self.base_url}{self._endpoint}", self._create_headers(), body
 
     def parse_create(self, resp_json: dict[str, Any]) -> str:
         d = self._unwrap(resp_json)
@@ -274,4 +282,4 @@ class ArkSeedanceProvider(_ContentArrayMixin, SeedanceProvider):
         )
 
 
-__all__ = ["ArkSeedanceProvider"]
+__all__ = ["ArkSeedanceProvider", "ContentArrayMixin"]

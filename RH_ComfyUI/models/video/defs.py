@@ -59,56 +59,72 @@ class Seedance15ProDef(SeedanceVideoModel):
             },
             mode="declarative",
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="视频生成提示词"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="视频生成提示词"),
                 # 与 Seedance 2.0 一致:按输入自动决定 文生/图生/首尾帧/多模态
                 "images": PortSpec(
                     type=PortType.LIST,
                     min_items=0,
                     max_items=9,
                     item_type=PortType.IMAGE,
-                    description="参考图片(0~9 张):0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考",
+                    title="参考图片",
+                    description="参考图片:0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考",
                 ),
                 "video_refs": PortSpec(
                     type=PortType.LIST,
                     max_items=3,
                     item_type=PortType.VIDEO,
-                    description='参考视频(0~3 段),prompt 中用 "视频1/视频2/..." 引用',
+                    title="参考视频",
+                    description='参考视频,prompt 中用 "视频1/视频2/..." 引用',
                 ),
                 "audio_refs": PortSpec(
                     type=PortType.LIST,
                     max_items=3,
                     item_type=PortType.AUDIO,
-                    description='参考音频(0~3 段),prompt 中用 "音频1/音频2/..." 引用',
+                    title="参考音频",
+                    description='参考音频,prompt 中用 "音频1/音频2/..." 引用',
                 ),
                 "frame_mode": PortSpec(
                     type=PortType.ENUM,
                     default="auto",
                     values=["auto", "first_last", "reference"],
-                    description="多图角色:auto(2 图默认首尾帧)/ first_last(强制首尾帧)/ reference(全部参考)",
+                    title="多图角色",
+                    description="多图角色:auto=2 图默认首尾帧 / first_last=强制首尾帧 / reference=全部参考",
                 ),
                 "ratio": PortSpec(
                     type=PortType.ENUM,
                     default="16:9",
                     values=["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
+                    title="宽高比",
                     description="视频宽高比",
                 ),
                 "resolution": PortSpec(
-                    type=PortType.ENUM, default="720p", values=["480p", "720p", "1080p"], description="视频分辨率"
+                    type=PortType.ENUM,
+                    default="720p",
+                    values=["480p", "720p", "1080p"],
+                    title="分辨率",
+                    description="视频分辨率",
                 ),
                 "duration": PortSpec(
-                    type=PortType.INTEGER, default=5, minimum=4, maximum=12, description="视频时长(秒)"
+                    type=PortType.INTEGER, default=5, minimum=4, maximum=12, title="时长", description="视频时长,单位秒"
                 ),
-                "seed": PortSpec(type=PortType.INTEGER, description="随机种子"),
+                "seed": PortSpec(type=PortType.INTEGER, title="随机种子", description="随机种子"),
                 "generate_audio": PortSpec(
-                    type=PortType.BOOLEAN, default=True, description="是否生成同步音频(默认开启;传 false 关闭)"
+                    type=PortType.BOOLEAN, default=True, title="同步音频", description="是否生成同步音频"
                 ),
-                "watermark": PortSpec(type=PortType.BOOLEAN, default=False, description="是否添加 AI 水印"),
-                "camera_fixed": PortSpec(type=PortType.BOOLEAN, default=False, description="摄像机是否固定"),
-                "return_last_frame": PortSpec(type=PortType.BOOLEAN, default=False, description="是否同时返回尾帧图"),
+                "watermark": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="AI 水印", description="是否添加 AI 水印"
+                ),
+                "camera_fixed": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="固定镜头", description="摄像机是否固定"
+                ),
+                "return_last_frame": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="返回尾帧", description="是否同时返回尾帧图"
+                ),
                 "service_tier": PortSpec(
                     type=PortType.ENUM,
                     default="default",
                     values=["default", "flex"],
+                    title="推理档位",
                     description=(
                         "推理档位:\n  - default: 在线推理,响应快\n  - flex: 离线推理,价格 50%,适合对时延不敏感的场景"
                     ),
@@ -173,6 +189,7 @@ class Seedance2Def(SeedanceVideoModel):
                 "prompt": PortSpec(
                     type=PortType.TEXT,
                     required=True,
+                    title="提示词",
                     description=(
                         '视频生成提示词。多模态场景可用 "图片1"/"图片2"/"视频1"/"音频1"\n等代号引用下方传入的素材。'
                     ),
@@ -182,29 +199,33 @@ class Seedance2Def(SeedanceVideoModel):
                     min_items=0,
                     max_items=9,
                     item_type=PortType.IMAGE,
-                    description="参考图片(0~9 张):0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考",
+                    title="参考图片",
+                    description="参考图片:0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考",
                 ),
                 "video_refs": PortSpec(
                     type=PortType.LIST,
                     max_items=3,
                     item_type=PortType.VIDEO,
-                    description='参考视频(0~3 段),prompt 中用 "视频1/视频2/..." 引用',
+                    title="参考视频",
+                    description='参考视频,prompt 中用 "视频1/视频2/..." 引用',
                 ),
                 "audio_refs": PortSpec(
                     type=PortType.LIST,
                     max_items=3,
                     item_type=PortType.AUDIO,
-                    description='参考音频(0~3 段),prompt 中用 "音频1/音频2/..." 引用',
+                    title="参考音频",
+                    description='参考音频,prompt 中用 "音频1/音频2/..." 引用',
                 ),
                 "frame_mode": PortSpec(
                     type=PortType.ENUM,
                     default="auto",
                     values=["auto", "first_last", "reference"],
+                    title="多图角色",
                     description=(
                         "多图时图片角色的判定方式:\n"
-                        "  - auto: 自动(2 张图默认视为首尾帧)\n"
-                        "  - first_last: 强制首尾帧(图1=首帧, 图2=尾帧, 其余参考)\n"
-                        "  - reference: 全部图片仅作参考素材(多参考生成)\n"
+                        "  - auto: 自动,2 张图默认视为首尾帧\n"
+                        "  - first_last: 强制首尾帧,图1=首帧, 图2=尾帧, 其余参考\n"
+                        "  - reference: 全部图片仅作参考素材,多参考生成\n"
                         "无限画布可改用 ordered_content 的 role 字段逐图指定角色"
                     ),
                 ),
@@ -212,21 +233,32 @@ class Seedance2Def(SeedanceVideoModel):
                     type=PortType.ENUM,
                     default="adaptive",
                     values=["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
-                    description="视频宽高比(adaptive 跟随首帧)",
+                    title="宽高比",
+                    description="视频宽高比,adaptive 跟随首帧",
                 ),
                 "resolution": PortSpec(
-                    type=PortType.ENUM, default="720p", values=["480p", "720p", "1080p"], description="视频分辨率"
+                    type=PortType.ENUM,
+                    default="720p",
+                    values=["480p", "720p", "1080p"],
+                    title="分辨率",
+                    description="视频分辨率",
                 ),
                 "duration": PortSpec(
-                    type=PortType.INTEGER, default=5, minimum=4, maximum=15, description="视频时长(秒)"
+                    type=PortType.INTEGER, default=5, minimum=4, maximum=15, title="时长", description="视频时长,单位秒"
                 ),
-                "seed": PortSpec(type=PortType.INTEGER, description="随机种子(留空则随机)"),
+                "seed": PortSpec(type=PortType.INTEGER, title="随机种子", description="随机种子,留空则随机"),
                 "generate_audio": PortSpec(
-                    type=PortType.BOOLEAN, default=True, description="是否生成同步音频(默认开启;传 false 关闭)"
+                    type=PortType.BOOLEAN, default=True, title="同步音频", description="是否生成同步音频"
                 ),
-                "watermark": PortSpec(type=PortType.BOOLEAN, default=False, description="是否添加 AI 水印"),
-                "camera_fixed": PortSpec(type=PortType.BOOLEAN, default=False, description="摄像机是否固定"),
-                "return_last_frame": PortSpec(type=PortType.BOOLEAN, default=False, description="是否同时返回尾帧图"),
+                "watermark": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="AI 水印", description="是否添加 AI 水印"
+                ),
+                "camera_fixed": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="固定镜头", description="摄像机是否固定"
+                ),
+                "return_last_frame": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="返回尾帧", description="是否同时返回尾帧图"
+                ),
             },
             outputs={
                 "video": PortSpec(type=PortType.OUTPUT_VIDEO, description="生成的视频(MP4)"),
@@ -325,55 +357,67 @@ class Seedance2FastDef(SeedanceVideoModel):
             },
             mode="declarative",
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="视频生成提示词"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="视频生成提示词"),
                 # 与 Seedance 2.0 一致:按输入自动决定 文生/图生/首尾帧/多模态
                 "images": PortSpec(
                     type=PortType.LIST,
                     min_items=0,
                     max_items=9,
                     item_type=PortType.IMAGE,
-                    description="参考图片(0~9 张):0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考",
+                    title="参考图片",
+                    description="参考图片:0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考",
                 ),
                 "video_refs": PortSpec(
                     type=PortType.LIST,
                     max_items=3,
                     item_type=PortType.VIDEO,
-                    description='参考视频(0~3 段),prompt 中用 "视频1/视频2/..." 引用',
+                    title="参考视频",
+                    description='参考视频,prompt 中用 "视频1/视频2/..." 引用',
                 ),
                 "audio_refs": PortSpec(
                     type=PortType.LIST,
                     max_items=3,
                     item_type=PortType.AUDIO,
-                    description='参考音频(0~3 段),prompt 中用 "音频1/音频2/..." 引用',
+                    title="参考音频",
+                    description='参考音频,prompt 中用 "音频1/音频2/..." 引用',
                 ),
                 "frame_mode": PortSpec(
                     type=PortType.ENUM,
                     default="auto",
                     values=["auto", "first_last", "reference"],
-                    description="多图角色:auto(2 图默认首尾帧)/ first_last(强制首尾帧)/ reference(全部参考)",
+                    title="多图角色",
+                    description="多图角色:auto=2 图默认首尾帧 / first_last=强制首尾帧 / reference=全部参考",
                 ),
                 "ratio": PortSpec(
                     type=PortType.ENUM,
                     default="16:9",
                     values=["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
+                    title="宽高比",
                     description="视频宽高比",
                 ),
                 "resolution": PortSpec(
                     type=PortType.ENUM,
                     default="720p",
                     values=["480p", "720p"],
-                    description="视频分辨率(Fast 版不支持 1080p)",
+                    title="分辨率",
+                    description="视频分辨率,Fast 版不支持 1080p",
                 ),
                 "duration": PortSpec(
-                    type=PortType.INTEGER, default=5, minimum=4, maximum=15, description="视频时长(秒)"
+                    type=PortType.INTEGER, default=5, minimum=4, maximum=15, title="时长", description="视频时长,单位秒"
                 ),
-                "seed": PortSpec(type=PortType.INTEGER, description="随机种子"),
+                "seed": PortSpec(type=PortType.INTEGER, title="随机种子", description="随机种子"),
                 "generate_audio": PortSpec(
-                    type=PortType.BOOLEAN, default=True, description="是否生成同步音频(默认开启;传 false 关闭)"
+                    type=PortType.BOOLEAN, default=True, title="同步音频", description="是否生成同步音频"
                 ),
-                "watermark": PortSpec(type=PortType.BOOLEAN, default=False, description="是否添加 AI 水印"),
-                "camera_fixed": PortSpec(type=PortType.BOOLEAN, default=False, description="摄像机是否固定"),
-                "return_last_frame": PortSpec(type=PortType.BOOLEAN, default=False, description="是否同时返回尾帧图"),
+                "watermark": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="AI 水印", description="是否添加 AI 水印"
+                ),
+                "camera_fixed": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="固定镜头", description="摄像机是否固定"
+                ),
+                "return_last_frame": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="返回尾帧", description="是否同时返回尾帧图"
+                ),
             },
             outputs={
                 "video": PortSpec(type=PortType.OUTPUT_VIDEO, description="生成的视频(MP4)"),
@@ -408,10 +452,10 @@ class Wan22VideogenDef(Wan22VideoModel):
             backend="comfyui",
             point_cost=15,
             description=(
-                'Wan 2.2 视频生成节点,按输入自动切换:\n'
-                '  - 不传图    → 文生视频\n'
-                '  - 传 1 张图  → 图生视频(该图作为首帧)\n'
-                '  - 传 2 张图  → 首尾帧生视频(图片1=首帧,图片2=尾帧)\n'
+                "Wan 2.2 视频生成节点,按输入自动切换:\n"
+                "  - 不传图    → 文生视频\n"
+                "  - 传 1 张图  → 图生视频(该图作为首帧)\n"
+                "  - 传 2 张图  → 首尾帧生视频(图片1=首帧,图片2=尾帧)\n"
                 '可在 prompt 中用 "图片1" / "图片2" 引用首/尾帧(支持位置插值)。'
             ),
             knowledge_content=(
@@ -440,9 +484,10 @@ class Wan22VideogenDef(Wan22VideoModel):
                 "prompt": PortSpec(
                     type=PortType.TEXT,
                     required=True,
+                    title="提示词",
                     description=(
-                        '视频描述。首尾帧场景可用 "图片1"(首帧)/"图片2"(尾帧) 代号\n'
-                        '引用下方传入的图片,系统会自动替换为位置标签。'
+                        '视频描述。首尾帧场景可用 "图片1"=首帧 / "图片2"=尾帧 代号\n'
+                        "引用下方传入的图片,系统会自动替换为位置标签。"
                     ),
                 ),
                 "images": PortSpec(
@@ -450,17 +495,18 @@ class Wan22VideogenDef(Wan22VideoModel):
                     min_items=0,
                     max_items=2,
                     item_type=PortType.IMAGE,
+                    title="首尾帧图片",
                     description=(
-                        "图片输入(0~2 张,Wan 2.2 只支持首尾帧):\n"
+                        "图片输入,Wan 2.2 只支持首尾帧:\n"
                         "  - 0 张 = 文生视频\n"
-                        "  - 1 张 = 图生视频(该图作为首帧)\n"
-                        "  - 2 张 = 首尾帧生视频(images[0]=首帧,images[1]=尾帧)\n"
+                        "  - 1 张 = 图生视频,该图作为首帧\n"
+                        "  - 2 张 = 首尾帧生视频,images[0]=首帧,images[1]=尾帧\n"
                         "超过 2 张需改用 Seedance 2.0 / Seedance 2.0 Fast。"
                     ),
                 ),
-                "width": PortSpec(type=PortType.INTEGER, default=720, description="视频宽度"),
-                "height": PortSpec(type=PortType.INTEGER, default=1280, description="视频高度"),
-                "duration": PortSpec(type=PortType.INTEGER, default=5, description="视频时长(秒)"),
+                "width": PortSpec(type=PortType.INTEGER, default=720, title="宽度", description="视频宽度"),
+                "height": PortSpec(type=PortType.INTEGER, default=1280, title="高度", description="视频高度"),
+                "duration": PortSpec(type=PortType.INTEGER, default=5, title="时长", description="视频时长,单位秒"),
             },
             outputs={
                 "video": PortSpec(type=PortType.OUTPUT_VIDEO, description="生成的视频"),

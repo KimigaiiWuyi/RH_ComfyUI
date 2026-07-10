@@ -71,6 +71,6 @@ description: >
 ```bash
 # 在插件根目录(<gsuid_core 仓库>/gsuid_core/plugins/RH_ComfyUI)
 # 用 gsuid_core 的 venv 解释器跑(系统 Python 的 fastapi/starlette 版本可能不配套)
-python -m pytest tests/ -q        # 内核单测,全离线,必须全绿(2026-07-10: 54 passed)
+python -m pytest tests/ -q        # 内核单测,全离线,必须全绿(2026-07-10: 73 passed)
 ruff check RH_ComfyUI             # 代码风格
 ```

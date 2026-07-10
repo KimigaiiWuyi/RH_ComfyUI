@@ -15,7 +15,8 @@
 └─────────────────────────────┬─────────────────────────────────────┘
                               ▼
 ┌── core/dispatch — 唯一执行路径 ────────────────────────────────────┐
-│ route → validate(不扣费)→ reserve → 并发闸 + model.run()        │
+│ route → validate(不扣费)→ reserve(estimate_cost 动态计费)      │
+│       → [超时预算 Dispatch_Timeout] 并发闸 + model.run()          │
 │       → commit / refund(幂等)→ record_dispatch(统计落库)      │
 └─────────────────────────────┬─────────────────────────────────────┘
                               ▼

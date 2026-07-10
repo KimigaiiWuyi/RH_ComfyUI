@@ -32,19 +32,24 @@ class _RecordNode:
     backend_models: dict[str, str] = field(default_factory=dict)
 
 
-def _node_view(model: "AIGCGenerationBase", output: Optional[NodeOutput]) -> _RecordNode:
-    """把模型实例(可能是 YAML 桥接模型)投影为统计所需的节点视图"""
+def _node_view(model: "AIGCGenerationBase", output: Optional[NodeOutput], point_cost: Optional[int]) -> _RecordNode:
+    """把模型实例(可能是 YAML 桥接模型)投影为统计所需的节点视图
+
+    point_cost 传 dispatcher 实际 reserve 的金额(动态计费钩子 estimate_cost
+    的结果);None 时回落模型静态 point_cost(非 dispatch 调用点)。
+    """
     node = model.node
     channel = ""
     vendor_model = ""
     if output is not None:
         channel = str(output.metadata.get("channel", ""))
         vendor_model = str(output.metadata.get("vendor_model", ""))
+    cost = point_cost if point_cost is not None else model.point_cost
     if node is not None:
         return _RecordNode(
             name=node.name,
             backend=node.backend,
-            point_cost=model.point_cost,
+            point_cost=cost,
             provider=channel or (node.provider or ""),
             backend_model=vendor_model or (node.backend_model or ""),
             backend_models=dict(node.backend_models or {}),
@@ -52,7 +57,7 @@ def _node_view(model: "AIGCGenerationBase", output: Optional[NodeOutput]) -> _Re
     return _RecordNode(
         name=model.name,
         backend=channel.split(":", 1)[0] if channel else "",
-        point_cost=model.point_cost,
+        point_cost=cost,
         provider=channel,
         backend_model=vendor_model,
     )
@@ -79,6 +84,7 @@ async def record_dispatch(
     elapsed_ms: int,
     error: Optional[str],
     ctx: "DispatchContext",
+    point_cost: Optional[int] = None,
 ) -> None:
     """统计落库(内部兜底,永不抛出)
 
@@ -96,7 +102,7 @@ async def record_dispatch(
         await record_task(
             request=request,
             result=result,
-            node=_node_view(model, output),  # type: ignore[arg-type]  # duck-typed NodeDef 视图
+            node=_node_view(model, output, point_cost),  # type: ignore[arg-type]  # duck-typed NodeDef 视图
             status=status,
             elapsed_ms=elapsed_ms,
             error=error,

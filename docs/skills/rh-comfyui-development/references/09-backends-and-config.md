@@ -88,16 +88,17 @@ PortSpec。两者必须同步(mapper 消费的字段要在 inputs 里声明)。
 | `MiniMax_apikey` / `MIMO_apikey` | MiniMax / MiMo |
 | `Seedance_apikey_{ark,runninghub}` + `Seedance_BaseURL_*` + `Seedance_Enable_*` | Seedance 内置供应商凭证(网关凭证在外部插件自己的面板) |
 | `Seedance_Dry_Run` | Seedance 干跑(拦截出站请求 + 打印;抛 `DryRunInterrupt` 终止,积分自动退款) |
-| `OpenAI_Image_Providers` | OpenAI 兼容供应商池(重复组,每行一家;见 13 章;增删/改映射后需 `rh 刷新供应商`) |
+| `OpenAI_Image_Providers` | OpenAI 兼容供应商池(重复组,每行一家,含 `weight` 负载权重;见 13 章;增删/改映射/改权重后需 `rh 刷新供应商`) |
 | `Load_Balance_Mode` / `Failure_Threshold` | 全模态通用的负载均衡策略 / 熔断阈值(每次决策实时读取,改完即生效;旧 `Seedance_Load_Balance` / `Seedance_Failure_Threshold` 已迁移至此) |
 
 **PLUGIN_CONFIG(plugin_config.py)— 插件行为**
 
 | 键 | 用途 |
 |---|---|
-| `Max_Concurrency` | 全局并发闸大小 |
+| `Max_Concurrency` | 全局并发闸大小(改配置即刻生效,见 05 章 5.4) |
+| `Dispatch_Timeout` | 单任务超时预算(秒,默认 1800,0=不限;覆盖排队+执行全程,超时退款,见 05 章 5.1) |
 | `Default_Point` | 新用户初始积分 |
-| `Draw_Point` / `Edit_Image_Point` / `Music_Point` / `Speech_Point` / `Video_Point` | 各任务兜底价格(模型自带 point_cost 优先) |
+| `Draw_Point` / `Edit_Image_Point` / `Music_Point` / `Speech_Point` / `Video_Point` | 各任务兜底价格(模型自带 point_cost 优先;按参数分档计费用模型的 `estimate_cost()` 钩子) |
 
 规则:
 - 模型可用性由 `required_config` / `requirements` 引用这些键,缺失自动

@@ -53,9 +53,9 @@ class AnimaDef(ImagePipelineModel):
                 {"source": "height", "target": "7.height", "default": "1280", "description": "height"},
             ],
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="生成描述"),
-                "width": PortSpec(type=PortType.INTEGER, default=720, description="图片宽度"),
-                "height": PortSpec(type=PortType.INTEGER, default=1280, description="图片高度"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述"),
+                "width": PortSpec(type=PortType.INTEGER, default=720, title="宽度", description="图片宽度"),
+                "height": PortSpec(type=PortType.INTEGER, default=1280, title="高度", description="图片高度"),
             },
             outputs={
                 "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的二次元图片"),
@@ -102,26 +102,29 @@ class Banana2Def(ImagePipelineModel):
             requirements=["gemini_image_apikey"],
             backend_model="gemini-3.1-flash-image-preview",
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="生成描述或编辑指令"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述或编辑指令"),
                 "images": PortSpec(
                     type=PortType.LIST,
                     min_items=0,
                     max_items=14,
                     item_type=PortType.IMAGE,
-                    description="参考图片(0~14 张):\n  - 0 张=文生图\n  - 1+ 张=图片编辑/多图参考",
+                    title="参考图片",
+                    description="参考图片:0 张=文生图,1+ 张=图片编辑/多图参考",
                 ),
                 # Gemini 只吃 aspect_ratio + image_size,不吃宽高像素
                 "ratio": PortSpec(
                     type=PortType.ENUM,
                     default="1:1",
                     values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    title="宽高比",
                     description="宽高比",
                 ),
                 "image_size": PortSpec(
                     type=PortType.ENUM,
                     default="2K",
                     values=["512", "1K", "2K", "4K"],
-                    description="输出尺寸档位(512/1K/2K/4K)",
+                    title="尺寸档位",
+                    description="输出尺寸档位",
                 ),
             },
             outputs={
@@ -144,6 +147,81 @@ class Banana2Def(ImagePipelineModel):
 
     async def unavailable_reason(self) -> str:
         return "Nano Banana 2 未配置 Gemini API Key(Gemini_Image_apikey)"
+
+
+class Banana1Def(ImagePipelineModel):
+    """Nano Banana 1 — 一代模型(gemini-2.5-flash-image),走同一条 Gemini 通道
+
+    与 banana2 同构:唯一内置通道是 GeminiImageChannel(AI Studio / VertexAI 双模),
+    vendor model 换成一代 ID;外部插件可经 channel_registry 追加供应商。
+    一代不支持 image_size 尺寸档(mapper 对 2.5 系自动不发该字段),故无此端口。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="banana1",
+            display_name="Nano Banana 1",
+            task_type=TaskType("image"),
+            backend="gemini-image",
+            point_cost=1,
+            description="Gemini 2.5 Flash 图像生成/编辑模型(一代 Nano Banana),轻量快速",
+            knowledge_content=(
+                "Nano Banana 1 图像生成/编辑模型(Gemini 2.5 Flash,一代)。"
+                "\n"
+                "优势:速度快、成本低,支持图片编辑(传入 1~3 张参考图自动进入编辑)。"
+                "\n"
+                "适用场景:快速预览、批量测试、对细节要求不高的日常生成。"
+                "\n"
+                "不适用场景:高分辨率/高细节输出(无尺寸档位,建议用 banana2 / banana_pro)。"
+                "\n"
+                "凭证:与 banana2 共用 Gemini 配置(VertexAI 或 AI Studio)。"
+                "\n"
+            ),
+            requirements=["gemini_image_apikey"],
+            backend_model="gemini-2.5-flash-image",
+            inputs={
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述或编辑指令"),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=3,
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description="参考图片:0 张=文生图,1+ 张=图片编辑/多图参考",
+                ),
+                # 一代只吃 aspect_ratio(无 image_size 尺寸档)
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="1:1",
+                    values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    title="宽高比",
+                    description="宽高比",
+                ),
+            },
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="sync",
+                priority=55,
+            ),
+        )
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...core.channels.registry import channel_registry
+        from ...utils.backends.gemini_image.channel import GeminiImageChannel
+
+        bindings = [ChannelBinding(GeminiImageChannel(), vendor_model=self.node.backend_model)]
+        bindings.extend(channel_registry.bindings_for(self.name))
+        return bindings
+
+    async def unavailable_reason(self) -> str:
+        return "Nano Banana 1 无可用供应商:配置 Gemini(Gemini_Image_apikey)或外部供应商插件"
 
 
 class BananaProDef(ImagePipelineModel):
@@ -178,17 +256,31 @@ class BananaProDef(ImagePipelineModel):
             mode="programmatic",
             mapper_func=_gpt_image2_mapper,
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="生成描述或编辑指令"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述或编辑指令"),
                 "images": PortSpec(
                     type=PortType.LIST,
                     min_items=0,
                     max_items=3,
                     item_type=PortType.IMAGE,
-                    description="参考图片(0~3 张):\n  - 0 张=文生图\n  - 1+ 张=图片编辑",
+                    title="参考图片",
+                    description="参考图片:0 张=文生图,1+ 张=图片编辑",
                 ),
-                "width": PortSpec(type=PortType.INTEGER, default=720, description="图片宽度(仅文生图模式用于推断比例)"),
-                "height": PortSpec(
-                    type=PortType.INTEGER, default=1280, description="图片高度(仅文生图模式用于推断比例)"
+                # 上游按 aspect_ratio→size 映射请求(GPTImage2API),不吃宽高像素
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="9:16",
+                    values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    title="宽高比",
+                    description="输出宽高比,上游按比例映射为 size 参数",
+                ),
+                # NBP 档位无 512;由支持尺寸档的通道(如 AI 基座 NBP)消费,
+                # 走 OpenAI 兼容网关的通道忽略该字段(size 已由 ratio 决定)
+                "image_size": PortSpec(
+                    type=PortType.ENUM,
+                    default="2K",
+                    values=["1K", "2K", "4K"],
+                    title="尺寸档位",
+                    description="输出尺寸档位,NBP 不支持 512",
                 ),
             },
             outputs={
@@ -250,14 +342,21 @@ class GptImage2Def(ImagePipelineModel):
             mode="programmatic",
             mapper_func=_gpt_image2_mapper,
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="生成描述"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述"),
                 "images": PortSpec(
                     type=PortType.LIST,
                     item_type=PortType.IMAGE,
-                    description="参考图片(可选)。上传即自动进入图生图/编辑模式,留空即为文生图",
+                    title="参考图片",
+                    description="参考图片,可选。上传即自动进入图生图/编辑模式,留空即为文生图",
                 ),
-                "width": PortSpec(type=PortType.INTEGER, default=1024, description="图片宽度(用于推断比例)"),
-                "height": PortSpec(type=PortType.INTEGER, default=1024, description="图片高度(用于推断比例)"),
+                # OpenAI images API 只吃 size(由 aspect_ratio 映射),不吃宽高像素
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="1:1",
+                    values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    title="宽高比",
+                    description="输出宽高比,上游按比例映射为 size 参数",
+                ),
             },
             outputs={
                 "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
@@ -301,9 +400,15 @@ class MinimaxImage01Def(ImagePipelineModel):
             mode="programmatic",
             mapper_func=_minimax_image01_mapper,
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="生成描述"),
-                "width": PortSpec(type=PortType.INTEGER, default=720, description="图片宽度(用于推断比例)"),
-                "height": PortSpec(type=PortType.INTEGER, default=1280, description="图片高度(用于推断比例)"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述"),
+                # MiniMax image-01 实际请求参数是 aspect_ratio(mapper 不发宽高像素)
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="9:16",
+                    values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    title="宽高比",
+                    description="宽高比,对应 MiniMax aspect_ratio 参数",
+                ),
             },
             outputs={
                 "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
@@ -346,14 +451,15 @@ class Qwen2511Def(ImagePipelineModel):
             mode="programmatic",
             mapper_func=_qwen_edit_mapper,
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="编辑指令"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="编辑指令", description="编辑指令"),
                 "images": PortSpec(
                     type=PortType.LIST,
                     required=True,
                     min_items=1,
                     max_items=3,
                     item_type=PortType.IMAGE,
-                    description="待编辑图片(1~3 张)",
+                    title="待编辑图片",
+                    description="待编辑图片",
                 ),
             },
             outputs={
@@ -401,14 +507,16 @@ class Qwen2512Def(ImagePipelineModel):
                 {"source": "height", "target": "107.inputs.height", "default": 1280},
             ],
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="生成描述"),
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述"),
                 "width": PortSpec(
-                    type=PortType.INTEGER, default=720, minimum=256, maximum=2048, description="图片宽度"
+                    type=PortType.INTEGER, default=720, minimum=256, maximum=2048, title="宽度", description="图片宽度"
                 ),
                 "height": PortSpec(
-                    type=PortType.INTEGER, default=1280, minimum=256, maximum=2048, description="图片高度"
+                    type=PortType.INTEGER, default=1280, minimum=256, maximum=2048, title="高度", description="图片高度"
                 ),
-                "negative_prompt": PortSpec(type=PortType.TEXT, description="反向提示词"),
+                "negative_prompt": PortSpec(
+                    type=PortType.TEXT, title="负向提示词", description="负向提示词,不希望出现在画面中的内容"
+                ),
             },
             outputs={
                 "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
@@ -421,4 +529,13 @@ class Qwen2512Def(ImagePipelineModel):
         )
 
 
-ALL_MODELS = [AnimaDef, Banana2Def, BananaProDef, GptImage2Def, MinimaxImage01Def, Qwen2511Def, Qwen2512Def]
+ALL_MODELS = [
+    AnimaDef,
+    Banana1Def,
+    Banana2Def,
+    BananaProDef,
+    GptImage2Def,
+    MinimaxImage01Def,
+    Qwen2511Def,
+    Qwen2512Def,
+]

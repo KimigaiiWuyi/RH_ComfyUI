@@ -67,12 +67,18 @@ class PortSpec:
 
     用于在 YAML 中声明节点端口的类型、约束与默认值。
     Adapter 在收到输入后会根据 PortSpec 进行校验与转换。
+
+    title 与 description 面向不同读者:
+    - title: 前端配置面板的短标题(几个字,无括号补充说明)
+    - description: 完整语义说明,Agent/LLM 依赖它理解端口用法;
+      缺 title 时前端回退用 description 当标题
     """
 
     type: PortType
     required: bool = False
     default: Any = None
     description: str = ""
+    title: str = ""
 
     # 数值约束
     minimum: Optional[float] = None
@@ -114,6 +120,7 @@ class PortSpec:
             required=bool(data.get("required", False)),
             default=data.get("default"),
             description=data.get("description", ""),
+            title=data.get("title", ""),
             minimum=data.get("minimum"),
             maximum=data.get("maximum"),
             values=data.get("values"),
@@ -132,6 +139,8 @@ class PortSpec:
             out["default"] = self.default
         if self.description:
             out["description"] = self.description
+        if self.title:
+            out["title"] = self.title
         if self.minimum is not None:
             out["minimum"] = self.minimum
         if self.maximum is not None:

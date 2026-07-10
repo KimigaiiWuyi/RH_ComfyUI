@@ -19,9 +19,15 @@ run(request)
   ├─ 1. validate(request)            # schema 通用校验 + 子类跨字段校验
   ├─ 2. normalize(request)           # 默认值填充/单位归一化(可覆盖)
   ├─ 3. balancer.order_candidates()  # 负载均衡排序通道
-  ├─ 4. execute_on_channel(...)      # ★ 子类核心;ChannelError(retryable)→ 换通道
+  ├─ 4. execute_on_channel(...)      # ★ 子类核心
+  │     ├─ ChannelError(transient=True,如 429/503)→ 原通道退避重试一次
+  │     │   (间隔 transient_retry_delay=2s,不计熔断;仅补试一次)
+  │     └─ ChannelError(retryable=True)→ 记熔断 → 换下一通道
   └─ 5. postprocess(output)          # 输出归一化(可覆盖)
 ```
+
+同通道退避重试的动机:切换通道意味着整单重新生成(重复烧钱),而 429/503
+是"通道健康、瞬时过载",原地等一下更省;重试仍失败才走常规切换。
 
 子类必须实现三个抽象方法:
 
@@ -37,8 +43,11 @@ run(request)
 (可用性所需配置键,缺失自动标不可用)。
 
 可覆盖钩子:`validate()`(必须先 `super().validate()`)、`normalize()`、
-`supports()`(路由的输入档案匹配)、`output_schema()`(多输出模型覆盖)、
-`check_available()` / `unavailable_reason()`、`postprocess()`。
+`estimate_cost(request) -> int`(**动态计费**:dispatcher 用它确定预扣金额,
+默认恒等于 `point_cost`;按参数分档计费——如视频按分辨率×时长——覆盖本方法,
+必须是纯函数、不做 IO)、`supports()`(路由的输入档案匹配)、
+`output_schema()`(多输出模型覆盖)、`check_available()` / `unavailable_reason()`、
+`postprocess()`。
 
 **设计约束**:本类不做计费/统计/全局限流(dispatcher 的职责),
 不持有 HTTP 细节(通道/backends 的职责)。
@@ -54,12 +63,17 @@ run(request)
 
 `VideoTaskShape`:`TEXT2VIDEO / IMAGE2VIDEO / FIRST_LAST_FRAME / MULTIMODAL`。
 
+`VideoGenerationBase.normalize()` 统一完成视频预处理:分辨率小写归一 +
+`images` 与 `ordered_content` 图片项的等比缩放(最长边 ≤ 800px,EXIF 校正)。
+入口层(api.submit / bot 命令)**不再各自预处理** —— run() 是唯一执行路径,
+此处天然覆盖三入口(回归测试 `tests/test_video_normalize.py`)。
+
 ## 2.4 schema 类型(core/schema/)
 
 | 类型 | 说明 |
 |---|---|
 | `GenerationRequest` | 统一请求:prompt / images / video_refs / audio_refs / reference_audio / ratio / resolution / duration / seed / params(自由字典)等 |
-| `PortSpec(type, required, default, values, min_items, max_items, minimum, maximum, item_type, description)` | 单端口声明;description 会被前端与 Agent 直接展示 |
+| `PortSpec(type, required, default, values, min_items, max_items, minimum, maximum, item_type, title, description)` | 单端口声明;title=前端配置面板短标题(几个字),description=完整说明(Agent 消费,前端缺 title 时回退用它) |
 | `PortType` | TEXT/INTEGER/NUMBER/BOOLEAN/ENUM/LIST/IMAGE/AUDIO/VIDEO/CONTENT/OUTPUT_* |
 | `NodeOutput` | 模型执行产物(data/mime_type/outputs/usage/metadata) |
 | `GenerationResult` | dispatch 返回给入口的最终结果(含 model_used/cost_points) |
@@ -74,7 +88,7 @@ run(request)
 | `ValidationError` | 参数校验失败(message 面向用户,写人话) | 不扣费 |
 | `ModelUnavailableError` | 路由无可用模型 | 不扣费 |
 | `BillingDeniedError` | 积分不足等 | 不扣费 |
-| `ChannelError(msg, retryable=bool)` | 通道执行失败;retryable=True 时 run() 自动切下一通道并记熔断 | 全部通道失败则退款 |
+| `ChannelError(msg, retryable=bool, transient=bool)` | 通道执行失败;retryable=True 时 run() 自动切下一通道并记熔断;transient=True(429/503 类瞬时错误)先在原通道退避重试一次、不计熔断 | 全部通道失败则退款 |
 | `AllChannelsFailedError` | 所有通道失败 | 退款 |
 
 ## 2.6 路由(core/routing/router.py 的 route())

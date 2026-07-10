@@ -25,9 +25,21 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
 - 熔断只由 `ChannelError(retryable=True)` 触发(retryable=False 不记失败、不切换,
   2026-07-10 起代码与此语义一致);`AllChannelsFailedError` 现继承
   最后一路 `cause.user_message`,保住供应商干净失败文案。
+- **`SeedanceProviderChannel` 尊重供应商侧 retryable 标注**(2026-07-10 修正,
+  此前硬编码 True):`SeedanceProviderError.retryable` 原样透传成
+  `ChannelError.retryable` —— 参数类失败(4xx / 网关显式 retryable=false)不再
+  盲目 failover 烧钱。各 raise 点的语义:HTTP 按 `http_status_retryable()`
+  统一策略(5xx/429/408/401/403=True,其余 4xx=False)、`TASK_FAILED`/
+  `TASK_EXPIRED`/`NO_TASK_ID`/`BAD_RESPONSE`=True、`POLL_NETWORK_ERROR`=False
+  (与取件失败同理,任务可能已成功);429/503 额外映射 `transient=True`,
+  run() 先在原通道退避重试一次。**新 Provider 抛错必须显式标 retryable**。
 - **生成成功但取件失败 ≠ 通道失败**:Seedance 下载 video_url 失败翻译成
   `ChannelError(retryable=False, code=RESULT_DOWNLOAD_FAILED)` —— 切通道会重新
   生成(重复烧钱),只给干净文案让用户重试。
+- **Idempotency-Key 只在创建请求携带**(`_create_headers()`,一次 create 一个
+  key;查询/删除不带)。共享的 content[] 渲染逻辑已公开为
+  `providers/ark.py::ContentArrayMixin`(旧私有名保留别名),外部供应商插件
+  继承它复用有序多模态渲染,不要再 import 下划线私有名。
 - **Dry-Run 中断会退款**:`DryRunInterrupt` 继承 `BaseException` 绕过 run() 的
   熔断/切换,dispatcher 现按 BaseException 兜底 —— 落统计(failed)+ 退款后原样抛出
   (2026-07-10 修复,此前干跑会吞积分)。
@@ -89,6 +101,7 @@ input 端口**。现全部 Seedance 变体端口已对齐。
 | 模型 | 参考输入端口 | 能力 |
 |---|---|---|
 | anima / minimax_image01 / qwen_2512 | 无 | 纯文生图(拒图) |
+| banana1 | images(≤3) | 一代 Gemini(gemini-2.5-flash-image),图生/编辑;无 image_size 端口(一代不支持尺寸档,mapper 对 2.5 系自动不发该字段) |
 | banana2 | images(≤14) | 原生 Gemini,图生/多图参考 |
 | banana_pro / gpt-image-2 / qwen_2511 | images | 图生/编辑 |
 | seedance*(全变体)| images/video_refs/audio_refs | 多模态视频 |
@@ -108,6 +121,6 @@ input 端口**。现全部 Seedance 变体端口已对齐。
 ## 验证
 
 ```bash
-python -m pytest tests/ -q     # 全绿(2026-07-10: 54 passed;完整测试清单见 08 章 §8.1)
+python -m pytest tests/ -q     # 全绿(2026-07-10: 73 passed;完整测试清单见 08 章 §8.1)
 ruff check RH_ComfyUI
 ```

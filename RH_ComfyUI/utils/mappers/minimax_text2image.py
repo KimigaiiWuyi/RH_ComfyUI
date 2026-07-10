@@ -13,7 +13,8 @@ async def minimax_image01_mapper(
     api: MiniMaxAPI,
 ) -> GenerationResult:
     """MiniMax image-01 文生图映射+执行"""
-    ratio = api._calculate_aspect_ratio(request.width, request.height)
+    # ratio 端口是对外契约;旧调用方仍可只传宽高,由此换算兜底
+    ratio = request.ratio or api._calculate_aspect_ratio(request.width, request.height)
 
     images = await api.generate_image(
         prompt=request.prompt,

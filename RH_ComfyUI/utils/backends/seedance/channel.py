@@ -185,6 +185,9 @@ class SeedanceProviderChannel(ProviderChannel):
 
         spec: VideoGenSpec = classify_video_spec(request)
         spec.params.setdefault("draft", request.params.get("draft"))
+        # 请求者身份透传(供应商旁路):需要按用户做归属/计量的 Provider
+        # 从 spec.params["user_id"] 取(canvas HTTP 入口 = str(account.id))
+        spec.params.setdefault("user_id", request.user_id or "")
 
         if on_progress is not None:
             await _safe_emit(on_progress, _evt("submitting", 5, f"提交 Seedance({self.name}) 任务"))
@@ -207,9 +210,13 @@ class SeedanceProviderChannel(ProviderChannel):
             # 直接透传终止,不触发熔断 / 切换。
             raise
         except SeedanceProviderError as exc:
+            # retryable 尊重供应商侧标注(HTTP 状态/网关 data.retryable/raise 点语义):
+            # 参数类失败(4xx/VID-*)换通道也解决不了,不再盲目 failover 烧钱;
+            # 429/503 额外标 transient,run() 先在原通道退避重试一次
             raise ChannelError(
                 str(exc),
-                retryable=True,
+                retryable=exc.retryable,
+                transient=exc.retryable and exc.http_status in (429, 503),
                 channel=self.name,
                 code=exc.code or "",
                 user_message=exc.user_message,

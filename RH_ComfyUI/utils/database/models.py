@@ -486,6 +486,71 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
 
     @classmethod
     @with_session
+    async def get_provider_summaries(
+        cls,
+        session: AsyncSession,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
+        """按供应商(backend_provider)聚合对账摘要,供 `供应商统计` 命令使用
+
+        返回按总积分倒序:
+          {
+            "provider": str,
+            "total": int,
+            "success": int,
+            "failed": int,
+            "success_rate": float,
+            "avg_elapsed_ms": int,
+            "total_points": int,
+          }
+        backend_provider 为空的历史记录(单通道时代)不计入。
+        """
+        conds: list[ColumnElement[bool]] = [col(cls.backend_provider) != ""]
+        if start_time is not None:
+            conds.append(col(cls.created_at) >= start_time)
+        if end_time is not None:
+            conds.append(col(cls.created_at) <= end_time)
+        base_sub = select(cls).where(and_(*conds)).subquery()
+
+        agg_stmt = (
+            select(
+                base_sub.c.backend_provider.label("provider"),
+                func.count().label("total"),
+                func.coalesce(func.avg(base_sub.c.elapsed_ms), 0).label("avg_elapsed_ms"),
+                func.coalesce(func.sum(base_sub.c.point_cost), 0).label("total_points"),
+            )
+            .group_by(base_sub.c.backend_provider)
+            .order_by(func.sum(base_sub.c.point_cost).desc())
+        )
+        agg_rows = (await session.execute(agg_stmt)).all()
+
+        success_stmt = (
+            select(base_sub.c.backend_provider, func.count())
+            .where(base_sub.c.status == RHComfyuiTaskStatus.OK.value)
+            .group_by(base_sub.c.backend_provider)
+        )
+        success_map = {p: int(cnt) for p, cnt in (await session.execute(success_stmt)).all()}
+
+        results: list[dict[str, Any]] = []
+        for provider, total, avg_elapsed, total_points in agg_rows:
+            total_i = int(total)
+            success = success_map.get(provider, 0)
+            results.append(
+                {
+                    "provider": str(provider),
+                    "total": total_i,
+                    "success": success,
+                    "failed": total_i - success,
+                    "success_rate": round(success / total_i, 4) if total_i else 0.0,
+                    "avg_elapsed_ms": int(float(avg_elapsed or 0)),
+                    "total_points": int(total_points),
+                }
+            )
+        return results
+
+    @classmethod
+    @with_session
     async def mark_last_failed_refunded(
         cls,
         session: AsyncSession,

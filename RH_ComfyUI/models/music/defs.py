@@ -44,8 +44,10 @@ class AceStep15Def(MusicPipelineModel):
             mode="programmatic",
             mapper_func=_ace_step_mapper,
             inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, description="音乐风格/主题描述"),
-                "negative_prompt": PortSpec(type=PortType.TEXT, description="歌词内容(可选)"),
+                "prompt": PortSpec(
+                    type=PortType.TEXT, required=True, title="风格描述", description="音乐风格/主题描述"
+                ),
+                "negative_prompt": PortSpec(type=PortType.TEXT, title="歌词", description="歌词内容,可选"),
             },
             outputs={
                 "audio": PortSpec(type=PortType.OUTPUT_AUDIO, description="生成的音频"),

@@ -131,3 +131,78 @@ def test_non_retryable_error_skips_breaker_and_failover():
         asyncio.run(model.run(req))
     assert ei.value.retryable is False
     assert lb.health_snapshot() == {}  # 未记失败、未熔断
+
+
+class _RateLimitedChannel(ProviderChannel):
+    """首次 429(transient),重试即成功 — 模拟上游瞬时限流"""
+
+    name = "ratelimited"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def check_available(self) -> bool:
+        return True
+
+    async def invoke(self, **kwargs: Any) -> NodeOutput:
+        self.calls += 1
+        if self.calls == 1:
+            raise ChannelError("HTTP 429", retryable=True, transient=True, channel=self.name)
+        return NodeOutput(output_type="image", data=b"retried-ok")
+
+
+class _TransientModel(AIGCGenerationBase):
+    modality = TaskType.IMAGE
+    card = ModelCard(description="x")
+    transient_retry_delay = 0.0  # 单测不真等退避
+
+    def __init__(self, channel: ProviderChannel, balancer: LoadBalancer) -> None:
+        self.name = "transient_model"
+        self.display_name = "transient_model"
+        self._channel = channel
+        self._balancer = balancer
+
+    def input_schema(self) -> dict:
+        return {"prompt": PortSpec(type=PortType.TEXT, required=True)}
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        return [ChannelBinding(self._channel)]
+
+    async def execute_on_channel(
+        self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+    ) -> NodeOutput:
+        return await binding.channel.invoke(request=request)
+
+    def balancer(self) -> LoadBalancer:
+        return self._balancer
+
+
+def test_transient_error_retries_same_channel_once():
+    # 429/503:先在原通道退避重试一次(切通道整单重跑更烧钱),且不计熔断失败
+    lb = LoadBalancer(BalancerConfig(mode="least_failures", failure_threshold=1))
+    ch = _RateLimitedChannel()
+    model = _TransientModel(ch, lb)
+    out = asyncio.run(model.run(GenerationRequest(task_type=TaskType.IMAGE, prompt="hi")))
+    assert out.data == b"retried-ok"
+    assert ch.calls == 2  # 第一次 429,原通道重试一次成功
+    assert lb.health_snapshot() == {}  # 瞬时失败未计入熔断
+
+
+class _AlwaysRateLimitedChannel(_RateLimitedChannel):
+    name = "always429"
+
+    async def invoke(self, **kwargs: Any) -> NodeOutput:
+        self.calls += 1
+        raise ChannelError("HTTP 429", retryable=True, transient=True, channel=self.name)
+
+
+def test_transient_retry_only_once_then_fails_over():
+    # 重试一次仍 429:按常规可重试失败处理(记熔断计数,单通道时原样抛出)
+    lb = LoadBalancer(BalancerConfig(mode="least_failures", failure_threshold=5))
+    ch = _AlwaysRateLimitedChannel()
+    model = _TransientModel(ch, lb)
+    with pytest.raises(ChannelError):
+        asyncio.run(model.run(GenerationRequest(task_type=TaskType.IMAGE, prompt="hi")))
+    assert ch.calls == 2  # 原通道只补试一次,不无限重试
+    snapshot = lb.health_snapshot()
+    assert snapshot.get("transient_model/always429", {}).get("failure_count") == 1

@@ -104,6 +104,63 @@ def test_banana2_served_by_gemini_only():
     assert "width" not in schema and "height" not in schema
 
 
+def test_banana1_served_by_gemini_first_gen():
+    # Nano Banana 1 = 一代 Gemini 模型(gemini-2.5-flash-image),与 banana2
+    # 共用同一条 GeminiImageChannel;外部插件可经 channel_registry 追加供应商
+    from RH_ComfyUI.models.image.defs import Banana1Def
+
+    channel_registry.clear()
+    banana1 = Banana1Def()
+    names = [b.channel.name for b in banana1.channel_bindings()]
+    assert names == ["gemini"]
+    assert banana1.channel_bindings()[0].vendor_model == "gemini-2.5-flash-image"
+    schema = banana1.input_schema()
+    # 一代不支持尺寸档:schema 只有 ratio,无 image_size
+    assert "ratio" in schema and "image_size" not in schema
+
+
+def test_mapper_omits_image_size_for_first_gen(monkeypatch):
+    # 回归:一代不支持 image_config.image_size,mapper 必须整个字段不发;
+    # 3.x 系保持既有默认 2K
+    from typing import Optional
+
+    import RH_ComfyUI.utils.mappers.gemini_image as gmapper
+    from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
+    from RH_ComfyUI.utils.backends.gemini_image.api import GeminiImageAPI
+
+    captured: list[Optional[str]] = []
+
+    class _FakeApi(GeminiImageAPI):
+        async def generate(
+            self,
+            *,
+            model: str,
+            prompt: str,
+            images: Optional[list[bytes]] = None,
+            aspect_ratio: str = "1:1",
+            image_size: Optional[str] = "2K",
+        ) -> bytes:
+            captured.append(image_size)
+            return b"IMG"
+
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    req.params["model"] = "gemini-2.5-flash-image"
+    asyncio.run(gmapper.gemini_flash_image_mapper(req, _FakeApi()))
+    assert captured[0] is None
+
+    req2 = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    req2.params["model"] = "gemini-3.1-flash-image-preview"
+    asyncio.run(gmapper.gemini_flash_image_mapper(req2, _FakeApi()))
+    assert captured[1] == "2K"
+
+    # 显式传 image_size 时(如 banana2 的端口)原样透传
+    req3 = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    req3.params["model"] = "gemini-3.1-flash-image-preview"
+    req3.params["image_size"] = "4K"
+    asyncio.run(gmapper.gemini_flash_image_mapper(req3, _FakeApi()))
+    assert captured[2] == "4K"
+
+
 def test_vertex_invoke_passes_guard_without_api_key(monkeypatch):
     # 回归:Vertex 模式(ADC/SA 鉴权)合法地没有 api_key,invoke 的守卫
     # 必须与 check_available 同源用 is_configured(),不能按 api_key 拒绝

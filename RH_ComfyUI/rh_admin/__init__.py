@@ -19,6 +19,7 @@ from .commands import (
     add_user_points,
     query_user_points,
     deduct_user_points,
+    format_provider_stats,
     parse_add_points_args,
     format_user_consumption,
     parse_query_points_args,
@@ -43,6 +44,28 @@ async def refresh_providers(bot: Bot, ev: Event) -> None:
     enabled = [e for e in entries if e.enable]
     bindings = sum(len(e.models) for e in enabled)
     await bot.send(f"✅ 供应商池已刷新: {len(enabled)} 家启用, {bindings} 条模型绑定")
+
+
+@sv_admin.on_command(("供应商统计", "供应商对账"), block=True)
+async def provider_stats(bot: Bot, ev: Event) -> None:
+    """按供应商聚合任务成功率/平均耗时/消耗积分(命令格式: 供应商统计 [最近N天])
+
+    数据取自任务统计表的 backend_provider 维度,并附本次运行期的熔断快照;
+    不带参数统计全部时间。
+    """
+    args = ev.text.strip().split()
+    days: int | None = None
+    if args:
+        try:
+            days = int(args[0])
+        except ValueError:
+            await bot.send("⚠️ 参数必须是天数(整数),如: 供应商统计 7")
+            return
+        if days <= 0:
+            await bot.send("⚠️ 天数必须 > 0")
+            return
+
+    await bot.send(await format_provider_stats(days=days))
 
 
 @sv_admin.on_command(("增加积分", "加积分"), block=True)

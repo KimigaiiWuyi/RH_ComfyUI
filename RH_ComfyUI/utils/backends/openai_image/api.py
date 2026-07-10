@@ -1,8 +1,12 @@
 """OpenAI 兼容生图客户端(通用) — 供多家 provider 复用。
 
-每次请求由 channel 传入 base_url + api_key(实时解析,支持热更新)。端点固定为
-``{base_url}/images/generations``, body ``{model, prompt, n[, size]}``, 解析
-``data[0].url | b64_json`` 为 PNG 字节。百度千帆 / OpenAI 官方 / 各类兼容网关通用。
+每次请求由 channel 传入 base_url + api_key(实时解析,支持热更新)。按输入分流端点:
+- 纯文生图 → ``POST {base_url}/images/generations``(JSON body ``{model, prompt, n[, size]}``)
+- 带参考图 → ``POST {base_url}/images/edits``(标准 OpenAI multipart 协议,
+  ``image`` 为文件字段;多图时按官方 SDK 惯例用 ``image[]``)
+
+两个端点响应结构一致,统一解析 ``data[0].url | b64_json`` 为 PNG 字节。
+百度千帆 / OpenAI 官方 / 各类兼容网关通用。
 """
 
 from __future__ import annotations
@@ -80,6 +84,26 @@ async def _download(url: str) -> bytes:
             return await resp.read()
 
 
+def _edits_fields(
+    *,
+    model: str,
+    prompt: str,
+    n: int,
+    size: Optional[str],
+    image_list: List[bytes],
+) -> List[tuple]:
+    """/images/edits 的 multipart 字段表(纯函数,供单测断言协议形状)。
+
+    字段名遵循官方 SDK 惯例:单图用 ``image``,多图每张一个 ``image[]`` 部件。
+    """
+    fields: List[tuple] = [("model", model), ("prompt", prompt), ("n", str(n))]
+    if size:
+        fields.append(("size", size))
+    image_field = "image" if len(image_list) == 1 else "image[]"
+    fields.extend((image_field, raw) for raw in image_list)
+    return fields
+
+
 async def generate_image(
     *,
     base_url: str,
@@ -90,21 +114,35 @@ async def generate_image(
     size: Optional[str] = None,
     image_list: Optional[List[bytes]] = None,
 ) -> bytes:
-    """POST {base_url}/images/generations, 返回第一张图的 PNG 字节。失败抛 OpenAIImageError。"""
-    url = f"{base_url.rstrip('/')}/images/generations"
-    headers: Dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json"}
+    """生成/编辑一张图,返回 PNG 字节。失败抛 OpenAIImageError。
+
+    无参考图走 /images/generations(JSON);带参考图走 /images/edits(multipart)。
+    """
+    headers: Dict[str, str] = {"Accept": "application/json"}
     if api_key:  # 空 key 不拼 Bearer, 避免 httpx/aiohttp 非法头
         headers["Authorization"] = f"Bearer {api_key}"
 
-    body: Dict[str, Any] = {"model": model, "prompt": prompt, "n": n}
-    if size:
-        body["size"] = size
+    root = base_url.rstrip("/")
     if image_list:
-        body["image"] = [base64.b64encode(b).decode() for b in image_list]
+        url = f"{root}/images/edits"
+        form = aiohttp.FormData()
+        fields = _edits_fields(model=model, prompt=prompt, n=n, size=size, image_list=image_list)
+        for i, (name, value) in enumerate(fields):
+            if isinstance(value, bytes):
+                form.add_field(name, value, filename=f"image_{i}.png", content_type="image/png")
+            else:
+                form.add_field(name, value)
+        request_kwargs: Dict[str, Any] = {"data": form}
+    else:
+        url = f"{root}/images/generations"
+        body: Dict[str, Any] = {"model": model, "prompt": prompt, "n": n}
+        if size:
+            body["size"] = size
+        request_kwargs = {"json": body}
 
     logger.info(f"[OpenAIImage] 请求 {url} model={model} n={n} size={size or '-'} 参考图={len(image_list or [])}")
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=body) as resp:
+        async with session.post(url, headers=headers, **request_kwargs) as resp:
             if resp.status != 200:
                 text = await resp.text()
                 logger.warning(f"[OpenAIImage] HTTP {resp.status}: {text[:300]}")

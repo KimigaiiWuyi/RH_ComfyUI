@@ -31,6 +31,7 @@ Plugins(name="RH_ComfyUI", force_prefix=["rh", "cf", "RH"], allow_empty_prefix=F
 | `查询积分` / `查看积分`、`消费记录` / `我的记录` 等 | 用户 |
 | `全员消费记录` / `全局记录` 等 | 管理员 |
 | `刷新供应商` / `刷新供应商池` / `同步供应商`(重挂 OpenAI 兼容供应商池,见 13 章) | 管理员 |
+| `供应商统计 [最近N天]` / `供应商对账`(按 backend_provider 聚合成功率/耗时/积分 + 熔断快照,见 13 章 13.6) | 管理员 |
 
 另有 `rh_models/`(`模型列表`/`模型清单`/`可用模型` 命令 + HTTP 路由)、
 `rh_help/`(`帮助` fullmatch)、`rh_agent/`(注册 AgentNode `rh_aigc_agent`,
@@ -61,5 +62,7 @@ Agent Mesh 的 AIGC 创作代理,import 即注册,无命令面)。管理类纯 A
 `utils/database/statistics.py`,不要在别处散落 INSERT。
 
 **统计查询**:`statistics.py` 提供按用户/全局的分页查询,供
-`消费记录` / `全员消费记录` 命令与后续报表使用;表已注册到
-gsuid_core 网页控制台(site.register_admin)可视化查看。
+`消费记录` / `全员消费记录` 命令与后续报表使用;
+`RHComfyuiTaskRecord.get_provider_summaries()` 按供应商聚合(供
+`供应商统计` 命令);表已注册到 gsuid_core 网页控制台
+(site.register_admin)可视化查看。

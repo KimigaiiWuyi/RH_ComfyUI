@@ -138,6 +138,17 @@ def _pick_int(d: dict[str, Any], key: str) -> Optional[int]:
         return None
 
 
+def http_status_retryable(status: int) -> bool:
+    """HTTP 状态码 → 换通道是否可能解决。
+
+    5xx / 429(限流)/ 408(超时)是上游侧瞬时问题;401/403 换一家供应商
+    (不同 key)可能就通;其余 4xx 属参数类错误,换通道也解决不了。
+    """
+    if status >= 500:
+        return True
+    return status in (401, 403, 408, 429)
+
+
 def normalize_usage(vendor: str, raw: dict[str, Any]) -> dict[str, Any]:
     """把各家异构的 usage 字段归一化为统一二级 Key。"""
     raw = raw or {}
@@ -384,6 +395,7 @@ class SeedanceProvider(ABC):
             raise SeedanceProviderError(
                 f"{self.name} 返回非 JSON: {exc}; raw={resp.text[:500]}",
                 code="BAD_RESPONSE",
+                retryable=True,  # 上游偶发脏响应,换通道可解
                 provider=self.name,
                 http_status=resp.status_code,
                 user_message="上游返回格式异常,请稍后重试。",
@@ -405,6 +417,9 @@ class SeedanceProvider(ABC):
         return SeedanceProviderError(
             f"{self.name} API 错误 {resp.status_code}: {err_body}",
             code="HTTP_ERROR",
+            # 按状态码标注可重试:5xx/429/408 是上游侧问题、401/403 换一家(不同 key)
+            # 可能就通;其余 4xx 是参数类错误,换通道也解决不了
+            retryable=http_status_retryable(resp.status_code),
             provider=self.name,
             http_status=resp.status_code,
             user_message=str(vendor_msg) if vendor_msg else "上游服务异常,请稍后重试。",
@@ -429,6 +444,7 @@ class SeedanceProvider(ABC):
             raise SeedanceProviderError(
                 f"{self.name} 未返回 task id: {resp}",
                 code="NO_TASK_ID",
+                retryable=True,  # 尚未产生任务,换通道重建无重复计费风险
                 provider=self.name,
                 user_message="上游未返回任务 ID,请稍后重试。",
             )
@@ -468,6 +484,9 @@ class SeedanceProvider(ABC):
                     f"上次状态={last_status}, 进度={last_progress}, "
                     f"已等待={elapsed:.1f}s, 轮询次数={poll_count}",
                     code="POLL_NETWORK_ERROR",
+                    # 任务可能已在上游成功,换通道会整单重跑(重复烧钱)——
+                    # 与 RESULT_DOWNLOAD_FAILED 同理,不做通道切换
+                    retryable=False,
                     provider=self.name,
                     user_message="轮询阶段网络异常,请稍后重试。",
                 ) from poll_exc
@@ -512,6 +531,7 @@ class SeedanceProvider(ABC):
                     raise SeedanceProviderError(
                         vendor_msg,
                         code="TASK_FAILED",
+                        retryable=True,  # 该家跑挂了(容量/内部错误),换一家值得一试
                         provider=self.name,
                         user_message=vendor_msg,
                     )
@@ -519,6 +539,7 @@ class SeedanceProvider(ABC):
                     raise SeedanceProviderError(
                         f"任务已过期:{task_id}",
                         code="TASK_EXPIRED",
+                        retryable=True,
                         provider=self.name,
                         user_message="生成任务已过期,请重试。",
                     )
@@ -547,4 +568,5 @@ __all__ = [
     "DryRunInterrupt",
     "SeedanceProvider",
     "normalize_usage",
+    "http_status_retryable",
 ]
