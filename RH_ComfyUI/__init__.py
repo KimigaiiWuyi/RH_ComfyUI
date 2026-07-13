@@ -9,7 +9,7 @@ Plugins(
     allow_empty_prefix=False,
 )
 
-# 触发 rh_models 的 setup():挂载 /RH_ComfyUI/models 系列 FastAPI 路由 + 注册命令
+# 触发 rh_models 的 setup():挂载 /api/RH_ComfyUI/models 系列 FastAPI 路由 + 注册命令
 # 其余业务子包在此显式装载(顺序确定),配合下方模块身份统一,
 # 无论本树经哪条路径先被 import(嵌套加载器 / 跨插件 re-export / 测试),
 # 加载器后续的 cached_import 都会直接复用,不再 exec 出第二棵模块树。

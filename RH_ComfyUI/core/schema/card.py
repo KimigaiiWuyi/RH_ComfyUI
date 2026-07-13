@@ -46,7 +46,7 @@ class ModelCard:
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
-        """HTTP 清单序列化(/RH_ComfyUI/models 的新增 card 字段)"""
+        """HTTP 清单序列化(/api/RH_ComfyUI/models 的新增 card 字段)"""
         return {
             "description": self.description,
             "strengths": list(self.strengths),

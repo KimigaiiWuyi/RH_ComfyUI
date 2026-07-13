@@ -4,9 +4,9 @@
 对外暴露三个模型查询接口。Bot 启动且 `core_config.ENABLE_HTTP=True`
 时,以下路径立即在 `HOST:PORT` 上生效:
 
-- `GET /RH_ComfyUI/models`           — 全量模型清单(按任务类型分组,含后端可用性)
-- `GET /RH_ComfyUI/models/{task}`    — 按任务类型(image/video/music/speech)过滤
-- `GET /RH_ComfyUI/models/summary`   — 后端可用性摘要(总览面板用)
+- `GET /api/RH_ComfyUI/models`           — 全量模型清单(按任务类型分组,含后端可用性)
+- `GET /api/RH_ComfyUI/models/summary`   — 后端可用性摘要(总览面板用)
+- `GET /api/RH_ComfyUI/models/{task}`    — 按任务类型(image/video/music/speech)过滤
 
 把这些路由从 `__init__.py` 拆出来,避免触发器注册模块掺杂 Web 层代码;
 `__init__.py` 仅 `import .webapi` 即可确保路由在启动时挂载到 FastAPI app。
@@ -76,7 +76,7 @@ class BackendSummary(_Base):
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@app.get("/RH_ComfyUI/models", summary="列出全部模型", tags=["生成引擎/模型清单"], response_model=ModelCatalog)
+@app.get("/api/RH_ComfyUI/models", summary="列出全部模型", tags=["生成引擎/模型清单"], response_model=ModelCatalog)
 async def list_all_models() -> dict[str, object]:
     """全量模型清单 — 按任务类型分组
 
@@ -108,23 +108,10 @@ async def list_all_models() -> dict[str, object]:
     return await build_model_catalog(include_unavailable=True)
 
 
+# /models/summary 必须注册在 /models/{task_type} 之前 —— Starlette 按注册顺序匹配,
+# 否则 summary 会被当成 task_type 吃掉。
 @app.get(
-    "/RH_ComfyUI/models/{task_type}",
-    summary="按任务类型列出模型",
-    tags=["生成引擎/模型清单"],
-    response_model=ModelCatalog,
-)
-async def list_models_by_task(task_type: str) -> dict[str, object]:
-    """按任务类型过滤
-
-    `task_type` ∈ `image` / `video` / `music` / `speech`,亦接受中文别名
-    (如 `图片` / `视频` / `音乐` / `语音` / `tts`)。
-    """
-    return await get_models_by_task(task_type, include_unavailable=True)
-
-
-@app.get(
-    "/RH_ComfyUI/models/summary",
+    "/api/RH_ComfyUI/models/summary",
     summary="模型可用性摘要",
     tags=["生成引擎/模型清单"],
     response_model=BackendSummary,
@@ -142,8 +129,24 @@ async def backend_summary() -> dict[str, object]:
     return await build_backend_summary()
 
 
+@app.get(
+    "/api/RH_ComfyUI/models/{task_type}",
+    summary="按任务类型列出模型",
+    tags=["生成引擎/模型清单"],
+    response_model=ModelCatalog,
+)
+async def list_models_by_task(task_type: str) -> dict[str, object]:
+    """按任务类型过滤
+
+    `task_type` ∈ `image` / `video` / `music` / `speech`,亦接受中文别名
+    (如 `图片` / `视频` / `音乐` / `语音` / `tts`)。
+    """
+    return await get_models_by_task(task_type, include_unavailable=True)
+
+
 logger.info(
-    "[rh_models] FastAPI 路由已注册: /RH_ComfyUI/models, /RH_ComfyUI/models/{task_type}, /RH_ComfyUI/models/summary"
+    "[rh_models] FastAPI 路由已注册: /api/RH_ComfyUI/models, "
+    "/api/RH_ComfyUI/models/summary, /api/RH_ComfyUI/models/{task_type}"
 )
 
 

@@ -43,7 +43,7 @@ Agent 智能选型的数据源(用户没指定模型时):
   `entry_point="http"` 走 dispatch(统计表 entry_point 三个取值:
   command / agent / http,**没有 "canvas" 这个值**);
   **签名与返回类型不变**(`submit / get_point_cost / list_models / is_available`);
-- `rh_models/api.py`:`GET /RH_ComfyUI/models`、`/models/{task_type}`、
+- `rh_models/api.py`:`GET /api/RH_ComfyUI/models`、`/models/{task_type}`、
   `/models/summary` 三个路由的聚合逻辑(`build_model_catalog()`)。
 
 ### HTTP 契约红线(画布前端依赖)

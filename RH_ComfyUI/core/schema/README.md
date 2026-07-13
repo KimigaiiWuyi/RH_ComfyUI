@@ -10,7 +10,7 @@
 
 ## 维护须知
 
-- 这些类型同时被 HTTP 契约(`/RH_ComfyUI/models`)序列化暴露,**字段只增不改不删**;
+- 这些类型同时被 HTTP 契约(`/api/RH_ComfyUI/models`)序列化暴露,**字段只增不改不删**;
 - 旧代码从 `utils/core/types.py` / `request.py` import 的同名类型是同一批定义
   (utils 侧为兼容 shim),不要在两处重复定义;
 - 新增字段一律带默认值,保证旧调用方无感。

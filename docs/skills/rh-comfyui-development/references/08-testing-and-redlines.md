@@ -35,7 +35,7 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 2. **`validate()` / `check_available()` 零副作用零网络**;
 3. **校验先于扣费**的顺序不许动;dispatcher 失败路径"先落统计再退款"的
    顺序不许动;
-4. **HTTP 契约只增不改**(`/RH_ComfyUI/models*` 与 `api.submit` 签名);
+4. **HTTP 契约只增不改**(`/api/RH_ComfyUI/models*` 与 `api.submit` 签名);
    由 `tests/test_http_contract.py` 的 golden test 强制 —— 该测试失败说明
    改动破坏了契约,正确做法是新增字段并把它补进快照,而不是改快照迁就实现;
 5. **`core/` 不新增对上层的 import**(models/、入口包)。已存在的例外是有意的
@@ -62,7 +62,7 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 
 - [ ] `pytest tests/ -q` 全绿;`ruff check` 无告警;
 - [ ] 启动冒烟:`discover_builtin_models()` 日志确认模型数正确、新模型在列;
-- [ ] `rh 模型列表` / `GET /RH_ComfyUI/models` 能看到新模型且 `available` 正确;
+- [ ] `rh 模型列表` / `GET /api/RH_ComfyUI/models` 能看到新模型且 `available` 正确;
 - [ ] 缺配置时 `unavailable_reason` 是人话;
 - [ ] `knowledge_content` 写清优势/适用/不适用(Agent 选型依据);
 - [ ] 真实生成一次:`RHComfyuiTaskRecord` 有记录且 point_cost / entry_point /

@@ -378,7 +378,7 @@ def _entries_to_text(entries: list[ModelEntry], task_display: dict[str, str], ta
 
 
 async def get_models_by_task(task_type: str, *, include_unavailable: bool = True) -> dict[str, Any]:
-    """按任务类型过滤 — FastAPI 路由 /RH_ComfyUI/models/{task_type} 使用"""
+    """按任务类型过滤 — FastAPI 路由 /api/RH_ComfyUI/models/{task_type} 使用"""
     target_task = _resolve_task_type(task_type)
     if target_task is None:
         return {

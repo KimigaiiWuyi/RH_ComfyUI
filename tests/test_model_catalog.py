@@ -1,4 +1,4 @@
-"""/RH_ComfyUI/models 可用性回归 — 以模型通道为准,而非已删除的后端 Adapter
+"""/api/RH_ComfyUI/models 可用性回归 — 以模型通道为准,而非已删除的后端 Adapter
 
 回归点:Seedance 改成多通道后不再有 Adapter,模型清单不能再报
 "后端 seedance 未注册";可用性应反映(内置 + 外部注入的)通道。

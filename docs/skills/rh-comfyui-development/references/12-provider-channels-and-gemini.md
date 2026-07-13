@@ -84,7 +84,7 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
 
 ## 4. input_schema 必须与模型能力一致(agent / 前端据此判参数)
 
-`/RH_ComfyUI/models` 的 `input_schema` 是**机器可读的能力契约**:agent(画布)
+`/api/RH_ComfyUI/models` 的 `input_schema` 是**机器可读的能力契约**:agent(画布)
 按它决定给哪个模型传什么参数,前端按它渲染表单。规则:
 
 - 有 `images` 端口 ⇒ 支持传参考图;`max_items` ⇒ 上限;
