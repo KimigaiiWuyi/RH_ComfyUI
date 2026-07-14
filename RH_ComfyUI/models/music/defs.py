@@ -55,6 +55,7 @@ class AceStep15Def(MusicPipelineModel):
             capabilities=CapabilityManifest(
                 supported_tasks=["music"],
                 mode="sync",
+                max_concurrency=1,  # 本地 ComfyUI 共用一块 GPU,工作流必须串行
                 priority=70,
             ),
         )

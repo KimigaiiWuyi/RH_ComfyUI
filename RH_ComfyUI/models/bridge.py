@@ -86,6 +86,12 @@ class _PipelineBackedMixin:
         self.priority = node.capabilities.priority
         self.card = ModelCard(description=node.description or node.display_name)
         self.execution_mode = node.capabilities.mode
+        # 只在 NodeDef 真的声明了上限时才写实例属性:留 0 的模型继续沿用类属性,
+        # 这样子类可以把 max_concurrency 定义成读配置的 property(如外部插件按面板
+        # 热调供应商并发)而不会在这里被一个死值覆盖掉 —— property 无 setter,
+        # 无条件赋值会直接 AttributeError。
+        if node.capabilities.max_concurrency > 0:
+            self.max_concurrency = node.capabilities.max_concurrency
         self._channel = AdapterChannel(node.backend)
 
     def input_schema(self) -> dict[str, PortSpec]:

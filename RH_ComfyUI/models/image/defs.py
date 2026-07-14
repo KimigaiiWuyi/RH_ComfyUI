@@ -468,6 +468,7 @@ class Qwen2511Def(ImagePipelineModel):
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
                 mode="sync",
+                max_concurrency=1,  # 本地 ComfyUI 共用一块 GPU,工作流必须串行
                 priority=70,
             ),
         )
@@ -524,6 +525,7 @@ class Qwen2512Def(ImagePipelineModel):
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
                 mode="sync",
+                max_concurrency=1,  # 本地 ComfyUI 共用一块 GPU,工作流必须串行
                 priority=80,
             ),
         )

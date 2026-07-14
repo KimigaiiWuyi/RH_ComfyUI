@@ -382,7 +382,9 @@ class SeedanceProvider(ABC):
         # ── 响应日志 ──
         try:
             resp_json = resp.json()
-            resp_text = dump_body(resp_json)
+            # 响应同样要脱敏:供应商可能把产物直接以 base64 回带(而不是给 URL),
+            # 那样一条响应日志就是几 MB,还会顶掉 logger 4096 字符窗口里的其它字段。
+            resp_text = dump_body(mask_body(resp_json))
         except Exception:
             resp_text = resp.text[:2000]
         logger.info(f"[Seedance:{self.name}] 响应 {resp.status_code} ({len(resp.content)} bytes)\n  body: {resp_text}")
