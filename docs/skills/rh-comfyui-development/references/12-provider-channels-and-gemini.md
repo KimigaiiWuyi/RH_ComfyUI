@@ -65,6 +65,11 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
     `Gemini_Image_SA_File` 服务账号 JSON,**忽略 api_key**。
   - **别再用"填了 project_id 就走 Vertex"推断** —— 用户填了 key+project 会被迫
     走 Vertex、报 ADC 缺失(踩坑现场)。
+- **直连不到 Google 就填 `Gemini_Image_BaseURL`(中转/反代地址)**:经
+  `Client(http_options={"base_url": …})` 改道,SDK 仍在其后拼 `/v1beta/…`
+  (`api_version` 不变),中转端按标准路径转发即可。**仅 AI Studio 模式生效** ——
+  Vertex 有自己的端点体系,套 generativelanguage 的中转前缀会把它打歪。
+  留空直连官方端点;跑通与否看日志里的 `endpoint=`。
 - **通道内所有守卫用 `is_configured()`,不要按 `api_key` 判**:Vertex 模式合法地
   没有 api_key,`GeminiImageChannel.invoke` 曾按 `api_key` 拒绝导致 Vertex 打不通
   (check_available 放行、invoke 秒拒,2026-07-10 修复)。守卫必须与

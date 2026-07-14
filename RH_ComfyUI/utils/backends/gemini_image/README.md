@@ -16,6 +16,9 @@
 
 维护须知:
 - **通道内一切凭证守卫用 `is_configured()`,不要按 `api_key` 判**(Vertex 无 key);
+- 服务器直连不到 Google 时填 `Gemini_Image_BaseURL`(中转/反代地址),SDK 经
+  `http_options.base_url` 改道,并在其后拼 `/v1beta/...`(`api_version` 不变);
+  **仅 AI Studio 模式生效**(Vertex 有自己的端点体系,套上去会打歪)。留空直连官方;
 - 图片在 `steps[*].content[*]`(SDK 未声明的 extra 字段),不在 `outputs`,
   取值走 `_find_image`;
 - 详细文档见 `docs/skills/rh-comfyui-development/references/12-provider-channels-and-gemini.md`;

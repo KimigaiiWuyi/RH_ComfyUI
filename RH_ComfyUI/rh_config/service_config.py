@@ -87,6 +87,14 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "",
         options=["AIzaSy..."],
     ),
+    "Gemini_Image_BaseURL": GsStrConfig(
+        "Gemini 中转地址(AI Studio,可选)",
+        "服务器直连不到 Google 时填中转/反代地址,如 https://你的中转域名/gemini/ ,"
+        "SDK 会在其后拼 /v1beta/...。留空则直连官方端点。仅 AI Studio 模式生效"
+        "(VertexAI 走自己的端点,不吃这项)。",
+        "",
+        options=[],
+    ),
     "Gemini_Image_Use_Vertex": GsBoolConfig(
         "使用 VertexAI(组织版)",
         "关=AI Studio(用 API Key);开=VertexAI(用下方 Project ID + ADC/服务账号,"

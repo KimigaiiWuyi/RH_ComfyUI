@@ -58,6 +58,35 @@ def test_vertex_mode_requires_toggle(monkeypatch):
     assert api2.location == "global"
 
 
+def test_relay_base_url_passed_to_sdk(monkeypatch):
+    """服务器直连不到 Google 时靠中转地址走通;留空则直连官方端点。"""
+    api = _api_with(
+        monkeypatch,
+        {"Gemini_Image_apikey": "AIzaKEY", "Gemini_Image_BaseURL": "https://relay.invalid/gemini/"},
+    )
+    client = api._build_client()
+    opts = client._api_client._http_options
+    assert opts.base_url == "https://relay.invalid/gemini/"
+    assert opts.api_version == "v1beta"  # SDK 仍在其后拼 /v1beta/...,中转端按标准路径转发
+
+    plain = _api_with(monkeypatch, {"Gemini_Image_apikey": "AIzaKEY"})
+    assert "generativelanguage" in plain._build_client()._api_client._http_options.base_url
+
+
+def test_relay_base_url_ignored_in_vertex_mode(monkeypatch):
+    """Vertex 有自己的端点体系,套 AI Studio 的中转前缀只会把它打歪。"""
+    api = _api_with(
+        monkeypatch,
+        {
+            "Gemini_Image_Use_Vertex": True,
+            "Gemini_Image_Project_ID": "proj-1",
+            "Gemini_Image_BaseURL": "https://relay.invalid/gemini/",
+        },
+    )
+    base = api._build_client()._api_client._http_options.base_url
+    assert "relay.invalid" not in base
+
+
 def test_find_image_inline_and_uri():
     b64 = base64.b64encode(b"PNGDATA").decode()
     interaction = SimpleNamespace(

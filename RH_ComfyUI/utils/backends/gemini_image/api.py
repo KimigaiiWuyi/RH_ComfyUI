@@ -30,6 +30,15 @@ class GeminiImageAPI:
         return str(SERVICE_CONFIG.get_config("Gemini_Image_apikey").data or "")
 
     @property
+    def base_url(self) -> str:
+        """AI Studio 的中转地址(可选);留空直连官方端点。
+
+        SDK 会在其后拼 ``/v1beta/...``(``api_version`` 不受影响),所以填到中转端
+        的路径前缀为止即可,结尾带不带 ``/`` 都行(SDK 自己会规整)。
+        """
+        return str(SERVICE_CONFIG.get_config("Gemini_Image_BaseURL").data or "").strip()
+
+    @property
     def project_id(self) -> str:
         return str(SERVICE_CONFIG.get_config("Gemini_Image_Project_ID").data or "").strip()
 
@@ -70,7 +79,10 @@ class GeminiImageAPI:
                 location=self.location,
                 credentials=credentials,
             )
-        return genai.Client(api_key=self.api_key)
+        # 中转地址只在 AI Studio 模式生效:Vertex 有自己的端点体系,
+        # 把 generativelanguage 的中转前缀套上去只会把它打歪。
+        http_options = {"base_url": self.base_url} if self.base_url else None
+        return genai.Client(api_key=self.api_key, http_options=http_options)
 
     async def generate(
         self,
@@ -97,8 +109,10 @@ class GeminiImageAPI:
             model_input = prompt
 
         img_sizes = ", ".join(f"{len(b)}B" for b in (images or [])) or "无"
+        # 直连不通时最常见的问题就是"到底走没走中转",所以把端点打进日志
+        endpoint = self.base_url if (self.base_url and not self.is_vertex) else "官方"
         logger.info(
-            f"[Gemini-Image] interactions.create model={model} vertex={self.is_vertex} "
+            f"[Gemini-Image] interactions.create model={model} vertex={self.is_vertex} endpoint={endpoint} "
             f"ratio={aspect_ratio} size={image_size or '-'} 参考图={len(images or [])} 张"
         )
         logger.debug(f"[Gemini-Image] 请求 prompt={prompt[:120]!r} 参考图=[{img_sizes}] modalities=['image']")

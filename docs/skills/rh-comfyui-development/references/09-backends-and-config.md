@@ -84,7 +84,7 @@ PortSpec。两者必须同步(mapper 消费的字段要在 inputs 里声明)。
 | `ComfyUI_BaseURL` | ComfyUI 地址 |
 | `RH_apikey` | RunningHub |
 | `OpenAI_Image_apikey` / `OpenAI_Image_BaseURL` | OpenAI 兼容生图 |
-| `Gemini_Image_apikey` / `Gemini_Image_Use_Vertex` / `Gemini_Image_Project_ID` / `Gemini_Image_Location` / `Gemini_Image_SA_File` | Gemini 生图(**显式开关** `Use_Vertex` 决定模式:开=VertexAI+ADC/SA(忽略 key),关=AI Studio+key;不再由 Project ID 推断) |
+| `Gemini_Image_apikey` / `Gemini_Image_BaseURL` / `Gemini_Image_Use_Vertex` / `Gemini_Image_Project_ID` / `Gemini_Image_Location` / `Gemini_Image_SA_File` | Gemini 生图(**显式开关** `Use_Vertex` 决定模式:开=VertexAI+ADC/SA(忽略 key),关=AI Studio+key;不再由 Project ID 推断。`BaseURL`=直连不通时的中转地址,仅 AI Studio 生效,留空直连官方) |
 | `MiniMax_apikey` / `MIMO_apikey` | MiniMax / MiMo |
 | `Seedance_apikey_{ark,runninghub}` + `Seedance_BaseURL_*` + `Seedance_Enable_*` | Seedance 内置供应商凭证(网关凭证在外部插件自己的面板) |
 | `Seedance_Dry_Run` | Seedance 干跑(拦截出站请求 + 打印;抛 `DryRunInterrupt` 终止,积分自动退款) |
