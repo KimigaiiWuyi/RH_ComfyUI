@@ -66,15 +66,18 @@ class MiniMaxAPI:
         json: Optional[Dict[str, Any]] = None,
     ) -> Union[Dict[str, Any], int]:
         """基础 HTTP 请求"""
-        logger.info(f"[MiniMax] 请求: {method} {url}")
+        # debug 而非 info:T2A 异步任务的轮询(query_t2a_async_task)也走这里,
+        # 每秒级一轮 × 并发用户数 = 刷屏。非 200 的那条下面按 warning 记,不会漏。
+        logger.debug(f"[MiniMax] 请求: {method} {url}")
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.request(method, url, headers=headers, json=json) as resp:
-                    logger.info(f"[MiniMax] 响应状态: {resp.status}")
-
                     if resp.status != 200:
+                        logger.warning(f"[MiniMax] 响应状态: {resp.status} ({method} {url})")
                         return resp.status
+
+                    logger.debug(f"[MiniMax] 响应状态: {resp.status}")
 
                     resp_data = await resp.json()
                     logger.debug(f"[MiniMax] 响应数据: {resp_data}")

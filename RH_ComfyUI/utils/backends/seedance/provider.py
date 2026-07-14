@@ -366,10 +366,11 @@ class SeedanceProvider(ABC):
                 f"[Seedance:{self.name}] Dry-Run 已启用,请求未发送: {method} {url}"
             )
 
-        # ── 请求日志(脱敏) ──
+        # ── 请求日志(脱敏;一律 debug —— 轮询也走这里,× 并发即刷屏) ──
+        # 每单一次的 dump 见 run()(request)与 poll_until_done(终态 result)。
         from ._debug import dump_body, mask_body, mask_headers
 
-        logger.info(
+        logger.debug(
             f"[Seedance:{self.name}] 请求 {method} {url}\n"
             f"  headers: {mask_headers(headers)}\n"
             f"  body:\n{dump_body(mask_body(json))}"
@@ -387,7 +388,9 @@ class SeedanceProvider(ABC):
             resp_text = dump_body(mask_body(resp_json))
         except Exception:
             resp_text = resp.text[:2000]
-        logger.info(f"[Seedance:{self.name}] 响应 {resp.status_code} ({len(resp.content)} bytes)\n  body: {resp_text}")
+        # 失败的那一条必须留在 INFO 之上:它是排障时唯一要看的原文
+        emit = logger.warning if resp.status_code >= 400 else logger.debug
+        emit(f"[Seedance:{self.name}] 响应 {resp.status_code} ({len(resp.content)} bytes)\n  body: {resp_text}")
 
         if resp.status_code >= 400:
             raise self._build_http_error(resp)
@@ -437,9 +440,16 @@ class SeedanceProvider(ABC):
         on_progress: Optional[Callable[[NormalizedTask], Any]] = None,
     ) -> NormalizedTask:
         """校验 → 创建 → 轮询,作为 Adapter 调用的统一入口。"""
+        from ._debug import dump_body, mask_body
+
         self.validate_spec(spec)
         method, url, headers, body = await self.render_create(spec, model=model)
-        logger.info(f"[Seedance:{self.name}] 创建任务: model={model}, endpoint={url}, keys={list(body.keys())}")
+        # 请求原文:每单一次(逐个请求的日志压在 debug,轮询会把它放大)。
+        # base64 已由 mask_body 换成占位符。
+        logger.info(
+            f"[Seedance:{self.name}] 创建任务: model={model}, endpoint={url}\n"
+            f"  request:\n{dump_body(mask_body(body))}"
+        )
         resp = await self._request(method, url, headers=headers, json=body)
         task_id = self.parse_create(resp)
         if not task_id:
@@ -459,7 +469,9 @@ class SeedanceProvider(ABC):
         *,
         interval: float = 8.0,
         max_wait: float = 1800.0,
-        heartbeat_every: int = 5,
+        # 15 × 8s ≈ 2 分钟一条心跳(原来 5 ≈ 40s:× 并发就是每分钟上百行)。
+        # 心跳只为"长任务没卡死"提供证据;状态真变了另有 INFO 行。
+        heartbeat_every: int = 15,
         on_progress: Optional[Callable[[NormalizedTask], Any]] = None,
     ) -> NormalizedTask:
         """基于 `NormalizedTask.status` 轮询,直至进入终态。
@@ -524,12 +536,19 @@ class SeedanceProvider(ABC):
                     logger.warning(f"[Seedance:{self.name}] 进度回调异常: {exc}")
 
             if task.status in TERMINAL_STATUSES:
+                # 终态 payload:每单一次,成功失败都打。与 run() 里那条 request:
+                # 配成一对 —— 一单看两条就够排障。
+                from ._debug import dump_body, mask_body
+
+                raw_dump = dump_body(mask_body(task.raw))
+
                 if task.status == NormalizedStatus.FAILED:
                     # 任务失败:优先把供应商原始 failReason 透传到上层,
                     # 不要再包一层 "gateway 任务失败: ..." 的前缀 ——
                     # 前端最终展示的就是这条原始文案(Request id 等供应商
                     # 自带的排查信息一并保留)。
                     vendor_msg = task.error or str(task.raw)
+                    logger.warning(f"[Seedance:{self.name}] 任务 {task_id} 失败: {vendor_msg}\n  result:\n{raw_dump}")
                     raise SeedanceProviderError(
                         vendor_msg,
                         code="TASK_FAILED",
@@ -538,6 +557,7 @@ class SeedanceProvider(ABC):
                         user_message=vendor_msg,
                     )
                 if task.status == NormalizedStatus.EXPIRED:
+                    logger.warning(f"[Seedance:{self.name}] 任务 {task_id} 已过期\n  result:\n{raw_dump}")
                     raise SeedanceProviderError(
                         f"任务已过期:{task_id}",
                         code="TASK_EXPIRED",
@@ -545,6 +565,7 @@ class SeedanceProvider(ABC):
                         provider=self.name,
                         user_message="生成任务已过期,请重试。",
                     )
+                logger.info(f"[Seedance:{self.name}] 任务 {task_id} 完成({task.status.value})\n  result:\n{raw_dump}")
                 return task
 
             elapsed = loop.time() - start

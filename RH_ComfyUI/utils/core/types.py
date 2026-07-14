@@ -432,10 +432,8 @@ class CapabilityManifest:
     # 异步模式: sync / async_poll / async_callback
     mode: str = "sync"
 
-    # 模型级并发上限(0=不限,只受全局闸约束)。
-    # 稀缺的**本地**资源才需要它:ComfyUI 系共用一块 GPU,同时跑两个工作流会炸显存,
-    # 所以声明 1。远程 API 后端(Seedance / 基座 / MiniMax…)是网络等待,不占本地资源,
-    # 留 0 让它们只受全局闸这道天花板约束。
+    # 模型级并发上限(0=不限,只受全局闸约束)。只有稀缺的本地资源才需要它:
+    # ComfyUI 共用一块 GPU 故声明 1;远程 API 是网络等待,留 0。
     max_concurrency: int = 0
 
     # 路由相关
