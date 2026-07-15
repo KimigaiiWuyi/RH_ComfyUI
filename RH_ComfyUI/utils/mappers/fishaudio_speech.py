@@ -39,8 +39,8 @@ async def fishaudio_tts_mapper(
         speed=request.speed,
     )
 
-    if isinstance(audio, int):
-        raise RuntimeError(f"Fish Audio 语音合成失败,状态码: {audio}")
+    if isinstance(audio, str):
+        raise RuntimeError(f"Fish Audio 语音合成失败: {audio}")
     if not audio:
         raise RuntimeError("Fish Audio 语音合成失败,未返回音频数据")
 

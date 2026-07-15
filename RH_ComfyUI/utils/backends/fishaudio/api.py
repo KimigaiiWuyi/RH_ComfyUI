@@ -18,9 +18,11 @@ from ....rh_config.comfyui_config import SERVICE_CONFIG
 # 仅对接官方公开端点(不额外暴露地址配置)。
 _BASE_URL = "https://api.fish.audio"
 
-# 允许的模型档位(header 里的 model 值)。默认走免费档。
-DEFAULT_MODEL = "s2.1-pro-free"
-KNOWN_MODELS = ("s2.1-pro-free", "s2.1-pro", "s2-pro", "s1")
+# 允许的模型档位(header 里的 model 值)。s2.1-pro 在官方免费期内不计费,作默认。
+# 刻意不含营销名 "s2.1-pro-free"(实测线上判 Unknown model):这样即便旧配置里存的是
+# 它,property.model 里 `value in KNOWN_MODELS` 不成立 → 自动回落到 s2.1-pro,免手改。
+DEFAULT_MODEL = "s2.1-pro"
+KNOWN_MODELS = ("s2.1-pro", "s2-pro", "s1")
 
 # 音色训练中的状态:处于这些状态需等待就绪后才能用于合成。
 # 快速克隆通常即时可用;偶发未就绪时轮询兜底,超预算仍未就绪则尽力尝试。
@@ -126,14 +128,14 @@ class FishAudioAPI:
         reference_id: Optional[str] = None,
         model: Optional[str] = None,
         speed: float = 1.0,
-    ) -> Union[bytes, int]:
-        """合成语音,返回音频字节;失败返回 HTTP 状态码(int)
+    ) -> Union[bytes, str]:
+        """合成语音,返回音频字节;失败返回**人话错误信息**(str),供上层直接透传给用户
 
         reference_id 为空时用档位内置默认音色;情绪标签已在正文内联(基类处理)。
         """
         if not self.api_key:
             logger.warning("[FishAudio] 未配置 API Key,将无法请求")
-            return 401
+            return "未配置 Fish Audio API Key(FishAudio_apikey)"
 
         engine = model if model in KNOWN_MODELS else self.model
         body: Dict[str, Any] = {
@@ -155,17 +157,19 @@ class FishAudioAPI:
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, headers=headers, json=body) as resp:
                     if resp.status != 200:
-                        detail = await resp.text()
-                        logger.warning(f"[FishAudio] 合成失败: {resp.status}, {detail[:300]}")
-                        return resp.status
+                        detail = (await resp.text())[:200]
+                        logger.warning(f"[FishAudio] 合成失败: {resp.status}, {detail}")
+                        # 400 多为档位不被账号支持(如 Unknown model)→ 指向配置项,可自助修
+                        hint = f"(可在 Web 控制台改 FishAudio_Model 档位,当前 {engine})" if resp.status == 400 else ""
+                        return f"HTTP {resp.status}: {detail}{hint}"
                     audio = await resp.read()
         except aiohttp.ClientError as e:
             logger.warning(f"[FishAudio] 合成网络异常: {e}")
-            return 500
+            return f"网络异常: {e}"
 
         if not audio:
             logger.warning("[FishAudio] 合成成功但未返回音频")
-            return 500
+            return "上游返回空音频"
         logger.info(f"[FishAudio] 合成成功: {len(audio)} bytes")
         return audio
 

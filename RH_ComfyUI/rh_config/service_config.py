@@ -147,9 +147,10 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "FishAudio_Model": GsStrConfig(
         "Fish Audio 模型档位",
-        "默认免费档 s2.1-pro-free；如需更高档位可切换（需对应账号权限）",
-        "s2.1-pro-free",
-        options=["s2.1-pro-free", "s2.1-pro", "s2-pro", "s1"],
+        "默认 s2.1-pro（官方免费期内不计费，质量最好）；s1 为旧版更稳。"
+        "（营销名 s2.1-pro-free 线上会判 Unknown model，已不作为选项。）",
+        "s2.1-pro",
+        options=["s2.1-pro", "s2-pro", "s1"],
     ),
     "divider_seedance": GsDivider(
         "Seedance 视频生成",
