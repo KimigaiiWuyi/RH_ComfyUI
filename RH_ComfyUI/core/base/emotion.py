@@ -1,13 +1,14 @@
 """语音情绪归一化 — 模态级共享工具(无外部依赖,纯函数)
 
-不同 TTS 上游表达情绪的方式互斥:
-- 内联标签(inline_bracket):情绪写在正文里 `[happy] ...`,支持句中定位与叠加;
-- 自然语言(natural_language):情绪走一条独立的自由文本指令通道;
-- 固定枚举(enum):情绪必须落在一个有限集合内,集合外一律丢弃;
-- 无(none):不吃情绪。
+情绪只来自**显式情绪块** `<<EMO: label>>`(由调用方的情绪选单产生),而**不是**
+正文里字面的 `[..]` / `【..】` —— 后者一律当普通文本(用户复制/手打的括号不受影响)。
 
-基类 DigitalHumanSpeechBase 按各模型声明的 EmotionStyle 调用本模块,把
-(正文, 情绪) 归一化成上游能直接消费的形态。子类只声明风格,无需重写逻辑。
+不同 TTS 上游消费情绪的方式互斥,由各模型声明 EmotionStyle,基类据此把
+(正文, 情绪块, 结构化情绪 mood) 归一化成上游能直接消费的形态:
+- 内联(inline_bracket):情绪块就地展开为 `[english]`,支持句中定位与叠加;
+- 自然语言(natural_language):情绪走独立自由文本字段;情绪块剥离;
+- 固定枚举(enum):情绪收敛到有限集合;情绪块剥离;
+- 无(none):不吃情绪;情绪块剥离。
 """
 
 from __future__ import annotations
@@ -17,15 +18,15 @@ from enum import Enum
 
 
 class EmotionStyle(str, Enum):
-    """模型消费情绪的方式(决定内联标签是嵌入还是剥离)"""
+    """模型消费情绪的方式(决定显式情绪块是内联展开还是剥离)"""
 
-    INLINE_BRACKET = "inline_bracket"  # 正文内联 [tag];结构化情绪并入句首
-    NATURAL_LANGUAGE = "natural_language"  # 情绪走独立自由文本;正文内联标记剥离
-    ENUM = "enum"  # 情绪收敛到固定枚举;正文内联标记剥离
-    NONE = "none"  # 不支持情绪;正文内联标记剥离
+    INLINE_BRACKET = "inline_bracket"  # 情绪块 → 内联 [tag];结构化情绪并入句首
+    NATURAL_LANGUAGE = "natural_language"  # 情绪走独立自由文本;情绪块剥离
+    ENUM = "enum"  # 情绪收敛到固定枚举;情绪块剥离
+    NONE = "none"  # 不支持情绪;情绪块剥离
 
 
-# 中文情绪 → 通用英文标签。既供内联翻译(zh→en),也供枚举收敛前的归一。
+# 中文情绪 → 通用英文标签。供内联展开(zh→en)与枚举收敛前的归一。
 _ZH_TO_TAG: dict[str, str] = {
     "高兴": "happy",
     "开心": "happy",
@@ -81,105 +82,43 @@ _ZH_TO_TAG: dict[str, str] = {
     "流畅": "fluent",
 }
 
-# 英文情绪/语气/拟声标签(内联剥离时判定 tag-like 用;非穷举,足以覆盖常见误写)
-_EN_TAGS: frozenset[str] = frozenset(
-    {
-        "happy",
-        "sad",
-        "angry",
-        "excited",
-        "calm",
-        "nervous",
-        "confident",
-        "surprised",
-        "fearful",
-        "disgusted",
-        "fluent",
-        "gentle",
-        "playful",
-        "serious",
-        "whisper",
-        "whispering",
-        "shouting",
-        "screaming",
-        "sobbing",
-        "crying",
-        "laughing",
-        "chuckling",
-        "sighing",
-        "groaning",
-        "panting",
-        "yawning",
-        "emphasis",
-        "break",
-        "long-break",
-        "breath",
-        "cough",
-        "sigh",
-    }
-)
-
-# [tag] 或 (tag):括号内 1~24 个非括号字符。跨括号(如 "[a)")也收,少见但无害。
-_BRACKET_RE = re.compile(r"[\[\(]([^\]\)]{1,24})[\]\)]")
-# 纯英文单词/短语(允许空格与连字符),用于判定 tag-like
-_ASCII_TAG_RE = re.compile(r"[A-Za-z][A-Za-z \-]*")
+# 显式情绪块:`<<EMO: label>>`(与调用方情绪选单/序列化协议一致)。
+_EMO_MARKER_RE = re.compile(r"<<EMO:\s*([^>]*?)\s*>>")
 _MULTISPACE_RE = re.compile(r"\s{2,}")
 
 
 def _normalize_word(word: str) -> str:
-    """去括号/空白后把中文情绪词映射成英文标签;未知词原样返回"""
-    key = word.strip().strip("[]()").strip()
+    """去空白后把中文情绪词映射成英文标签;未知词原样返回"""
+    key = word.strip()
     return _ZH_TO_TAG.get(key, key)
 
 
-def _looks_like_tag(inner: str) -> bool:
-    """括号内容是否像情绪/语气标记(而非用户想读出来的普通括注)"""
-    text = inner.strip()
-    if not text:
-        return False
-    if text in _ZH_TO_TAG:
-        return True
-    lowered = text.lower()
-    if lowered in _EN_TAGS:
-        return True
-    # 纯英文短词按标记处理(如 "in a hurry tone");中文非情绪词(如 苹果/重要)保留
-    return bool(_ASCII_TAG_RE.fullmatch(text)) and len(text) <= 24
+def render_inline_markers(text: str) -> str:
+    """把显式情绪块 `<<EMO: label>>` 就地展开为内联 `[english]`(中→英)
 
-
-def translate_inline_zh_tags(text: str) -> str:
-    """把正文里 [中文情绪] 翻成 [english](供 inline_bracket 模型)
-
-    仅翻译已知情绪词;非情绪括注(如 (苹果))与英文标签原样保留 ——
-    inline_bracket 上游本就支持自由英文标签。
+    正文里字面的 `[..]` / `【..】` 一律不动 —— 只有显式情绪块才是情绪。
     """
 
     def repl(match: re.Match[str]) -> str:
-        inner = match.group(1).strip()
-        if inner in _ZH_TO_TAG:
-            return f"[{_ZH_TO_TAG[inner]}]"
-        return match.group(0)
+        return f"[{_normalize_word(match.group(1))}]"
 
-    return _BRACKET_RE.sub(repl, text)
+    return _EMO_MARKER_RE.sub(repl, text)
 
 
-def strip_inline_tags(text: str) -> tuple[str, list[str]]:
-    """剥离正文里 tag-like 的 [..]/(..) 标记,避免被上游当普通文字读出
+def extract_emotion_markers(text: str) -> tuple[str, list[str]]:
+    """剥离显式情绪块,返回(清理后文本, 块内标签原文列表)
 
-    Returns:
-        (清理后文本, 被剥离的标记原始内容列表)。普通括注不剥离。
+    普通括号文本不受影响。用于非内联模型:块内情绪交由 mood / 枚举通道消费。
     """
-    stripped: list[str] = []
+    labels: list[str] = []
 
     def repl(match: re.Match[str]) -> str:
-        inner = match.group(1).strip()
-        if _looks_like_tag(inner):
-            stripped.append(inner)
-            return ""
-        return match.group(0)
+        labels.append(match.group(1).strip())
+        return ""
 
-    cleaned = _BRACKET_RE.sub(repl, text)
+    cleaned = _EMO_MARKER_RE.sub(repl, text)
     cleaned = _MULTISPACE_RE.sub(" ", cleaned).strip()
-    return cleaned, stripped
+    return cleaned, labels
 
 
 def to_inline_tag(mood: str) -> str:
@@ -191,9 +130,9 @@ def to_inline_tag(mood: str) -> str:
 
 
 def to_enum_emotion(mood: str | None, extra: list[str], allowed: list[str]) -> str | None:
-    """把结构化情绪或剥出的内联标记收敛到模型枚举;都不在枚举内则返回 None(丢弃)
+    """把结构化情绪或情绪块标签收敛到模型枚举;都不在枚举内则返回 None(丢弃)
 
-    先取结构化 mood,再取正文里剥出的标记;逐个做 zh→en 归一后匹配枚举。
+    先取结构化 mood,再取正文里剥出的情绪块标签;逐个做 zh→en 归一后匹配枚举。
     """
     allowed_set = set(allowed)
     candidates: list[str] = []
@@ -209,8 +148,8 @@ def to_enum_emotion(mood: str | None, extra: list[str], allowed: list[str]) -> s
 
 __all__ = [
     "EmotionStyle",
-    "translate_inline_zh_tags",
-    "strip_inline_tags",
+    "render_inline_markers",
+    "extract_emotion_markers",
     "to_inline_tag",
     "to_enum_emotion",
 ]

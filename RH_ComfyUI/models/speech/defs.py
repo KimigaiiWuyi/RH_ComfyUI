@@ -228,21 +228,27 @@ class FishTtsDef(FishTtsModel):
             task_type=TaskType("speech"),
             backend="fishaudio",
             point_cost=2,
-            description="Fish Audio S2 系列语音合成，多语言、韵律自然，情绪可在正文内联细粒度控制，支持自动音色克隆",
+            description="Fish Audio S2 语音合成，多语言、韵律自然，情绪可句中定位，支持自动音色克隆；配音/口播首选",
             knowledge_content=(
-                "Fish Audio S2 系列语音合成模型。"
+                "Fish Audio S2 系列语音合成模型 —— 配音 / 口播 / 有声内容的**首选**模型。"
                 "\n"
-                "优势：多语言支持，韵律自然，情绪表达细粒度可控（正文内联标签，支持句中定位与叠加），"
+                "优势：多语言支持，韵律自然，情绪表达细粒度可控（可句中定位与叠加），"
                 "\n"
                 "传入参考音频即自动克隆音色（内容去重、持久复用，无需显式克隆步骤）。"
                 "\n"
-                "情绪用法：在文本里内联方括号标签，如 [开心] 今天天气真好 / 你好 [低语] 我想你了，"
+                "情绪用法（重要）：用情绪块 <<EMO: 情绪词>> 在句中定位情绪，"
                 "\n"
-                "支持叠加如 [悲伤][低语]；也可单独填『情绪』参数作用于整句。"
+                "如 今天<<EMO: 开心>>天气真好 / 你好<<EMO: 低语>>我想你了，可连续叠加"
+                "\n"
+                "如 <<EMO: 悲伤>><<EMO: 低语>>；情绪词支持中文（开心/低语/悲伤/大笑…）。"
+                "\n"
+                "也可用『情绪』参数或文本开头 [情绪] 指定整句情绪。"
+                "\n"
+                "注意：只有情绪块 <<EMO: …>> 才被识别为情绪；正文里字面的 []/【】 当普通文本。"
                 "\n"
                 "模型档位可配置（默认免费档 s2.1-pro-free，可切换更高档位）。"
                 "\n"
-                "适用场景：口播、有声内容、配音、多语言朗读。"
+                "适用场景：配音、口播、有声内容、多语言朗读、角色对白。"
                 "\n"
                 "不适用场景：音乐生成。"
                 "\n"
@@ -255,7 +261,10 @@ class FishTtsDef(FishTtsModel):
                     type=PortType.TEXT,
                     required=True,
                     title="合成文本",
-                    description="待合成文本；可内联情绪标签，如 [开心] 或 你好 [低语] 我想你了",
+                    description=(
+                        "待合成文本。用情绪块 <<EMO: 情绪词>> 在句中定位情绪"
+                        "（如 你好<<EMO: 低语>>我想你了）；正文里字面的 []/【】 当普通文本。"
+                    ),
                 ),
                 "reference_audio": PortSpec(
                     type=PortType.AUDIO,
@@ -265,7 +274,7 @@ class FishTtsDef(FishTtsModel):
                 "mood": PortSpec(
                     type=PortType.STRING,
                     title="情绪",
-                    description="整句情绪/语气，自动包成内联标签注入句首；支持自由描述与叠加",
+                    description="整句情绪/语气，自动注入句首；句中定位请用情绪块 <<EMO: 情绪>>",
                     values=["开心", "悲伤", "愤怒", "惊讶", "平静", "兴奋", "低语", "哭腔", "大笑", "着急"],
                 ),
                 "speed": PortSpec(
@@ -284,7 +293,8 @@ class FishTtsDef(FishTtsModel):
             capabilities=CapabilityManifest(
                 supported_tasks=["speech"],
                 mode="sync",
-                priority=70,
+                # 配音/口播首选:优先级高于其它 TTS(未配置 key 时 check_available 自动让路)
+                priority=85,
             ),
         )
 

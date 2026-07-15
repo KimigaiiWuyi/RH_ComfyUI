@@ -17,8 +17,8 @@ from .emotion import (
     EmotionStyle,
     to_inline_tag,
     to_enum_emotion,
-    strip_inline_tags,
-    translate_inline_zh_tags,
+    render_inline_markers,
+    extract_emotion_markers,
 )
 from .generation import AIGCGenerationBase
 from ..schema.types import PortSpec, PortType
@@ -78,31 +78,34 @@ class DigitalHumanSpeechBase(AIGCGenerationBase):
         return self._apply_emotion(request)
 
     def _apply_emotion(self, request: GenerationRequest) -> GenerationRequest:
-        """按 emotion_style 把(prompt, mood)整形成上游能直接消费的形态
+        """按 emotion_style 把(prompt, 情绪块, mood)整形成上游能直接消费的形态
 
-        - inline_bracket:正文 zh→en 翻译 + 结构化情绪并入句首,mood 清空(已进正文)
-        - enum:剥离正文内联标记 + 结构化情绪/剥出标记收敛到枚举
-        - natural_language:剥离正文内联标记;无结构化情绪时用剥出的首个标记兜底
-        - none / 不支持情绪:剥离正文内联标记并清空 mood
+        情绪只来自显式情绪块 `<<EMO: label>>` 与结构化 mood;正文里字面 `[..]`/`【..】`
+        一律当普通文本(不翻译、不剥离)。
+
+        - inline_bracket:情绪块就地展开为 `[english]` + 结构化情绪并入句首,mood 清空
+        - enum:剥离情绪块 + 结构化情绪/块标签收敛到枚举
+        - natural_language:剥离情绪块;无结构化情绪时用首个块标签兜底
+        - none / 不支持情绪:剥离情绪块并清空 mood
         """
         style = self.emotion_style if self.supports_mood else EmotionStyle.NONE
 
         if style is EmotionStyle.INLINE_BRACKET:
-            text = translate_inline_zh_tags(request.prompt)
+            text = render_inline_markers(request.prompt)
             if request.mood:
                 text = f"{to_inline_tag(request.mood)} {text}"
             request.prompt = text
             request.mood = None
             return request
 
-        cleaned, stripped = strip_inline_tags(request.prompt)
+        cleaned, labels = extract_emotion_markers(request.prompt)
         request.prompt = cleaned
 
         if style is EmotionStyle.ENUM:
-            request.mood = to_enum_emotion(request.mood, stripped, self.emotion_enum)
+            request.mood = to_enum_emotion(request.mood, labels, self.emotion_enum)
         elif style is EmotionStyle.NATURAL_LANGUAGE:
-            if not request.mood and stripped:
-                request.mood = stripped[0]
+            if not request.mood and labels:
+                request.mood = labels[0]
         else:  # NONE
             request.mood = None
         return request

@@ -110,9 +110,9 @@ MINIMAX_EMOTIONS = {
     "whisper",
 }
 
-# 情绪标签解析正则（支持 [情绪] 和 [情绪:xxx] 格式）
+# 情绪标签解析正则（支持 [情绪] / [情绪:xxx]，含全角 【情绪】/［情绪］ 格式）
 
-_MOOD_BRACKET_RE = re.compile(r"^\[([^\]]+)\]\s*")
+_MOOD_BRACKET_RE = re.compile(r"^[\[【［]([^\]】］]+)[\]】］]\s*")
 
 
 def parse_mood_from_prompt(text: str) -> tuple[Optional[str], str]:

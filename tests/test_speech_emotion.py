@@ -1,10 +1,10 @@
-"""语音情绪归一化:内联翻译 / 剥离 / 枚举收敛 / 普通括注保留 / 基类整合"""
+"""语音情绪归一化:只认显式情绪块 <<EMO>>、字面括号忽略、枚举收敛、基类整合"""
 
 from RH_ComfyUI.core.base.emotion import (
     to_inline_tag,
     to_enum_emotion,
-    strip_inline_tags,
-    translate_inline_zh_tags,
+    render_inline_markers,
+    extract_emotion_markers,
 )
 from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
 
@@ -16,27 +16,28 @@ def _req(prompt: str, mood: str | None = None) -> GenerationRequest:
 # ── 纯函数 ──
 
 
-def test_translate_inline_zh_tags():
-    assert translate_inline_zh_tags("今天 [高兴] 天气真好") == "今天 [happy] 天气真好"
-    assert translate_inline_zh_tags("你好 [whisper] 我想你了") == "你好 [whisper] 我想你了"
-    # 普通中文括注不翻译
-    assert translate_inline_zh_tags("我买了(苹果)") == "我买了(苹果)"
+def test_render_inline_markers():
+    # 情绪块就地展开为 [english]（中→英）
+    assert render_inline_markers("今天 <<EMO: 开心>> 天气真好") == "今天 [happy] 天气真好"
+    assert render_inline_markers("你好 <<EMO: whisper>> 我想你了") == "你好 [whisper] 我想你了"
+    # 字面括号（复制/手打的 []/【】）一律不动
+    assert render_inline_markers("我买了[苹果]和【重要】") == "我买了[苹果]和【重要】"
+
+
+def test_extract_emotion_markers():
+    cleaned, labels = extract_emotion_markers("今天 <<EMO: 开心>> 天气真好")
+    assert cleaned == "今天 天气真好"
+    assert labels == ["开心"]
+    # 普通括号文本不受影响
+    cleaned2, labels2 = extract_emotion_markers("普通[文本]和【括注】不受影响")
+    assert cleaned2 == "普通[文本]和【括注】不受影响"
+    assert labels2 == []
 
 
 def test_to_inline_tag():
     assert to_inline_tag("开心") == "[happy]"
     assert to_inline_tag("[sad]") == "[sad]"
     assert to_inline_tag("excited") == "[excited]"
-
-
-def test_strip_inline_tags():
-    cleaned, stripped = strip_inline_tags("今天 [高兴] 天气真好")
-    assert cleaned == "今天 天气真好"
-    assert stripped == ["高兴"]
-    # 普通中文括注保留,不误剥
-    cleaned2, stripped2 = strip_inline_tags("我买了(苹果)三个")
-    assert cleaned2 == "我买了(苹果)三个"
-    assert stripped2 == []
 
 
 def test_to_enum_emotion():
@@ -60,18 +61,25 @@ def test_model_normalize_by_style():
 
     fish = model_registry.get("fish_tts")
     assert fish is not None
-    out = fish.normalize(_req("今天 [高兴] 天气真好"))
+    # 情绪块 → 内联展开(句中定位)
+    out = fish.normalize(_req("今天 <<EMO: 开心>> 天气真好"))
     assert out.prompt == "今天 [happy] 天气真好" and out.mood is None
+    # 字面 [开心] 是普通文本,不翻译
+    out = fish.normalize(_req("字面 [开心] 不翻译"))
+    assert out.prompt == "字面 [开心] 不翻译" and out.mood is None
+    # 结构化情绪 → 句首
     out = fish.normalize(_req("你好", "开心"))
     assert out.prompt == "[happy] 你好" and out.mood is None
 
     mmx = model_registry.get("minimax_t2a_speech")
     assert mmx is not None
-    out = mmx.normalize(_req("今天 [高兴] 天气真好"))
-    assert out.prompt == "今天 天气真好" and out.mood == "happy"
+    out = mmx.normalize(_req("<<EMO: 开心>> 你好"))
+    assert out.prompt == "你好" and out.mood == "happy"
+    # 字面括号不剥离
+    assert mmx.normalize(_req("[开心] 你好")).prompt == "[开心] 你好"
     assert mmx.normalize(_req("你好", "随便")).mood is None
 
     mimo = model_registry.get("mimo_tts")
     assert mimo is not None
-    out = mimo.normalize(_req("今天 [高兴] 天气真好"))
-    assert out.prompt == "今天 天气真好" and out.mood == "高兴"
+    out = mimo.normalize(_req("<<EMO: 开心>> 你好"))
+    assert out.prompt == "你好" and out.mood == "开心"
