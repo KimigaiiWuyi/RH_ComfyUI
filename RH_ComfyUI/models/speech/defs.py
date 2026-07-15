@@ -224,7 +224,7 @@ class FishTtsDef(FishTtsModel):
     def node_def() -> NodeDef:
         return NodeDef(
             name="fish_tts",
-            display_name="Fish Audio S2 语音合成",
+            display_name="Fish Audio S2",
             task_type=TaskType("speech"),
             backend="fishaudio",
             point_cost=2,
