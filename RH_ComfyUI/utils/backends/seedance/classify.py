@@ -152,7 +152,13 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     ordered_segments: list[OrderedSegment] = []
     base_prompt = request.prompt or ""
 
-    if request.ordered_content:
+    # ordered_content 仅含文本段(无任何媒体项)时不能走有序分支 —— 否则 else 分支里
+    # 的 images / video_refs / audio_refs(前端把"连线但未 @"的素材放在这些扁平字段里)
+    # 会被整体忽略,导致"普通链接没 @"时图片凭空丢失。文本已由 request.prompt 承载,
+    # 落到 else 分支不会丢文案。真正的有序多模态由 ordered_content 里的媒体项触发。
+    oc_has_media = any(item.media is not None for item in request.ordered_content)
+
+    if request.ordered_content and oc_has_media:
         # 第一遍:算 dedup 映射(同 bytes 的图压缩成一个)
         orig_to_deduped, keep_orig = _build_image_dedup_map(request.ordered_content)
 

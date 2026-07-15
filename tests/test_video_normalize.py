@@ -81,3 +81,40 @@ def test_normalize_shrinks_images_and_ordered_content():
     assert img_item.media.role == "first_frame"  # role 等元数据不丢
 
     assert out.ordered_content[1].text == "镜头拉远"  # 非图片项原样保留
+
+
+from RH_ComfyUI.core.base.video import VideoTaskShape  # noqa: E402
+
+
+def _txt(t: str) -> ContentItem:
+    return ContentItem(type=ContentItemType.TEXT, text=t)
+
+
+def _img_item() -> ContentItem:
+    return ContentItem(type=ContentItemType.IMAGE, media=MediaRef(kind=MediaKind.IMAGE, data=_big_png()))
+
+
+def test_shape_of_text_only_ordered_content_is_not_multimodal():
+    """纯文本 ordered_content(前端对任意 prompt 都会产出)不应把形态判成 multimodal。
+
+    回归:kling_v3 这类只支持 T2V/I2V/首尾帧的模型,收到"1 张连线图 + 纯文本
+    ordered_content"时,曾被误判为 multimodal 而直接报错;应按真实图片数判为 I2V。
+    """
+    model = _MiniVideoModel()
+    # 0 图 → T2V
+    req_t2v = GenerationRequest(task_type=TaskType.VIDEO, prompt="跳舞", ordered_content=[_txt("跳舞")])
+    assert model.shape_of(req_t2v) == VideoTaskShape.TEXT2VIDEO
+    # 1 图(扁平)+ 纯文本有序段 → I2V(不再是 multimodal)
+    req_i2v = GenerationRequest(
+        task_type=TaskType.VIDEO, prompt="跳舞", images=[_big_png()], ordered_content=[_txt("跳舞")]
+    )
+    assert model.shape_of(req_i2v) == VideoTaskShape.IMAGE2VIDEO
+
+
+def test_shape_of_ordered_content_with_media_is_multimodal():
+    """ordered_content 里含真实媒体项时,仍判为 multimodal(有序多模态未被误伤)。"""
+    model = _MiniVideoModel()
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO, prompt="看", ordered_content=[_txt("看"), _img_item(), _txt("这个")]
+    )
+    assert model.shape_of(req) == VideoTaskShape.MULTIMODAL
