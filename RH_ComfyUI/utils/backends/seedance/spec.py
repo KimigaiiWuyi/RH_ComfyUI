@@ -77,7 +77,7 @@ class VideoGenSpec:
     duration: int = 5
     seed: Optional[int] = None
     generate_audio: bool = False
-    watermark: bool = True
+    watermark: bool = False  # 默认关,与 GenerationRequest / 各模型 input_schema 对齐
     camera_fixed: bool = False
     return_last_frame: bool = False
     service_tier: str = "default"
