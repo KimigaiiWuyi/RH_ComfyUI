@@ -13,7 +13,7 @@ __all__ = [
     "RHComfyuiTaskRecord",
     "RHComfyuiTaskStatus",
     "record_task",
-    # 结构化查询入口(供 bot 命令文本格式化 / canvas_backend HTTP 共用)
+    # 结构化查询入口(供 bot 命令文本格式化 / 外部 HTTP 共用)
     "build_user_consumption_payload",
     "build_admin_consumption_payload",
     "build_admin_records_payload",

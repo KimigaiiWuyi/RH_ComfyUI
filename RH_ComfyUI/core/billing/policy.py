@@ -2,7 +2,7 @@
 
 内置/可注册策略:
 - PointsBillingPolicy   : RHBind 积分(bot 命令 / AI Agent 入口默认)
-- ExternalPrepaidPolicy : 调用方已在外部记账(canvas_backend 走 account_system),
+- ExternalPrepaidPolicy : 调用方已在外部记账(外部插件 走 外部记账系统),
                           引擎侧只记账不扣费
 - 生态自定义            : 另外的兼容插件生态实现本 ABC 后在自己的入口注入
 """
@@ -20,7 +20,7 @@ class BillingContext:
     user_id: str
     bot_id: str = ""
     entry_point: str = "command"  # command / agent / http
-    external_ref: str = ""  # 外部记账凭据(如 canvas job_id)
+    external_ref: str = ""  # 外部记账凭据(如 外部 job_id)
 
 
 @dataclass

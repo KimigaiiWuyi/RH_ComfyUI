@@ -102,4 +102,4 @@ channel_registry.register_binding("gpt-image-2", MyAzureChannel())
 "创建任务 → 轮询终态"型上游用 `PollingChannelMixin`
 (`core/channels/polling.py`)提供的通用骨架,不要自己写 while+sleep。
 模型侧把 `execution_mode` 声明为 `async_poll`(HTTP 清单会透出,
-画布据此展示进度条)。
+调用方据此展示进度条)。

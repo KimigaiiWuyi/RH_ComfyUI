@@ -41,7 +41,7 @@ class NewImageDef(ImagePipelineModel):
             # mode="programmatic" 时改用:
             # mapper_func=my_mapper,             # from ...utils.mappers.xxx import
             inputs={
-                # title=前端面板短标题(几个字);description=完整说明(Agent 消费,缺 title 时前端回退用它)
+                # title=调用方面板短标题(几个字);description=完整说明(Agent 消费,缺 title 时调用方回退用它)
                 "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述"),
                 "width": PortSpec(type=PortType.INTEGER, default=720, minimum=256, maximum=2048, title="宽度"),
             },
@@ -81,7 +81,7 @@ class NewVideoModel(VideoPipelineModel):
 3. 在 `tests/test_schema_validation.py` 补跨字段约束用例(参考 Seedance/Wan)。
 
 校验规则:`validate()` 无副作用、无网络;错误信息面向最终用户,写人话
-(命令与画布都会直接展示)。
+(命令与调用方都会直接展示)。
 
 ## 3.3 路径 C:全新执行链(不走现有 Adapter)
 

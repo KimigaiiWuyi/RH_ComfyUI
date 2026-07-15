@@ -15,7 +15,7 @@
 
 已完成的优化
 
-- HTTP 清单补录纯编程式模型：文档承诺"注册即三入口可见"，但 /RH_ComfyUI/models 只列带 NodeDef 的模型，闭源插件按路径 C 注册的纯 ABC 模型在画布上不可见。/models/summary 的可用数也仍按 Adapter 判定（Seedance/Gemini 永远算不可用）。两处都已修正。
+- HTTP 清单补录纯编程式模型：文档承诺"注册即三入口可见"，但 /RH_ComfyUI/models 只列带 NodeDef 的模型，闭源插件按路径 C 注册的纯 ABC 模型在调用方上不可见。/models/summary 的可用数也仍按 Adapter 判定（Seedance/Gemini 永远算不可用）。两处都已修正。
 - 去重：rh_generate 里 25 行透明图合白底实现与 utils/image_process.py 完全重复，已改为共享导入。
 - Seedance_Dry_Run 配置描述与实际行为对齐（原来写的异常类型是错的）；api.py 的 __all__ 补上 get_model_input_schema；给 openai_image/gemini_image 两个目录补 README（红线 9 的要求）。
 
@@ -24,7 +24,7 @@
 文档修正（11 个文件 + 新增 1 章）
 
 - 新增 13 章《OpenAI 兼容供应商池》：最近一次提交（"对齐后端配置池"）引入的 OpenAI_Image_Providers 配置池、rh 刷新供应商 命令、凭证即时生效 vs 绑定需重挂的语义——此前文档完全没写。
-- 纠错：06 章 canvas 入口的 entry_point 实为 "http" 不是 "canvas"（文档自相矛盾，以代码为准）；03 章 requirements 字段只进 HTTP 清单展示、不驱动可用性；docs/ABC_ARCHITECTURE.md 根本不存在，两处引用已清理；08 章红线 5 按现实收窄为"不新增上层依赖"并列明四个既有例外。
+- 纠错：06 章 HTTP 入口的 entry_point 实为 "http" （文档自相矛盾，以代码为准）；03 章 requirements 字段只进 HTTP 清单展示、不驱动可用性；docs/ABC_ARCHITECTURE.md 根本不存在，两处引用已清理；08 章红线 5 按现实收窄为"不新增上层依赖"并列明四个既有例外。
 - 补全：08 章测试表从 4 个文件补到 10 个；10 章补 刷新供应商 命令和 rh_agent 包（AgentNode 注册，此前无文档）；09 章配置表补 Gemini_Image_Use_Vertex、OpenAI_Image_Providers；测试数 43 → 54 并去掉易过时的硬编码。
 
 一个环境提醒

@@ -2,7 +2,7 @@
 
 与上游服务无关的插件设置：并发上限、用户初始积分、各种业务的积分消耗等。
 
-前端展示按用途分组，使用 [`GsDivider`](../../../gsuid_core/utils/plugins_config/models.py:93) 分割。
+Web 控制台展示按用途分组，使用 [`GsDivider`](../../../gsuid_core/utils/plugins_config/models.py:93) 分割。
 """
 
 from __future__ import annotations

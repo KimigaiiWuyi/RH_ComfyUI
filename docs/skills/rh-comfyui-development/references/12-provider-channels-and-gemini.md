@@ -65,7 +65,7 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
     `Gemini_Image_SA_File` 服务账号 JSON,**忽略 api_key**。
   - **别再用"填了 project_id 就走 Vertex"推断** —— 用户填了 key+project 会被迫
     走 Vertex、报 ADC 缺失(踩坑现场)。
-- **直连不到 Google 就填 `Gemini_Image_BaseURL`(中转/反代地址)**:经
+- **直连不到 Google 就填 `Gemini_Image_BaseURL`(中转地址)**:经
   `Client(http_options={"base_url": …})` 改道,SDK 仍在其后拼 `/v1beta/…`
   (`api_version` 不变),中转端按标准路径转发即可。**仅 AI Studio 模式生效** ——
   Vertex 有自己的端点体系,套 generativelanguage 的中转前缀会把它打歪。
@@ -87,10 +87,10 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
   `image_size`(512/1K/2K/4K),不吃像素宽高。banana2 的 input 端口是 `ratio` /
   `image_size`(`image_size` 走 params 透传给 mapper)。
 
-## 4. input_schema 必须与模型能力一致(agent / 前端据此判参数)
+## 4. input_schema 必须与模型能力一致(agent / 调用方据此判参数)
 
-`/api/RH_ComfyUI/models` 的 `input_schema` 是**机器可读的能力契约**:agent(画布)
-按它决定给哪个模型传什么参数,前端按它渲染表单。规则:
+`/api/RH_ComfyUI/models` 的 `input_schema` 是**机器可读的能力契约**:agent(调用方)
+按它决定给哪个模型传什么参数,调用方按它渲染表单。规则:
 
 - 有 `images` 端口 ⇒ 支持传参考图;`max_items` ⇒ 上限;
 - **纯文生图 / 纯文本模型无 `images` 端口** → 桥接层推出 `supports_edit=False`,
@@ -99,7 +99,7 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
 
 **踩坑**:`SeedanceVideoModel.__init__` **强制** `supported_shapes = 全 4 形态`
 (文生/图生/首尾帧/多模态),但 `seedance15_pro` / `seedance2_fast` 曾漏声明
-`images`/`video_refs`/`audio_refs`/`frame_mode` 端口 → schema 藏了能力,agent/前端
+`images`/`video_refs`/`audio_refs`/`frame_mode` 端口 → schema 藏了能力,agent/调用方
 以为它们只能文生。**改模型 supported_shapes / max_reference_total 时,务必同步
 input 端口**。现全部 Seedance 变体端口已对齐。
 
@@ -114,13 +114,13 @@ input 端口**。现全部 Seedance 变体端口已对齐。
 | ace_step1.5 | 无(negative_prompt=歌词) | 文生音乐 |
 | IndexTTS2 / mimo_tts / minimax_t2a_speech | reference_audio | 音色复刻 |
 
-## 5. 计费 / 退款(canvas / http 入口)
+## 5. 计费 / 退款(HTTP 入口)
 
 - http 入口用 `ExternalPrepaidPolicy`:**引擎只记账不扣费**,扣费/退款由调用方
-  (`canvas_backend/generate_api.py`)负责。生成失败时 canvas 侧
+  (`外部插件/generate_api.py`)负责。生成失败时 调用方侧
   `_run_generation` 的 `except` 会 `refund_rh` 退还。
-- **两笔独立积分池**:canvas 扣的是 `RHBind`(与 bot 命令共用);前端
-  `/api/account/me` 显示的是 `account_system` 积分池。别混淆"扣了没退"。
+- **两笔独立积分池**:HTTP 入口扣的是 `RHBind`(与 bot 命令共用);调用方
+  `/api/account/me` 显示的是 `外部记账系统` 积分池。别混淆"扣了没退"。
   `refund_rh` 成功现有 INFO 日志,便于对账。
 
 ## 验证

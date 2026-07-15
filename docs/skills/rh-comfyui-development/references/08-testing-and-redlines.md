@@ -79,7 +79,7 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 | 新模型三入口都看不到 | 是否加进 `ALL_MODELS`;启动日志有无注册行 |
 | 模型显示不可用 | `required_config` / `requirements` 对应配置键是否已配 |
 | 扣了积分没产物 | 统计表该记录 status 与退款标记(见 05 章 5.1) |
-| 参数改了前端没变 | 前端读的是 `input_schema` 序列化,确认改的是 defs 的 PortSpec |
+| 参数改了调用方没变 | 调用方读的是 `input_schema` 序列化,确认改的是 defs 的 PortSpec |
 | 通道频繁切换/全挂 | 熔断日志;`ChannelError.retryable` 是否误标 |
 | import 报 `cannot import name 'dispatcher' from 'dispatch'` | 用 `importlib.import_module`(02 章 2.1 的坑) |
 | 配完 key 不重启直接报 `LocalProtocolError: Illegal header value b'Bearer '` | 老 [§11](./11-credential-hot-reload.md) 现象:单例把空 key 冻在 `__init__`,httpx 拒收 `Bearer `(尾空格)。修法见 §9.4 / §11 |

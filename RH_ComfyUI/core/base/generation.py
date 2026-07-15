@@ -74,7 +74,7 @@ class AIGCGenerationBase(ABC):
 
     @abstractmethod
     def input_schema(self) -> dict[str, PortSpec]:
-        """编程式声明本模型的输入端口(驱动校验/前端表单/Agent 文档)"""
+        """编程式声明本模型的输入端口(驱动校验/调用方表单/Agent 文档)"""
 
     @abstractmethod
     def channel_bindings(self) -> list[ChannelBinding]:

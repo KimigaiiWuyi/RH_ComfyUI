@@ -33,7 +33,7 @@ run(request)
 
 | 方法 | 职责 |
 |---|---|
-| `input_schema() -> dict[str, PortSpec]` | 编程式声明输入端口(驱动校验/前端表单/Agent 文档) |
+| `input_schema() -> dict[str, PortSpec]` | 编程式声明输入端口(驱动校验/调用方表单/Agent 文档) |
 | `channel_bindings() -> list[ChannelBinding]` | 声明可执行通道(1 个=单通道,多个=负载均衡) |
 | `execute_on_channel(request, binding, *, on_progress)` | 在指定通道上执行一次生成 |
 
@@ -73,7 +73,7 @@ run(request)
 | 类型 | 说明 |
 |---|---|
 | `GenerationRequest` | 统一请求:prompt / images / video_refs / audio_refs / reference_audio / ratio / resolution / duration / seed / params(自由字典)等 |
-| `PortSpec(type, required, default, values, min_items, max_items, minimum, maximum, item_type, title, description)` | 单端口声明;title=前端配置面板短标题(几个字),description=完整说明(Agent 消费,前端缺 title 时回退用它) |
+| `PortSpec(type, required, default, values, min_items, max_items, minimum, maximum, item_type, title, description)` | 单端口声明;title=配置面板短标题(几个字),description=完整说明(Agent 消费,调用方缺 title 时回退用它) |
 | `PortType` | TEXT/INTEGER/NUMBER/BOOLEAN/ENUM/LIST/IMAGE/AUDIO/VIDEO/CONTENT/OUTPUT_* |
 | `NodeOutput` | 模型执行产物(data/mime_type/outputs/usage/metadata) |
 | `GenerationResult` | dispatch 返回给入口的最终结果(含 model_used/cost_points) |

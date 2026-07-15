@@ -3,7 +3,7 @@
 唯一的"按输入自动匹配任务形态"入口,被所有 Provider 共享使用。
 判定顺序(命中即定):
   1. 显式 ordered_content(逐素材 role)/ params["shape"] 覆盖
-  2. params["frame_mode"] 半显式覆盖(前端 API,声明在模型 schema 里):
+  2. params["frame_mode"] 半显式覆盖(调用方 API,声明在模型 schema 里):
        - "reference":  全部图片仅作参考 → MULTIMODAL(多参考生成)
        - "first_last": 强制首尾帧(图1=首帧, 图2=尾帧, 其余 reference)
        - "auto"/缺省:  走下方自动判定
@@ -13,7 +13,7 @@
   6. 其余              → TEXT2VIDEO
 
 "2 张图到底是首尾帧还是双参考"仅靠图片数量无法分辨 —— HTTP 简单调用用
-frame_mode 区分;无限画布连线场景用 ordered_content 的 role 字段逐素材指定。
+frame_mode 区分;多素材连线场景用 ordered_content 的 role 字段逐素材指定。
 """
 
 from __future__ import annotations
@@ -153,7 +153,7 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     base_prompt = request.prompt or ""
 
     # ordered_content 仅含文本段(无任何媒体项)时不能走有序分支 —— 否则 else 分支里
-    # 的 images / video_refs / audio_refs(前端把"连线但未 @"的素材放在这些扁平字段里)
+    # 的 images / video_refs / audio_refs(调用方把"连线但未 @"的素材放在这些扁平字段里)
     # 会被整体忽略,导致"普通链接没 @"时图片凭空丢失。文本已由 request.prompt 承载,
     # 落到 else 分支不会丢文案。真正的有序多模态由 ordered_content 里的媒体项触发。
     oc_has_media = any(item.media is not None for item in request.ordered_content)

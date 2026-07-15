@@ -4,7 +4,7 @@
 |---|---|
 | `policy.py` | `BillingPolicy` ABC(`reserve` / `commit` / `refund`)、`BillingContext`(user_id/bot_id/entry_point)、`BillingReservation` |
 | `points_policy.py` | `PointsBillingPolicy` — RHBind 积分扣费(命令/Agent 入口用) |
-| `external_policy.py` | `ExternalPrepaidPolicy` — 调用方已扣费(canvas HTTP 入口):只记账不扣费,避免双重扣费 |
+| `external_policy.py` | `ExternalPrepaidPolicy` — 调用方已扣费(HTTP 入口):只记账不扣费,避免双重扣费 |
 
 ## 语义保证(由 dispatcher 保证,策略实现须配合)
 

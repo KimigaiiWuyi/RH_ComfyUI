@@ -236,7 +236,7 @@ class SeedanceAPI:
                 err = task.get("error") or {}
                 # 与新 provider 架构对齐:
                 #   - str(exc) 保留诊断信息(code + message)
-                #   - user_message 仅放供应商原始 message(给前端展示)
+                #   - user_message 仅放供应商原始 message(给Web 控制台展示)
                 err_code = err.get("code") or "TASK_FAILED"
                 err_message = err.get("message") or "任务失败,请重试。"
                 raise SeedanceProviderError(

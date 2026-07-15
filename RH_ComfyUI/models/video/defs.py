@@ -226,7 +226,7 @@ class Seedance2Def(SeedanceVideoModel):
                         "  - auto: 自动,2 张图默认视为首尾帧\n"
                         "  - first_last: 强制首尾帧,图1=首帧, 图2=尾帧, 其余参考\n"
                         "  - reference: 全部图片仅作参考素材,多参考生成\n"
-                        "无限画布可改用 ordered_content 的 role 字段逐图指定角色"
+                        "调用方可改用 ordered_content 的 role 字段逐图指定角色"
                     ),
                 ),
                 "ratio": PortSpec(

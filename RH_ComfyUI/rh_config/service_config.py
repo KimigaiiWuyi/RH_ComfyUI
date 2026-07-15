@@ -3,7 +3,7 @@
 将服务连接信息（API Key、BaseURL、地址选项）集中管理，
 与插件自身行为配置（并发、积分等）解耦。
 
-前端展示按服务分组，使用 [`GsDivider`](../../../gsuid_core/utils/plugins_config/models.py:93) 分割。
+Web 控制台展示按服务分组，使用 [`GsDivider`](../../../gsuid_core/utils/plugins_config/models.py:93) 分割。
 """
 
 from __future__ import annotations
@@ -55,24 +55,22 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     "divider_openai_image": GsDivider(
         "OpenAI 兼容生图（文生图 / 图生图 / 编辑）",
         "OpenAI 兼容协议生图服务配置（支持任意 OpenAI 兼容服务，包括 OpenAI 官方 / "
-        "OneAPI / NewAPI / OpenRouter / BLT / SiliconFlow 等）",
+        "OneAPI / NewAPI / OpenRouter / SiliconFlow 等）",
         "OpenAI 兼容生图服务配置",
     ),
     "OpenAI_Image_apikey": GsStrConfig(
         "OpenAI 兼容生图 API Key",
         "用于设置 OpenAI 兼容生图接口的 API Key（适用于所有 OpenAI 兼容服务，"
-        "包括 OpenAI / OneAPI / NewAPI / OpenRouter / BLT 等）",
+        "包括 OpenAI / OneAPI / NewAPI / OpenRouter 等）",
         "",
-        options=["sk-xxx"],
     ),
     "OpenAI_Image_BaseURL": GsStrConfig(
         "OpenAI 兼容生图 Base URL",
         "用于设置 OpenAI 兼容生图接口的 Base URL（可填任意 OpenAI 兼容服务的地址，"
-        "包括 OpenAI 官方 / OneAPI / NewAPI / OpenRouter / BLT 等）",
+        "包括 OpenAI 官方 / OneAPI / NewAPI / OpenRouter 等）",
         "https://api.openai.com/v1",
         options=[
             "https://api.openai.com/v1",
-            "https://api.bltcy.ai",
         ],
     ),
     "divider_gemini_image": GsDivider(
@@ -85,11 +83,10 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "Gemini API Key(AI Studio)",
         "AI Studio 个人版 API Key。默认模式(未开 VertexAI)用此项鉴权。",
         "",
-        options=["AIzaSy..."],
     ),
     "Gemini_Image_BaseURL": GsStrConfig(
         "Gemini 中转地址(AI Studio,可选)",
-        "服务器直连不到 Google 时填中转/反代地址,如 https://你的中转域名/gemini/ ,"
+        "服务器直连不到官方端点时填中转地址,如 https://你的中转域名/gemini/ ,"
         "SDK 会在其后拼 /v1beta/...。留空则直连官方端点。仅 AI Studio 模式生效"
         "(VertexAI 走自己的端点,不吃这项)。",
         "",
@@ -127,7 +124,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "MiniMax API Key",
         "用于设置 MiniMax API 的 Key（文生图 / 图生图 / T2A 语音合成）",
         "",
-        options=["eyJhbGciOiJSUzI1Ni........."],
     ),
     "divider_mimo": GsDivider(
         "MiMo TTS（小米语音合成）",
@@ -138,7 +134,22 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "MiMo API Key",
         "用于设置 XiaoMi MiMo TTS 语音合成 API 的 Key（MiMo-V2.5-TTS 系列）",
         "",
-        options=["sk-xxx"],
+    ),
+    "divider_fishaudio": GsDivider(
+        "Fish Audio 语音合成",
+        "Fish Audio S2 系列 TTS 与自动音色克隆服务连接配置",
+        "Fish Audio S2 系列 TTS 服务连接配置",
+    ),
+    "FishAudio_apikey": GsStrConfig(
+        "Fish Audio API Key",
+        "用于设置 Fish Audio 官方 API 的 Key（S2 系列 TTS 与音色克隆）",
+        "",
+    ),
+    "FishAudio_Model": GsStrConfig(
+        "Fish Audio 模型档位",
+        "默认免费档 s2.1-pro-free；如需更高档位可切换（需对应账号权限）",
+        "s2.1-pro-free",
+        options=["s2.1-pro-free", "s2.1-pro", "s2-pro", "s1"],
     ),
     "divider_seedance": GsDivider(
         "Seedance 视频生成",
@@ -149,7 +160,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "ARK API Key",
         "火山方舟 Seedance API Key。用于 Seedance 2.0 / 2.0 Fast / 1.5 Pro / 1.0 Pro 等系列模型。",
         "",
-        options=["xxxx-xxxx-xxxx"],
     ),
     "Seedance_BaseURL_ark": GsStrConfig(
         "ARK Base URL",
@@ -173,7 +183,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "RunningHub API Key",
         "RunningHub 平台的 Seedance API Key。为空时回退使用 RH_apikey。",
         "",
-        options=["sk-xxx"],
     ),
     "Seedance_BaseURL_runninghub": GsStrConfig(
         "RunningHub Base URL",
@@ -191,7 +200,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     "divider_openai_image_pool": GsDivider(
         "OpenAI 兼容生图供应商池",
         "为现有模型追加任意数量的 OpenAI 兼容生图供应商(如百度千帆)。同一内部模型可挂多家,"
-        "自动参与负载均衡与熔断;前端只看到一个模型,后端按供应商分发并入库(含 Key 前缀)。",
+        "自动参与负载均衡与熔断;调用方只看到一个模型,后端按供应商分发并入库(含 Key 前缀)。",
         "OpenAI 兼容生图供应商池",
     ),
     # 供应商池配置键按「协议_模态_Providers」命名:图片=OpenAI_Image_Providers;

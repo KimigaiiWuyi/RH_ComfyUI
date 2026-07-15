@@ -556,7 +556,7 @@ class ComfyUIAPI:
                 if prompt_id in history and history[prompt_id].get("outputs"):
                     logger.success(f"Prompt {prompt_id} finished by history polling.")
                     return
-                # 阶段化日志:启动 + 30s/60s/... 心跳都打 info,避免长任务时前端以为卡死
+                # 阶段化日志:启动 + 30s/60s/... 心跳都打 info,避免长任务时调用方以为卡死
                 if i == 0:
                     logger.info(f"[ComfyUI] 任务 {prompt_id} 已提交,等待代理返回 history")
                 elif i % 6 == 0:

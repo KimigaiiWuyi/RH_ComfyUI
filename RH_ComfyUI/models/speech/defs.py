@@ -8,13 +8,14 @@
 from __future__ import annotations
 
 from ..bridge import SpeechPipelineModel
-from .overrides import IndexTTS2Model
+from .overrides import FishTtsModel, IndexTTS2Model, MinimaxSpeechModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType
 from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.speech import index_tts2_mapper as _index_tts2_mapper
 from ...utils.mappers.mimo_speech import mimo_tts_mapper as _mimo_tts_mapper
 from ...utils.mappers.minimax_speech import minimax_t2a_speech_mapper as _minimax_t2a_speech_mapper
+from ...utils.mappers.fishaudio_speech import fishaudio_tts_mapper as _fishaudio_tts_mapper
 
 
 class IndexTTS2Def(IndexTTS2Model):
@@ -135,7 +136,7 @@ class MimoTtsDef(SpeechPipelineModel):
         )
 
 
-class MinimaxT2aSpeechDef(SpeechPipelineModel):
+class MinimaxT2aSpeechDef(MinimaxSpeechModel):
     """MiniMax 语音合成 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)"""
 
     def __init__(self) -> None:
@@ -213,4 +214,79 @@ class MinimaxT2aSpeechDef(SpeechPipelineModel):
         )
 
 
-ALL_MODELS = [IndexTTS2Def, MimoTtsDef, MinimaxT2aSpeechDef]
+class FishTtsDef(FishTtsModel):
+    """Fish Audio S2 语音合成 — 自动音色克隆 + 内联情绪"""
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="fish_tts",
+            display_name="Fish Audio S2 语音合成",
+            task_type=TaskType("speech"),
+            backend="fishaudio",
+            point_cost=2,
+            description="Fish Audio S2 系列语音合成，多语言、韵律自然，情绪可在正文内联细粒度控制，支持自动音色克隆",
+            knowledge_content=(
+                "Fish Audio S2 系列语音合成模型。"
+                "\n"
+                "优势：多语言支持，韵律自然，情绪表达细粒度可控（正文内联标签，支持句中定位与叠加），"
+                "\n"
+                "传入参考音频即自动克隆音色（内容去重、持久复用，无需显式克隆步骤）。"
+                "\n"
+                "情绪用法：在文本里内联方括号标签，如 [开心] 今天天气真好 / 你好 [低语] 我想你了，"
+                "\n"
+                "支持叠加如 [悲伤][低语]；也可单独填『情绪』参数作用于整句。"
+                "\n"
+                "模型档位可配置（默认免费档 s2.1-pro-free，可切换更高档位）。"
+                "\n"
+                "适用场景：口播、有声内容、配音、多语言朗读。"
+                "\n"
+                "不适用场景：音乐生成。"
+                "\n"
+            ),
+            requirements=["fishaudio_apikey"],
+            mode="programmatic",
+            mapper_func=_fishaudio_tts_mapper,
+            inputs={
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=True,
+                    title="合成文本",
+                    description="待合成文本；可内联情绪标签，如 [开心] 或 你好 [低语] 我想你了",
+                ),
+                "reference_audio": PortSpec(
+                    type=PortType.AUDIO,
+                    title="参考音频",
+                    description="传入即自动克隆音色并持久复用，无需显式克隆",
+                ),
+                "mood": PortSpec(
+                    type=PortType.STRING,
+                    title="情绪",
+                    description="整句情绪/语气，自动包成内联标签注入句首；支持自由描述与叠加",
+                    values=["开心", "悲伤", "愤怒", "惊讶", "平静", "兴奋", "低语", "哭腔", "大笑", "着急"],
+                ),
+                "speed": PortSpec(
+                    type=PortType.NUMBER,
+                    default=1.0,
+                    minimum=0.5,
+                    maximum=2.0,
+                    title="语速",
+                    description="语速，0.5~2.0",
+                ),
+                "params": PortSpec(type=PortType.STRING, title="扩展参数", description="预留扩展，可指定 model 档位等"),
+            },
+            outputs={
+                "audio": PortSpec(type=PortType.OUTPUT_AUDIO, description="生成的语音"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["speech"],
+                mode="sync",
+                priority=70,
+            ),
+        )
+
+
+ALL_MODELS = [IndexTTS2Def, MimoTtsDef, MinimaxT2aSpeechDef, FishTtsDef]

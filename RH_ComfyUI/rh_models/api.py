@@ -76,11 +76,11 @@ class ModelEntry:
     input_schema: dict[str, Any] = field(default_factory=dict)
     output_schema: dict[str, Any] = field(default_factory=dict)
     requirements: list[str] = field(default_factory=list)
-    # ── 2026-07-02 ABC 重构新增(只增不改,前端不读则行为不变) ──
+    # ── 2026-07-02 ABC 重构新增(只增不改,调用方不读则行为不变) ──
     card: dict[str, Any] = field(default_factory=dict)
     channels: list[dict[str, Any]] = field(default_factory=list)
     execution_mode: str = "sync"
-    # ── 输入能力显式标注:纯文生图模型 accepts_images=False,前端/agent 不必解析
+    # ── 输入能力显式标注:纯文生图模型 accepts_images=False,调用方/agent 不必解析
     #    input_schema 即可判定是否可传参考图,以及最多几张 ──
     accepts_images: bool = False
     max_input_images: int = 0
@@ -264,7 +264,7 @@ async def _build_entry_from_model(model) -> ModelEntry:  # noqa: ANN001
 def _deduplicate_by_name(entries: list[ModelEntry]) -> list[ModelEntry]:
     """按 name 分组去重,只保留 priority 最高的那一个。
 
-    解决运行时路径存在重复 YAML 副本(内置 + 运行时两份)导致前端看到重复模型的问题。
+    解决运行时路径存在重复 YAML 副本(内置 + 运行时两份)导致调用方看到重复模型的问题。
     同一 name 视为同一节点(可能是不同路径被加载两次),只保留 priority 最高者;
     不同 name 的节点即使 backend_model 相同也保留(如 qwen_2512 与 qwen_2512_alt),
     避免误伤本应独立展示的多入口业务节点。
@@ -300,7 +300,7 @@ async def build_model_catalog(
         as_text: 若为 True,在结果 dict 里附带 `text` 字段(LLM 友好)
 
     Returns:
-        统一结构 dict,前端可渲染、AI 可消费
+        统一结构 dict,调用方可渲染、AI 可消费
     """
     # 懒加载兜底:启动钩子未跑完时,补一次加载
     if not pipeline_registry.all_pipelines():
@@ -336,7 +336,7 @@ async def build_model_catalog(
         entries.append(entry)
 
     # 去重:同一 name 只保留 priority 最高的节点
-    # 解决运行时路径存在重复 YAML 副本导致前端看到重复模型的问题
+    # 解决运行时路径存在重复 YAML 副本导致调用方看到重复模型的问题
     entries = _deduplicate_by_name(entries)
 
     # 按 task_type 排序,内部按 priority 倒序

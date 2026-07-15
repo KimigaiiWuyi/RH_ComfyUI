@@ -205,7 +205,7 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
             retryable=bool(data.get("retryable", False)),
             http_status=code_int if code_int is not None else 500,
             provider=self.name,
-            # 给前端展示原始 msg,排查信息(code / 信封)仍写在 str(exc)。
+            # 给Web 控制台展示原始 msg,排查信息(code / 信封)仍写在 str(exc)。
             user_message=str(msg),
         )
 

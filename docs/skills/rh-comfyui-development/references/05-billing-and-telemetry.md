@@ -43,7 +43,7 @@ refund(reservation)                        # 失败退款;必须幂等(判 reser
 | 实现 | 用于 | 行为 |
 |---|---|---|
 | `PointsBillingPolicy` | 命令 / Agent 入口 | RHBind 积分真实扣减 |
-| `ExternalPrepaidPolicy` | canvas HTTP 入口 | 调用方已扣费,只记账不扣费(防双重扣费) |
+| `ExternalPrepaidPolicy` | HTTP 入口 | 调用方已扣费,只记账不扣费(防双重扣费) |
 
 新入口有独立钱包 → 写新的 Policy 子类并在入口构造 `DispatchContext` 时
 注入;**不要在 dispatcher 里加分支**。
@@ -55,7 +55,7 @@ refund(reservation)                        # 失败退款;必须幂等(判 reser
 2. `record_task()` 写 `RHComfyuiTaskRecord`(`utils/database/models.py`)。
 
 关键列:`user_id / bot_id / task_type / model_name / prompt /
-point_cost / status / entry_point(command|agent|canvas)/ channel /
+point_cost / status / entry_point(command|agent|http)/ channel /
 elapsed_ms / error`。
 
 规则:

@@ -71,8 +71,8 @@ class SeedanceProviderError(RuntimeError):
         provider:    供应商名(``gateway`` / ``ark`` / ``runninghub``)。
         user_message: 面向最终用户的错误文案。当我们能稳定映射到一条
                       *干净的* 供应商原文(如 ``failReason``)时设置;上游
-                      ``canvas_backend.generate`` 会优先用其写库 / 广播,
-                      避免前端看到 ``RuntimeError: ...`` 这类堆栈噪音。
+                      ``外部插件的生成入口`` 会优先用其写库 / 广播,
+                      避免调用方看到 ``RuntimeError: ...`` 这类堆栈噪音。
     """
 
     def __init__(
@@ -407,7 +407,7 @@ class SeedanceProvider(ABC):
             ) from exc
 
     def _build_http_error(self, resp: httpx.Response) -> SeedanceProviderError:
-        # 尝试从响应体抽出干净的供应商 message,透传给前端。
+        # 尝试从响应体抽出干净的供应商 message,透传给调用方。
         try:
             err_body: Any = resp.json()
         except Exception:
@@ -545,7 +545,7 @@ class SeedanceProvider(ABC):
                 if task.status == NormalizedStatus.FAILED:
                     # 任务失败:优先把供应商原始 failReason 透传到上层,
                     # 不要再包一层 "gateway 任务失败: ..." 的前缀 ——
-                    # 前端最终展示的就是这条原始文案(Request id 等供应商
+                    # 调用方最终展示的就是这条原始文案(Request id 等供应商
                     # 自带的排查信息一并保留)。
                     vendor_msg = task.error or str(task.raw)
                     logger.warning(f"[Seedance:{self.name}] 任务 {task_id} 失败: {vendor_msg}\n  result:\n{raw_dump}")

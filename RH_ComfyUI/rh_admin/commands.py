@@ -395,7 +395,7 @@ async def format_user_consumption(
     """生成某用户的消费记录文本(供 sv_user 命令调用)
 
     实现:`build_user_consumption_payload` 取数 + 聚合,本函数只负责渲染。
-    保证与 canvas_backend HTTP 接口口径一致。
+    保证与 外部 HTTP 接口口径一致。
 
     Args:
         user_id: 目标用户 ID

@@ -3,7 +3,7 @@
 同一份代码在运行时可能被三种名字 import:
 
 1. ``plugins.RH_ComfyUI.RH_ComfyUI``  — gsuid_core 嵌套加载器的规范名
-2. ``RH_ComfyUI.RH_ComfyUI``          — 经外层 re-export 包(canvas_backend 等
+2. ``RH_ComfyUI.RH_ComfyUI``          — 经外层 re-export 包(外部插件 等
    跨插件 ``import RH_ComfyUI`` 时,外层 __init__ 触发内层导入)
 3. ``RH_ComfyUI``                     — 插件外层目录直接在 sys.path 上时
    (pytest / 独立脚本环境)

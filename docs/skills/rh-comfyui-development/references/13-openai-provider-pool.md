@@ -10,7 +10,7 @@
 → `sync_openai_image_providers()`(`utils/backends/openai_image/providers.py`)按配置为每家
 构造一个 `OpenAIImageChannel`,经 `channel_registry.register_binding(内部模型名, channel,
 vendor_model=供应商侧模型名)` 挂到现有模型上 → 与内置通道一起参与通用 LoadBalancer
-的排序 / 熔断 / 故障切换。**前端只看到一个模型,后端按供应商分发。**
+的排序 / 熔断 / 故障切换。**调用方只看到一个模型,后端按供应商分发。**
 
 ## 13.2 配置结构(每行一家)
 

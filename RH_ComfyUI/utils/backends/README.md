@@ -129,7 +129,7 @@ class ComfyUIAdapter(Adapter):
 | `draw_image_by_model(model, prompt)` | 通过 Chat Completions API 生成图片 |
 | `draw_image(model, prompt, aspect_ratio, image_list)` | 通过 DALL-E 格式 API 生成/编辑图片 |
 
-支持自动重试（最多3次）、421 频控等待（180秒）、base64/URL 图片解析。后端 Base URL 可指向任意 OpenAI 兼容服务（OpenAI 官方 / OneAPI / NewAPI / OpenRouter / SiliconFlow / 本地 Ollama / BLT 等）。
+支持自动重试（最多3次）、421 频控等待（180秒）、base64/URL 图片解析。后端 Base URL 可指向任意 OpenAI 兼容服务（OpenAI 官方 / OneAPI / NewAPI / OpenRouter / SiliconFlow / 本地 Ollama 等）。
 
 #### 执行器 [`executor.py`](RH_ComfyUI/utils/backends/gpt_image2/executor.py:1)
 

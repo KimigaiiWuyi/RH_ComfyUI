@@ -186,7 +186,7 @@ class SeedanceProviderChannel(ProviderChannel):
         spec: VideoGenSpec = classify_video_spec(request)
         spec.params.setdefault("draft", request.params.get("draft"))
         # 请求者身份透传(供应商旁路):需要按用户做归属/计量的 Provider
-        # 从 spec.params["user_id"] 取(canvas HTTP 入口 = str(account.id))
+        # 从 spec.params["user_id"] 取(HTTP 入口 = str(account.id))
         spec.params.setdefault("user_id", request.user_id or "")
 
         if on_progress is not None:

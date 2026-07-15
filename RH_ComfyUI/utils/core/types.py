@@ -69,9 +69,9 @@ class PortSpec:
     Adapter 在收到输入后会根据 PortSpec 进行校验与转换。
 
     title 与 description 面向不同读者:
-    - title: 前端配置面板的短标题(几个字,无括号补充说明)
+    - title: 配置面板的短标题(几个字,无括号补充说明)
     - description: 完整语义说明,Agent/LLM 依赖它理解端口用法;
-      缺 title 时前端回退用 description 当标题
+      缺 title 时调用方回退用 description 当标题
     """
 
     type: PortType

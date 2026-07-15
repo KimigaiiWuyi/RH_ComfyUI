@@ -35,7 +35,7 @@ class VideoGenerationBase(AIGCGenerationBase):
         """按输入自动判定任务形态(0 图=T2V / 1 图=I2V / 2 图=FLF / 含音视频=多模态)
 
         ``ordered_content`` **仅含文本段**(无任何媒体项)时等价于普通 prompt ——
-        前端 buildOrderedContent 对纯文本输入也会产出一个 text 段,不该据此把
+        调用方 对纯文本输入也会产出一个 text 段,不该据此把
         形态误判成 multimodal(否则 kling_v3 这类只支持 T2V/I2V/首尾帧的模型会
         把"普通图生视频"当成不支持的多模态而直接报错)。真正的多模态由
         ordered_content 里的**媒体项**或 video_refs / audio_refs 触发。

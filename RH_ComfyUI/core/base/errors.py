@@ -56,7 +56,7 @@ class ChannelError(GenerationError):
 class AllChannelsFailedError(GenerationError):
     def __init__(self, message: str, *, cause: Optional[Exception] = None) -> None:
         # 保留最后一个通道的干净用户文案(如供应商 failReason),
-        # 否则前端只会看到 "所有通道均失败" 这类无信息量的兜底文案。
+        # 否则调用方只会看到 "所有通道均失败" 这类无信息量的兜底文案。
         cause_user_message = getattr(cause, "user_message", None) if cause is not None else None
         super().__init__(message, user_message=cause_user_message)
         self.cause = cause

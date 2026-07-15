@@ -36,24 +36,24 @@ Agent 智能选型的数据源(用户没指定模型时):
 **所以新模型的 knowledge_content 必须认真写**:优势 / 适用场景 /
 不适用场景 / 成本,这是 Agent 替用户选模型的唯一依据。
 
-## 6.3 canvas HTTP 入口(api.py + rh_models/)
+## 6.3 HTTP 入口(api.py + rh_models/)
 
-- `api.submit()`:canvas_backend 调用的编程接口,内部构造
+- `api.submit()`:外部插件 调用的编程接口,内部构造
   `ExternalPrepaidPolicy`(调用方已扣费,引擎只记账)+
   `entry_point="http"` 走 dispatch(统计表 entry_point 三个取值:
-  command / agent / http,**没有 "canvas" 这个值**);
+  command / agent / http);
   **签名与返回类型不变**(`submit / get_point_cost / list_models / is_available`);
 - `rh_models/api.py`:`GET /api/RH_ComfyUI/models`、`/models/{task_type}`、
   `/models/summary` 三个路由的聚合逻辑(`build_model_catalog()`)。
 
-### HTTP 契约红线(画布前端依赖)
+### HTTP 契约红线(调用方依赖)
 
 - `ModelEntry` 既有字段(name/display_name/task_type/backend/point_cost/
   input_schema/output_schema/...)**不得改名、改类型、删除**;
 - 新增字段必须带默认值(2026-07 已按此增加 `card` / `channels` /
   `execution_mode` 三个字段);
-- `input_schema` 直接序列化模型的 PortSpec —— 改模型端口 = 改前端表单,
-  删端口前先确认画布无引用;
+- `input_schema` 直接序列化模型的 PortSpec —— 改模型端口 = 改调用方表单,
+  删端口前先确认调用方无引用;
 - 同名节点去重逻辑(`_deduplicate_by_name`,priority 高者胜)保留,
   防止历史运行时目录的重复定义污染清单。
 

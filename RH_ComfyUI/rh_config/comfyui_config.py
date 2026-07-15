@@ -6,7 +6,7 @@
 - `PLUGIN_CONFIG`: 插件自身行为配置（并发上限、用户初始积分、业务积分消耗）
 
 二者分别持久化到独立的 JSON 文件，并通过 [`StringConfig`](../../../gsuid_core/utils/plugins_config/gs_config.py:40)
-注册到 Web 控制台，方便分别管理。前端展示用 [`GsDivider`](../../../gsuid_core/utils/plugins_config/models.py:93)
+注册到 Web 控制台，方便分别管理。Web 控制台展示用 [`GsDivider`](../../../gsuid_core/utils/plugins_config/models.py:93)
 按服务 / 按用途分组。
 """
 

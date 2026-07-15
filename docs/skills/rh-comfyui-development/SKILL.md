@@ -3,7 +3,7 @@ name: rh-comfyui-development
 description: >
   当用户要求"给 RH_ComfyUI 加一个模型"、"新增一个生图/生视频/TTS/音乐模型"、
   "接一家新供应商/渠道"、"改模型参数面/校验规则"、"调整积分/计费"、
-  "查生成统计/退款问题"、"画布模型清单接口怎么改"、"闭源插件怎么接入"、
+  "查生成统计/退款问题"、"调用方模型清单接口怎么改"、"闭源插件怎么接入"、
   "怎么覆盖开源模型"、"dispatch 流程是什么"、"负载均衡/熔断怎么配"、
   "参考音频怎么接"时触发此 SKILL。
   对所有 RH_ComfyUI 插件的开发与维护任务都应优先读取此 SKILL。
@@ -11,7 +11,7 @@ description: >
   RH_ComfyUI 是 gsuid_core 的 AIGC 统一生成插件(图片/视频/音乐/数字人语音)。
   2026-07 起采用基于抽象基类(ABC)的全编程式架构:模型定义在
   models/*/defs.py 的 Python 类里(无 YAML),三大入口(命令 / AI Agent /
-  canvas HTTP)统一走 core.dispatch.dispatch() 执行,计费(预留-提交-退款)、
+  HTTP)统一走 core.dispatch.dispatch() 执行,计费(预留-提交-退款)、
   负载均衡(多通道熔断切换)、统计落库(RHComfyuiTaskRecord)在该点强制拦截。
   闭源插件通过 model_registry.register() 或 pip entry points
   (rh_comfyui.models 组)接入,开源仓库零闭源代码。
@@ -31,7 +31,7 @@ description: >
 | 三 | 新增/修改模型(defs.py 范式、PortSpec、NodeDef、跨字段校验、知识库) | [references/03-adding-models.md](./references/03-adding-models.md) |
 | 四 | 通道与供应商(ProviderChannel、多通道负载均衡、熔断、新增一家供应商) | [references/04-channels-and-providers.md](./references/04-channels-and-providers.md) |
 | 五 | 计费与统计(BillingPolicy 三件套、dispatch 失败语义、统计表字段) | [references/05-billing-and-telemetry.md](./references/05-billing-and-telemetry.md) |
-| 六 | 三大入口(命令 / AI Agent / canvas HTTP、DispatchContext 构造、HTTP 契约红线) | [references/06-entry-points.md](./references/06-entry-points.md) |
+| 六 | 三大入口(命令 / AI Agent / HTTP、DispatchContext 构造、HTTP 契约红线) | [references/06-entry-points.md](./references/06-entry-points.md) |
 | 七 | 闭源插件接入(注册途径、覆盖开源模型、私有数据隔离、独立钱包) | [references/07-closed-source-extension.md](./references/07-closed-source-extension.md) |
 | 八 | 测试、代码红线与上线自查清单 | [references/08-testing-and-redlines.md](./references/08-testing-and-redlines.md) |
 | 九 | 后端 Adapter、映射器与配置体系(六后端、Seedance Provider 子层、SERVICE/PLUGIN_CONFIG 全键) | [references/09-backends-and-config.md](./references/09-backends-and-config.md) |
@@ -39,6 +39,7 @@ description: >
 | 十一 | 凭证热更新(中途改 key 不重启)— `@property` / `refresh_config` / `update_credentials` 三种写法 | [references/11-credential-hot-reload.md](./references/11-credential-hot-reload.md) |
 | 十二 | 供应商通道 / Gemini 生图 / 能力一致性 — 单层负载均衡、AdapterChannel 翻错、/models 可用性、Gemini SDK 双模、图在 steps、input_schema 与能力同步、计费退款 | [references/12-provider-channels-and-gemini.md](./references/12-provider-channels-and-gemini.md) |
 | 十三 | OpenAI 兼容供应商池(网页配置零代码挂供应商、`OpenAI_Image_Providers`、`rh 刷新供应商`、resync 语义) | [references/13-openai-provider-pool.md](./references/13-openai-provider-pool.md) |
+| 十四 | 语音情绪体系与自动音色克隆(EmotionStyle 基类归一、内联/剥离/枚举收敛、参考音频持久去重、fish_tts 样例) | [references/14-speech-emotion-and-voice-clone.md](./references/14-speech-emotion-and-voice-clone.md) |
 
 ## 快速决策表(先看这里)
 
@@ -50,11 +51,13 @@ description: >
 | 给现有模型加一家供应商 | `channel_bindings()` 追加 `ChannelBinding` | 四 |
 | 改模型积分价格 | defs 类的 `point_cost`(node_def 里) | 三 |
 | 排查"扣了积分没出图" | dispatch 失败语义 + 统计表 `status/refunded` | 五 |
-| 前端画布要新字段 | HTTP 契约只增不改,`ModelEntry` 加带默认值的字段 | 六 |
+| 调用方要新字段 | HTTP 契约只增不改,`ModelEntry` 加带默认值的字段 | 六 |
 | 写闭源 / 另外的兼容插件生态模型 | 独立插件 `model_registry.register()` 或 entry points | 七 |
 | 接一个全新上游 API | backends 新 Adapter(或 ProviderChannel)+ 配置键 | 九、四 |
 | 加/改一个图片供应商(如 Gemini)/ 给模型加第二家供应商 | ProviderChannel + `channel_registry.register_binding` | 十二、四 |
 | 给图片模型挂一家 OpenAI 兼容供应商(如千帆,零代码) | 网页控制台 `OpenAI_Image_Providers` + `rh 刷新供应商` | 十三 |
+| 加一个语音/TTS 模型 / 改某模型情绪风格(内联/枚举/自然语言) | overrides 声明 `emotion_style`,基类 `normalize()` 统一整形 | 十四 |
+| 参考音频自动克隆 / 克隆结果持久复用去重 | mapper 复用 `RHVoiceCloneCache`(按内容哈希全局去重) | 十四 |
 | 改模型能不能传参考图 / 参考图上限 | defs 的 `images` 端口(有无 + `max_items`),需与 `supported_shapes`/`supports_edit` 同步 | 十二、三 |
 | 改请求组装 / workflow 注入 | `utils/mappers/` 对应函数 | 九 |
 | 改命令触发词 / to_ai 文案 | rh_generate(触发词是兼容承诺,慎改) | 十 |

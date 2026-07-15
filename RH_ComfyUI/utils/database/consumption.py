@@ -1,8 +1,8 @@
-"""消费记录结构化查询 — bot 命令(文本)和 canvas_backend HTTP(JSON)共用入口。
+"""消费记录结构化查询 — bot 命令(文本)和 外部 HTTP(JSON)共用入口。
 
 设计要点:
   - 不重复执行 SQL。Bot 命令原来在 `commands.format_*_consumption` 里
-    现取再聚合;canvas_backend 走 HTTP 也要同样口径,否则两边数据对不上。
+    现取再聚合;外部插件 走 HTTP 也要同样口径,否则两边数据对不上。
     所以**把"取数 + 聚合"集中到这里**,两条调用方各取所需。
   - 只返回 JSON 可序列化的 dict。datetime 由 Pydantic/fastapi jsonable_encoder
     处理;为了避免模型层耦合,RHComfyuiTaskRecord 字段直接展开为 dict。
@@ -142,11 +142,11 @@ async def build_user_consumption_payload(
 ) -> dict[str, Any]:
     """生成"某用户消费记录"的结构化 payload。
 
-    Bot 命令的文本格式化和 canvas_backend 的 HTTP 响应都基于此 payload,
+    Bot 命令的文本格式化和 外部插件的 HTTP 响应都基于此 payload,
     保证两路数据口径一致。
 
     Args:
-        user_id: 目标用户 ID(字符串)。canvas_backend 直接传 `str(ctx.id)`。
+        user_id: 目标用户 ID(字符串)。外部插件 直接传 `str(ctx.id)`。
         bot_id: Bot 平台 ID(如 "qq")。
         limit: 最多返回条数。
         days: 仅统计最近 N 天,None 表示不限制(与 date_from/date_to 互斥)。
@@ -373,7 +373,7 @@ async def build_admin_records_payload(
 
     与 `build_admin_consumption_payload(view='global')` 的区别:
       - 支持 `offset`(分页)与 `user_id` 精确过滤;
-      - 不计算 summary / user_summaries(纯列表接口,前端可重复请求)。
+      - 不计算 summary / user_summaries(纯列表接口,调用方可重复请求)。
 
     Args:
         bot_id: Bot 平台。

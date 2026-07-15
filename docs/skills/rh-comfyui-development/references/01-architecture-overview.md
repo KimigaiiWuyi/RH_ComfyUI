@@ -10,7 +10,7 @@
 
 ```
 ┌── 入口层(构造 DispatchContext,不含业务逻辑)──────────────────────┐
-│ rh_generate/(命令 + to_ai 桥接 Agent)  api.py(canvas HTTP)      │
+│ rh_generate/(命令 + to_ai 桥接 Agent)  api.py(HTTP)      │
 │ rh_models/(GET /api/RH_ComfyUI/models* 模型清单)                     │
 └─────────────────────────────┬─────────────────────────────────────┘
                               ▼
@@ -54,17 +54,17 @@
 | `RH_ComfyUI/rh_models/` | HTTP 模型清单(/api/RH_ComfyUI/models*) | 改清单展示时(契约只增不改) |
 | `RH_ComfyUI/rh_agent/` | AgentNode 注册(rh_aigc_agent,AIGC 创作代理身份核 prompt) | 改 Agent Mesh 里的代理行为时 |
 | `RH_ComfyUI/rh_admin/` | 积分管理命令 + `刷新供应商` + @ai_tools 管理工具 | 改积分/记录/供应商池命令时 |
-| `RH_ComfyUI/api.py` | canvas_backend 调用的编程接口(submit 等) | 改画布对接时 |
+| `RH_ComfyUI/api.py` | 外部插件 调用的编程接口(submit 等) | 改调用方对接时 |
 | `RH_ComfyUI/utils/database/` | RHComfyuiTaskRecord 统计表 | 加统计维度时 |
 | `tests/` | 内核单测(全离线) | 每次改 core/models |
 | `docs/skills/rh-comfyui-development/` | 本 SKILL(架构事实来源) | 架构级变更时同步 |
 
-## 1.4 一次生成的完整数据流(画布参考音频为例)
+## 1.4 一次生成的完整数据流(调用方参考音频为例)
 
-1. 前端 `GET /api/RH_ComfyUI/models` → IndexTTS2 的 `input_schema` 含
-   `reference_audio` 端口 → 画布展示音频连线口;
-2. 前端提交 → `api.submit()` 组装 `GenerationRequest`(reference_audio=MediaRef)
-   与 `DispatchContext`(policy=ExternalPrepaidPolicy, entry_point="canvas");
+1. 调用方 `GET /api/RH_ComfyUI/models` → IndexTTS2 的 `input_schema` 含
+   `reference_audio` 端口 → 调用方展示音频连线口;
+2. 调用方提交 → `api.submit()` 组装 `GenerationRequest`(reference_audio=MediaRef)
+   与 `DispatchContext`(policy=ExternalPrepaidPolicy, entry_point="http");
 3. `dispatch()`:route 命中 IndexTTS2 → validate(schema 校验,不扣费)
    → reserve(外部预付只记账)→ `model.run()`;
 4. `run()`:负载均衡选通道 → `execute_on_channel()` 经桥接层调 Adapter,

@@ -201,7 +201,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     seed: Optional[int] = Field(default=None, title="随机种子")
     voice_id: str = Field(default="", title="音色ID(仅语音)", max_length=64)
     extra_params_json: str = Field(default="", title="其他核心参数 JSON")
-    # 用户提示词(由 GenerationRequest.prompt 透传,用于前端"我的消费"页直接展示;
+    # 用户提示词(由 GenerationRequest.prompt 透传,用于调用方"我的消费"页直接展示;
     # 2026-07-01 之前记录里没有这一列,已通过 exec_list 补 ALTER TABLE)
     prompt: str = Field(default="", title="生成提示词", max_length=4000)
 
@@ -243,7 +243,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         except ValueError:
             return self.task_type
 
-    # ── 查询 / 清理方法:风格与 canvas_backend 的 VideoJob.list_by_owner() 一致 ──
+    # ── 查询 / 清理方法:风格与 外部插件的 VideoJob.list_by_owner() 一致 ──
 
     @classmethod
     @with_session
@@ -699,6 +699,91 @@ class RHComfyuiTaskRecordAdmin(GsAdminModel):
         icon="fa fa-line-chart",
     )  # type: ignore
     model = RHComfyuiTaskRecord
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  语音音色克隆缓存表
+#
+#  部分 TTS 上游支持"参考音频 → 克隆音色 id"。同一段参考音频反复提交时,
+#  按内容哈希全局去重复用已克隆的音色 id,避免重复克隆(省额度 + 跨重启持久)。
+#  克隆是纯内容派生(同音频→同音色),故全局共享、不按用户隔离;created_by 仅审计。
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class RHVoiceCloneCache(SQLModel, table=True):
+    """参考音频哈希 → 已克隆音色 id 的持久映射(全局去重)"""
+
+    __table_args__ = {"extend_existing": True}
+
+    id: Optional[int] = Field(default=None, primary_key=True, title="序号")
+    provider: str = Field(default="", title="上游后端名", index=True, max_length=32)
+    audio_hash: str = Field(title="参考音频内容哈希", index=True, max_length=64)
+    voice_model_id: str = Field(title="上游返回的音色 id", max_length=128)
+    title: str = Field(default="", title="音色标题", max_length=128)
+    created_by: str = Field(default="", title="首次创建者(审计)", max_length=64)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        title="创建时间 UTC",
+    )
+
+    @classmethod
+    @with_session
+    async def get_voice_id(
+        cls,
+        session: AsyncSession,
+        provider: str,
+        audio_hash: str,
+    ) -> Optional[str]:
+        """命中返回已克隆音色 id,未命中返回 None"""
+        stmt = (
+            select(cls)
+            .where(and_(col(cls.provider) == provider, col(cls.audio_hash) == audio_hash))
+            .limit(1)
+        )
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        return row.voice_model_id if row is not None else None
+
+    @classmethod
+    @with_session
+    async def remember(
+        cls,
+        session: AsyncSession,
+        *,
+        provider: str,
+        audio_hash: str,
+        voice_model_id: str,
+        title: str = "",
+        created_by: str = "",
+    ) -> None:
+        """记住一条映射;并发下若已存在则跳过,避免重复行"""
+        stmt = (
+            select(cls)
+            .where(and_(col(cls.provider) == provider, col(cls.audio_hash) == audio_hash))
+            .limit(1)
+        )
+        if (await session.execute(stmt)).scalar_one_or_none() is not None:
+            return
+        session.add(
+            cls(
+                provider=provider,
+                audio_hash=audio_hash,
+                voice_model_id=voice_model_id,
+                title=title,
+                created_by=created_by,
+            )
+        )
+
+
+@site.register_admin
+class RHVoiceCloneCacheAdmin(GsAdminModel):
+    """WebConsole 后台查看/清理音色克隆缓存"""
+
+    pk_name = "id"
+    page_schema = PageSchema(
+        label="RH_ComfyUI 音色克隆缓存",
+        icon="fa fa-microphone",
+    )  # type: ignore
+    model = RHVoiceCloneCache
 
 
 exec_list.extend(

@@ -1,6 +1,6 @@
 # core/dispatch — 统一调度器
 
-三大入口(命令 / AI Agent / canvas HTTP)全部经由 `dispatch()` 执行,
+三大入口(命令 / AI Agent / HTTP)全部经由 `dispatch()` 执行,
 这是唯一执行路径,也是计费/统计的强制拦截点。
 
 | 文件 | 内容 |

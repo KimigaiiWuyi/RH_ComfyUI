@@ -70,7 +70,7 @@ ComfyUI 字段注入。
 | `speech.py` | IndexTTS2(含参考音频注入) |
 | `mimo_speech.py` / `minimax_speech.py` | mimo_tts / minimax_t2a_speech |
 
-改某模型的请求组装 → 改对应 mapper;改参数面(校验/前端表单)→ 改 defs 的
+改某模型的请求组装 → 改对应 mapper;改参数面(校验/调用方表单)→ 改 defs 的
 PortSpec。两者必须同步(mapper 消费的字段要在 inputs 里声明)。
 
 ## 9.3 配置体系(rh_config/)

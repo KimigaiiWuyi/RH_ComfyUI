@@ -1,4 +1,4 @@
-"""RH_ComfyUI 公开 Python API — 给外部插件(canvas_backend 等)调用。
+"""RH_ComfyUI 公开 Python API — 给外部插件(外部插件 等)调用。
 
 设计原则:
 - 只暴露 Pipeline / Adapter 引擎能力,完全不涉及 HTTP / 鉴权 / 积分 / 限速。
@@ -88,7 +88,7 @@ async def submit(
         Exception: Adapter 自身抛出的错误。
     """
     # 延迟导入:避免 RH_ComfyUI 导入阶段就触发整个模型注册链。
-    # 必须在 canvas_backend 等下游插件被加载前保证注册表已初始化
+    # 必须在 外部插件 等下游插件被加载前保证注册表已初始化
     # (由 RH_ComfyUI/__init__.py 的 @on_core_start 钩子负责)。
     from .utils.core.request import TaskType
     from .core.routing.registry import model_registry
@@ -231,7 +231,7 @@ def list_models(task_type: Optional[str] = None) -> list[dict[str, Any]]:
 def get_model_input_schema(model: str) -> dict[str, Any]:
     """返回模型的 input_schema(与 webapi 模型目录同源);模型不存在返回 {}。
 
-    下游插件(如画布 Agent)用它判断模型能力——例如 input_schema 含
+    下游插件(如外部 Agent)用它判断模型能力——例如 input_schema 含
     ``frame_mode`` 字段即支持 Seedance 系的多参考(reference)语义。
     """
     from .rh_models.api import _port_to_schema
