@@ -21,7 +21,7 @@ from gsuid_core.logger import logger
 
 from .context import DispatchContext
 from .concurrency import generation_slot
-from ..base.errors import GenerationError
+from ..base.errors import GenerationError, describe_exception
 from ..schema.types import NodeOutput
 from ..schema.request import GenerationResult, GenerationRequest
 from ..telemetry.recorder import record_dispatch
@@ -121,7 +121,9 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
             model=model,
             status=status,
             elapsed_ms=elapsed_ms,
-            error=repr(e),
+            # 展开成因链:AllChannelsFailedError 的真实根因在 .cause 里,
+            # 仅 repr(e) 会让每条失败记录都记成无信息量的"所有通道均失败"
+            error=describe_exception(e),
             ctx=ctx,
             point_cost=cost,
         )
