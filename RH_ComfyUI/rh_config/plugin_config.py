@@ -21,11 +21,25 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
         "插件运行时行为参数",
     ),
     "Max_Concurrency": GsIntConfig(
-        "全局最大并发数",
-        "限制所有后端（RH 原生 / ComfyUI / GPT-Image2 等）同时执行的最大任务数，防止过载。"
-        "改动即刻生效（新任务按新上限；已在执行中的任务不受影响，收缩上限时并发会随旧任务完成逐渐收敛）",
+        "全局最大并发数（总量兜底）",
+        "所有后端同时执行任务数的总量兜底闸；日常限流由「后端并发」两项按供应商各自约束，"
+        "本项仅防极端过载。改动即刻生效（新任务按新上限；已在执行中的任务不受影响）",
+        600,
+        options=[1, 10, 100, 300, 600],
+    ),
+    "RH_Backend_Concurrency": GsIntConfig(
+        "RH 相关后端并发数",
+        "RunningHub 相关后端（rh_app / comfyui）各自的最大并发；共用一块 GPU 的工作流必须串行，保持 1。"
+        "改动即刻生效",
         1,
-        options=[1, 2, 3, 5, 10],
+        options=[1, 2, 3],
+    ),
+    "Backend_Concurrency": GsIntConfig(
+        "其他后端并发数（每供应商一把闸）",
+        "非 RH 后端（seedance / fishaudio / minimax / gemini-image / gpt-image-2 / mimo 等）"
+        "按后端各设一把独立并发闸的大小，互不挤占。改动即刻生效",
+        10,
+        options=[5, 10, 20, 50],
     ),
     "Dispatch_Timeout": GsIntConfig(
         "单任务超时预算（秒）",

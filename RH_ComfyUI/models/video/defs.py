@@ -231,7 +231,7 @@ class Seedance2Def(SeedanceVideoModel):
                 ),
                 "ratio": PortSpec(
                     type=PortType.ENUM,
-                    default="adaptive",
+                    default="9:16",
                     values=["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
                     title="宽高比",
                     description="视频宽高比,adaptive 跟随首帧",
@@ -390,7 +390,7 @@ class Seedance2FastDef(SeedanceVideoModel):
                 ),
                 "ratio": PortSpec(
                     type=PortType.ENUM,
-                    default="16:9",
+                    default="9:16",
                     values=["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
                     title="宽高比",
                     description="视频宽高比",
