@@ -114,7 +114,7 @@ class Banana2Def(ImagePipelineModel):
                 # Gemini 只吃 aspect_ratio + image_size,不吃宽高像素
                 "ratio": PortSpec(
                     type=PortType.ENUM,
-                    default="1:1",
+                    default="9:16",
                     values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
                     title="宽高比",
                     description="宽高比",
@@ -196,7 +196,7 @@ class Banana1Def(ImagePipelineModel):
                 # 一代只吃 aspect_ratio(无 image_size 尺寸档)
                 "ratio": PortSpec(
                     type=PortType.ENUM,
-                    default="1:1",
+                    default="9:16",
                     values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
                     title="宽高比",
                     description="宽高比",
@@ -352,7 +352,7 @@ class GptImage2Def(ImagePipelineModel):
                 # OpenAI images API 只吃 size(由 aspect_ratio 映射),不吃宽高像素
                 "ratio": PortSpec(
                     type=PortType.ENUM,
-                    default="1:1",
+                    default="9:16",
                     values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
                     title="宽高比",
                     description="输出宽高比,上游按比例映射为 size 参数",

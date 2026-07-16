@@ -187,6 +187,15 @@ class AIGCGenerationBase(ABC):
 
         ordered = self.balancer().order_candidates(scope=self.name, candidates=bindings)
 
+        from ..dispatch.concurrency import channel_slot, channel_has_capacity
+
+        # 供应商软排序:满载(在途数 ≥ 并发上限)的通道排到末尾,优先溢到空闲供应商,
+        # 避免阻塞在繁忙供应商的信号量上;组内保持负载均衡给出的顺序
+        if len(ordered) > 1:
+            free = [b for b in ordered if channel_has_capacity(b.channel.name)]
+            if free:
+                ordered = free + [b for b in ordered if b not in free]
+
         last_error: Optional[Exception] = None
         for binding in ordered:
             if not await binding.channel.check_available():
@@ -195,7 +204,10 @@ class AIGCGenerationBase(ABC):
             retried_transient = False
             while output is None:
                 try:
-                    output = await self.execute_on_channel(request, binding, on_progress=on_progress)
+                    # 供应商级并发闸:按选中通道(channel.name)各一把,
+                    # 同一模型的多个供应商互不挤占;整个执行(含轮询)持有许可
+                    async with channel_slot(binding.channel.name):
+                        output = await self.execute_on_channel(request, binding, on_progress=on_progress)
                 except ChannelError as e:
                     last_error = e
                     if not e.retryable:

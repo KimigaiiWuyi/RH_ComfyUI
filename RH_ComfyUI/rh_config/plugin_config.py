@@ -27,17 +27,17 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
         600,
         options=[1, 10, 100, 300, 600],
     ),
-    "RH_Backend_Concurrency": GsIntConfig(
-        "RH 相关后端并发数",
-        "RunningHub 相关后端（rh_app / comfyui）各自的最大并发；共用一块 GPU 的工作流必须串行，保持 1。"
-        "改动即刻生效",
+    "RH_Channel_Concurrency": GsIntConfig(
+        "RH 相关通道并发数",
+        "RunningHub 相关供应商通道（runninghub / rh_app / comfyui）各自的最大并发；"
+        "共用一块 GPU 的工作流必须串行，保持 1。改动即刻生效",
         1,
         options=[1, 2, 3],
     ),
-    "Backend_Concurrency": GsIntConfig(
-        "其他后端并发数（每供应商一把闸）",
-        "非 RH 后端（seedance / fishaudio / minimax / gemini-image / gpt-image-2 / mimo 等）"
-        "按后端各设一把独立并发闸的大小，互不挤占。改动即刻生效",
+    "Channel_Concurrency": GsIntConfig(
+        "其他供应商通道并发数（每供应商一把闸）",
+        "非 RH 供应商通道（ark / gateway / aifoundation / azure / fishaudio / minimax / "
+        "gemini-image / gpt-image-2 / mimo 等）各设一把独立并发闸的大小，互不挤占。改动即刻生效",
         10,
         options=[5, 10, 20, 50],
     ),
