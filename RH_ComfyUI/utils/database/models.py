@@ -215,6 +215,12 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     # ── 原始数据 ──
     raw_response_json: str = Field(default="", title="厂商原始响应 JSON(已截断到 64KB)")
 
+    # ── 本地产物(2026-07-17 新增,exec_list 补 ALTER;旧记录为空串) ──
+    # 供应商返回 base64/二进制时 raw 里没有 URL,但 executor._save_output 会把
+    # 产物落盘到 OUTPUT_PATH;这里存相对 OUTPUT_PATH 的路径 JSON 数组
+    # (如 ["image/1752741663123.png"]),消费详情接口按 index 映射回文件。
+    saved_files_json: str = Field(default="", title="本地产物相对路径 JSON 数组")
+
     # ── 关联 ──
     trace_id: str = Field(default="", title="调用链追踪ID(由 GenerationRequest.trace_id 传入)", max_length=64)
 
@@ -406,6 +412,17 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         stmt = stmt.order_by(col(cls.created_at).desc()).offset(offset).limit(limit)
         rows = (await session.execute(stmt)).scalars().all()
         return list(rows)
+
+    @classmethod
+    @with_session
+    async def get_by_record_id(
+        cls,
+        session: AsyncSession,
+        record_id: int,
+    ) -> Optional["RHComfyuiTaskRecord"]:
+        """按主键查询单条记录;不存在返回 None(供消费详情懒加载使用)"""
+        stmt = select(cls).where(col(cls.id) == record_id).limit(1)
+        return (await session.execute(stmt)).scalar_one_or_none()
 
     @classmethod
     @with_session
@@ -613,6 +630,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         trace_id: str,
         created_at: datetime,
         entry_point: str = "",
+        saved_files_json: str = "",
     ) -> int:
         """插入一条任务执行记录;返回新行 id。供 statistics.record_task 调用。
 
@@ -647,6 +665,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             trace_id=trace_id,
             created_at=created_at,
             entry_point=entry_point,
+            saved_files_json=saved_files_json,
         )
         session.add(record)
         await session.flush()  # 获取 id
@@ -791,5 +810,6 @@ exec_list.extend(
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN prompt TEXT DEFAULT ""',
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN entry_point VARCHAR(16) DEFAULT ""',
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN backend_key_prefix VARCHAR(16) DEFAULT ""',
+        'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN saved_files_json TEXT DEFAULT ""',
     ]
 )

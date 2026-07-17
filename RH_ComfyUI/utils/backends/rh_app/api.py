@@ -162,9 +162,42 @@ class RHAppAPI:
             TimeoutError: 等待超时
         """
         start_time = asyncio.get_event_loop().time()
+        # 连续轮询失败计数(成功一次清零)。轮询是只读查询,单次网络抖动
+        # (代理断连/读超时/瞬时 5xx)不代表远端任务失败 —— 任务可能已在云端
+        # 跑完,直接抛错会把整单判死并退款。容忍连续 N 次再放弃。
+        poll_failures = 0
+        max_poll_failures = 5
 
         while True:
-            result = await self.query_task(task_id)
+            try:
+                result = await self.query_task(task_id)
+                poll_failures = 0
+            except httpx.HTTPStatusError as e:
+                # 4xx 是确定性错误(鉴权/参数),重试无意义直接抛;5xx 按瞬时处理
+                if e.response.status_code < 500:
+                    raise
+                result = None
+                poll_error: Exception = e
+            except httpx.HTTPError as e:
+                result = None
+                poll_error = e
+
+            if result is None:
+                poll_failures += 1
+                elapsed = asyncio.get_event_loop().time() - start_time
+                if poll_failures >= max_poll_failures:
+                    raise RuntimeError(
+                        f"[RHApp] 任务 {task_id} 轮询连续失败 {poll_failures} 次: {poll_error}"
+                    ) from poll_error
+                if elapsed > timeout:
+                    raise TimeoutError(f"[RHApp] 任务 {task_id} 等待超时（超过 {timeout} 秒）")
+                logger.warning(
+                    f"[RHApp] 任务 {task_id} 轮询失败({poll_failures}/{max_poll_failures}),"
+                    f"{poll_interval}s 后重试: {type(poll_error).__name__}: {poll_error}"
+                )
+                await asyncio.sleep(poll_interval)
+                continue
+
             status = result.get("status", "")
 
             if status == "SUCCESS":

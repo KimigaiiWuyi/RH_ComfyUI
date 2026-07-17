@@ -89,6 +89,7 @@ def _save_output(result: NodeOutput, task_type_str: str, default_ext: str = ".bi
     file_path = sub_dir / f"{ts}{ext}"
     file_path.write_bytes(result.data)
     logger.info(f"[Executor] 已保存生成结果: {file_path} ({len(result.data)} bytes)")
+    saved_files: list[str] = [str(file_path)]
 
     # 落盘附加产物(跳过与主产物同一份字节,扩展名按文件头嗅探)
     for name, payload in (result.outputs or {}).items():
@@ -101,9 +102,15 @@ def _save_output(result: NodeOutput, task_type_str: str, default_ext: str = ".bi
         extra_path = sub_dir / f"{ts}_{suffix}{extra_ext}"
         try:
             extra_path.write_bytes(payload)
+            saved_files.append(str(extra_path))
             logger.info(f"[Executor] 已保存附加输出 {name}: {extra_path}")
         except Exception as e:
             logger.warning(f"[Executor] 保存附加输出 {name} 失败: {e}")
+
+    # 全部落盘路径写进 metadata,供 statistics.record_task 入库
+    # (saved_path 只有主产物,附加产物如尾帧图会丢;两个调用点
+    #  executor.execute_generation / telemetry.recorder 都吃这份)
+    result.metadata["saved_files"] = saved_files
 
     return file_path
 

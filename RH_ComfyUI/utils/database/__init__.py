@@ -4,8 +4,10 @@ from .models import RHBind, RHComfyuiTaskRecord, RHComfyuiTaskStatus
 from .statistics import record_task
 from .consumption import (
     build_admin_records_payload,
+    build_record_detail_payload,
     build_user_consumption_payload,
     build_admin_consumption_payload,
+    resolve_record_saved_file,
 )
 
 __all__ = [
@@ -17,4 +19,6 @@ __all__ = [
     "build_user_consumption_payload",
     "build_admin_consumption_payload",
     "build_admin_records_payload",
+    "build_record_detail_payload",
+    "resolve_record_saved_file",
 ]

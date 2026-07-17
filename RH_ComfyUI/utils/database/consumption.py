@@ -17,7 +17,9 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional, TypedDict, overload
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 from .models import RHComfyuiTaskRecord
@@ -436,9 +438,79 @@ async def build_admin_records_payload(
     }
 
 
+# ─────────────────────────── 单条记录详情 payload ───────────────────────────
+
+
+def _parse_saved_files(raw: str) -> list[str]:
+    """解析 saved_files_json 列(相对 OUTPUT_PATH 的路径 JSON 数组)。
+
+    旧记录为空串;解析失败/形状不对一律返回 [](该列由 statistics 写入,
+    正常不会坏,防御历史手工数据)。
+    """
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [p for p in parsed if isinstance(p, str) and p]
+
+
+async def build_record_detail_payload(record_id: int) -> Optional[dict[str, Any]]:
+    """单条消费记录详情(含 raw_response_json 等重字段)。
+
+    列表接口刻意不返回 raw_response_json(最大 64KB,随分页批量返回会拖垮
+    响应体积);前端点击行展开时懒加载走这里。记录不存在返回 None。
+    """
+    record = await RHComfyuiTaskRecord.get_by_record_id(record_id)
+    if record is None:
+        return None
+    detail = _record_to_dict(record)
+    detail.update(
+        {
+            "entry_point": record.entry_point,
+            "backend_key_prefix": record.backend_key_prefix,
+            "extra_params_json": record.extra_params_json,
+            "raw_response_json": record.raw_response_json,
+            "saved_files": _parse_saved_files(record.saved_files_json),
+        }
+    )
+    return detail
+
+
+async def resolve_record_saved_file(record_id: int, file_index: int) -> Optional[Path]:
+    """把 (record_id, saved_files 下标) 映射为 OUTPUT_PATH 内的实际文件路径。
+
+    供 HTTP 层(canvas_backend)按下标流式返回产物文件 —— 前端只拿到
+    下标而非路径,所有路径解析收在这里并强制限制在 OUTPUT_PATH 目录内
+    (相对路径含 ../ 或符号链接逃逸都会被拒),文件不存在/越界返回 None。
+    """
+    record = await RHComfyuiTaskRecord.get_by_record_id(record_id)
+    if record is None:
+        return None
+    files = _parse_saved_files(record.saved_files_json)
+    if file_index < 0 or file_index >= len(files):
+        return None
+    from ..resource.RESOURCE_PATH import OUTPUT_PATH
+
+    base = Path(OUTPUT_PATH).resolve()
+    try:
+        target = (base / files[file_index]).resolve()
+        target.relative_to(base)  # 目录穿越防护
+    except (ValueError, OSError):
+        return None
+    if not target.is_file():
+        return None
+    return target
+
+
 __all__ = [
     "build_user_consumption_payload",
     "build_admin_consumption_payload",
     "build_admin_records_payload",
+    "build_record_detail_payload",
+    "resolve_record_saved_file",
     "to_beijing",
 ]

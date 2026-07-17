@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any, Optional
+from pathlib import Path
 from datetime import datetime, timezone
 
 from gsuid_core.logger import logger
@@ -44,6 +45,30 @@ def _truncate_str(s: str, max_chars: int) -> str:
     if len(s) > max_chars:
         return s[: max_chars - 16] + "...[TRUNCATED]"
     return s
+
+
+def _relativize_saved_files(paths: Any) -> list[str]:
+    """把 executor._save_output 写进 metadata 的落盘绝对路径转为相对 OUTPUT_PATH。
+
+    入库存相对路径:换机器/挪目录后记录不失效,消费详情接口也只允许
+    OUTPUT_PATH 内的文件被映射(天然防目录穿越)。不在 OUTPUT_PATH 下的
+    路径直接丢弃。
+    """
+    if not isinstance(paths, (list, tuple)):
+        return []
+    try:
+        from ..resource.RESOURCE_PATH import OUTPUT_PATH
+
+        base = Path(OUTPUT_PATH).resolve()
+    except Exception:  # noqa: BLE001 - 资源路径不可用时放弃记录,不影响主流程
+        return []
+    rels: list[str] = []
+    for p in paths:
+        try:
+            rels.append(Path(str(p)).resolve().relative_to(base).as_posix())
+        except (ValueError, OSError):
+            continue
+    return rels
 
 
 # ── 各任务类型的核心输入参数提取器 ──
@@ -162,6 +187,18 @@ async def record_task(
         #   (与模型字段 max_length=4000 对齐;语音/音乐通常 < 200,视频图描述可上千字)
         prompt_str: str = _truncate_str(request.prompt or "", 4000)
 
+        # 6.6) 本地产物路径:_save_output 把落盘绝对路径写进 result.metadata
+        #   ("saved_files" 全量列表;旧路径只有 "saved_path" 主产物,做回退)。
+        #   供应商返回 base64/二进制时 raw 里没有 URL,消费详情靠这一列映射文件。
+        saved_files_json = ""
+        if result is not None and result.metadata:
+            saved_paths = result.metadata.get("saved_files")
+            if not saved_paths and result.metadata.get("saved_path"):
+                saved_paths = [result.metadata["saved_path"]]
+            rel_files = _relativize_saved_files(saved_paths)
+            if rel_files:
+                saved_files_json = _safe_json_dumps(rel_files, EXTRA_PARAMS_MAX_BYTES)
+
         # 7. 调 RHComfyuiTaskRecord.insert_task_record 落库
         #    局部 import 避免循环引用(models 已 import statistics 链路,或反之)
         from .models import RHComfyuiTaskRecord
@@ -196,6 +233,7 @@ async def record_task(
             trace_id=trace_id[:64] if trace_id else "",
             created_at=datetime.now(timezone.utc),
             entry_point=entry_point[:16] if entry_point else "",
+            saved_files_json=saved_files_json,
         )
 
         logger.info(

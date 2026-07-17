@@ -130,7 +130,13 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
         await ctx.policy.refund(reservation)
         if reservation.refunded:
             await ctx.policy.post_refund(reservation, model_name=model.name)
-        if isinstance(e, Exception):
+        if isinstance(e, GenerationError):
+            # 已知域错误(通道失败/超时/校验/计费):根因链 describe_exception 一行
+            # 说清;logger.exception 会把 __cause__ 链上的 httpx/httpcore 内部帧
+            # 全部展开(一次网络失败 100+ 行 rich traceback),纯刷屏无增量信息。
+            logger.error(f"[dispatch] 模型 {model.name} 执行失败: {describe_exception(e)}")
+        elif isinstance(e, Exception):
+            # 非预期异常(真 bug)才需要完整 traceback 定位
             logger.exception(f"[dispatch] 模型 {model.name} 执行失败")
         else:
             logger.warning(f"[dispatch] 模型 {model.name} 执行中断({type(e).__name__}),已退款")

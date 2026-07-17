@@ -31,6 +31,10 @@ from .RH_ComfyUI.utils.backends import (  # noqa: F401
 )
 from .RH_ComfyUI.utils.core.types import ProgressEvent  # noqa: F401
 
+# 引擎域错误基类(供 canvas_backend 等调用方判型:域错误在 dispatcher 已带
+# 成因链打过日志,上层只需一行,避免同一失败的 traceback 重复刷屏)
+from .RH_ComfyUI.core.base.errors import GenerationError as RHGenerationError  # noqa: F401
+
 # 触发内层 __init__.py(执行 Plugins(...) + 注册命令 + @on_core_start 钩子)
 from .RH_ComfyUI.utils.core.pipeline import NodeDef, pipeline_registry  # noqa: F401
 
@@ -44,8 +48,10 @@ from .RH_ComfyUI.utils.database.models import RHBind, RHComfyuiTaskRecord  # noq
 # 外部消费者无需依赖 `RH_ComfyUI.utils.database.consumption` 这条隐式子包路径。
 from .RH_ComfyUI.utils.database.consumption import (  # noqa: F401
     build_admin_records_payload,
+    build_record_detail_payload,
     build_user_consumption_payload,
     build_admin_consumption_payload,
+    resolve_record_saved_file,
 )
 
 __all__ = [
@@ -57,6 +63,7 @@ __all__ = [
     "get_model_input_schema",
     "GenerationResult",
     "ProgressEvent",
+    "RHGenerationError",
     # 高级(允许需要写 Adapter / Pipeline 的下游插件访问内部注册表)
     "NodeDef",
     "pipeline_registry",
@@ -67,6 +74,8 @@ __all__ = [
     "build_user_consumption_payload",
     "build_admin_consumption_payload",
     "build_admin_records_payload",
+    "build_record_detail_payload",
+    "resolve_record_saved_file",
     # 跨插件积分扣减(canvas_backend credit_rh 使用)
     "RHBind",
     "RHComfyuiTaskRecord",
