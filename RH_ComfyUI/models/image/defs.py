@@ -8,10 +8,12 @@
 from __future__ import annotations
 
 from ..bridge import ImagePipelineModel
+from .overrides import Seedream5ProImageModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType
 from ...utils.core.pipeline import NodeDef
 from ...core.channels.channel import ChannelBinding
+from ...utils.mappers.seedream import seedream_mapper as _seedream_mapper
 from ...utils.mappers.gpt_image2 import gpt_image2_mapper as _gpt_image2_mapper
 from ...utils.mappers.image_edit import qwen_edit_mapper as _qwen_edit_mapper
 from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minimax_image01_mapper
@@ -531,6 +533,250 @@ class Qwen2512Def(ImagePipelineModel):
         )
 
 
+class Seedream5Def(ImagePipelineModel):
+    """Seedream 5.0 Lite — 火山方舟 Doubao Seedream 5.0 Lite 图片生成/编辑模型
+
+    注:以下 backend_model 字段为占位符,请按 ARK 控制台开通页返回的 Model ID
+    核对修改(`[开通模型服务]` 入口:console.volcengine.com/ark)。Lite 与 Pro 同属
+    「Seedream 5.0 系列」,API Key 与 Base URL 直接复用 Seedance_apikey_ark /
+    Seedance_BaseURL_ark(同源 ARK 平台,凭证通用)。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="seedream5",
+            display_name="Seedream 5.0 Lite",
+            task_type=TaskType("image"),
+            backend="seedream",
+            point_cost=2,
+            description=(
+                "火山方舟 Doubao Seedream 5.0 Lite 图片生成/编辑模型。"
+                "支持文生图 / 单图编辑 / 多图参考(0~14 张),"
+                "提供 2K/3K/4K 三档分辨率与自然语言宽高比描述。"
+            ),
+            knowledge_content=(
+                "Seedream 5.0 Lite 是字节跳动火山方舟推出的图片生成/编辑模型(Lite 版)。"
+                "\n"
+                "优势:中文提示词理解强,支持 0~14 张参考图(2~10 张时效果最佳),"
+                "\n"
+                "支持 2K/3K/4K 分辨率档位与显式像素模式,出图速度较快。"
+                "\n"
+                "适用场景:高质量写实/二次元/创意图像生成,商品图,场景插画,概念设计。"
+                "\n"
+                "不适用场景:需要极高高分辨率或商业级精修(可改用 Pro)。"
+                "\n"
+                "凭证:复用 Seedance 面板的火山方舟 API Key(Seedance_apikey_ark),"
+                "\n"
+                "与 Seedance 视频共用同一 ARK Key,无需单独配置。"
+                "\n"
+                "提示词建议:中文为主,可在 prompt 末尾用「横构图/竖构图/正方形」"
+                "\n"
+                "等自然语言 hint 描述宽高比,模型会自动映射到 ARK 的 size 档位。"
+                "\n"
+            ),
+            requirements=["seedance_apikey"],
+            # 占位 Model ID —— 实际开通后请按 ARK 控制台返回的 ID 修改
+            backend_model="doubao-seedream-5-0-lite-250915",
+            mode="programmatic",
+            mapper_func=_seedream_mapper,
+            inputs={
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=True,
+                    title="提示词",
+                    description="生成描述,支持中英文。建议不超过 300 字。",
+                ),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=14,  # Lite 上限(ARK Seedream 5.0 lite/4.5/4.0 通用)
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description=(
+                        "参考图片:0 张=文生图;1 张=图生图/编辑;2~14 张=多图参考。"
+                        "格式 jpeg/png/webp/bmp/tiff/gif/heic/heif,单张 ≤30MB。"
+                    ),
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="9:16",
+                    values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    title="宽高比",
+                    description=(
+                        "输出宽高比,会以自然语言方式拼到 prompt 末尾;"
+                        "具体像素由 ARK 按 size 档位自主选择。"
+                    ),
+                ),
+                "size_mode": PortSpec(
+                    type=PortType.ENUM,
+                    default="2K",
+                    values=["2K", "3K", "4K"],
+                    title="分辨率档位",
+                    description="Lite 支持 2K/3K/4K 三档,默认 2K。",
+                ),
+                "output_format": PortSpec(
+                    type=PortType.ENUM,
+                    default="png",
+                    values=["png", "jpeg"],
+                    title="输出格式",
+                    description="生成图片的文件格式(PNG 透明 / JPEG 体积小)。",
+                ),
+                "response_format": PortSpec(
+                    type=PortType.ENUM,
+                    default="url",
+                    values=["url", "b64_json"],
+                    title="返回格式",
+                    description=(
+                        "url=返回 24h 有效下载链接(本节点会立即下载转 bytes);"
+                        "b64_json=直接返回 Base64。"
+                    ),
+                ),
+                "watermark": PortSpec(
+                    type=PortType.BOOLEAN,
+                    default=False,
+                    title="添加水印",
+                    description="是否在生成图右下角添加「AI 生成」水印。",
+                ),
+            },
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="sync",
+                priority=65,
+            ),
+        )
+
+
+class Seedream5ProDef(Seedream5ProImageModel):
+    """Seedream 5.0 Pro — 火山方舟 Doubao Seedream 5.0 Pro 图片生成/编辑模型(高质量档)
+
+    Pro 在 Lite 能力基础上:
+    - 参考图上限降为 10 张(ARK Seedream 5.0 pro 上限,见 ARK 文档);
+    - 分辨率档位仅 1K/2K 两档(Pro 不支持 3K/4K);
+    - 显式像素模式 (size=WxH) 额外受像素积约束:[921600, 4624220]、
+      宽高比约束:[1/16, 16](由 Seedream5ProImageModel.validate() 覆盖);
+    - 不支持 sequential_image_generation / web_search 工具(mapper 防御性拦截)。
+
+    注:backend_model 为占位符,请按 ARK 控制台开通页返回的 Model ID 修改。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="seedream5_pro",
+            display_name="Seedream 5.0 Pro",
+            task_type=TaskType("image"),
+            backend="seedream",
+            point_cost=4,
+            description=(
+                "火山方舟 Doubao Seedream 5.0 Pro 图片生成/编辑模型(高质量档)。"
+                "支持文生图 / 单图编辑 / 多图参考(0~10 张),1K/2K 两档,"
+                "出图质量与细节优于 Lite。"
+            ),
+            knowledge_content=(
+                "Seedream 5.0 Pro 是字节跳动火山方舟的高质量图片生成/编辑模型(Pro 版)。"
+                "\n"
+                "优势:画面细节、色彩、构图明显优于 Lite,适合最终输出与商业级场景;"
+                "\n"
+                "支持 0~10 张参考图(单图编辑 + 多图参考)。"
+                "\n"
+                "适用场景:商业级人像/产品/场景图,概念精修,海报与封面图。"
+                "\n"
+                "不适用场景:实时预览 / 批量草图(可改用 Lite 节省积分)。"
+                "\n"
+                "约束:显式像素模式总像素需在 [921600, 4624220],"
+                "\n"
+                "宽高比需在 [1/16, 16] 范围内;"
+                "\n"
+                "分辨率档位仅 1K/2K,不支持 3K/4K。"
+                "\n"
+                "凭证:复用 Seedance 面板的火山方舟 API Key,与 Seedance 视频共用。"
+                "\n"
+            ),
+            requirements=["seedance_apikey"],
+            # 占位 Model ID —— 实际开通后请按 ARK 控制台返回的 ID 修改
+            backend_model="doubao-seedream-5-0-pro-250915",
+            mode="programmatic",
+            mapper_func=_seedream_mapper,
+            inputs={
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=True,
+                    title="提示词",
+                    description="生成描述,支持中英文。建议不超过 300 字。",
+                ),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=10,  # Pro 上限(文档「Seedream 5.0 pro 最多支持传入 10 张参考图」)
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description=(
+                        "参考图片:0 张=文生图;1 张=图生图/编辑;2~10 张=多图参考。"
+                        "格式 jpeg/png/webp/bmp/tiff/gif/heic/heif,单张 ≤30MB。"
+                    ),
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="9:16",
+                    values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    title="宽高比",
+                    description=(
+                        "输出宽高比,会以自然语言方式拼到 prompt 末尾;"
+                        "具体像素由 ARK 按 size 档位自主选择。"
+                    ),
+                ),
+                "size_mode": PortSpec(
+                    type=PortType.ENUM,
+                    default="2K",
+                    values=["1K", "2K"],  # Pro 仅支持 1K/2K
+                    title="分辨率档位",
+                    description="Pro 仅支持 1K/2K 两档,默认 2K。",
+                ),
+                "output_format": PortSpec(
+                    type=PortType.ENUM,
+                    default="png",
+                    values=["png", "jpeg"],
+                    title="输出格式",
+                    description="生成图片的文件格式(PNG 透明 / JPEG 体积小)。",
+                ),
+                "response_format": PortSpec(
+                    type=PortType.ENUM,
+                    default="url",
+                    values=["url", "b64_json"],
+                    title="返回格式",
+                    description=(
+                        "url=返回 24h 有效下载链接(本节点会立即下载转 bytes);"
+                        "b64_json=直接返回 Base64。"
+                    ),
+                ),
+                "watermark": PortSpec(
+                    type=PortType.BOOLEAN,
+                    default=False,
+                    title="添加水印",
+                    description="是否在生成图右下角添加「AI 生成」水印。",
+                ),
+            },
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="sync",
+                priority=70,
+            ),
+        )
+
+
 ALL_MODELS = [
     AnimaDef,
     Banana1Def,
@@ -540,4 +786,6 @@ ALL_MODELS = [
     MinimaxImage01Def,
     Qwen2511Def,
     Qwen2512Def,
+    Seedream5Def,
+    Seedream5ProDef,
 ]

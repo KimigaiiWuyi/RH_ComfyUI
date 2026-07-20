@@ -46,6 +46,7 @@ def init_backends() -> AdapterRegistry:
     from .rh_app.executor import RHAppAdapter
     from .comfyui.executor import ComfyUIAdapter
     from .minimax.executor import MiniMaxAdapter
+    from .seedream.executor import SeedreamAdapter
     from .fishaudio.executor import FishAudioAdapter
     from .gpt_image2.executor import GPTImage2Adapter
 
@@ -55,6 +56,8 @@ def init_backends() -> AdapterRegistry:
     backend_registry.register(MIMOAdapter())
     backend_registry.register(FishAudioAdapter())
     backend_registry.register(GPTImage2Adapter())
+    # Seedream 5.0(Lite / Pro):复用 Seedance_apikey_ark / Seedance_BaseURL_ark
+    backend_registry.register(SeedreamAdapter())
     # Seedance / Gemini 不是 Adapter:各供应商 = 一个 ProviderChannel,
     # 由通用 LoadBalancer 统一调度(见 seedance/channel.py、gemini_image/channel.py)。
 

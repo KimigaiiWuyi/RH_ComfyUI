@@ -29,6 +29,8 @@ _IMAGE_MODEL_REAL_NAMES = [
     "minimax_image01",
     "qwen_2511",
     "qwen_2512",
+    "seedream5",
+    "seedream5_pro",
 ]
 
 # ── ComfyUI 服务 ────────────────────────────────────────────────
@@ -153,18 +155,23 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         options=["s2.1-pro", "s2-pro", "s1"],
     ),
     "divider_seedance": GsDivider(
-        "Seedance 视频生成",
-        "Seedance 视频生成服务配置。每个供应商可独立启用/禁用,并配置独立的 API Key 和 Base URL。",
-        "火山官方 Seedance 服务配置",
+        "Seedance 视频生成 / Seedream 5.0 图片",
+        "Seedance 视频生成 + Seedream 5.0 (Lite / Pro) 图片生成服务配置。"
+        "Seedance 与 Seedream 同源火山方舟 ARK,共用同一 API Key 与 Base URL;"
+        "每个供应商可独立启用/禁用,并配置独立的 API Key 和 Base URL。",
+        "火山官方 Seedance / Seedream 服务配置",
     ),
     "Seedance_apikey_ark": GsStrConfig(
         "ARK API Key",
-        "火山方舟 Seedance API Key。用于 Seedance 2.0 / 2.0 Fast / 1.5 Pro / 1.0 Pro 等系列模型。",
+        "火山方舟 ARK API Key。"
+        "用于 Seedance 2.0 / 2.0 Fast / 1.5 Pro / 1.0 Pro 视频系列,"
+        "同时用于 Seedream 5.0 Lite / Pro 图片系列(同源 Key)。",
         "",
     ),
     "Seedance_BaseURL_ark": GsStrConfig(
         "ARK Base URL",
-        "火山方舟 Seedance 官方 API 地址。默认值已填,一般无需修改。",
+        "火山方舟 ARK 官方 API 地址(Seedance 视频端点 + Seedream 图片端点共用)。"
+        "默认值已填,一般无需修改。",
         "https://ark.cn-beijing.volces.com/api/v3",
         options=[
             "https://ark.cn-beijing.volces.com/api/v3",
@@ -172,7 +179,8 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "Seedance_Enable_ark": GsBoolConfig(
         "启用 ARK 供应商",
-        "是否启用火山方舟官方 Seedance 供应商。禁用后,该供应商不会参与任务分发。",
+        "是否启用火山方舟官方供应商。禁用后,Seedance 视频与 Seedream 5.0 图片"
+        "均不会通过该供应商分发(同源开关)。",
         True,
     ),
     "divider_seedance_runninghub": GsDivider(
