@@ -3,7 +3,7 @@
 2026-07 起模型定义全编程式:NodeDef 由各模态 defs.py 的模型类以代码构建
 (node_def()),不再来自 YAML。本模块提供:
 - AdapterChannel:把旧 Adapter(utils/backends)适配为 ProviderChannel;
-- 四个模态桥接基类:从 NodeDef 推导能力字段(input_schema/形态/分辨率等),
+- 五个模态桥接基类:从 NodeDef 推导能力字段(input_schema/形态/分辨率等),
   执行走 Adapter(mapper/工作流逻辑零改动);
 - 需要跨字段校验的模型以子类覆盖 validate()(见 models/*/overrides.py)。
 """
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from ..core.base.asr import AsrGenerationBase
 from ..core.base.image import ImageGenerationBase
 from ..core.base.music import MusicGenerationBase
 from ..core.base.video import VideoTaskShape, VideoGenerationBase
@@ -187,11 +188,27 @@ class SpeechPipelineModel(_PipelineBackedMixin, DigitalHumanSpeechBase):
         return dict(self.node.inputs) if self.node.inputs else self.base_speech_schema()
 
 
+class AsrPipelineModel(_PipelineBackedMixin, AsrGenerationBase):
+    """ASR 模态桥接:audio_payload 端口的 mime_types 从 NodeDef 推导,其余继承基类骨架"""
+
+    def __init__(self, node: NodeDef) -> None:
+        # 与其它模态一致:不调 super().__init__(),由 mixin 的 _init_from_node 完成身份初始化
+        self._init_from_node(node)
+        audio_port = node.inputs.get("audio_payload")
+        if audio_port is not None and audio_port.mime_types:
+            self.audio_formats = list(audio_port.mime_types)
+
+    def input_schema(self) -> dict[str, PortSpec]:
+        # 桥接模型:YAML 端口优先;缺时回落模态骨架 schema(audio_payload/language/include_timestamps)
+        return dict(self.node.inputs) if self.node.inputs else self.base_asr_schema()
+
+
 _MODALITY_CLASS: dict[TaskType, type] = {
     TaskType.IMAGE: ImagePipelineModel,
     TaskType.VIDEO: VideoPipelineModel,
     TaskType.MUSIC: MusicPipelineModel,
     TaskType.SPEECH: SpeechPipelineModel,
+    TaskType.ASR: AsrPipelineModel,
 }
 
 
@@ -212,5 +229,6 @@ __all__ = [
     "VideoPipelineModel",
     "MusicPipelineModel",
     "SpeechPipelineModel",
+    "AsrPipelineModel",
     "build_bridge_model",
 ]

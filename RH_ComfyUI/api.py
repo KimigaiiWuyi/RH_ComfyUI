@@ -275,6 +275,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
         "audio_refs",
         "ordered_content",
         "reference_audio",
+        "audio_payload",
         "width",
         "height",
         "ratio",
@@ -335,6 +336,10 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
     # reference_audio: bytes / dict → bytes
     if "reference_audio" in req_kwargs and isinstance(req_kwargs["reference_audio"], dict):
         req_kwargs["reference_audio"] = await _decode_media_bytes(req_kwargs["reference_audio"])
+
+    # audio_payload: ASR 输入;bytes / dict → bytes(同 reference_audio)
+    if "audio_payload" in req_kwargs and isinstance(req_kwargs["audio_payload"], dict):
+        req_kwargs["audio_payload"] = await _decode_media_bytes(req_kwargs["audio_payload"])
 
     # 透传后端私有参数到 params
     if passthrough:

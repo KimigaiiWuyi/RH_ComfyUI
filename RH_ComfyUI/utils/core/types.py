@@ -45,6 +45,7 @@ class PortType(str, Enum):
     OUTPUT_IMAGE = "output_image"
     OUTPUT_VIDEO = "output_video"
     OUTPUT_AUDIO = "output_audio"
+    OUTPUT_TEXT = "output_text"
 
 
 def _to_port_type(value: Union[PortType, str]) -> PortType:

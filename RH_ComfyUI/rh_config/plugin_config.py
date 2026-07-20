@@ -20,31 +20,19 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
         "运行参数",
         "插件运行时行为参数",
     ),
-    "Max_Concurrency": GsIntConfig(
-        "全局最大并发数（总量兜底）",
-        "所有后端同时执行任务数的总量兜底闸；日常限流由「后端并发」两项按供应商各自约束，"
-        "本项仅防极端过载。改动即刻生效（新任务按新上限；已在执行中的任务不受影响）",
-        600,
-        options=[1, 10, 100, 300, 600],
-    ),
-    "RH_Channel_Concurrency": GsIntConfig(
-        "RH 相关通道并发数",
-        "RunningHub 相关供应商通道（runninghub / rh_app / comfyui）各自的最大并发；"
-        "共用一块 GPU 的工作流必须串行，保持 1。改动即刻生效",
-        1,
-        options=[1, 2, 3],
-    ),
     "Channel_Concurrency": GsIntConfig(
-        "其他供应商通道并发数（每供应商一把闸）",
-        "非 RH 供应商通道（ark / gateway / aifoundation / azure / fishaudio / minimax / "
-        "gemini-image / gpt-image-2 / mimo 等）各设一把独立并发闸的大小，互不挤占。改动即刻生效",
+        "供应商通道并发数（每通道一把闸，作为 (model, channel) 闸的基线）",
+        "所有供应商通道（runninghub / rh_app / comfyui / ark / gateway / aifoundation / "
+        "azure / fishaudio / minimax / gemini-image / gpt-image-2 / mimo 等）共享此基线；"
+        "本地 ComfyUI 工作流自带 max_concurrency=1，会被 (model, channel) 闸自动收窄为 1。"
+        "改动即刻生效",
         10,
         options=[5, 10, 20, 50],
     ),
     "Dispatch_Timeout": GsIntConfig(
         "单任务超时预算（秒）",
         "一次生成从进入排队到完成的总时长上限；超时按失败处理（落统计并退款），"
-        "防止卡死的上游长期占用全局并发闸。0=不限制。改动即刻生效",
+        "防止卡死的上游长期占用并发闸。0=不限制。改动即刻生效",
         1800,
         options=[0, 600, 1200, 1800, 3600],
     ),

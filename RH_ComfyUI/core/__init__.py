@@ -9,6 +9,7 @@ from .base import (
     VideoTaskShape,
     GenerationError,
     ValidationError,
+    AsrGenerationBase,
     AIGCGenerationBase,
     BillingDeniedError,
     ImageGenerationBase,
@@ -67,6 +68,7 @@ __all__ = [
     "VideoGenerationBase",
     "MusicGenerationBase",
     "DigitalHumanSpeechBase",
+    "AsrGenerationBase",
     "VideoTaskShape",
     # 类型
     "ModelCard",

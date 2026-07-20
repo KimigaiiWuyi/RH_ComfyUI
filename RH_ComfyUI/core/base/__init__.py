@@ -1,5 +1,6 @@
-"""core.base — 抽象基类层(五个 ABC + 错误族 + 通用校验器)"""
+"""core.base — 抽象基类层(六个 ABC + 错误族 + 通用校验器)"""
 
+from .asr import AsrGenerationBase
 from .image import ImageGenerationBase
 from .music import MusicGenerationBase
 from .video import VideoTaskShape, VideoGenerationBase
@@ -21,6 +22,7 @@ __all__ = [
     "VideoGenerationBase",
     "MusicGenerationBase",
     "DigitalHumanSpeechBase",
+    "AsrGenerationBase",
     "VideoTaskShape",
     "GenerationError",
     "ValidationError",

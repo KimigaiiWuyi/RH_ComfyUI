@@ -1,4 +1,4 @@
-"""Fish Audio Adapter — S2 系列 TTS 语音合成"""
+"""Fish Audio Adapter — S2 系列 TTS 语音合成 + ASR 语音识别"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from ...core.pipeline import NodeDef
 
 
 class FishAudioAdapter(Adapter):
-    """Fish Audio 官方 TTS(自动音色克隆 + 内联情绪)"""
+    """Fish Audio 官方 TTS(自动音色克隆 + 内联情绪)与 ASR(语音识别)"""
 
     name = "fishaudio"
 
@@ -28,9 +28,19 @@ class FishAudioAdapter(Adapter):
 
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(
-            supported_tasks=["speech"],
-            supported_params=["prompt", "mood", "reference_audio", "speed"],
-            output_mime=["audio/mpeg"],
+            supported_tasks=["speech", "asr"],
+            supported_params=[
+                # TTS
+                "prompt",
+                "mood",
+                "reference_audio",
+                "speed",
+                # ASR
+                "audio",
+                "audio_refs",
+                "language_boost",
+            ],
+            output_mime=["audio/mpeg", "text/plain; charset=utf-8"],
             mode="sync",
             priority=70,
         )
@@ -45,7 +55,12 @@ class FishAudioAdapter(Adapter):
         if node.mapper_func is None:
             raise RuntimeError(f"Fish Audio 节点 {node.name} 缺少 mapper_func")
 
-        await _emit(on_progress, ProgressEvent(stage="running", percent=20, message="Fish Audio 合成中"))
+        # 区分提示语:按 node.task_type 推断(TTS / ASR)
+        if getattr(node, "task_type", None) is not None and str(node.task_type.value) == "asr":
+            await _emit(on_progress, ProgressEvent(stage="running", percent=20, message="Fish Audio 识别中"))
+        else:
+            await _emit(on_progress, ProgressEvent(stage="running", percent=20, message="Fish Audio 合成中"))
+
         result = await node.mapper_func(request, self.api)
         await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="完成"))
 
@@ -54,7 +69,22 @@ class FishAudioAdapter(Adapter):
         if isinstance(result, GenerationResult):
             return NodeOutput.from_result(result)
         if isinstance(result, bytes):
-            return NodeOutput(status="ok", output_type="audio", data=result, mime_type="audio/mpeg")
+            # 默认按 bytes 处理:TTS 是 mp3,ASR 是 UTF-8 文本 —— mime 由 mapper 给
+            task_type = getattr(node, "task_type", None)
+            output_type = (
+                "audio"
+                if task_type is None or str(task_type.value) == "speech"
+                else "text"
+            )
+            mime_type = (
+                "audio/mpeg" if output_type == "audio" else "text/plain; charset=utf-8"
+            )
+            return NodeOutput(
+                status="ok",
+                output_type=output_type,
+                data=result,
+                mime_type=mime_type,
+            )
 
         raise RuntimeError(f"Fish Audio 节点 {node.name} 返回了无法处理的类型: {type(result)}")
 

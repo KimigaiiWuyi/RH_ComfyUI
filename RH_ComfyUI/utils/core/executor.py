@@ -1,7 +1,11 @@
 """统一执行器 — 根据节点指定的 Adapter 分发执行
 
-所有命令和 AI 工具都走 `execute_generation()`。
-受全局 Semaphore 限流,所有 Adapter 共享同一并发限制。
+⚠ 旧入口,实际生产路径已统一走 core.dispatch.dispatch() → model.run(),
+后者内含两层并发闸(供应商闸 + (model, channel) 闸,详见
+core/dispatch/concurrency.py)。本模块保留供历史 Adapter 兼容,但
+execute_generation() 已无生产调用点。
+
+受 Channel_Concurrency 兜底限流,所有 Adapter 共享同一并发限制。
 生成完成后自动落盘到 OUTPUT_PATH,并记录统计。
 """
 
@@ -21,7 +25,9 @@ from ..database.statistics import record_task
 if TYPE_CHECKING:
     from .pipeline import NodeDef
 
-# 全局 Semaphore,懒加载
+# ⚠ 旧全局 Semaphore(懒加载),仅在 execute_generation 被调用时才会初始化。
+# 当前生产路径不再走 execute_generation,此闸实际为死代码;保留是为兼容外部
+# 旧 import。新并发闸由 core.dispatch.concurrency 提供。
 _generation_semaphore: asyncio.Semaphore | None = None
 
 # 输出文件扩展名映射
@@ -33,16 +39,19 @@ _OUTPUT_EXTENSIONS: dict[OutputType, str] = {
 
 
 def _get_semaphore() -> asyncio.Semaphore:
-    """获取全局并发控制 Semaphore(懒加载)"""
+    """获取旧版全局并发控制 Semaphore(懒加载)。
+
+    读 Channel_Concurrency(与新架构基线对齐);原 Max_Concurrency 已废弃。
+    """
     global _generation_semaphore
     if _generation_semaphore is None:
         from ...rh_config.comfyui_config import PLUGIN_CONFIG
 
-        concurrency = PLUGIN_CONFIG.get_config("Max_Concurrency").data
+        concurrency = PLUGIN_CONFIG.get_config("Channel_Concurrency").data
         if not isinstance(concurrency, int) or concurrency < 1:
             concurrency = 1
         _generation_semaphore = asyncio.Semaphore(concurrency)
-        logger.info(f"[Executor] 全局并发限制初始化: {concurrency}")
+        logger.info(f"[Executor] 旧全局并发限制初始化: {concurrency}")
     return _generation_semaphore
 
 

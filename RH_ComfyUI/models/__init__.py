@@ -1,7 +1,7 @@
 """models — 开源模型实现层(全编程式,2026-07 起不再装载 YAML)
 
 discover_builtin_models() 在 on_core_start 时被调用:
-1. 实例化四个模态 defs.py 里的全部模型类(每个模型一个类,继承模态基类);
+1. 实例化五个模态 defs.py 里的全部模型类(每个模型一个类,继承模态基类);
 2. 模型实例注册进 core.routing.model_registry(单一事实来源);
 3. NodeDef 目录(pipeline_registry)由 model_registry 派生 —— Adapter 执行 /
    AI 知识库 / HTTP 契约仍消费 NodeDef,但不再单独注册,避免两表漂移;
@@ -14,6 +14,7 @@ from gsuid_core.logger import logger
 
 from .video import Wan22VideoModel, SeedanceVideoModel
 from .speech import IndexTTS2Model
+from .asr import FishAsrModel
 
 
 def discover_builtin_models() -> int:
@@ -22,11 +23,12 @@ def discover_builtin_models() -> int:
     from .music.defs import ALL_MODELS as MUSIC_MODELS
     from .video.defs import ALL_MODELS as VIDEO_MODELS
     from .speech.defs import ALL_MODELS as SPEECH_MODELS
+    from .asr.defs import ALL_MODELS as ASR_MODELS
     from ..core.routing.registry import model_registry, load_entry_point_models
 
     # NodeDef 目录(pipeline_registry)现由 model_registry 派生,无需再单独注册
     count = 0
-    for cls in (*IMAGE_MODELS, *MUSIC_MODELS, *SPEECH_MODELS, *VIDEO_MODELS):
+    for cls in (*IMAGE_MODELS, *MUSIC_MODELS, *SPEECH_MODELS, *VIDEO_MODELS, *ASR_MODELS):
         model_registry.register(cls())
         count += 1
 
@@ -42,4 +44,5 @@ __all__ = [
     "SeedanceVideoModel",
     "Wan22VideoModel",
     "IndexTTS2Model",
+    "FishAsrModel",
 ]

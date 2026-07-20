@@ -4,7 +4,8 @@
   1. route()           失败 → ModelUnavailableError(不扣费)
   2. validate 前置     失败 → ValidationError(不扣费)★ 校验先于扣费
   3. policy.reserve(model.estimate_cost(request))  失败 → BillingDeniedError
-  4. 并发闸 + model.run(),整体受超时预算约束(Dispatch_Timeout,0=不限)
+  4. model.run() 内自带两层并发闸(供应商全局闸 + (model,channel) 闸),
+       整体受超时预算约束(Dispatch_Timeout,0=不限)
        成功 → policy.commit() → record_dispatch(status=ok)
        失败/超时 → record_dispatch(status=failed) → policy.refund() → 原样抛出
        取消/中断(BaseException,如 CancelledError / DryRunInterrupt)
@@ -20,7 +21,6 @@ from typing import Optional
 from gsuid_core.logger import logger
 
 from .context import DispatchContext
-from .concurrency import generation_slot
 from ..base.errors import GenerationError, describe_exception
 from ..schema.types import NodeOutput
 from ..schema.request import GenerationResult, GenerationRequest
@@ -64,12 +64,13 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
     result: Optional[GenerationResult] = None
 
     async def _run_slotted() -> NodeOutput:
-        async with generation_slot(model):
-            logger.info(
-                f"[dispatch] 执行生成: task={request.task_type.value}, "
-                f"model={model.name}, entry={ctx.billing.entry_point}"
-            )
-            return await model.run(request, on_progress=ctx.on_progress)
+        # 并发闸全部在 model.run() 内部(channel_slot + channel_slot_for_model 两层);
+        # 本层仅做超时预算 + 日志。详见 core/dispatch/concurrency.py。
+        logger.info(
+            f"[dispatch] 执行生成: task={request.task_type.value}, "
+            f"model={model.name}, entry={ctx.billing.entry_point}"
+        )
+        return await model.run(request, on_progress=ctx.on_progress)
 
     try:
         timeout_s = _resolve_timeout()

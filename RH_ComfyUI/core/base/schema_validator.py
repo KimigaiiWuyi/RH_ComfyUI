@@ -20,15 +20,36 @@ def validate_against_schema(
     *,
     model_name: str,
 ) -> None:
-    """通用校验:required / 枚举值 / 数值范围 / 列表基数"""
-    for key, spec in schema.items():
-        value = _request_value(request, key)
-        is_empty = value is None or value == "" or value == [] or value == {}
+    """通用校验:required / 枚举值 / 数值范围 / 列表基数
 
-        if spec.required and is_empty:
-            raise ValidationError(f"[{model_name}] 缺少必填参数: {key}({spec.description})")
-        if is_empty:
-            continue
+    端口名与 ``GenerationRequest`` 字段名约定:
+    - ``audio_payload`` 端口对应 ``request.audio_payload`` (bytes);
+    - ``audio_refs`` / ``reference_audio`` 端口对应 ``request.audio_refs`` (MediaRef 列表),
+      任一即可视为 ASR 音频输入已满足 —— 这样模型既支持直接字节透传,
+      也支持引用式的音频(后者用于 Adapter 链上批量 / 多参考场景)。
+    """
+    for key, spec in schema.items():
+        # audio_payload 端口:audio_refs 携带非空 bytes 时也视为满足
+        if key == "audio_payload":
+            value = request.audio_payload
+            has_alt = bool(request.audio_refs) and any(
+                bool(getattr(ref, "data", None)) for ref in request.audio_refs
+            )
+            is_empty = not value and not has_alt
+            if spec.required and is_empty:
+                raise ValidationError(
+                    f"[{model_name}] 缺少必填参数: {key}({spec.description})"
+                )
+            if is_empty:
+                continue
+            value = value or (request.audio_refs[0].data if has_alt else None)
+        else:
+            value = _request_value(request, key)
+            is_empty = value is None or value == "" or value == [] or value == {}
+            if spec.required and is_empty:
+                raise ValidationError(f"[{model_name}] 缺少必填参数: {key}({spec.description})")
+            if is_empty:
+                continue
 
         if spec.type == PortType.ENUM and spec.values is not None:
             if value not in spec.values:
@@ -69,10 +90,19 @@ def schema_supports_request(request: GenerationRequest, schema: dict[str, PortSp
     elif img_port is not None and (img_port.required or (img_port.min_items or 0) >= 1):
         return False
 
-    if request.audio_refs and "audio_refs" not in schema and "reference_audio" not in schema:
-        return False
     if request.video_refs and "video_refs" not in schema:
         return False
+
+    # ASR / 音频引用:schema 里有 audio_payload / audio_refs / reference_audio 任一即可
+    # ASR 必备音频输入;请求带音频但 schema 一个端口都没有 → 不支持
+    audio_keys = ("audio_payload", "audio_refs", "reference_audio")
+    has_audio_input = bool(request.audio_payload) or bool(request.audio_refs)
+    if has_audio_input and not any(k in schema for k in audio_keys):
+        return False
+    # 反向:schema 声明必须 audio_payload 且请求完全没音频 → 不支持
+    if not has_audio_input and schema.get("audio_payload") is not None:
+        return False
+
     return True
 
 

@@ -1,7 +1,10 @@
-"""Fish Audio 官方 API 客户端 — S2 系列 TTS 与快速音色克隆
+"""Fish Audio 官方 API 客户端 — S2 系列 TTS / 音色克隆 / 语音识别
 
 只对接官方公开端点(api.fish.audio)。凭证与模型档位从配置动态读取,
 中途改配置即时生效(不缓存到实例,见 @property)。
+
+网络层用 httpx(与 seedance/aigc 等通道统一风格),统一 120s 总超时 +
+10s 连接超时,避免 aiohttp 默认行为(无超时)下慢响应无限占住并发闸。
 """
 
 from __future__ import annotations
@@ -9,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, Union, Optional
 
-import aiohttp
+import httpx
 
 from gsuid_core.logger import logger
 
@@ -28,6 +31,9 @@ KNOWN_MODELS = ("s2.1-pro", "s2-pro", "s1")
 # 快速克隆通常即时可用;偶发未就绪时轮询兜底,超预算仍未就绪则尽力尝试。
 _NOT_READY_STATES = frozenset({"created", "training", "pending", "processing"})
 
+# 统一超时:与 seedance/aigc 通道一致,慢响应不会无限占住并发闸。
+_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+
 
 def _audio_content_type(audio: bytes) -> tuple[str, str]:
     """按文件头嗅探音频类型;返回 (filename, content_type)"""
@@ -37,7 +43,7 @@ def _audio_content_type(audio: bytes) -> tuple[str, str]:
 
 
 class FishAudioAPI:
-    """Fish Audio TTS + 音色克隆客户端"""
+    """Fish Audio TTS + 音色克隆 + ASR 客户端"""
 
     base_url: str = _BASE_URL
 
@@ -66,33 +72,34 @@ class FishAudioAPI:
             return None
 
         filename, content_type = _audio_content_type(audio)
-        form = aiohttp.FormData()
-        form.add_field("type", "tts")
-        form.add_field("title", title)
-        form.add_field("train_mode", "fast")
-        form.add_field("visibility", "unlist")
-        form.add_field("enhance_audio_quality", "true")
-        form.add_field("voices", audio, filename=filename, content_type=content_type)
+        files = {"voices": (filename, audio, content_type)}
+        data = {
+            "type": "tts",
+            "title": title,
+            "train_mode": "fast",
+            "visibility": "unlist",
+            "enhance_audio_quality": "true",
+        }
 
         url = f"{self.base_url}/model"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=self._auth_header(), data=form) as resp:
-                    if resp.status not in (200, 201):
-                        body = await resp.text()
-                        logger.warning(f"[FishAudio] 克隆音色失败: {resp.status}, {body[:300]}")
-                        return None
-                    data = await resp.json()
-        except aiohttp.ClientError as e:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(url, headers=self._auth_header(), files=files, data=data)
+                if resp.status_code not in (200, 201):
+                    body = resp.text[:300]
+                    logger.warning(f"[FishAudio] 克隆音色失败: {resp.status_code}, {body}")
+                    return None
+                payload = resp.json()
+        except httpx.HTTPError as e:
             logger.warning(f"[FishAudio] 克隆音色网络异常: {e}")
             return None
 
-        model_id = data.get("_id")
+        model_id = payload.get("_id")
         if not (isinstance(model_id, str) and model_id):
-            logger.warning(f"[FishAudio] 克隆响应缺少 _id: {list(data.keys())}")
+            logger.warning(f"[FishAudio] 克隆响应缺少 _id: {list(payload.keys())}")
             return None
 
-        state = data.get("state")
+        state = payload.get("state")
         if isinstance(state, str) and state in _NOT_READY_STATES:
             await self._wait_ready(model_id)
         logger.info(f"[FishAudio] 克隆音色成功: model_id={model_id}")
@@ -102,12 +109,12 @@ class FishAudioAPI:
         """查询音色训练状态;查询失败返回 None(视作不再阻塞)"""
         url = f"{self.base_url}/model/{model_id}"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=self._auth_header()) as resp:
-                    if resp.status != 200:
-                        return None
-                    data = await resp.json()
-        except aiohttp.ClientError as e:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.get(url, headers=self._auth_header())
+                if resp.status_code != 200:
+                    return None
+                data = resp.json()
+        except httpx.HTTPError as e:
             logger.warning(f"[FishAudio] 查询音色状态异常: {e}")
             return None
         state = data.get("state")
@@ -154,16 +161,16 @@ class FishAudioAPI:
         logger.info(f"[FishAudio] 合成: model={engine}, cloned={bool(reference_id)}, text={text[:50]}...")
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=body) as resp:
-                    if resp.status != 200:
-                        detail = (await resp.text())[:200]
-                        logger.warning(f"[FishAudio] 合成失败: {resp.status}, {detail}")
-                        # 400 多为档位不被账号支持(如 Unknown model)→ 指向配置项,可自助修
-                        hint = f"(可在 Web 控制台改 FishAudio_Model 档位,当前 {engine})" if resp.status == 400 else ""
-                        return f"HTTP {resp.status}: {detail}{hint}"
-                    audio = await resp.read()
-        except aiohttp.ClientError as e:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(url, headers=headers, json=body)
+                if resp.status_code != 200:
+                    detail = resp.text[:200]
+                    logger.warning(f"[FishAudio] 合成失败: {resp.status_code}, {detail}")
+                    # 400 多为档位不被账号支持(如 Unknown model)→ 指向配置项,可自助修
+                    hint = f"(可在 Web 控制台改 FishAudio_Model 档位,当前 {engine})" if resp.status_code == 400 else ""
+                    return f"HTTP {resp.status_code}: {detail}{hint}"
+                audio = resp.content
+        except httpx.HTTPError as e:
             logger.warning(f"[FishAudio] 合成网络异常: {e}")
             return f"网络异常: {e}"
 
@@ -172,6 +179,69 @@ class FishAudioAPI:
             return "上游返回空音频"
         logger.info(f"[FishAudio] 合成成功: {len(audio)} bytes")
         return audio
+
+    async def asr(
+        self,
+        audio: bytes,
+        *,
+        language: Optional[str] = None,
+        ignore_timestamps: bool = False,
+    ) -> Union[Dict[str, Any], str]:
+        """语音识别:audio → {text, duration, segments[]};失败返回**人话错误信息**(str)
+
+        端点:`POST /v1/asr`,走 `multipart/form-data`(wav/mp3/opus 等原样接受)。
+
+        参数:
+            audio: 音频字节(完整文件,wav/mp3/opus/...;不接受裸 PCM 流)
+            language: ISO 639-1 语言码(如 en/zh/ja),空 = 上游自动识别
+            ignore_timestamps: True = 不返回 segments(只给 text + duration);
+                默认 False = 返回带 start/end 的分段,方便前端做字幕。
+        """
+        if not self.api_key:
+            logger.warning("[FishAudio] 未配置 API Key,将无法请求 ASR")
+            return "未配置 Fish Audio API Key(FishAudio_apikey)"
+
+        if not audio:
+            return "音频字节为空,无法识别"
+
+        filename, content_type = _audio_content_type(audio)
+        files = {"audio": (filename, audio, content_type)}
+        # ignore_timestamps=True 才传 "true",其余传 "false" —— 与 aiohttp 旧行为一致
+        data = {
+            "ignore_timestamps": "true" if ignore_timestamps else "false",
+        }
+        if language:
+            data["language"] = language
+
+        url = f"{self.base_url}/v1/asr"
+        logger.info(
+            f"[FishAudio] 识别: lang={language or 'auto'}, "
+            f"timestamps={not ignore_timestamps}, bytes={len(audio)}"
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(url, headers=self._auth_header(), files=files, data=data)
+                if resp.status_code != 200:
+                    detail = resp.text[:200]
+                    logger.warning(f"[FishAudio] 识别失败: {resp.status_code}, {detail}")
+                    return f"HTTP {resp.status_code}: {detail}"
+                data_resp = resp.json()
+        except httpx.HTTPError as e:
+            logger.warning(f"[FishAudio] 识别网络异常: {e}")
+            return f"网络异常: {e}"
+
+        # 形态兜底:有些上游对极短音频返回 {"text": ""},segments 可能缺失
+        if not isinstance(data_resp, dict):
+            return f"上游响应格式异常: {type(data_resp).__name__}"
+        text = data_resp.get("text") or ""
+        duration = data_resp.get("duration") or 0.0
+        segments = data_resp.get("segments") or []
+        logger.info(
+            f"[FishAudio] 识别成功: text={len(text)}字, "
+            f"duration={duration}s, segments={len(segments)}段"
+        )
+        return {"text": text, "duration": float(duration), "segments": segments}
 
 
 # 全局单例

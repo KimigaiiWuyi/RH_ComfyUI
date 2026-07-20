@@ -61,12 +61,14 @@ class TaskType(str, Enum):
       - VIDEO : 0 图=文生视频 / 1 图=图生视频 / 2 图=首尾帧 / 图+音视频=多模态
       - MUSIC : 音乐生成
       - SPEECH: 语音生成(支持参考音频克隆)
+      - ASR   : 语音识别(音频 → 文本)
     """
 
     IMAGE = "image"
     VIDEO = "video"
     MUSIC = "music"
     SPEECH = "speech"
+    ASR = "asr"
 
 
 class OutputType(str, Enum):
@@ -75,6 +77,7 @@ class OutputType(str, Enum):
     IMAGE = "image"
     VIDEO = "video"
     AUDIO = "audio"
+    TEXT = "text"
 
 
 # 任务类型 → 输出类型 映射
@@ -83,6 +86,7 @@ TASK_OUTPUT_MAP: dict[TaskType, OutputType] = {
     TaskType.VIDEO: OutputType.VIDEO,
     TaskType.MUSIC: OutputType.AUDIO,
     TaskType.SPEECH: OutputType.AUDIO,
+    TaskType.ASR: OutputType.TEXT,
 }
 
 # 任务类型 → MIME 类型 映射
@@ -91,6 +95,7 @@ TASK_MIME_MAP: dict[TaskType, str] = {
     TaskType.VIDEO: "video/mp4",
     TaskType.MUSIC: "audio/mpeg",
     TaskType.SPEECH: "audio/mpeg",
+    TaskType.ASR: "text/plain",
 }
 
 # 任务类型 → 中文名称 映射
@@ -99,6 +104,7 @@ TASK_DISPLAY_NAME: dict[TaskType, str] = {
     TaskType.VIDEO: "视频生成",
     TaskType.MUSIC: "音乐生成",
     TaskType.SPEECH: "语音生成",
+    TaskType.ASR: "语音识别",
 }
 
 
@@ -113,31 +119,31 @@ class GenerationRequest:
 
     字段矩阵(✅=必有,⭕=可选,空=不适用):
 
-    字段                    | t2i | i2i | edit | t2v | i2v | flf2v | mm2v | music | speech
-    ------------------------|-----|-----|------|-----|-----|-------|------|-------|--------
-    prompt                  | ✅  | ✅  | ✅   | ✅  | ✅  | ✅    | ✅   | ✅ 风格 | ✅ 文本
-    negative_prompt         | ⭕  | ⭕  |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
-    images                  |     | ✅1+| ✅1+ |     | ✅1 | ✅2   | ✅1+ |        |
-    video_refs              |     |     |      |     |     |       | ✅0+ |        |
-    audio_refs              |     |     |      |     |     |       | ✅0+ |        |
-    ordered_content         |     |     |      |     |     |       | ✅   |        |
-    reference_audio         |     |     |      |     |     |       |      |        | ⭕
-    mood                    |     |     |      |     |     |       |      |        | ⭕
-    voice_id                |     |     |      |     |     |       |      |        | ⭕
-    width / height          | ✅  | ✅  |      | ✅  | ✅  | ✅    | ✅   |        |
-    ratio                   |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
-    resolution              |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
-    duration                |     |     |      | ✅  | ✅  | ✅    | ✅   |        |
-    seed                    | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   |        |
-    generate_audio          |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
-    watermark               | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   |        |
-    camera_fixed            |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
-    return_last_frame       |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
-    service_tier            |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |
-    model                   | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   | ⭕    | ⭕
-    speed                   |     |     |      |     |     |       |      |        | ⭕
-    language_boost          |     |     |      |     |     |       |      |        | ⭕
-    params                  | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   | ⭕    | ⭕
+    字段                    | t2i | i2i | edit | t2v | i2v | flf2v | mm2v | music | speech | asr
+    ------------------------|-----|-----|------|-----|-----|-------|------|-------|--------|-----
+    prompt                  | ✅  | ✅  | ✅   | ✅  | ✅  | ✅    | ✅   | ✅ 风格 | ✅ 文本 |    ⭕
+    negative_prompt         | ⭕  | ⭕  |      | ⭕  | ⭕  | ⭕    | ⭕   |        |        |
+    images                  |     | ✅1+| ✅1+ |     | ✅1 | ✅2   | ✅1+ |        |        |
+    video_refs              |     |     |      |     |     |       | ✅0+ |        |        |
+    audio_refs              |     |     |      |     |     |       | ✅0+ |        |        | ✅0+
+    ordered_content         |     |     |      |     |     |       | ✅   |        |        |
+    reference_audio         |     |     |      |     |     |       |      |        | ⭕    | ✅1
+    mood                    |     |     |      |     |     |       |      |        | ⭕    |
+    voice_id                |     |     |      |     |     |       |      |        | ⭕    |
+    width / height          | ✅  | ✅  |      | ✅  | ✅  | ✅    | ✅   |        |        |
+    ratio                   |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |        |
+    resolution              |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |        |
+    duration                |     |     |      | ✅  | ✅  | ✅    | ✅   |        |        |
+    seed                    | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   |        |        |
+    generate_audio          |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |        |
+    watermark               | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   |        |        |
+    camera_fixed            |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |        |
+    return_last_frame       |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |        |
+    service_tier            |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |        |
+    model                   | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   | ⭕    | ⭕    | ⭕
+    speed                   |     |     |      |     |     |       |      |        | ⭕    |
+    language_boost          |     |     |      |     |     |       |      |        | ⭕    | ⭕
+    params                  | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   | ⭕    | ⭕    | ⭕
     """
 
     # ── 必填字段 ──
@@ -162,6 +168,10 @@ class GenerationRequest:
 
     # ── 音频输入(语音克隆参考音色,向后兼容字段) ──
     reference_audio: Optional[bytes] = None
+
+    # ── ASR 输入:待转写音频(语义上与参考音频不同,但同样为单条 bytes) ──
+    #    与 reference_audio 二选一:若两者都给,ASR 优先用 audio,reference_audio 给 TTS 复用。
+    audio_payload: Optional[bytes] = None
 
     # ── 语音情绪(语音生成专用) ──
     mood: Optional[str] = None

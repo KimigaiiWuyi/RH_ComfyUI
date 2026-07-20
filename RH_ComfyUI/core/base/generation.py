@@ -99,6 +99,7 @@ class AIGCGenerationBase(ABC):
             TaskType.VIDEO: ("video", PortType.OUTPUT_VIDEO),
             TaskType.MUSIC: ("audio", PortType.OUTPUT_AUDIO),
             TaskType.SPEECH: ("audio", PortType.OUTPUT_AUDIO),
+            TaskType.ASR: ("text", PortType.OUTPUT_TEXT),
         }
         key, port_type = defaults[self.modality]
         return {key: PortSpec(type=port_type, description=f"生成的{key}")}
@@ -187,7 +188,7 @@ class AIGCGenerationBase(ABC):
 
         ordered = self.balancer().order_candidates(scope=self.name, candidates=bindings)
 
-        from ..dispatch.concurrency import channel_slot, channel_has_capacity
+        from ..dispatch.concurrency import channel_slot, channel_slot_for_model, channel_has_capacity
 
         # 供应商软排序:满载(在途数 ≥ 并发上限)的通道排到末尾,优先溢到空闲供应商,
         # 避免阻塞在繁忙供应商的信号量上;组内保持负载均衡给出的顺序
@@ -204,10 +205,13 @@ class AIGCGenerationBase(ABC):
             retried_transient = False
             while output is None:
                 try:
-                    # 供应商级并发闸:按选中通道(channel.name)各一把,
-                    # 同一模型的多个供应商互不挤占;整个执行(含轮询)持有许可
+                    # 两层闸嵌套:
+                    #   1. 供应商全局闸(channel.name):防同一 channel 被多模型一起打爆
+                    #   2. (model, channel) 闸:防单一模型在单一 channel 上挤爆
+                    #      上限 = min(Channel_Concurrency, model.max_concurrency)
                     async with channel_slot(binding.channel.name):
-                        output = await self.execute_on_channel(request, binding, on_progress=on_progress)
+                        async with channel_slot_for_model(self, binding.channel.name):
+                            output = await self.execute_on_channel(request, binding, on_progress=on_progress)
                 except ChannelError as e:
                     last_error = e
                     if not e.retryable:
