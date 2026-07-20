@@ -178,13 +178,43 @@ class AIGCGenerationBase(ABC):
         *,
         on_progress: Optional[ProgressCallback] = None,
     ) -> NodeOutput:
-        """统一生命周期:校验 → 归一化 → 选通道 → 执行(带故障切换) → 后处理"""
+        """统一生命周期:校验 → 归一化 → 选通道 → 执行(带故障切换) → 后处理
+
+        通道选择拆成两步:
+        1. **能力预过滤** —— 排除掉 ``supports_request()`` 返回 False
+           的通道(典型:seedance2 模型同时挂 ark / 网关 / aifoundation,
+           用户传 1080P 时 aifoundation 仅支持 720P,应在此被剔除,免得
+           LB 投到它头上被 ``validate_spec`` 抛 ``UNSUPPORTED_RESOLUTION``
+           后 ``retryable=False`` 整单失败)。
+        2. **LoadBalancer 排序** —— 只在有能力承接的候选里 round_robin /
+           weighted / least_failures;熔断统计同理只看子集。
+        """
         self.validate(request)
         request = self.normalize(request)
 
         bindings = self.channel_bindings()
         if not bindings:
             raise ChannelError(f"{self.display_name} 未声明任何执行通道")
+
+        # ── 能力预过滤(2026-07-20 加入) ──
+        capable = [b for b in bindings if b.channel.supports_request(request)]
+        if not capable:
+            # 全部通道都因能力不兼容被排除 → 抛参数类错误。
+            # dispatcher 走 refund 路径,积分退掉;与 model.validate() 异常同语义。
+            # 之所以用 ValidationError 而非 ChannelError:这是请求参数与通道能力
+            # 的不匹配,跟「channel 执行失败」是两件事 —— 后者交给 ChannelError
+            # 让模板方法走「切换下一通道」逻辑,前者直接抛、不再尝试。
+            from .errors import ValidationError
+
+            lines: list[str] = []
+            for b in bindings:
+                lines.append(f"- {b.channel.name}: {await b.channel.unavailable_reason()}")
+            raise ValidationError(
+                f"{self.display_name} 的所有通道均无法处理该请求"
+                f"(分辨率/宽高比/时长可能不在任一通道能力范围内)"
+                f"\n通道反馈:\n" + "\n".join(lines)
+            )
+        bindings = capable
 
         ordered = self.balancer().order_candidates(scope=self.name, candidates=bindings)
 

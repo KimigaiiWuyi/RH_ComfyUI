@@ -208,6 +208,10 @@ class SeedanceProvider(ABC):
     supported_shapes: set[VideoTaskShape] = set()
     supported_resolutions: set[str] = set()
     supported_ratios: set[str] = set()
+    # 时长上下限(秒):0 = 不限制。Provider 子类按上游 API 文档声明,
+    # 未声明时与 supported_ratios 一样对 can_handle_spec/validate_spec 是 no-op。
+    min_duration: int = 0
+    max_duration: int = 0
 
     max_images: int = 9
     max_videos: int = 3
@@ -229,8 +233,50 @@ class SeedanceProvider(ABC):
 
     # ── 能力校验 ──
 
+    def can_handle_spec(self, spec: VideoGenSpec) -> bool:
+        """判断 spec 是否落在能力矩阵内(无异常抛出版本)。
+
+        与 ``validate_spec`` 的差别:
+        - 不抛 ``UnsupportedProviderShapeError``,仅返回 True/False;
+          用于路由前的"通道能力预过滤",避免 LB 把任务投到注定失败的通道。
+        - **故意不检查媒体数** —— 即便上游对图片/视频/音频数量有限制,
+          也允许把请求路由过来;真实兜底仍由 ``validate_spec`` 在 invoke
+          阶段抛错。这样设计的理由:媒体数是动态内容,即便超出某家上限
+          也常能在另一家供应商落地,不应让 LB 早早把整条线砍掉。
+
+        字段为空(=未声明)时,该维度不参与判定。
+        """
+        if self.supported_shapes and spec.shape not in self.supported_shapes:
+            return False
+        if (
+            self.supported_resolutions
+            and spec.resolution is not None
+            and spec.resolution not in self.supported_resolutions
+        ):
+            return False
+        if (
+            self.supported_ratios
+            and spec.ratio is not None
+            and spec.ratio not in self.supported_ratios
+        ):
+            return False
+        if self.min_duration and spec.duration and spec.duration < self.min_duration:
+            return False
+        if self.max_duration and spec.duration and spec.duration > self.max_duration:
+            return False
+        return True
+
     def validate_spec(self, spec: VideoGenSpec) -> None:
-        """classify 之后、render 之前调用;不支持的形态/参数直接抛错。"""
+        """classify 之后、render 之前调用;不支持的形态/参数直接抛错。
+
+        检查维度(均与 ``can_handle_spec`` 对齐,前者抛错后者返回 False):
+        - ``supported_shapes``:任务形态
+        - ``supported_resolutions``:分辨率
+        - ``supported_ratios``:宽高比(原字段空集时不启用,本次新增)
+        - ``min/max_duration``:时长上下限(0 = 不启用,本次新增)
+        - ``max_images/videos/audios``:媒体数(``can_handle_spec`` 故意不检,
+          由本方法在 invoke 阶段兜底)
+        """
         if self.supported_shapes and spec.shape not in self.supported_shapes:
             raise UnsupportedProviderShapeError(
                 f"供应商 {self.name or self.__class__.__name__} 不支持任务形态 {spec.shape.value}",
@@ -244,6 +290,27 @@ class SeedanceProvider(ABC):
             raise UnsupportedProviderShapeError(
                 f"供应商 {self.name or self.__class__.__name__} 不支持分辨率 {spec.resolution}",
                 code="UNSUPPORTED_RESOLUTION",
+            )
+        if (
+            self.supported_ratios
+            and spec.ratio is not None
+            and spec.ratio not in self.supported_ratios
+        ):
+            raise UnsupportedProviderShapeError(
+                f"供应商 {self.name or self.__class__.__name__} 不支持宽高比 {spec.ratio}",
+                code="UNSUPPORTED_RATIO",
+            )
+        if self.min_duration and spec.duration and spec.duration < self.min_duration:
+            raise UnsupportedProviderShapeError(
+                f"供应商 {self.name or self.__class__.__name__} 不支持时长 {spec.duration}s"
+                f"(下限 {self.min_duration}s)",
+                code="UNSUPPORTED_DURATION",
+            )
+        if self.max_duration and spec.duration and spec.duration > self.max_duration:
+            raise UnsupportedProviderShapeError(
+                f"供应商 {self.name or self.__class__.__name__} 不支持时长 {spec.duration}s"
+                f"(上限 {self.max_duration}s)",
+                code="UNSUPPORTED_DURATION",
             )
         n_img = len(spec.images())
         n_vid = len(spec.videos())

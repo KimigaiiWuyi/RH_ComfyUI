@@ -30,6 +30,20 @@ class ProviderChannel(ABC):
     async def unavailable_reason(self) -> str:
         return f"通道 {self.name} 不可用(缺少配置)"
 
+    def supports_request(self, request: GenerationRequest) -> bool:
+        """判断该通道是否能处理此请求(默认 True,向后兼容)。
+
+        Override 此方法可在不发起 HTTP 的前提下排除不兼容的请求,
+        避免 LB 把任务投到注定失败的通道。Seedance 类通道已实现该钩子
+        —— 否则会出现 "1080P 投到只支持 720P 的通道 → retryable=False
+        → 整单失败" 的问题。
+
+        默认实现:永远返回 True。基类之外的通道(本地 ComfyUI 等)若未
+        声明能力矩阵,继续走原有 invoke() 路径,由模型级
+        ``validate()``/Adapter 自检兜底,不影响现有行为。
+        """
+        return True
+
     @abstractmethod
     async def invoke(self, **kwargs: Any) -> NodeOutput:
         """执行一次生成;参数由所属模型的 execute_on_channel 约定

@@ -169,6 +169,29 @@ class SeedanceProviderChannel(ProviderChannel):
     def audit_key_prefix(self) -> str:
         return (self._resolve_creds().api_key or "")[:6]
 
+    def supports_request(self, request: GenerationRequest) -> bool:
+        """能力预检:不发起 HTTP,仅复用 provider.can_handle_spec()。
+
+        复用 ``_get_provider()`` 的缓存(provider 实例化有 credentials
+        解析开销,但 ``self._cached`` 类实例级别缓存,二次调用零 IO)。
+
+        错误兜底策略:任何异常一律返回 True —— 分类失败 / Provider 未
+        实例化 / 能力字段意外等边角情况,留给 ``invoke()`` 自己暴露;
+        这里保守"放行"避免误杀可救活的请求(比如凭证切换中短暂返回 None)。
+
+        故意**不**检查媒体数:can_handle_spec 自身已省略该维度,
+        多图多视频场景即便某家通道 max_images=2 也可能由别家承接,
+        不该在路由阶段就砍掉整条候选线。
+        """
+        try:
+            provider = self._get_provider()
+            if provider is None:
+                return True
+            spec = classify_video_spec(request)
+            return provider.can_handle_spec(spec)
+        except Exception:
+            return True
+
     async def invoke(self, **kwargs: Any) -> NodeOutput:
         request: GenerationRequest = kwargs["request"]
         on_progress = kwargs.get("on_progress")
