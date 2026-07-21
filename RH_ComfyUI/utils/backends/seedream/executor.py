@@ -7,6 +7,8 @@
 3. 空 key 直接 raise,不在 _headers() 拼 "Bearer "(§11.3 红线 1)
 4. AdapterChannel.invoke(models/bridge.py:53) 捕获 RuntimeError 后
    包成 ChannelError(retryable=True),实现供应商间自动 failover
+5. 参考图走 R2 外链(ARK 对 base64 body 限 ~2.4MB,超则 413):
+   executor 在调 mapper 前把 bytes 上传 R2,注入 request.params["_image_urls"]
 """
 
 from __future__ import annotations
@@ -72,6 +74,10 @@ class SeedreamAdapter(Adapter):
         if node.backend_model:
             request.params["model"] = node.backend_model
 
+        # 参考图走 R2 外链(避免 base64 body 超限 413)
+        if request.images:
+            await self._materialize_images(request.images, request.params)
+
         await _emit(on_progress, ProgressEvent(stage="running", percent=15, message="Seedream 生成中"))
         result = await node.mapper_func(request, self.api)
         await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="完成"))
@@ -99,6 +105,33 @@ class SeedreamAdapter(Adapter):
             f"Seedream 节点 {node.name} 返回了无法处理的类型: {type(result)}"
         )
 
+    async def _materialize_images(
+        self, images: list[bytes], params: dict
+    ) -> None:
+        """bytes 列表 → R2 外链,注入 params["_image_urls"]
+
+        R2 失败抛 RuntimeError,让上层 ChannelError(retryable=True) 触发 failover。
+        """
+        try:
+            from aigc_system.aifoundation.media_host import materialize
+            from aigc_system.aifoundation.media_host import MediaPublishError
+        except ImportError:
+            # canvas_backend 未装 — 回落 data URL,由 mapper 自己处理
+            return
+
+        try:
+            urls = [
+                u
+                for u in await asyncio.gather(
+                    *(materialize(img, "image/png") for img in images)
+                )
+                if u
+            ]
+            if urls:
+                params["_image_urls"] = urls
+        except MediaPublishError as exc:
+            raise RuntimeError(f"Seedream 输入图上传 R2 失败: {exc}") from exc
+
 
 # 向后兼容
 SeedreamBackend = SeedreamAdapter
@@ -111,3 +144,7 @@ async def _emit(cb, event: ProgressEvent) -> None:
         await cb(event)
     except Exception:  # noqa: BLE001
         pass
+
+
+# asyncio 引用(给 _materialize_images 用)
+import asyncio  # noqa: E402, F401
