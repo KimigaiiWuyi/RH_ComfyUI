@@ -25,6 +25,7 @@ from ..base.errors import GenerationError, describe_exception
 from ..schema.types import NodeOutput
 from ..schema.request import GenerationResult, GenerationRequest
 from ..telemetry.recorder import record_dispatch
+from ...utils.core.safe_json import mask_body
 
 
 def _resolve_timeout() -> float:
@@ -43,6 +44,9 @@ def _resolve_timeout() -> float:
 
 async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> GenerationResult:
     from ..routing.router import route
+
+    # 在校验/normalize/上下文回填之前冻结输入,保证统计表记录调用方原始请求。
+    request_body = mask_body(request)
 
     # 1. 路由(内部含 supports() 匹配与可用性过滤)
     model = await route(request)
@@ -98,6 +102,7 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
         result.metadata.setdefault("elapsed_ms", elapsed_ms)
         await record_dispatch(
             request=request,
+            request_body=request_body,
             result=result,
             output=output,
             model=model,
@@ -117,6 +122,7 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
         # 先落统计(status=failed),再退款并标记 refunded,顺序保证标记能找到记录
         await record_dispatch(
             request=request,
+            request_body=request_body,
             result=None,
             output=output,
             model=model,

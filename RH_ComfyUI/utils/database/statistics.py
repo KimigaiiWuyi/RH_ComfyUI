@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from gsuid_core.logger import logger
 
 from ..core.request import TaskType
+from ..core.safe_json import dump_body
 
 if TYPE_CHECKING:
     from ..core.request import GenerationResult, GenerationRequest
@@ -148,6 +149,7 @@ async def record_task(
     trace_id: str = "",
     entry_point: str = "",
     backend_key_prefix: str = "",
+    request_body: Optional[dict[str, Any]] = None,
 ) -> Optional[int]:
     """记录一次任务执行(模块函数,从 executor.py 直接调用)。
 
@@ -156,6 +158,10 @@ async def record_task(
     try:
         # 1. 提取核心输入参数
         core = _extract_core_params(request)
+
+        # dispatcher 传入的快照通常已经脱敏; dump_body 对其再次处理是幂等的,
+        # 也兼容旧调用点/第三方直接传入未脱敏 dict 的情况。
+        request_body_json = dump_body(request_body if request_body is not None else request)
 
         # 2. 序列化原始厂商响应(失败时 result 为 None,跳过)
         raw_json = ""
@@ -230,6 +236,7 @@ async def record_task(
             point_cost=int(node.point_cost or 0),
             error_message=error_msg,
             raw_response_json=raw_json,
+            request_body_json=request_body_json,
             trace_id=trace_id[:64] if trace_id else "",
             created_at=datetime.now(timezone.utc),
             entry_point=entry_point[:16] if entry_point else "",

@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from dataclasses import field, dataclass
 
 from gsuid_core.logger import logger
@@ -85,6 +85,7 @@ async def record_dispatch(
     error: Optional[str],
     ctx: "DispatchContext",
     point_cost: Optional[int] = None,
+    request_body: Optional[dict[str, Any]] = None,
 ) -> None:
     """统计落库(内部兜底,永不抛出)
 
@@ -101,6 +102,7 @@ async def record_dispatch(
 
         await record_task(
             request=request,
+            request_body=request_body,
             result=result,
             node=_node_view(model, output, point_cost),  # type: ignore[arg-type]  # duck-typed NodeDef 视图
             status=status,

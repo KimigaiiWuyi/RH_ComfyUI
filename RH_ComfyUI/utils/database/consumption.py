@@ -473,6 +473,7 @@ async def build_record_detail_payload(record_id: int) -> Optional[dict[str, Any]
             "entry_point": record.entry_point,
             "backend_key_prefix": record.backend_key_prefix,
             "extra_params_json": record.extra_params_json,
+            "request_body_json": record.request_body_json,
             "raw_response_json": record.raw_response_json,
             "saved_files": _parse_saved_files(record.saved_files_json),
         }

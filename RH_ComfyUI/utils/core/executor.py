@@ -20,6 +20,7 @@ from gsuid_core.logger import logger
 
 from .types import NodeOutput, ProgressEvent
 from .request import OutputType, GenerationResult, GenerationRequest
+from .safe_json import mask_body
 from ..database.statistics import record_task
 
 if TYPE_CHECKING:
@@ -148,6 +149,8 @@ async def execute_generation(
     Returns:
         GenerationResult(向下兼容旧 API)
     """
+    request_body = mask_body(request)
+
     from ..backends import backend_registry
 
     adapter = backend_registry.get(node.backend)
@@ -197,6 +200,7 @@ async def execute_generation(
             elapsed_ms = int((time.monotonic() - start_ts) * 1000)
             await record_task(
                 request=request,
+                request_body=request_body,
                 result=result,
                 node=node,
                 status=status,

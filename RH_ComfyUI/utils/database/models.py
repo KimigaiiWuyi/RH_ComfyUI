@@ -214,6 +214,9 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
 
     # ── 原始数据 ──
     raw_response_json: str = Field(default="", title="厂商原始响应 JSON(已截断到 64KB)")
+    # 调度入口冻结的完整 GenerationRequest;仅替换 bytes/base64 媒体内容
+    # (旧记录为空串,由 exec_list 自动补列)
+    request_body_json: str = Field(default="", title="原始请求体 JSON(Base64 已截断)")
 
     # ── 本地产物(2026-07-17 新增,exec_list 补 ALTER;旧记录为空串) ──
     # 供应商返回 base64/二进制时 raw 里没有 URL,但 executor._save_output 会把
@@ -631,6 +634,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         created_at: datetime,
         entry_point: str = "",
         saved_files_json: str = "",
+        request_body_json: str = "",
     ) -> int:
         """插入一条任务执行记录;返回新行 id。供 statistics.record_task 调用。
 
@@ -662,6 +666,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             point_cost=point_cost,
             error_message=error_message,
             raw_response_json=raw_response_json,
+            request_body_json=request_body_json,
             trace_id=trace_id,
             created_at=created_at,
             entry_point=entry_point,
@@ -811,5 +816,6 @@ exec_list.extend(
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN entry_point VARCHAR(16) DEFAULT ""',
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN backend_key_prefix VARCHAR(16) DEFAULT ""',
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN saved_files_json TEXT DEFAULT ""',
+        'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN request_body_json TEXT DEFAULT ""',
     ]
 )

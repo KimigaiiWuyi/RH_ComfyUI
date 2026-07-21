@@ -299,6 +299,48 @@ def test_dispatch_timeout_zero_means_unlimited(monkeypatch):
         model_registry.unregister(model.name)
 
 
+class _MutatingModel(FakeModel):
+    name = "fake_mutating_model"
+
+    async def execute_on_channel(
+        self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+    ) -> NodeOutput:
+        request.prompt = "normalized prompt"
+        request.params["quality"] = "mutated"
+        return NodeOutput(output_type="image", data=b"png", mime_type="image/png")
+
+
+def test_dispatch_records_request_before_model_mutates_it(monkeypatch):
+    import importlib
+
+    captured: dict[str, Any] = {}
+    disp = importlib.import_module("RH_ComfyUI.core.dispatch.dispatcher")
+
+    async def _capture(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(disp, "record_dispatch", _capture)
+    model = _MutatingModel()
+    model_registry.register(model)
+    try:
+        request = GenerationRequest(
+            task_type=TaskType.IMAGE,
+            prompt="original prompt",
+            model=model.name,
+            params={"quality": "original", "image_base64": "AQID"},
+        )
+        asyncio.run(dispatch(request, _ctx(FakePolicy())))
+
+        assert request.prompt == "normalized prompt"
+        assert captured["request_body"]["prompt"] == "original prompt"
+        assert captured["request_body"]["params"] == {
+            "quality": "original",
+            "image_base64": "<base64 len=4>",
+        }
+    finally:
+        model_registry.unregister(model.name)
+
+
 def _mute_recording(monkeypatch):
     """统计落库依赖真实数据库,单测中静音"""
     import importlib
