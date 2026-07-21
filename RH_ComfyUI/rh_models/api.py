@@ -84,6 +84,8 @@ class ModelEntry:
     #    input_schema 即可判定是否可传参考图,以及最多几张 ──
     accepts_images: bool = False
     max_input_images: int = 0
+    # ── 2026-07-21 积分范围新增:前端展示"最低~最高积分"用 ──
+    point_range: dict[str, int] = field(default_factory=lambda: {"min": 0, "max": 0})
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -105,6 +107,7 @@ class ModelEntry:
             input_schema=dict(data.get("input_schema", {})),
             output_schema=dict(data.get("output_schema", {})),
             requirements=list(data.get("requirements", [])),
+            point_range=data.get("point_range", {"min": 0, "max": 0}),
         )
 
 
@@ -179,6 +182,14 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
     accepts_images = img_port is not None
     max_input_images = int(img_port.max_items) if img_port is not None and img_port.max_items else 0
 
+    # 积分范围:min ~ max(动态计费模型有范围,固定计费模型 min=max)
+    range_min = range_max = node.point_cost
+    if model_obj is not None:
+        try:
+            range_min, range_max = model_obj.point_range()
+        except Exception:  # noqa: BLE001
+            pass
+
     return ModelEntry(
         name=node.name,
         display_name=node.display_name,
@@ -199,6 +210,7 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
         execution_mode=execution_mode,
         accepts_images=accepts_images,
         max_input_images=max_input_images,
+        point_range={"min": range_min, "max": range_max},
     )
 
 
@@ -240,6 +252,13 @@ async def _build_entry_from_model(model) -> ModelEntry:  # noqa: ANN001
     accepts_images = img_port is not None
     max_input_images = int(img_port.max_items) if img_port is not None and img_port.max_items else 0
 
+    # 积分范围
+    range_min = range_max = model.point_cost
+    try:
+        range_min, range_max = model.point_range()
+    except Exception:  # noqa: BLE001
+        pass
+
     return ModelEntry(
         name=model.name,
         display_name=model.display_name,
@@ -258,6 +277,7 @@ async def _build_entry_from_model(model) -> ModelEntry:  # noqa: ANN001
         execution_mode=model.execution_mode,
         accepts_images=accepts_images,
         max_input_images=max_input_images,
+        point_range={"min": range_min, "max": range_max},
     )
 
 
@@ -447,9 +467,190 @@ async def build_backend_summary() -> dict[str, Any]:
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════
+#  动态积分估算
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def estimate_model_points(
+    model_name: str,
+    *,
+    ratio: Optional[str] = None,
+    image_size: Optional[str] = None,
+    quality: Optional[str] = None,
+    resolution: Optional[str] = None,
+    duration: Optional[int] = None,
+    generate_audio: Optional[bool] = None,
+    num_input_images: int = 0,
+    num_video_refs: int = 0,
+) -> dict[str, Any]:
+    """根据用户实时选择的参数,估算某模型消耗的积分。
+
+    供前端在用户切换 ratio/image_size/quality/resolution/duration/已连输入数量时
+    实时预览扣费,无需真正发起生成。对未覆盖 estimate_cost 的模型,返回其静态 point_cost。
+
+    Args:
+        ratio: 输出宽高比,如 "1:1" / "16:9" / "auto"。透传到 GenerationRequest.ratio
+            (顶层字段)和 params['ratio'](双轨,因不同模型读法不一)。
+        image_size: 图片分辨率档位,如 "1K" / "2K" / "4K"。塞 params['image_size']。
+        quality: 生成质量档位,如 "low" / "medium" / "high"。塞 params['quality']。
+        resolution: 视频分辨率,如 "480p" / "720p" / "1080p"。塞 params['resolution']。
+        duration: 视频时长(秒)。塞 GenerationRequest.duration(顶层字段,
+            Seedance 等视频模型从顶层读)和 params['duration'](双轨)。
+        generate_audio: 是否生成同步音频(Seedance 1.5 Pro)。塞 params['generate_audio']。
+        num_input_images: 已连输入图数量(0=文生图)。estimate_cost 只取 len(),
+            不读图片内容,用占位 bytes 即可,避免下载/解析真实图片。
+        num_video_refs: 已连输入视频参考数(0=文生视频)。同 num_input_images,
+            用占位对象让 len() 命中。
+
+    Returns:
+        {
+            "model": str,
+            "point_cost": int,        # 估算积分(动态或静态)
+            "is_dynamic": bool,       # True=由 estimate_cost 动态算出;False=静态兜底
+            "point_range": {          # 积分范围(min, max)
+                "min": int,
+                "max": int,
+            },
+            "params": {               # 实际参与计算的参数(归一化后)
+                "ratio": str|null,
+                "image_size": str|null,
+                "quality": str|null,
+                "resolution": str|null,
+                "duration": int|null,
+                "generate_audio": bool|null,
+                "num_input_images": int,
+                "num_video_refs": int,
+            },
+        }
+    """
+    from ..core.routing.registry import model_registry
+    from ..utils.core.request import TaskType, GenerationRequest
+
+    model_obj = model_registry.get(model_name)
+    if model_obj is None:
+        return {
+            "model": model_name,
+            "point_cost": 0,
+            "is_dynamic": False,
+            "error": f"模型 {model_name!r} 未注册",
+            "params": _build_echo_params(
+                ratio=ratio,
+                image_size=image_size,
+                quality=quality,
+                resolution=resolution,
+                duration=duration,
+                generate_audio=generate_audio,
+                num_input_images=num_input_images,
+                num_video_refs=num_video_refs,
+            ),
+        }
+
+    params: dict[str, Any] = {}
+    if image_size is not None:
+        params["image_size"] = image_size
+    if quality is not None:
+        params["quality"] = quality
+    if resolution is not None:
+        params["resolution"] = resolution
+    if duration is not None:
+        params["duration"] = duration
+    if generate_audio is not None:
+        params["generate_audio"] = generate_audio
+
+    # 占位 bytes:estimate_cost 只调 len() 不读内容,避免下载真实图片。
+    # 这里跟实际生成路径用的同一份 GenerationRequest,保证字段语义一致。
+    placeholder_images = [b""] * max(num_input_images, 0) if num_input_images > 0 else []
+    # video_refs 同理:占位对象仅供 len() 命中(video_refs 是 list[MediaRef],estimate 只判 bool/length)
+    placeholder_video_refs = [object()] * max(num_video_refs, 0) if num_video_refs > 0 else []
+
+    # ratio 顶层 + duration 顶层,因为部分模型(Seedance2Def 等)直接从 request.duration/request.ratio 读
+    req = GenerationRequest(
+        task_type=TaskType.IMAGE,
+        prompt="",  # 估算不需要真实 prompt
+        ratio=ratio,
+        resolution=resolution,
+        duration=duration if duration is not None else 5,  # GenerationRequest 默认 5
+        params=params,
+        images=placeholder_images,
+        video_refs=placeholder_video_refs,
+    )
+
+    try:
+        cost = model_obj.estimate_cost(req)
+    except Exception as e:  # noqa: BLE001 - 估算失败不阻断前端,回落静态值
+        logger.warning(f"[estimate] {model_name} 动态估算失败({e}),回落静态 point_cost")
+        return {
+            "model": model_name,
+            "point_cost": model_obj.point_cost,
+            "is_dynamic": False,
+            "error": f"动态估算失败: {e}",
+            "params": _build_echo_params(
+                ratio=ratio,
+                image_size=image_size,
+                quality=quality,
+                resolution=resolution,
+                duration=duration,
+                generate_audio=generate_audio,
+                num_input_images=num_input_images,
+                num_video_refs=num_video_refs,
+            ),
+        }
+
+    is_dynamic = cost != model_obj.point_cost
+
+    # 获取积分范围
+    try:
+        range_min, range_max = model_obj.point_range()
+    except Exception:  # noqa: BLE001
+        range_min = range_max = model_obj.point_cost
+
+    return {
+        "model": model_name,
+        "point_cost": cost,
+        "is_dynamic": is_dynamic,
+        "point_range": {"min": range_min, "max": range_max},
+        "params": _build_echo_params(
+            ratio=ratio,
+            image_size=image_size,
+            quality=quality,
+            resolution=resolution,
+            duration=duration,
+            generate_audio=generate_audio,
+            num_input_images=num_input_images,
+            num_video_refs=num_video_refs,
+        ),
+    }
+
+
+def _build_echo_params(
+    *,
+    ratio: Optional[str],
+    image_size: Optional[str],
+    quality: Optional[str],
+    resolution: Optional[str],
+    duration: Optional[int],
+    generate_audio: Optional[bool],
+    num_input_images: int,
+    num_video_refs: int,
+) -> dict[str, Any]:
+    """构造 estimate 返回值里的 params echo 字典,所有路径共用避免漂移。"""
+    return {
+        "ratio": ratio,
+        "image_size": image_size,
+        "quality": quality,
+        "resolution": resolution,
+        "duration": duration,
+        "generate_audio": generate_audio,
+        "num_input_images": num_input_images,
+        "num_video_refs": num_video_refs,
+    }
+
+
 __all__ = [
     "ModelEntry",
     "build_model_catalog",
     "build_backend_summary",
     "get_models_by_task",
+    "estimate_model_points",
 ]

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from ..bridge import MusicPipelineModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
-from ...utils.core.request import TaskType
+from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.music import ace_step_mapper as _ace_step_mapper
 
@@ -59,6 +59,14 @@ class AceStep15Def(MusicPipelineModel):
                 priority=70,
             ),
         )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """固定价格:10 积分/次。"""
+        return 10
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:固定值(min=max=10)。"""
+        return (10, 10)
 
 
 ALL_MODELS = [AceStep15Def]

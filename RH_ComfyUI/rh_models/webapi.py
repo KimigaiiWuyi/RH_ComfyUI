@@ -1,18 +1,24 @@
 """RH_ComfyUI 模型清单 — Web API 路由模块.
 
 通过复用框架的 FastAPI app([`gsuid_core.app_life.app`](../../../gsuid_core/app_life.py))
-对外暴露三个模型查询接口。Bot 启动且 `core_config.ENABLE_HTTP=True`
+对外暴露四个模型查询接口。Bot 启动且 `core_config.ENABLE_HTTP=True`
 时,以下路径立即在 `HOST:PORT` 上生效:
 
 - `GET /api/RH_ComfyUI/models`           — 全量模型清单(按任务类型分组,含后端可用性)
 - `GET /api/RH_ComfyUI/models/summary`   — 后端可用性摘要(总览面板用)
+- `GET /api/RH_ComfyUI/models/estimate`  — 估算某模型在指定参数下的积分消耗
 - `GET /api/RH_ComfyUI/models/{task}`    — 按任务类型(image/video/music/speech)过滤
+
+注意:`summary` 和 `estimate` 必须注册在 `{task_type}` 之前 —— Starlette 按注册
+顺序匹配,否则这两个字面路径会被当成 task_type 吃掉。
 
 把这些路由从 `__init__.py` 拆出来,避免触发器注册模块掺杂 Web 层代码;
 `__init__.py` 仅 `import .webapi` 即可确保路由在启动时挂载到 FastAPI app。
 """
 
 from __future__ import annotations
+
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -23,6 +29,7 @@ from .api import (
     get_models_by_task,
     build_model_catalog,
     build_backend_summary,
+    estimate_model_points,
 )
 
 # ─────────────────────────── OpenAPI 响应模型 ───────────────────────────
@@ -71,6 +78,15 @@ class BackendSummary(_Base):
     totals: dict = {}
 
 
+class EstimateResult(_Base):
+    """/models/estimate 的返回。"""
+
+    model: str
+    point_cost: int = 0
+    is_dynamic: bool = False
+    params: dict = {}
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  FastAPI 路由 — 直接挂在框架 app 上
 # ═══════════════════════════════════════════════════════════════════════
@@ -108,8 +124,8 @@ async def list_all_models() -> dict[str, object]:
     return await build_model_catalog(include_unavailable=True)
 
 
-# /models/summary 必须注册在 /models/{task_type} 之前 —— Starlette 按注册顺序匹配,
-# 否则 summary 会被当成 task_type 吃掉。
+# /models/summary 与 /models/estimate 都必须在 /models/{task_type} 之前注册
+# —— Starlette 按注册顺序匹配,否则它们会被当成 task_type 吃掉。
 @app.get(
     "/api/RH_ComfyUI/models/summary",
     summary="模型可用性摘要",
@@ -130,6 +146,51 @@ async def backend_summary() -> dict[str, object]:
 
 
 @app.get(
+    "/api/RH_ComfyUI/models/estimate",
+    summary="估算模型积分消耗(动态)",
+    tags=["生成引擎/模型清单"],
+    response_model=EstimateResult,
+)
+async def estimate_model_cost(
+    model: str,
+    ratio: Optional[str] = None,
+    image_size: Optional[str] = None,
+    quality: Optional[str] = None,
+    resolution: Optional[str] = None,
+    duration: Optional[int] = None,
+    generate_audio: Optional[bool] = None,
+    num_input_images: int = 0,
+    num_video_refs: int = 0,
+) -> dict[str, object]:
+    """根据用户实时选择的参数,估算某模型消耗的积分。
+
+    前端在用户切换 ratio / image_size / quality / resolution / duration / 已连输入数量时调用,
+    实时预览扣费。
+
+    例(图片模型):
+      ``GET /models/estimate?model=gpt-image-2&ratio=1:1&image_size=4K&quality=high&num_input_images=3``
+    例(视频模型):
+      ``GET /models/estimate?model=seedance2&resolution=1080p&duration=10&num_video_refs=1``
+
+    num_input_images / num_video_refs 为已连输入数量(0=文生)。后端用占位 bytes/对象表示,
+    estimate_cost 只取 len()/bool 不读内容,不会触发真实媒体下载。
+
+    对未覆盖 ``estimate_cost()`` 的模型,返回其静态 point_cost。
+    """
+    return await estimate_model_points(
+        model_name=model,
+        ratio=ratio,
+        image_size=image_size,
+        quality=quality,
+        resolution=resolution,
+        duration=duration,
+        generate_audio=generate_audio,
+        num_input_images=num_input_images,
+        num_video_refs=num_video_refs,
+    )
+
+
+@app.get(
     "/api/RH_ComfyUI/models/{task_type}",
     summary="按任务类型列出模型",
     tags=["生成引擎/模型清单"],
@@ -146,7 +207,8 @@ async def list_models_by_task(task_type: str) -> dict[str, object]:
 
 logger.info(
     "[rh_models] FastAPI 路由已注册: /api/RH_ComfyUI/models, "
-    "/api/RH_ComfyUI/models/summary, /api/RH_ComfyUI/models/{task_type}"
+    "/api/RH_ComfyUI/models/summary, /api/RH_ComfyUI/models/{task_type}, "
+    "/api/RH_ComfyUI/models/estimate"
 )
 
 
@@ -154,4 +216,5 @@ __all__ = [
     "list_all_models",
     "list_models_by_task",
     "backend_summary",
+    "estimate_model_cost",
 ]

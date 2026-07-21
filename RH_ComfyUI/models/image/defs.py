@@ -10,13 +10,16 @@ from __future__ import annotations
 from ..bridge import ImagePipelineModel
 from .overrides import Seedream5ProImageModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
-from ...utils.core.request import TaskType
+from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...core.channels.channel import ChannelBinding
 from ...utils.mappers.seedream import seedream_mapper as _seedream_mapper
 from ...utils.mappers.gpt_image2 import gpt_image2_mapper as _gpt_image2_mapper
 from ...utils.mappers.image_edit import qwen_edit_mapper as _qwen_edit_mapper
 from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minimax_image01_mapper
+from ...utils.mappers.nanobanana2_billing import estimate_nanobanana2_points
+from ...utils.mappers.nanobanana1_billing import estimate_nanobanana1_points
+from ...utils.mappers.banana_pro_billing import estimate_banana_pro_points
 
 
 class AnimaDef(ImagePipelineModel):
@@ -150,6 +153,21 @@ class Banana2Def(ImagePipelineModel):
     async def unavailable_reason(self) -> str:
         return "Nano Banana 2 未配置 Gemini API Key(Gemini_Image_apikey)"
 
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按输出分辨率分档计费(60 美元/1M tokens)。
+
+        image_size 缺失 → 按 2K 档(默认值)估算。
+        """
+        image_size = request.params.get("image_size")
+        return estimate_nanobanana2_points(image_size)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:512 档(最小) ~ 4K 档(最大)。"""
+        return (
+            estimate_nanobanana2_points("512"),
+            estimate_nanobanana2_points("4K"),
+        )
+
 
 class Banana1Def(ImagePipelineModel):
     """Nano Banana 1 — 一代模型(gemini-2.5-flash-image),走同一条 Gemini 通道
@@ -225,9 +243,28 @@ class Banana1Def(ImagePipelineModel):
     async def unavailable_reason(self) -> str:
         return "Nano Banana 1 无可用供应商:配置 Gemini(Gemini_Image_apikey)或外部供应商插件"
 
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:一代模型无尺寸档位,固定 1290 tokens(30 美元/1M tokens)。"""
+        return estimate_nanobanana1_points()
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:固定值(min=max)。"""
+        pts = estimate_nanobanana1_points()
+        return (pts, pts)
+
 
 class BananaProDef(ImagePipelineModel):
-    """Nano Banana Pro — 定义迁移自 pipelines YAML(2026-07 起以代码为准)"""
+    """Nano Banana Pro — 定义迁移自 pipelines YAML(2026-07 起以代码为准)
+
+    与 gpt-image-2 共享后端(gpt-image-2)和 mapper,但计费独立:
+    输入 0.0011 美元/张 + 输出 120 美元/1M tokens 按分辨率分档(1K~2K 同价,4K 单独一档)。
+    point_cost 仅作未知参数时的兜底。
+
+    ⚠️ 注意:此模型 schema 中**没有** quality 字段。banana_pro 与 gpt-image-2 共享
+    后端 API(支持透传 quality),但官方计费曲线不区分 quality 档位 —— 因此把 quality
+    暴露给前端会让用户在切换 quality 时看到积分不变,造成"积分 bug"误判。前端要切 quality
+    请用 gpt-image-2。
+    """
 
     def __init__(self) -> None:
         super().__init__(self.node_def())
@@ -267,23 +304,23 @@ class BananaProDef(ImagePipelineModel):
                     title="参考图片",
                     description="参考图片:0 张=文生图,1+ 张=图片编辑",
                 ),
-                # 上游按 aspect_ratio→size 映射请求(GPTImage2API),不吃宽高像素
+                # 上游按 ratio + image_size → size 映射请求(GPTImage2API),不吃宽高像素
                 "ratio": PortSpec(
                     type=PortType.ENUM,
-                    default="9:16",
-                    values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    default="auto",
+                    values=["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
                     title="宽高比",
-                    description="输出宽高比,上游按比例映射为 size 参数",
+                    description="输出宽高比,与分辨率组合映射为 size 参数",
                 ),
-                # NBP 档位无 512;由支持尺寸档的通道(如 AI 基座 NBP)消费,
-                # 走 OpenAI 兼容网关的通道忽略该字段(size 已由 ratio 决定)
                 "image_size": PortSpec(
                     type=PortType.ENUM,
                     default="2K",
                     values=["1K", "2K", "4K"],
-                    title="尺寸档位",
-                    description="输出尺寸档位,NBP 不支持 512",
+                    title="分辨率",
+                    description="输出分辨率档位,与宽高比组合映射为 size 参数",
                 ),
+                # 注:故意不暴露 quality 字段 —— 官方计费曲线不区分 quality 档位,
+                # 暴露会让前端误以为切 quality 会影响积分(实际不影响)。
             },
             outputs={
                 "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
@@ -295,9 +332,34 @@ class BananaProDef(ImagePipelineModel):
             ),
         )
 
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:独立于 gpt-image-2,按输入图片数 + 输出分辨率分档计费。
+
+        输入:每张 0.0011 美元;输出:120 美元/1M tokens,按 image_size 分档
+        (1K~2K 同价 14 积分,4K 24 积分,按官方文档 token 数表)。
+        image_size 缺失 → 按 2K 档(默认值)估算。
+
+        ⚠️ 故意不读 quality:banana_pro 计费曲线无 quality 维度,读它会导致
+        切换 quality 时积分预期变化但实际不变的"假 bug"。
+        """
+        image_size = request.params.get("image_size")
+        num_input_images = len(request.images) if request.images else 0
+        return estimate_banana_pro_points(num_input_images, image_size)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(0 输入 + 1K) ~ 最大(3 输入 + 4K)。"""
+        return (
+            estimate_banana_pro_points(0, "1K"),
+            estimate_banana_pro_points(3, "4K"),
+        )
+
 
 class GptImage2Def(ImagePipelineModel):
-    """GPT-Image2 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)"""
+    """GPT-Image2 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)
+
+    动态计费:按 quality + 输出像素面积折算 tokens,210 元/1M tokens。
+    point_cost 仅作未知参数时的兜底。
+    """
 
     def __init__(self) -> None:
         super().__init__(self.node_def())
@@ -351,13 +413,27 @@ class GptImage2Def(ImagePipelineModel):
                     title="参考图片",
                     description="参考图片,可选。上传即自动进入图生图/编辑模式,留空即为文生图",
                 ),
-                # OpenAI images API 只吃 size(由 aspect_ratio 映射),不吃宽高像素
+                # OpenAI images API 接受 size(由 ratio + image_size 共同映射) + quality
                 "ratio": PortSpec(
                     type=PortType.ENUM,
-                    default="9:16",
-                    values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    default="auto",
+                    values=["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
                     title="宽高比",
-                    description="输出宽高比,上游按比例映射为 size 参数",
+                    description="输出宽高比,与分辨率组合映射为 size 参数",
+                ),
+                "image_size": PortSpec(
+                    type=PortType.ENUM,
+                    default="2K",
+                    values=["1K", "2K", "4K"],
+                    title="分辨率",
+                    description="输出分辨率档位,与宽高比组合映射为 size 参数",
+                ),
+                "quality": PortSpec(
+                    type=PortType.ENUM,
+                    default="medium",
+                    values=["low", "medium", "high"],
+                    title="生成质量",
+                    description="生成质量档位",
                 ),
             },
             outputs={
@@ -368,6 +444,26 @@ class GptImage2Def(ImagePipelineModel):
                 mode="sync",
                 priority=65,
             ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按 quality + ratio + image_size 折算 tokens。
+
+        210 元 / 1M tokens,1 元 = 100 积分。参数缺失时按 medium + 1024x1024 估算。
+        """
+        from ...utils.mappers.gpt_image2_billing import estimate_gpt_image2_points
+
+        quality = request.params.get("quality")
+        image_size = request.params.get("image_size")
+        return estimate_gpt_image2_points(quality, request.ratio, image_size)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(low + 1K) ~ 最大(high + 4K)。"""
+        from ...utils.mappers.gpt_image2_billing import estimate_gpt_image2_points
+
+        return (
+            estimate_gpt_image2_points("low", "1:1", "1K"),
+            estimate_gpt_image2_points("high", "1:1", "4K"),
         )
 
 
@@ -424,7 +520,10 @@ class MinimaxImage01Def(ImagePipelineModel):
 
 
 class Qwen2511Def(ImagePipelineModel):
-    """Qwen-Edit 2511 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)"""
+    """Qwen-Edit 2511 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)
+
+    固定价格:15 积分/次。
+    """
 
     def __init__(self) -> None:
         super().__init__(self.node_def())
@@ -436,7 +535,7 @@ class Qwen2511Def(ImagePipelineModel):
             display_name="Qwen-Edit 2511",
             task_type=TaskType("image"),
             backend="comfyui",
-            point_cost=4,
+            point_cost=15,
             description="专业的图像编辑模型,支持中文指令和多图输入",
             knowledge_content=(
                 "专业的图像编辑模型(Qwen-Image-Edit 2511)。"
@@ -477,7 +576,10 @@ class Qwen2511Def(ImagePipelineModel):
 
 
 class Qwen2512Def(ImagePipelineModel):
-    """Qwen-Image 2512 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)"""
+    """Qwen-Image 2512 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)
+
+    固定价格:15 积分/次。
+    """
 
     def __init__(self) -> None:
         super().__init__(self.node_def())
@@ -489,7 +591,7 @@ class Qwen2512Def(ImagePipelineModel):
             display_name="Qwen-Image 2512",
             task_type=TaskType("image"),
             backend="comfyui",
-            point_cost=2,
+            point_cost=15,
             description="千问Image2512模型，擅长中文提示词理解，适合各种风格的图像生成",
             knowledge_content=(
                 "千问Image2512模型，擅长中文提示词理解，适合各种风格的图像生成。"
@@ -540,6 +642,8 @@ class Seedream5Def(ImagePipelineModel):
     核对修改(`[开通模型服务]` 入口:console.volcengine.com/ark)。Lite 与 Pro 同属
     「Seedream 5.0 系列」,API Key 与 Base URL 直接复用 Seedance_apikey_ark /
     Seedance_BaseURL_ark(同源 ARK 平台,凭证通用)。
+
+    固定价格:输入图免费,输出图 0.22 元 = 22 积分。
     """
 
     def __init__(self) -> None:
@@ -552,7 +656,7 @@ class Seedream5Def(ImagePipelineModel):
             display_name="Seedream 5.0 Lite",
             task_type=TaskType("image"),
             backend="seedream",
-            point_cost=2,
+            point_cost=22,
             description=(
                 "火山方舟 Doubao Seedream 5.0 Lite 图片生成/编辑模型。"
                 "支持文生图 / 单图编辑 / 多图参考(0~14 张),"
@@ -774,6 +878,28 @@ class Seedream5ProDef(Seedream5ProImageModel):
                 mode="sync",
                 priority=70,
             ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:输入图首张免费 + 第 2 张起 2 积分/张,输出图按分辨率分档。
+
+        输出:1K (≤236 万像素) = 30 积分,2K (>236 万像素) = 60 积分。
+        """
+        from ...utils.mappers.seedream5_pro_billing import estimate_seedream5_pro_points
+
+        num_input_images = len(request.images) if request.images else 0
+        # 通用 estimate API 用 image_size(同 gpt-image-2 / banana_pro 一致);
+        # 节点定义内部叫 size_mode,这里兼容两种 key 以防漏传。
+        size_mode = request.params.get("image_size") or request.params.get("size_mode")
+        return estimate_seedream5_pro_points(num_input_images, size_mode)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(0 输入 + 1K) ~ 最大(10 输入 + 2K)。"""
+        from ...utils.mappers.seedream5_pro_billing import estimate_seedream5_pro_points
+
+        return (
+            estimate_seedream5_pro_points(0, "1K"),
+            estimate_seedream5_pro_points(10, "2K"),
         )
 
 

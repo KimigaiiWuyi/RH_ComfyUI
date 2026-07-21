@@ -234,27 +234,51 @@ class GPTImage2API:
             logger.error(f"[GPT-Image2] 解析 Chat Completions 失败: {e}")
             return 500
 
-    # aspect_ratio → OpenAI images API 的 size 参数映射
-    _RATIO_TO_SIZE: Dict[str, str] = {
-        "1:1": "1024x1024",
-        "16:9": "1792x1024",
-        "9:16": "1024x1792",
-        "4:3": "1024x1024",
-        "3:4": "1024x1024",
-        "21:9": "1792x1024",
-        "3:2": "1536x1024",
-        "2:3": "1024x1536",
+    # ratio + image_size → OpenAI images API 的 size 参数映射(二维)
+    # 有效尺寸:1024x1024 / 1536x1024 / 1024x1536 / 2048x2048 / 2048x1152 /
+    #          3840x2160 / 2160x3840 / auto
+    # 约束:最大边 ≤3840 / 双边 16 整除 / 长宽比 ≤3:1 / 像素 ∈ [655360, 8294400]
+    _RATIO_SIZE_MAP: Dict[str, Dict[str, str]] = {
+        "1:1":   {"1K": "1024x1024", "2K": "2048x2048", "4K": "3840x2160"},
+        "16:9":  {"1K": "1024x1024", "2K": "2048x1152", "4K": "3840x2160"},
+        "9:16":  {"1K": "1024x1024", "2K": "2048x2048", "4K": "2160x3840"},
+        "4:3":   {"1K": "1024x1024", "2K": "2048x2048", "4K": "3840x2160"},
+        "3:4":   {"1K": "1024x1024", "2K": "2048x2048", "4K": "2160x3840"},
+        "3:2":   {"1K": "1536x1024", "2K": "2048x1152", "4K": "3840x2160"},
+        "2:3":   {"1K": "1024x1536", "2K": "2048x2048", "4K": "2160x3840"},
+        "21:9":  {"1K": "1024x1024", "2K": "2048x1152", "4K": "3840x2160"},
     }
+
+    @staticmethod
+    def resolve_size(ratio: Optional[str], image_size: Optional[str]) -> str:
+        """ratio + image_size → 像素尺寸字符串。
+
+        未匹配的组合回落到 2048x2048(2K 正方形,满足全部约束);
+        ratio 为 "auto" 或空 → 返回 "auto"。
+        """
+        if not ratio or ratio == "auto":
+            return "auto"
+        tier = image_size if image_size in ("1K", "2K", "4K") else "2K"
+        tier_map = GPTImage2API._RATIO_SIZE_MAP.get(ratio)
+        if tier_map is None:
+            return "auto"
+        return tier_map.get(tier, "2048x2048")
 
     async def draw_image(
         self,
         model: str,
         prompt: str,
         aspect_ratio: Optional[str] = "1:1",
+        image_size: Optional[str] = "2K",
+        quality: Optional[str] = "medium",
         image_list: Optional[List[bytes]] = None,
     ) -> Union[Image.Image, int]:
-        """通过 DALL-E 格式 API 生图 (/v1/images/generations)"""
-        logger.info(f"[GPT-Image2] Dall-e生图: model={model}, prompt={prompt}")
+        """通过 DALL-E 格式 API 生图 (/v1/images/generations)
+
+        aspect_ratio + image_size → size 像素值;quality 直接透传给上游。
+        """
+        size = self.resolve_size(aspect_ratio, image_size)
+        logger.info(f"[GPT-Image2] Dall-e生图: model={model}, prompt={prompt}, size={size}, quality={quality}")
 
         headers = {
             "Content-Type": "application/json",
@@ -267,8 +291,9 @@ class GPTImage2API:
             "response_format": "url",
         }
 
-        if aspect_ratio is not None:
-            request_body["size"] = self._RATIO_TO_SIZE.get(aspect_ratio, "1024x1024")
+        request_body["size"] = size
+        if quality and quality in ("low", "medium", "high"):
+            request_body["quality"] = quality
         if image_list is not None:
             request_body["image"] = [base64.b64encode(img_bytes).decode() for img_bytes in image_list]
 

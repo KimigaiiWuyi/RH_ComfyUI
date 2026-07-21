@@ -61,6 +61,11 @@ class ModelRegistry:
         with self._lock:
             self._models.pop(name, None)
 
+    def clear(self) -> None:
+        """测试用:清空注册表"""
+        with self._lock:
+            self._models.clear()
+
     def get(self, name: str) -> Optional[AIGCGenerationBase]:
         return self._models.get(name)
 

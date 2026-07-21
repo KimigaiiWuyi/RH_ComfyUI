@@ -9,9 +9,16 @@ from __future__ import annotations
 
 from .overrides import Wan22VideoModel, SeedanceVideoModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
-from ...utils.core.request import TaskType
+from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.video import wan_videogen_mapper as _wan_videogen_mapper
+from ...utils.mappers.seedance_billing import (
+    estimate_seedance2_points,
+    estimate_seedance2_fast_points,
+    estimate_seedance2_mini_points,
+    estimate_seedance15_pro_points,
+)
+from ...utils.mappers.extra_billing import estimate_wan22_points
 
 
 class Seedance15ProDef(SeedanceVideoModel):
@@ -139,6 +146,25 @@ class Seedance15ProDef(SeedanceVideoModel):
                 mode="async_poll",
                 priority=75,
             ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按 token 用量计费(有声 16 元/M,无声 8 元/M)。"""
+        resolution = request.params.get("resolution", "720p")
+        duration = float(request.duration or 5)
+        generate_audio = request.params.get("generate_audio", True)
+        return estimate_seedance15_pro_points(
+            resolution,
+            duration,
+            generate_audio=generate_audio,
+            video_refs=request.video_refs,
+        )
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(480p + 4s + 无声) ~ 最大(1080p + 12s + 有声 + 输入视频)。"""
+        return (
+            estimate_seedance15_pro_points("480p", 4, generate_audio=False, video_refs=None),
+            estimate_seedance15_pro_points("1080p", 12, generate_audio=True, video_refs=[object()]),
         )
 
 
@@ -273,6 +299,29 @@ class Seedance2Def(SeedanceVideoModel):
             ),
         )
 
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按 token 用量计费(分分辨率 + 有无输入视频)。"""
+        resolution = request.params.get("resolution", "720p")
+        duration = float(request.duration or 5)
+        return estimate_seedance2_points(
+            resolution,
+            duration,
+            video_refs=request.video_refs,
+        )
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(480p + 4s + 无输入) ~ 最大(4K + 15s + 有输入)。
+
+        注意:4K 费率最低但像素最多,实际需要比较各档位的积分值。
+        """
+        candidates = []
+        for res in ("480p", "720p", "1080p", "4k"):
+            for dur in (4, 15):
+                for has_input in (False, True):
+                    refs = [object()] if has_input else None
+                    candidates.append(estimate_seedance2_points(res, dur, video_refs=refs))
+        return (min(candidates), max(candidates))
+
 
 class Seedance2MiniDef(SeedanceVideoModel):
     """Seedance 2.0 Mini — 轻量低成本档(统一对外模型;当前仅外部供应商提供通道)"""
@@ -315,6 +364,23 @@ class Seedance2MiniDef(SeedanceVideoModel):
                 mode="async_poll",
                 priority=80,
             ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按 token 用量计费(23 元/M 无输入,14 元/M 有输入)。"""
+        resolution = request.params.get("resolution", "720p")
+        duration = float(request.duration or 5)
+        return estimate_seedance2_mini_points(
+            resolution,
+            duration,
+            video_refs=request.video_refs,
+        )
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(480p + 4s + 无输入) ~ 最大(720p + 15s + 有输入)。"""
+        return (
+            estimate_seedance2_mini_points("480p", 4, video_refs=None),
+            estimate_seedance2_mini_points("720p", 15, video_refs=[object()]),
         )
 
 
@@ -430,6 +496,23 @@ class Seedance2FastDef(SeedanceVideoModel):
             ),
         )
 
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按 token 用量计费(37 元/M 无输入,22 元/M 有输入)。"""
+        resolution = request.params.get("resolution", "720p")
+        duration = float(request.duration or 5)
+        return estimate_seedance2_fast_points(
+            resolution,
+            duration,
+            video_refs=request.video_refs,
+        )
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(480p + 4s + 无输入) ~ 最大(720p + 15s + 有输入)。"""
+        return (
+            estimate_seedance2_fast_points("480p", 4, video_refs=None),
+            estimate_seedance2_fast_points("720p", 15, video_refs=[object()]),
+        )
+
 
 class Wan22VideogenDef(Wan22VideoModel):
     """Wan2.2 视频生成 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)
@@ -517,6 +600,18 @@ class Wan22VideogenDef(Wan22VideoModel):
                 max_concurrency=1,  # 本地 ComfyUI 共用一块 GPU,工作流必须串行
                 priority=70,
             ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按输出视频时长计费(0.6 元/秒 = 60 积分/秒)。"""
+        duration = float(request.duration or 5)
+        return estimate_wan22_points(duration)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(1 秒) ~ 最大(15 秒,输入最大时长)。"""
+        return (
+            estimate_wan22_points(1),
+            estimate_wan22_points(15),
         )
 
 

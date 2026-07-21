@@ -22,9 +22,18 @@ def _png_b64() -> str:
 
 
 def test_size_mapping():
-    assert oapi.size_for("16:9", 720, 1280) == "1792x1024"
-    # 无 ratio 时按宽高取最接近枚举
-    assert oapi.size_for(None, 1024, 1024) == "1024x1024"
+    # 旧二参数形态(无 image_size):回落 2K 档
+    assert oapi.size_for("16:9", 720, 1280) == "2048x1152"
+    # 新三参数形态:ratio + image_size → 像素值
+    # 注:16:9 1K = 1792x1008(精确比例,不再是历史错误的 1024x1024 正方形)
+    assert oapi.size_for("16:9", 720, 1280, image_size="1K") == "1792x1008"
+    assert oapi.size_for("16:9", 720, 1280, image_size="2K") == "2048x1152"
+    assert oapi.size_for("16:9", 720, 1280, image_size="4K") == "3840x2160"
+    assert oapi.size_for("1:1", 1024, 1024, image_size="2K") == "2048x2048"
+    # auto → "auto"
+    assert oapi.size_for("auto", 720, 1280, image_size="2K") == "auto"
+    # 无 ratio 时按宽高取最接近枚举(仍回落 2K 档)
+    assert oapi.size_for(None, 1024, 1024) == "2048x2048"
     assert oapi.ratio_from_wh(1920, 1080) == "16:9"
 
 
@@ -45,14 +54,16 @@ def test_extract_missing_image_raises():
 
 def test_edits_fields_protocol_shape():
     # 单图:字段名 image;多图:每张一个 image[](官方 SDK 惯例)
-    single = oapi._edits_fields(model="m", prompt="p", n=1, size="1024x1024", image_list=[b"a"])
+    single = oapi._edits_fields(model="m", prompt="p", n=1, size="1024x1024", quality="medium", image_list=[b"a"])
     assert ("model", "m") in single and ("size", "1024x1024") in single
+    assert ("quality", "medium") in single
     assert [name for name, _ in single].count("image") == 1
 
-    multi = oapi._edits_fields(model="m", prompt="p", n=1, size=None, image_list=[b"a", b"b"])
+    multi = oapi._edits_fields(model="m", prompt="p", n=1, size=None, quality="high", image_list=[b"a", b"b"])
     names = [name for name, _ in multi]
     assert names.count("image[]") == 2 and "image" not in names
     assert "size" not in names
+    assert ("quality", "high") in multi
 
 
 class _FakeResp:
@@ -100,6 +111,7 @@ def test_generate_image_routes_to_edits_endpoint(monkeypatch):
             api_key="sk-x",
             model="qwen-image",
             prompt="p",
+            quality="medium",
             image_list=[b"\x89PNG fake"],
         )
     )
@@ -115,11 +127,12 @@ def test_generate_image_routes_to_edits_endpoint(monkeypatch):
             api_key="sk-x",
             model="qwen-image",
             prompt="p",
+            quality="medium",
         )
     )
     url, kwargs = _FakeSession.calls[0]
-    assert url == "https://qianfan.baidubce.com/v2/images/generations"
-    assert "json" in kwargs and "data" not in kwargs
+    assert url == "https://qianfan.baidubce.com/v2/images/edits"
+    assert "data" in kwargs  # 统一走 multipart
 
 
 def test_channel_availability():

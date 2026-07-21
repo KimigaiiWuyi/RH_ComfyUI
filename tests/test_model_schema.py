@@ -50,16 +50,18 @@ def test_seedance_variants_declare_media_ports(cls):
 
 @pytest.mark.parametrize("cls", [BananaProDef, GptImage2Def, MinimaxImage01Def])
 def test_ratio_based_image_models_expose_ratio_not_wh(cls):
-    # 这些模型的真实请求参数是宽高比(aspect_ratio / aspect_ratio→size),
+    # 这些模型的真实请求参数是宽高比(aspect_ratio / aspect_ratio+image_size→size),
     # 不吃宽高像素 —— schema 必须暴露 ratio 枚举,不得假装接受 width/height。
     # (与 test_gemini_image 对 banana2/banana1 的同类断言口径一致)
-    from RH_ComfyUI.utils.backends.openai_image.api import _RATIO_TO_SIZE
+    from RH_ComfyUI.utils.backends.openai_image.api import _RATIO_SIZE_MAP
 
     node = cls.node_def()
     assert "width" not in node.inputs and "height" not in node.inputs
     ratio = node.inputs.get("ratio")
     assert ratio is not None and ratio.values, f"{cls.__name__} 缺少 ratio 枚举端口"
-    assert set(ratio.values) <= set(_RATIO_TO_SIZE), f"{cls.__name__} ratio 枚举超出上游支持范围"
+    # ratio 枚举值(除 "auto" 外)必须全部在映射表内
+    ratio_values = set(ratio.values) - {"auto"}
+    assert ratio_values <= set(_RATIO_SIZE_MAP), f"{cls.__name__} ratio 枚举超出上游支持范围"
     assert ratio.default in ratio.values
 
 

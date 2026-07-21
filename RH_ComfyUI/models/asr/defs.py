@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from .overrides import FishAsrModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
-from ...utils.core.request import TaskType
+from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.fishaudio_asr import fishaudio_asr_mapper as _fishaudio_asr_mapper
+from ...utils.mappers.fishaudio_asr_billing import estimate_fish_asr_points
 
 
 class FishAsrDef(FishAsrModel):
@@ -80,6 +81,26 @@ class FishAsrDef(FishAsrModel):
                 mode="sync",
                 priority=80,
             ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按输入音频时长计费(0.36 美元 / 音频小时)。"""
+        audio = request.audio_payload
+        if not audio and request.audio_refs:
+            audio = request.audio_refs[0].data if request.audio_refs[0].data else None
+        return estimate_fish_asr_points(audio)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(1 秒音频) ~ 最大(60 分钟音频上限)。"""
+        from RH_ComfyUI.utils.mappers.fishaudio_asr_billing import calculate_asr_points
+
+        # 1 秒 @ 128kbps = 16_000 bytes
+        min_audio = b"\x00" * 16_000
+        # 60 分钟 @ 128kbps = 57_600_000 bytes
+        max_audio = b"\x00" * 57_600_000
+        return (
+            calculate_asr_points(min_audio),
+            calculate_asr_points(max_audio),
         )
 
 

@@ -10,12 +10,14 @@ from __future__ import annotations
 from ..bridge import SpeechPipelineModel
 from .overrides import FishTtsModel, IndexTTS2Model, MinimaxSpeechModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
-from ...utils.core.request import TaskType
+from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.speech import index_tts2_mapper as _index_tts2_mapper
 from ...utils.mappers.mimo_speech import mimo_tts_mapper as _mimo_tts_mapper
 from ...utils.mappers.minimax_speech import minimax_t2a_speech_mapper as _minimax_t2a_speech_mapper
 from ...utils.mappers.fishaudio_speech import fishaudio_tts_mapper as _fishaudio_tts_mapper
+from ...utils.mappers.speech_billing import estimate_fish_tts_points, estimate_index_tts2_points
+from ...utils.mappers.extra_billing import estimate_mimo_tts_points, estimate_minimax_t2a_points
 
 
 class IndexTTS2Def(IndexTTS2Model):
@@ -61,6 +63,26 @@ class IndexTTS2Def(IndexTTS2Model):
                 max_concurrency=1,  # 本地 ComfyUI 共用一块 GPU,工作流必须串行
                 priority=80,
             ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按输入文本 UTF-8 字节长度计费(5 美元 / M bytes)。"""
+        return estimate_index_tts2_points(request.prompt)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(空文本) ~ 最大(5000 字符常见上限)。
+
+        历史 bug:max 用 300 字符(900 bytes)算出的积分还是 1,与 min=1 相同,
+        前端用 min<max 判断是否调 estimate API,导致 IndexTTS2 被当成"固定积分"
+        不调 estimate,实际生成长文本时积分远超显示。改成 5000 字符(15000 bytes)
+        算出 8 积分,触发前端动态调用 estimate。
+
+        上限取 5000 而非真实模型上限,是为了 UI 上展示"常见长度的最高积分"
+        而非理论上限(避免误导用户以为输入多少字都是 8 积分)。
+        """
+        return (
+            estimate_index_tts2_points(""),
+            estimate_index_tts2_points("你" * 5000),
         )
 
 
@@ -133,6 +155,21 @@ class MimoTtsDef(SpeechPipelineModel):
                 mode="sync",
                 priority=65,
             ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按输入文本 UTF-8 字节长度计费(6 美元/M bytes → 600 积分/M bytes)。"""
+        return estimate_mimo_tts_points(request.prompt)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(空文本) ~ 最大(5000 字符常见上限)。
+
+        历史 bug:同 IndexTTS2 —— max 用 300 字符算出仍是 1 积分,前端误判为固定积分。
+        改为 5000 字符(15000 bytes × 600 积分/M bytes = 9 积分)触发动态 estimate。
+        """
+        return (
+            estimate_mimo_tts_points(""),
+            estimate_mimo_tts_points("你" * 5000),
         )
 
 
@@ -211,6 +248,17 @@ class MinimaxT2aSpeechDef(MinimaxSpeechModel):
                 mode="async_poll",
                 priority=60,
             ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按输入文本字符数计费(3.5 元/万字符 = 350 积分/万字符)。"""
+        return estimate_minimax_t2a_points(request.prompt)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(空文本) ~ 最大(300 字符上限)。"""
+        return (
+            estimate_minimax_t2a_points(""),
+            estimate_minimax_t2a_points("你" * 300),
         )
 
 
@@ -296,6 +344,17 @@ class FishTtsDef(FishTtsModel):
                 # 配音/口播首选:优先级高于其它 TTS(未配置 key 时 check_available 自动让路)
                 priority=85,
             ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按输入文本 UTF-8 字节长度计费(15 美元 / M bytes)。"""
+        return estimate_fish_tts_points(request.prompt)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(空文本) ~ 最大(300 字符上限)。"""
+        return (
+            estimate_fish_tts_points(""),
+            estimate_fish_tts_points("你" * 300),
         )
 
 

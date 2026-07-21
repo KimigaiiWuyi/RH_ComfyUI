@@ -73,12 +73,14 @@ class OpenAIImageChannel(ProviderChannel):
             )
 
         size = size_for(request.ratio, request.width, request.height)
+        quality = str(request.params.get("quality") or "medium")
         try:
             data = await generate_image(
                 base_url=creds.base_url,
                 api_key=creds.api_key,
                 model=model,
                 prompt=request.prompt,
+                quality=quality,
                 image_list=request.images or None,
                 size=size,
             )
