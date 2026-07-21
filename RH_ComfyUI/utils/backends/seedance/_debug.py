@@ -44,9 +44,9 @@ def mask_headers(headers: dict[str, str] | None) -> dict[str, str]:
         if k.lower() in _SECRET_HEADERS:
             low_v = v.lower()
             if low_v.startswith("bearer "):
-                masked[k] = "Bearer ****"
+                masked[k] = f"Bearer {low_v[7:15]}****"
             else:
-                masked[k] = "****"
+                masked[k] = f"{low_v[:9]}****"
         else:
             masked[k] = v
     return masked
