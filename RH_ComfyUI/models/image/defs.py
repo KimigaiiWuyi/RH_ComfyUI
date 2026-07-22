@@ -16,10 +16,10 @@ from ...core.channels.channel import ChannelBinding
 from ...utils.mappers.seedream import seedream_mapper as _seedream_mapper
 from ...utils.mappers.gpt_image2 import gpt_image2_mapper as _gpt_image2_mapper
 from ...utils.mappers.image_edit import qwen_edit_mapper as _qwen_edit_mapper
-from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minimax_image01_mapper
-from ...utils.mappers.nanobanana2_billing import estimate_nanobanana2_points
-from ...utils.mappers.nanobanana1_billing import estimate_nanobanana1_points
 from ...utils.mappers.banana_pro_billing import estimate_banana_pro_points
+from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minimax_image01_mapper
+from ...utils.mappers.nanobanana1_billing import estimate_nanobanana1_points
+from ...utils.mappers.nanobanana2_billing import estimate_nanobanana2_points
 
 
 class AnimaDef(ImagePipelineModel):
@@ -299,7 +299,7 @@ class BananaProDef(ImagePipelineModel):
                 "images": PortSpec(
                     type=PortType.LIST,
                     min_items=0,
-                    max_items=3,
+                    max_items=14,
                     item_type=PortType.IMAGE,
                     title="参考图片",
                     description="参考图片:0 张=文生图,1+ 张=图片编辑",
@@ -710,10 +710,7 @@ class Seedream5Def(ImagePipelineModel):
                     default="9:16",
                     values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
                     title="宽高比",
-                    description=(
-                        "输出宽高比,会以自然语言方式拼到 prompt 末尾;"
-                        "具体像素由 ARK 按 size 档位自主选择。"
-                    ),
+                    description=("输出宽高比,会以自然语言方式拼到 prompt 末尾;具体像素由 ARK 按 size 档位自主选择。"),
                 ),
                 "size_mode": PortSpec(
                     type=PortType.ENUM,
@@ -734,10 +731,7 @@ class Seedream5Def(ImagePipelineModel):
                     default="url",
                     values=["url", "b64_json"],
                     title="返回格式",
-                    description=(
-                        "url=返回 24h 有效下载链接(本节点会立即下载转 bytes);"
-                        "b64_json=直接返回 Base64。"
-                    ),
+                    description=("url=返回 24h 有效下载链接(本节点会立即下载转 bytes);b64_json=直接返回 Base64。"),
                 ),
                 "watermark": PortSpec(
                     type=PortType.BOOLEAN,
@@ -834,10 +828,7 @@ class Seedream5ProDef(Seedream5ProImageModel):
                     default="9:16",
                     values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
                     title="宽高比",
-                    description=(
-                        "输出宽高比,会以自然语言方式拼到 prompt 末尾;"
-                        "具体像素由 ARK 按 size 档位自主选择。"
-                    ),
+                    description=("输出宽高比,会以自然语言方式拼到 prompt 末尾;具体像素由 ARK 按 size 档位自主选择。"),
                 ),
                 "size_mode": PortSpec(
                     type=PortType.ENUM,
@@ -858,10 +849,7 @@ class Seedream5ProDef(Seedream5ProImageModel):
                     default="url",
                     values=["url", "b64_json"],
                     title="返回格式",
-                    description=(
-                        "url=返回 24h 有效下载链接(本节点会立即下载转 bytes);"
-                        "b64_json=直接返回 Base64。"
-                    ),
+                    description=("url=返回 24h 有效下载链接(本节点会立即下载转 bytes);b64_json=直接返回 Base64。"),
                 ),
                 "watermark": PortSpec(
                     type=PortType.BOOLEAN,
