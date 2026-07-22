@@ -40,6 +40,9 @@ description: >
 | 十二 | 供应商通道 / Gemini 生图 / 能力一致性 — 单层负载均衡、AdapterChannel 翻错、/models 可用性、Gemini SDK 双模、图在 steps、input_schema 与能力同步、计费退款 | [references/12-provider-channels-and-gemini.md](./references/12-provider-channels-and-gemini.md) |
 | 十三 | OpenAI 兼容供应商池(网页配置零代码挂供应商、`OpenAI_Image_Providers`、`rh 刷新供应商`、resync 语义) | [references/13-openai-provider-pool.md](./references/13-openai-provider-pool.md) |
 | 十四 | 语音情绪体系与自动音色克隆(EmotionStyle 基类归一、内联/剥离/枚举收敛、参考音频持久去重、fish_tts 样例) | [references/14-speech-emotion-and-voice-clone.md](./references/14-speech-emotion-and-voice-clone.md) |
+| 十五 | **积分计价规则总览**(公式推导、9 类计费曲线、改价流程、6 个已知 bug 列表、防踩指南) | [references/15-billing-pricing-formulas.md](./references/15-billing-pricing-formulas.md) |
+| 十六 | **模型目录与 estimate API 契约**(`/models` 系列端点、input_schema 结构、point_range 双重作用、兼容性矩阵) | [references/16-models-catalog-api.md](./references/16-models-catalog-api.md) |
+| 十七 | **新增/修改模型 与 计费改动 完整交接清单**(改文件顺序、跑测试、常见出错模式、提交前自检) | [references/17-adding-models-billing-handoff.md](./references/17-adding-models-billing-handoff.md) |
 
 ## 快速决策表(先看这里)
 
@@ -62,6 +65,9 @@ description: >
 | 改请求组装 / workflow 注入 | `utils/mappers/` 对应函数 | 九 |
 | 改命令触发词 / to_ai 文案 | rh_generate(触发词是兼容承诺,慎改) | 十 |
 | 加统计维度 / 查积分逻辑 | RHComfyuiTaskRecord / RHBind | 十、五 |
+| **改积分价格 / 加新计费维度 / 排查积分不准** | defs 的 `estimate_cost` / `point_range` + `utils/mappers/<model>_billing.py` 常量 | **十五** |
+| **改 schema 字段 / 加新参数面 / 排查 estimate 失效** | defs 的 `node_def()` `inputs` + `rh_models/webapi.py` 路由 handler + `rh_models/api.py:estimate_model_points` | **十六、十七** |
+| **前端报"积分不变" / 不调 estimate / 422 / 4K 反便宜** | 跨前后端双侧排查 | **十五** |
 
 ## 三条最高红线(违反必被打回)
 
