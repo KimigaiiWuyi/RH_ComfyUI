@@ -40,21 +40,22 @@ POINTS_PER_MILLION_TOKENS: int = 21_000
 #   2. max edge ≤ 3840px
 #   3. 长宽比 = ratio(精确),且 ≤ 3:1
 #   4. 像素 ∈ [655_360, 8_294_400]
-#
-# 历史 bug:早期表里大量 cell 用了 1024x1024 / 2048x2048 / 3840x2160 这些"占位值",
-# 比例与对应 ratio 不一致(例如 2:3 + 2K 给的是 2048x2048 正方形,实际应为 2048x3072)。
-# 本表已按比例精确重建,tier 语义:短边 ≈ 1K/2K/4K。
+# 此外:总像素 > 3_686_400 (即 2560x1440) 视为 2K+ 实验性输出。
+# 本表以 16:9 2K = 2560x1440 为基准,其余 2K 行同比例上抬;4K 行贴近硬上限,
+# tier 语义:短边 ≈ 1K/2K/4K。
 _RATIO_SIZE_MAP: dict[str, dict[str, str]] = {
     # Landscape (width > height)
-    "1:1":   {"1K": "1024x1024", "2K": "2048x2048", "4K": "2880x2880"},
-    "16:9":  {"1K": "1792x1008", "2K": "2048x1152", "4K": "3840x2160"},
-    "4:3":   {"1K": "1280x960",  "2K": "2048x1536", "4K": "3264x2448"},
-    "3:2":   {"1K": "1536x1024", "2K": "3072x2048", "4K": "3456x2304"},
-    "21:9":  {"1K": "2464x1056", "2K": "2688x1152", "4K": "3808x1632"},
+    "1:1": {"1K": "1024x1024", "2K": "2560x2560", "4K": "2880x2880"},
+    "16:9": {"1K": "1792x1008", "2K": "2560x1440", "4K": "3840x2160"},
+    "4:3": {"1K": "1280x960", "2K": "2560x1920", "4K": "3264x2448"},
+    "3:2": {"1K": "1536x1024", "2K": "3072x2048", "4K": "3504x2336"},
+    "2:1": {"1K": "1152x576", "2K": "2560x1280", "4K": "3840x1920"},
+    "21:9": {"1K": "2464x1056", "2K": "2800x1200", "4K": "3808x1632"},
     # Portrait (width < height)
-    "9:16":  {"1K": "1008x1792", "2K": "1152x2048", "4K": "2160x3840"},
-    "3:4":   {"1K": "960x1280",  "2K": "1536x2048", "4K": "2448x3264"},
-    "2:3":   {"1K": "1024x1536", "2K": "2048x3072", "4K": "2304x3456"},
+    "9:16": {"1K": "1008x1792", "2K": "1440x2560", "4K": "2160x3840"},
+    "3:4": {"1K": "960x1280", "2K": "1920x2560", "4K": "2448x3264"},
+    "2:3": {"1K": "1024x1536", "2K": "2048x3072", "4K": "2336x3504"},
+    "1:2": {"1K": "576x1152", "2K": "1280x2560", "4K": "1920x3840"},
 }
 
 # ratio="auto" 时的默认估算尺寸
@@ -107,14 +108,10 @@ def calculate_image_tokens(
     quality_axis_factor = spec["quality_axis_factors"][quality]
     long_edge = max(width, height)
     short_edge = min(width, height)
-    short_axis_factor = (
-        2 * quality_axis_factor * short_edge + long_edge
-    ) // (2 * long_edge)
+    short_axis_factor = (2 * quality_axis_factor * short_edge + long_edge) // (2 * long_edge)
 
     return (
-        quality_axis_factor
-        * short_axis_factor
-        * (spec["token_area_offset_pixels"] + width * height)
+        quality_axis_factor * short_axis_factor * (spec["token_area_offset_pixels"] + width * height)
         + spec["token_area_scale_denominator"]
         - 1
     ) // spec["token_area_scale_denominator"]

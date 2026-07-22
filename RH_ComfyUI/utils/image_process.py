@@ -171,11 +171,147 @@ def preprocess_for_video(data: bytes, max_long_edge: int = 800) -> bytes:
     return pipeline(data)
 
 
+# ── 像素量压缩(上传/传输前瘦身) ─────────────────────────────────
+
+# 默认 1080P 像素量阈值(1920×1080 ≈ 207 万像素)。
+# 超过此值的图片等比缩小到该范围内;480P/720P/1080P 原样保留,绝不放大。
+DEFAULT_MAX_PIXELS = 1920 * 1080
+
+# 只压缩图片类 mime;视频/音频不动。
+_COMPRESSIBLE_MIMES = {"image/png", "image/jpeg", "image/webp"}
+
+# 有损格式的质量参数:视觉质量与文件体积的平衡点。
+_JPEG_QUALITY = 85
+_WEBP_QUALITY = 85
+
+
+def compress_to_max_pixels(
+    data: bytes,
+    mime: str = "image/png",
+    *,
+    max_pixels: int = DEFAULT_MAX_PIXELS,
+    jpeg_quality: int = _JPEG_QUALITY,
+    webp_quality: int = _WEBP_QUALITY,
+) -> tuple[bytes, str]:
+    """按像素量(宽×高)等比压缩图片,保持原格式不变。
+
+    超过 ``max_pixels`` 的图片等比缩小到该范围内(LANCZOS 重采样);
+    不超过的原样返回,绝不放大。格式保持:PNG→PNG(optimize)、
+    JPEG→JPEG(quality)、WebP→WebP(quality)。
+
+    设计原则与模块内其他函数一致:
+    - 安全降级:任何异常静默返回原始 data,不中断调用方流程
+    - 惰性导入:PIL 在函数体内 import,模块加载不依赖 Pillow
+    - 链式友好:bytes in → bytes out
+
+    Args:
+        data: 原始图片字节
+        mime: MIME 类型,决定输出格式(仅 png/jpeg/webp 会被处理)
+        max_pixels: 像素量上限(宽×高),默认 1920×1080
+        jpeg_quality: JPEG 有损压缩质量(1-95),默认 85
+        webp_quality: WebP 有损压缩质量(1-100),默认 85
+
+    Returns:
+        ``(compressed_bytes, info)`` 元组:
+        - compressed_bytes: 压缩后的图片字节(未压缩时等于原始 data)
+        - info: 一行人类可读的压缩描述(空串 = 未压缩),可直接拼进日志
+
+    Example::
+
+        from RH_ComfyUI.utils.image_process import compress_to_max_pixels
+
+        compressed, info = compress_to_max_pixels(raw_bytes, "image/jpeg")
+        if info:
+            logger.info(f"图片压缩: {info}")
+    """
+    if mime not in _COMPRESSIBLE_MIMES:
+        return data, ""
+
+    try:
+        from PIL import Image  # noqa: PLC0415
+    except ImportError:
+        return data, ""
+
+    try:
+        img = Image.open(BytesIO(data))
+        img.load()  # 强制解码,后续 resize 不会在已关闭的 buffer 上炸
+    except Exception:  # noqa: BLE001 - 解码失败(损坏/非真图片),原样返回
+        return data, ""
+
+    width, height = img.size
+    pixels = width * height
+    if pixels <= max_pixels:
+        return data, ""  # 不超过阈值,原样保留
+
+    # 等比缩小:scale = sqrt(目标像素量 / 当前像素量),保证 w*h ≈ max_pixels
+    import math
+
+    scale = math.sqrt(max_pixels / pixels)
+    new_w = max(1, int(width * scale))
+    new_h = max(1, int(height * scale))
+
+    resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1)
+    img = img.resize((new_w, new_h), resampling)
+
+    buf = BytesIO()
+    try:
+        if mime == "image/png":
+            img.save(buf, format="PNG", optimize=True)
+        elif mime == "image/jpeg":
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            img.save(buf, format="JPEG", quality=jpeg_quality, optimize=True)
+        elif mime == "image/webp":
+            img.save(buf, format="WEBP", quality=webp_quality)
+        else:
+            return data, ""
+    except Exception:  # noqa: BLE001 - 编码失败,回落原图
+        return data, ""
+
+    compressed = buf.getvalue()
+    if len(compressed) >= len(data):
+        # 压缩后反而更大(极少见),不折腾了
+        return data, ""
+
+    info = f"{width}x{height}→{new_w}x{new_h} ({len(data) // 1024}KB→{len(compressed) // 1024}KB)"
+    return compressed, info
+
+
+async def compress_to_max_pixels_async(
+    data: bytes,
+    mime: str = "image/png",
+    *,
+    max_pixels: int = DEFAULT_MAX_PIXELS,
+    jpeg_quality: int = _JPEG_QUALITY,
+    webp_quality: int = _WEBP_QUALITY,
+) -> tuple[bytes, str]:
+    """``compress_to_max_pixels`` 的异步包装:PIL 是 CPU 密集的阻塞操作,
+    丢进线程池跑,不阻塞事件循环。
+
+    签名和返回值与同步版完全一致。非图片 mime 直接短路返回(不进线程池)。
+    """
+    if mime not in _COMPRESSIBLE_MIMES:
+        return data, ""
+    import asyncio
+
+    return await asyncio.to_thread(
+        compress_to_max_pixels,
+        data,
+        mime,
+        max_pixels=max_pixels,
+        jpeg_quality=jpeg_quality,
+        webp_quality=webp_quality,
+    )
+
+
 __all__ = [
     "resize_long_edge",
     "correct_orientation",
     "build_process_pipeline",
     "preprocess_for_video",
+    "compress_to_max_pixels",
+    "compress_to_max_pixels_async",
+    "DEFAULT_MAX_PIXELS",
 ]
 
 
