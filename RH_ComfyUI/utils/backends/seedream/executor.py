@@ -7,8 +7,9 @@
 3. 空 key 直接 raise,不在 _headers() 拼 "Bearer "(§11.3 红线 1)
 4. AdapterChannel.invoke(models/bridge.py:53) 捕获 RuntimeError 后
    包成 ChannelError(retryable=True),实现供应商间自动 failover
-5. 参考图走 R2 外链(ARK 对 base64 body 限 ~2.4MB,超则 413):
-   executor 在调 mapper 前把 bytes 上传 R2,注入 request.params["_image_urls"]
+5. 参考图优先走公网外链(ARK 对 base64 body 限 ~2.4MB,超则 413):
+   executor 在调 mapper 前经 core.media_host 扩展点外链化,注入
+   request.params["_image_urls"];未注册 publisher 时 mapper 回落 data URL
 """
 
 from __future__ import annotations
@@ -87,6 +88,7 @@ class SeedreamAdapter(Adapter):
         if isinstance(result, NodeOutput):
             return result
         if isinstance(result, Image.Image):
+
             def _to_png(img: Image.Image) -> bytes:
                 buf = io.BytesIO()
                 img.save(buf, format="PNG")
@@ -105,36 +107,27 @@ class SeedreamAdapter(Adapter):
                 data=result,
                 mime_type="image/png",
             )
-        raise RuntimeError(
-            f"Seedream 节点 {node.name} 返回了无法处理的类型: {type(result)}"
-        )
+        raise RuntimeError(f"Seedream 节点 {node.name} 返回了无法处理的类型: {type(result)}")
 
-    async def _materialize_images(
-        self, images: list[bytes], params: dict
-    ) -> None:
-        """bytes 列表 → R2 外链,注入 params["_image_urls"]
+    async def _materialize_images(self, images: list[bytes], params: dict) -> None:
+        """bytes 列表 → 公网外链,注入 params["_image_urls"]
 
-        R2 失败抛 RuntimeError,让上层 ChannelError(retryable=True) 触发 failover。
+        走 core.media_host 扩展点(由 aigc_system / canvas 侧在启动时注册 R2
+        publisher)。未注册时返回 None → 不注入,mapper 自行 data URL 回落。
+        外链化失败抛 RuntimeError,让上层 ChannelError(retryable=True) 触发 failover。
         """
-        try:
-            from aigc_system.aifoundation.media_host import materialize
-            from aigc_system.aifoundation.media_host import MediaPublishError
-        except ImportError:
-            # canvas_backend 未装 — 回落 data URL,由 mapper 自己处理
-            return
+        from ....core.media_host import MediaPublishError, materialize
 
         try:
             urls = [
                 u
-                for u in await asyncio.gather(
-                    *(materialize(img, "image/png") for img in images)
-                )
+                for u in await asyncio.gather(*(materialize(img, "image/png") for img in images))
                 if u
             ]
             if urls:
                 params["_image_urls"] = urls
         except MediaPublishError as exc:
-            raise RuntimeError(f"Seedream 输入图上传 R2 失败: {exc}") from exc
+            raise RuntimeError(f"Seedream 输入图外链化失败: {exc}") from exc
 
 
 # 向后兼容
@@ -148,7 +141,3 @@ async def _emit(cb, event: ProgressEvent) -> None:
         await cb(event)
     except Exception:  # noqa: BLE001
         pass
-
-
-# asyncio 引用(给 _materialize_images 用)
-import asyncio  # noqa: E402, F401

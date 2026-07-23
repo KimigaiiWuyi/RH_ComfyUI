@@ -53,6 +53,13 @@ from .channels import (
     channel_registry,
 )
 from .dispatch import DispatchContext, dispatch
+from .media_host import (
+    MediaPublishError,
+    MediaPublisher,
+    get_media_publisher,
+    materialize as materialize_media,
+    set_media_publisher,
+)
 
 # Seedance 供应商通道:外部插件(自带凭证面板)可复用本类把自己的
 # SeedanceProvider 包装成通道,经 channel_registry 注入宿主模型的候选列表。
@@ -88,6 +95,12 @@ __all__ = [
     "channel_registry",
     "ProviderCredentials",
     "SeedanceProviderChannel",
+    # 媒体外链化扩展点(闭源/宿主注册 R2 等 publisher;开源零感知)
+    "MediaPublisher",
+    "MediaPublishError",
+    "set_media_publisher",
+    "get_media_publisher",
+    "materialize_media",
     # 注册与路由
     "model_registry",
     "register_model",

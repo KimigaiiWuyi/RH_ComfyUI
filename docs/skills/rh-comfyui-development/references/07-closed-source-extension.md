@@ -80,7 +80,27 @@ class ExtSeedanceModel(VideoGenerationBase):
         return await binding.channel.invoke(request=request, on_progress=on_progress)
 ```
 
-## 7.4 必须遵守的边界
+## 7.4 媒体外链化(R2 等)扩展点
+
+开源引擎**不得** import 其他本地包。需要把参考图
+bytes 变成上游可 GET 的公网 URL 时,走 `core` 的 media publisher:
+
+```python
+# 闭源/宿主插件 @on_core_start
+from RH_ComfyUI.core import set_media_publisher
+
+async def my_publish(data: bytes, mime: str = "image/png") -> str:
+    # 上传对象存储,返回 https URL;失败抛异常即可
+    ...
+
+set_media_publisher(my_publish)
+```
+
+- 未注册 → 内置 Adapter(如 Seedream)回落 data URL
+- 已注册且失败 → `MediaPublishError`,通道层可翻成 retryable 以 failover
+- 签名: `async (data: bytes, mime: str) -> str`
+
+## 7.5 必须遵守的边界
 
 1. **只从 `RH_ComfyUI.core` 顶层 import**,不深入 `core.*` 子模块
    (内核重组只保证顶层稳定);
@@ -90,4 +110,6 @@ class ExtSeedanceModel(VideoGenerationBase):
    DispatchContext 时注入,不改开源 dispatcher;
 4. 闭源专属命令 → gsuid_core 标准 SV + 构造 DispatchContext 调 dispatch;
 5. 需要开源侧新钩子时,提交的是**通用**扩展点(新的 Policy/Channel 抽象),
-   另外的兼容插件生态逻辑留在闭源包 —— 不接受按来源分叉的条件式提交。
+   另外的兼容插件生态逻辑留在闭源包 —— 不接受按来源分叉的条件式提交;
+6. **反向零依赖**:开源仓库不得 `import aigc_system` / `canvas_backend` /
+   `account_system`(含 soft-import);宿主能力一律通过扩展点注入。

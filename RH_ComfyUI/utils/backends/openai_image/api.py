@@ -28,21 +28,19 @@ from gsuid_core.logger import logger
 # 注:本表 2026-07 重建,纠正早期"占位值"错误(2:3 + 2K 不再是正方形)。
 _RATIO_SIZE_MAP: Dict[str, Dict[str, str]] = {
     # Landscape (width > height)
-    "1:1":   {"1K": "1024x1024", "2K": "2048x2048", "4K": "2880x2880"},
-    "16:9":  {"1K": "1792x1008", "2K": "2048x1152", "4K": "3840x2160"},
-    "4:3":   {"1K": "1280x960",  "2K": "2048x1536", "4K": "3264x2448"},
-    "3:2":   {"1K": "1536x1024", "2K": "3072x2048", "4K": "3456x2304"},
-    "21:9":  {"1K": "2464x1056", "2K": "2688x1152", "4K": "3808x1632"},
+    "1:1": {"1K": "1024x1024", "2K": "2048x2048", "4K": "2880x2880"},
+    "16:9": {"1K": "1792x1008", "2K": "2048x1152", "4K": "3840x2160"},
+    "4:3": {"1K": "1280x960", "2K": "2048x1536", "4K": "3264x2448"},
+    "3:2": {"1K": "1536x1024", "2K": "3072x2048", "4K": "3456x2304"},
+    "21:9": {"1K": "2464x1056", "2K": "2688x1152", "4K": "3808x1632"},
     # Portrait (width < height)
-    "9:16":  {"1K": "1008x1792", "2K": "1152x2048", "4K": "2160x3840"},
-    "3:4":   {"1K": "960x1280",  "2K": "1536x2048", "4K": "2448x3264"},
-    "2:3":   {"1K": "1024x1536", "2K": "2048x3072", "4K": "2304x3456"},
+    "9:16": {"1K": "1008x1792", "2K": "1152x2048", "4K": "2160x3840"},
+    "3:4": {"1K": "960x1280", "2K": "1536x2048", "4K": "2448x3264"},
+    "2:3": {"1K": "1024x1536", "2K": "2048x3072", "4K": "2304x3456"},
 }
 
 # 扁平旧表保留作 fallback 用(取 2K 档)
-_RATIO_TO_SIZE: Dict[str, str] = {
-    ratio: tiers["2K"] for ratio, tiers in _RATIO_SIZE_MAP.items()
-}
+_RATIO_TO_SIZE: Dict[str, str] = {ratio: tiers["2K"] for ratio, tiers in _RATIO_SIZE_MAP.items()}
 
 
 class OpenAIImageError(RuntimeError):
@@ -185,9 +183,7 @@ async def generate_image(
     root = base_url.rstrip("/")
     url = f"{root}/images/edits"
     form = aiohttp.FormData()
-    fields = _edits_fields(
-        model=model, prompt=prompt, n=n, size=size, quality=quality, image_list=image_list or []
-    )
+    fields = _edits_fields(model=model, prompt=prompt, n=n, size=size, quality=quality, image_list=image_list or [])
     for i, (name, value) in enumerate(fields):
         if isinstance(value, bytes):
             form.add_field(name, value, filename=f"image_{i}.png", content_type="image/png")
@@ -195,7 +191,8 @@ async def generate_image(
             form.add_field(name, value)
     request_kwargs: Dict[str, Any] = {"data": form}
 
-    logger.info(f"[OpenAIImage] 请求 {url} model={model} n={n} size={size or '-'} quality={quality} 参考图={len(image_list or [])}")
+    n_refs = len(image_list or [])
+    logger.info(f"[OpenAIImage] 请求 {url} model={model} n={n} size={size or '-'} quality={quality} 参考图={n_refs}")
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, **request_kwargs) as resp:
             if resp.status != 200:

@@ -6,7 +6,7 @@
 
 ## 子目录
 
-| 目录 | 职责 |
+| 目录/模块 | 职责 |
 |---|---|
 | `schema/` | 数据契约:请求/结果/端口/ModelCard(零内部依赖,最底层) |
 | `base/` | ABC 五件套(AIGCGenerationBase + 四大模态基类)与错误族 |
@@ -15,6 +15,7 @@
 | `billing/` | 计费策略(积分 / 外部预付)与预留-提交-退款协议 |
 | `dispatch/` | 统一调度器:路由 → 计费 → 限流 → 执行 → 统计 → 退款 |
 | `telemetry/` | 生成记录统一落库(record_dispatch) |
+| `media_host.py` | 媒体外链化扩展点(`set_media_publisher`);开源零感知 R2 实现 |
 
 ## 依赖方向(只允许向下)
 
