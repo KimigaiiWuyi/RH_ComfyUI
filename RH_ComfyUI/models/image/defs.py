@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from ..bridge import ImagePipelineModel
 from .overrides import Seedream5ProImageModel
+from ...core.base.errors import ValidationError
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
@@ -20,6 +21,29 @@ from ...utils.mappers.banana_pro_billing import estimate_banana_pro_points
 from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minimax_image01_mapper
 from ...utils.mappers.nanobanana1_billing import estimate_nanobanana1_points
 from ...utils.mappers.nanobanana2_billing import estimate_nanobanana2_points
+
+# ── CameraAngleDef 参数范围 — 复用 RunningHub 工作流 2080138749291356162 的合法域 ──
+CAMERA_ANGLE_HORIZ_MIN: float = 0.0
+CAMERA_ANGLE_HORIZ_MAX: float = 360.0
+CAMERA_ANGLE_VERT_MIN: float = -30.0
+CAMERA_ANGLE_VERT_MAX: float = 60.0
+CAMERA_ANGLE_ZOOM_MIN: float = 0.0
+CAMERA_ANGLE_ZOOM_MAX: float = 10.0
+# 中性视角(0/0/5)是原图,前端应直接拒绝,避免积分白扣
+CAMERA_ANGLE_NEUTRAL: tuple[float, float, float] = (0.0, 0.0, 5.0)
+
+
+def is_camera_angle_neutral(
+    horizontal: float | None,
+    vertical: float | None,
+    zoom: float | None,
+) -> bool:
+    """中性视角判定:与 CAMERA_ANGLE_NEUTRAL 三元组全部相等视为「原图」。
+    缺省值取中性值后再比较,允许前端省略参数但仍能正确识别。"""
+    h = CAMERA_ANGLE_NEUTRAL[0] if horizontal is None else float(horizontal)
+    v = CAMERA_ANGLE_NEUTRAL[1] if vertical is None else float(vertical)
+    z = CAMERA_ANGLE_NEUTRAL[2] if zoom is None else float(zoom)
+    return h == CAMERA_ANGLE_NEUTRAL[0] and v == CAMERA_ANGLE_NEUTRAL[1] and z == CAMERA_ANGLE_NEUTRAL[2]
 
 
 class AnimaDef(ImagePipelineModel):
@@ -71,6 +95,162 @@ class AnimaDef(ImagePipelineModel):
                 priority=50,
             ),
         )
+
+
+class CameraAngleDef(ImagePipelineModel):
+    """RH 多角度 — RunningHub 工作流 2080138749291356162
+
+    复用 RH App 后端(走 OpenAPI v2 nodeInfoList 协议),单张参考图 +
+    三个摄像机参数(水平环绕 / 垂直俯仰 / 景别缩放) → 新视角图像。
+
+    参数语义(与 RH 工作流节点 2 完全一致):
+      - horizontal_angle (0~360):  摄像机绕主体水平方向旋转的角度,向右旋转
+      - vertical_angle   (-30~60): 摄像机俯仰角度,越大越俯视
+      - zoom             (0~10):   景别缩放,越大越近
+
+    (0, 0, 5) 是中性视角(原图),validate() 会拒绝提交以免白扣积分。
+    固定 5 积分/次(由 point_cost 兜底,无动态计费)。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="rh_camera_angle",
+            display_name="RH 多角度",
+            task_type=TaskType("image"),
+            backend="rh_app",
+            point_cost=5,
+            description="基于 RunningHub 工作流的图片摄像机多角度生成,支持水平旋转、垂直俯仰、景别缩放",
+            knowledge_content=(
+                "RH 多角度是基于 RunningHub 工作流 2080138749291356162 实现的图片多视角生成节点。"
+                "\n"
+                "优势:保持原图主体与构图,仅改变摄像机视角,适合同一场景下多角度展示、物料复用。"
+                "\n"
+                "参数:horizontal_angle(0~360,水平旋转,向右);vertical_angle(-30~60,俯仰,越大越俯视);zoom(0~10,越大越近)。"
+                "\n"
+                "中性视角(0, 0, 5) 即原图,前端会拒绝提交以免白扣积分。"
+                "\n"
+                "凭证:复用 RH_apikey(RunningHub 通用 key)。"
+                "\n"
+            ),
+            requirements=["rh_apikey"],
+            workflow_file="2080138749291356162",
+            mode="declarative",
+            mappings=[
+                {
+                    "source": "images.0",
+                    "target": "1.image",
+                    "type": "upload_image",
+                    "description": "image",
+                },
+                {
+                    "source": "params.horizontal_angle",
+                    "target": "2.horizontal_angle",
+                    "description": "horizontal_angle",
+                },
+                {
+                    "source": "params.vertical_angle",
+                    "target": "2.vertical_angle",
+                    "description": "vertical_angle",
+                },
+                {
+                    "source": "params.zoom",
+                    "target": "2.zoom",
+                    "description": "zoom",
+                },
+            ],
+            inputs={
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    required=True,
+                    min_items=1,
+                    max_items=1,
+                    item_type=PortType.IMAGE,
+                    title="参考图",
+                    description="原始图片(必传 1 张)",
+                ),
+                "horizontal_angle": PortSpec(
+                    type=PortType.NUMBER,
+                    default=CAMERA_ANGLE_NEUTRAL[0],
+                    minimum=CAMERA_ANGLE_HORIZ_MIN,
+                    maximum=CAMERA_ANGLE_HORIZ_MAX,
+                    title="水平环绕",
+                    description="摄像机绕主体水平方向旋转的角度,0~360 度,向右旋转",
+                ),
+                "vertical_angle": PortSpec(
+                    type=PortType.NUMBER,
+                    default=CAMERA_ANGLE_NEUTRAL[1],
+                    minimum=CAMERA_ANGLE_VERT_MIN,
+                    maximum=CAMERA_ANGLE_VERT_MAX,
+                    title="垂直俯仰",
+                    description="摄像机俯仰角度,-30~60 度,越大越俯视",
+                ),
+                "zoom": PortSpec(
+                    type=PortType.NUMBER,
+                    default=CAMERA_ANGLE_NEUTRAL[2],
+                    minimum=CAMERA_ANGLE_ZOOM_MIN,
+                    maximum=CAMERA_ANGLE_ZOOM_MAX,
+                    title="景别缩放",
+                    description="摄像机景别缩放,0~10,越大越近",
+                ),
+            },
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="新视角的图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="async_poll",
+                priority=55,
+            ),
+        )
+
+    def validate(self, request: GenerationRequest) -> None:
+        # 基类会校验图片数量(本节点 max=1)
+        super().validate(request)
+        params = request.params
+        horizontal = params.get("horizontal_angle")
+        vertical = params.get("vertical_angle")
+        zoom = params.get("zoom")
+        if (
+            horizontal is None
+            and vertical is None
+            and zoom is None
+        ):
+            # 没传任何参数视为中性,直接拒绝避免白扣
+            raise ValidationError(
+                f"{self.display_name}:三参数均为中性值(0/0/5),提交后等于生成原图,请调整至少一个参数"
+            )
+        if horizontal is not None and not (
+            CAMERA_ANGLE_HORIZ_MIN <= float(horizontal) <= CAMERA_ANGLE_HORIZ_MAX
+        ):
+            raise ValidationError(
+                f"horizontal_angle 必须在 {CAMERA_ANGLE_HORIZ_MIN:g}~{CAMERA_ANGLE_HORIZ_MAX:g} 之间"
+            )
+        if vertical is not None and not (
+            CAMERA_ANGLE_VERT_MIN <= float(vertical) <= CAMERA_ANGLE_VERT_MAX
+        ):
+            raise ValidationError(
+                f"vertical_angle 必须在 {CAMERA_ANGLE_VERT_MIN:g}~{CAMERA_ANGLE_VERT_MAX:g} 之间"
+            )
+        if zoom is not None and not (CAMERA_ANGLE_ZOOM_MIN <= float(zoom) <= CAMERA_ANGLE_ZOOM_MAX):
+            raise ValidationError(
+                f"zoom 必须在 {CAMERA_ANGLE_ZOOM_MIN:g}~{CAMERA_ANGLE_ZOOM_MAX:g} 之间"
+            )
+        if is_camera_angle_neutral(horizontal, vertical, zoom):
+            raise ValidationError(
+                f"{self.display_name}:三参数均为中性值(0/0/5),提交后等于生成原图,请调整至少一个参数"
+            )
+
+    def normalize(self, request: GenerationRequest) -> GenerationRequest:
+        """预处理参考图:最长边 ≤ 1080px 且宽高均为 4 的倍数(RunningHub 工作流要求)。"""
+        if request.images:
+            from ...utils.image_process import preprocess_for_camera_angle
+
+            request.images = [preprocess_for_camera_angle(img) for img in request.images]
+        return super().normalize(request)
 
 
 class Banana2Def(ImagePipelineModel):
@@ -896,6 +1076,7 @@ ALL_MODELS = [
     Banana1Def,
     Banana2Def,
     BananaProDef,
+    CameraAngleDef,
     GptImage2Def,
     MinimaxImage01Def,
     Qwen2511Def,

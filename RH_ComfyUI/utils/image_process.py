@@ -171,6 +171,58 @@ def preprocess_for_video(data: bytes, max_long_edge: int = 800) -> bytes:
     return pipeline(data)
 
 
+def preprocess_for_camera_angle(data: bytes, max_long_edge: int = 1080) -> bytes:
+    """摄像机多角度工作流(RH 2080138749291356162)的图片预处理。
+
+    两步:
+    1. 等比缩放最长边到 max_long_edge(默认 1080px)
+    2. 将宽高各自向下取整到 4 的倍数(ComfyUI / RunningHub 工作流要求)
+
+    已经满足条件的原样返回,绝不放大。输出统一为 PNG。
+
+    Args:
+        data: 原始图片字节
+        max_long_edge: 最长边上限(px),默认 1080
+
+    Returns:
+        处理后的图片字节;异常时返回原始数据
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return data
+
+    try:
+        img = Image.open(BytesIO(data))
+    except Exception:
+        return data
+
+    w, h = img.size
+    long_edge = max(w, h)
+
+    # 1) 等比缩放最长边
+    if long_edge > max_long_edge:
+        scale = max_long_edge / long_edge
+        w = int(w * scale)
+        h = int(h * scale)
+
+    # 2) 取整到 4 的倍数(向下取整,绝不放大)
+    new_w = w - (w % 4)
+    new_h = h - (h % 4)
+    # 兜底:避免取整后变成 0
+    new_w = max(new_w, 4)
+    new_h = max(new_h, 4)
+
+    if new_w == w and new_h == h and long_edge <= max_long_edge:
+        return data
+
+    resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1)
+    resized = img.resize((new_w, new_h), resampling)
+    buf = BytesIO()
+    resized.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 # ── 像素量压缩(上传/传输前瘦身) ─────────────────────────────────
 
 # 默认 1080P 像素量阈值(1920×1080 ≈ 207 万像素)。
@@ -309,6 +361,7 @@ __all__ = [
     "correct_orientation",
     "build_process_pipeline",
     "preprocess_for_video",
+    "preprocess_for_camera_angle",
     "compress_to_max_pixels",
     "compress_to_max_pixels_async",
     "DEFAULT_MAX_PIXELS",
