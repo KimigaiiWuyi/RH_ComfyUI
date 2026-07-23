@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import io
+import asyncio
 
 from PIL import Image
 
@@ -86,12 +87,15 @@ class SeedreamAdapter(Adapter):
         if isinstance(result, NodeOutput):
             return result
         if isinstance(result, Image.Image):
-            buf = io.BytesIO()
-            result.save(buf, format="PNG")
+            def _to_png(img: Image.Image) -> bytes:
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                return buf.getvalue()
+
             return NodeOutput(
                 status="ok",
                 output_type="image",
-                data=buf.getvalue(),
+                data=await asyncio.to_thread(_to_png, result),
                 mime_type="image/png",
             )
         if isinstance(result, bytes):

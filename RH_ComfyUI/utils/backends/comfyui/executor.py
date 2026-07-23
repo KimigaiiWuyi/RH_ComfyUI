@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import io
+import asyncio
 from typing import Any, Optional
 from pathlib import Path
 
@@ -124,12 +125,17 @@ class ComfyUIAdapter(Adapter):
         if output_type == OutputType.IMAGE:
             image = await self.api.generate_image_by_prompt(workflow)
             await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="图片已生成"))
-            buf = io.BytesIO()
-            image.save(buf, format="PNG")
+
+            def _to_png(img) -> bytes:
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                return buf.getvalue()
+
+            data = await asyncio.to_thread(_to_png, image)
             return NodeOutput(
                 status="ok",
                 output_type="image",
-                data=buf.getvalue(),
+                data=data,
                 mime_type=mime_type,
             )
         elif output_type == OutputType.VIDEO:

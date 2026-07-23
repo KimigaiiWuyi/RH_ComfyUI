@@ -39,6 +39,16 @@ _RUNNINGHUB_FAILURE_STATUSES = frozenset({
     "INTERRUPTED",
 })
 
+
+def _write_bytes_sync(path: Path, data: bytes) -> None:
+    """同步写盘;大音视频勿在事件循环直接调用。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+async def _write_bytes_async(path: Path, data: bytes) -> None:
+    await asyncio.to_thread(_write_bytes_sync, path, data)
+
 # ComfyUI /history 风格响应中嵌套 status.status_str 的失败状态(小写比较)
 _RUNNINGHUB_FAILURE_NESTED_STATUSES = frozenset({
     "failed",
@@ -175,6 +185,7 @@ class ComfyUIAPI:
         return prompt_data
 
     def save_image(self, images: List[Dict[str, Any]], output_path: Path, image_name: str) -> Optional[Image.Image]:
+        """同步解码+落盘 JPEG;异步调用方请用 ``asyncio.to_thread(self.save_image, ...)``。"""
         for itm in images:
             if itm["type"] != "output":
                 continue
@@ -185,13 +196,11 @@ class ComfyUIAPI:
         return None
 
     def save_video(self, videos: List[Dict[str, Any]], output_path: Path, image_name: str) -> None:
+        """同步落盘(历史 API);异步路径请用 generate_video_by_prompt。"""
         for itm in videos:
             if itm["type"] != "output":
                 continue
-            output_path.mkdir(parents=True, exist_ok=True)
-            video_data = io.BytesIO(itm["image_data"])
-            with open(output_path / f"{image_name}.mp4", "wb") as f:
-                f.write(video_data.getbuffer())
+            _write_bytes_sync(output_path / f"{image_name}.mp4", bytes(itm["image_data"]))
 
     async def get_image(self, filename: str, subfolder: Path, folder_type: str) -> bytes:
         url = f"{self.url}/view"
@@ -332,8 +341,7 @@ class ComfyUIAPI:
             audio_object = audios[0]
             audio_data: bytes = audio_object["data"]
             audio_path = resolved_output_path / resolved_file_name
-            with open(audio_path, "wb") as f:
-                f.write(audio_data)
+            await _write_bytes_async(audio_path, audio_data)
             logger.info(f"✅ [ComfyUI] 音频生成完成！保存路径: {audio_path}")
             return audio_data
         return None
@@ -352,7 +360,8 @@ class ComfyUIAPI:
         prompt_id = prompt_data["prompt_id"]
         await self.track_progress(prompt, prompt_id)
         images = await self.get_images(prompt_id)
-        image = self.save_image(images, resolved_output_path, resolved_image_name)
+        # PIL 解码 + JPEG 写盘放到线程池,避免堵 bot 事件循环
+        image = await asyncio.to_thread(self.save_image, images, resolved_output_path, resolved_image_name)
         if image is None:
             raise ValueError("🚫 [ComfyUI失败] 未知原因生成失败！")
         if self.is_prompt:
@@ -381,8 +390,7 @@ class ComfyUIAPI:
             video_object = videos[0]
             video_data: bytes = video_object["data"]
             video_path = resolved_output_path / resolved_video_name
-            with open(video_path, "wb") as f:
-                f.write(video_data)
+            await _write_bytes_async(video_path, video_data)
             logger.info(f"✅ [ComfyUI] 视频生成完成！保存路径: {video_path}")
             return video_data
         return None

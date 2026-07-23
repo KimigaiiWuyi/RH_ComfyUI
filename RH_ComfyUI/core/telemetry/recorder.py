@@ -63,12 +63,12 @@ def _node_view(model: "AIGCGenerationBase", output: Optional[NodeOutput], point_
     )
 
 
-def _save_output(output: NodeOutput, task_type_str: str) -> None:
-    """产物落盘(复用旧 executor 的实现,失败仅告警)"""
+async def _save_output(output: NodeOutput, task_type_str: str) -> None:
+    """产物落盘(复用 executor 异步落盘,失败仅告警;不堵事件循环)。"""
     from ...utils.core.executor import _save_output as legacy_save
 
     try:
-        saved_path = legacy_save(output, task_type_str)
+        saved_path = await legacy_save(output, task_type_str)
         output.metadata["saved_path"] = str(saved_path)
     except Exception as e:  # noqa: BLE001 — 落盘失败不影响返回
         logger.warning(f"[Telemetry] 保存生成结果失败(不影响返回): {e}")
@@ -94,7 +94,7 @@ async def record_dispatch(
     """
     try:
         if output is not None and status == "ok":
-            _save_output(output, request.task_type.value)
+            await _save_output(output, request.task_type.value)
 
         from ...utils.database.statistics import record_task
 

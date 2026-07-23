@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import io
+import asyncio
 
 from PIL import Image
 
@@ -74,9 +75,12 @@ class GPTImage2Adapter(Adapter):
             return NodeOutput.from_result(result)
 
         if isinstance(result, Image.Image):
-            buf = io.BytesIO()
-            result.save(buf, format="PNG")
-            data = buf.getvalue()
+            def _to_png(img: Image.Image) -> bytes:
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                return buf.getvalue()
+
+            data = await asyncio.to_thread(_to_png, result)
             return NodeOutput(
                 status="ok",
                 output_type="image",

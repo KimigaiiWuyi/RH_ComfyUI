@@ -75,19 +75,14 @@ def _guess_ext(data: bytes, fallback: str) -> str:
     return fallback
 
 
-def _save_output(result: NodeOutput, task_type_str: str, default_ext: str = ".bin") -> Path:
-    """将生成结果保存到 OUTPUT_PATH
+def _save_output_sync(result: NodeOutput, task_type_str: str, default_ext: str = ".bin") -> Path:
+    """将生成结果同步写到 OUTPUT_PATH(供线程池调用)。
 
     约定:`result.data` 为主产物;`result.outputs` 只存放**附加**产物
     (如视频生成的尾帧图),不再重复存放主产物(避免双写)。
 
-    Args:
-        result: 节点输出
-        task_type_str: 任务类型字符串(用于子目录)
-        default_ext: 主产物扩展名兜底
-
-    Returns:
-        主产物的保存路径
+    ⚠️ 同步磁盘 I/O:大图/视频可达数十 MB,禁止在 asyncio 事件循环直接调用。
+    异步路径请用 ``_save_output``。
     """
     from ...utils.resource.RESOURCE_PATH import OUTPUT_PATH
 
@@ -123,6 +118,11 @@ def _save_output(result: NodeOutput, task_type_str: str, default_ext: str = ".bi
     result.metadata["saved_files"] = saved_files
 
     return file_path
+
+
+async def _save_output(result: NodeOutput, task_type_str: str, default_ext: str = ".bin") -> Path:
+    """``_save_output_sync`` 的线程池封装,bot / telemetry 统一走这里。"""
+    return await asyncio.to_thread(_save_output_sync, result, task_type_str, default_ext)
 
 
 async def execute_generation(
@@ -171,7 +171,7 @@ async def execute_generation(
 
             # 落盘失败不影响主流程,统计仍可标为成功
             try:
-                saved_path = _save_output(node_output, request.task_type.value)
+                saved_path = await _save_output(node_output, request.task_type.value)
                 node_output.metadata["saved_path"] = str(saved_path)
             except Exception as e:
                 logger.warning(f"[Executor] 保存生成结果失败(不影响返回): {e}")

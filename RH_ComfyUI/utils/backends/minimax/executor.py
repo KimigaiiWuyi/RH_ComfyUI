@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import asyncio
 
 from PIL import Image
 
@@ -75,11 +76,13 @@ class MiniMaxAdapter(Adapter):
         if isinstance(result, GenerationResult):
             return NodeOutput.from_result(result)
 
-        if isinstance(result, list) and result and isinstance(result[0], Image.Image):
-            img = result[0]
+        def _to_png(img: Image.Image) -> bytes:
             buf = io.BytesIO()
             img.save(buf, format="PNG")
-            data = buf.getvalue()
+            return buf.getvalue()
+
+        if isinstance(result, list) and result and isinstance(result[0], Image.Image):
+            data = await asyncio.to_thread(_to_png, result[0])
             return NodeOutput(
                 status="ok",
                 output_type="image",
@@ -88,9 +91,7 @@ class MiniMaxAdapter(Adapter):
             )
 
         if isinstance(result, Image.Image):
-            buf = io.BytesIO()
-            result.save(buf, format="PNG")
-            data = buf.getvalue()
+            data = await asyncio.to_thread(_to_png, result)
             return NodeOutput(
                 status="ok",
                 output_type="image",

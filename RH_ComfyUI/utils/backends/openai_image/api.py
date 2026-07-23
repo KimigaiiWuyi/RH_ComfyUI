@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import base64
+import asyncio
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -100,11 +101,25 @@ def _ratio_value(ratio: str) -> float:
 
 
 def _to_png_bytes(raw: bytes) -> bytes:
-    """统一转 PNG 字节(上游可能返回 jpeg/webp),保证 mime 一致。"""
+    """统一转 PNG 字节(上游可能返回 jpeg/webp),保证 mime 一致。
+
+    同步 CPU 重活:大图勿在事件循环直接调用,见 ``_to_png_bytes_async``。
+    """
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        try:
+            with Image.open(io.BytesIO(raw)) as img:
+                if img.mode not in ("P", "LA"):
+                    return raw
+        except Exception:  # noqa: BLE001
+            pass
     with Image.open(io.BytesIO(raw)) as img:
         buf = io.BytesIO()
         img.convert("RGBA" if img.mode in ("RGBA", "LA", "P") else "RGB").save(buf, format="PNG")
         return buf.getvalue()
+
+
+async def _to_png_bytes_async(raw: bytes) -> bytes:
+    return await asyncio.to_thread(_to_png_bytes, raw)
 
 
 async def _download(url: str) -> bytes:
@@ -208,10 +223,10 @@ async def _extract_image(data: Any, model: str) -> bytes:
 
     b64 = first.get("b64_json")
     if isinstance(b64, str) and b64:
-        return _to_png_bytes(base64.b64decode(b64))
+        return await _to_png_bytes_async(base64.b64decode(b64))
     result_url = first.get("url")
     if isinstance(result_url, str) and result_url:
-        return _to_png_bytes(await _download(result_url))
+        return await _to_png_bytes_async(await _download(result_url))
     raise OpenAIImageError(f"{model} data[0] 无 url/b64_json", user_message="生图服务未返回可用图片。")
 
 
