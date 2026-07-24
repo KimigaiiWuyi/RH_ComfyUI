@@ -402,9 +402,52 @@ async def _decode_media_dict(d: dict[str, Any]) -> bytes:
     return await _decode_media_bytes(d)
 
 
-async def _decode_media_bytes(d: dict[str, Any]) -> bytes:
-    """异步下载 url 或解码 data_base64。"""
+def _preview_media_url(url: str, *, limit: int = 120) -> str:
+    """日志用 URL 预览:截断 + 对 data: 去掉 base64 体。"""
+    s = (url or "").strip()
+    if not s:
+        return ""
+    low = s.lower()
+    if low.startswith("data:"):
+        head, _, _rest = s.partition(",")
+        return f"{head},<payload len={len(s) - len(head) - 1}>"
+    if len(s) <= limit:
+        return s
+    return s[: limit - 3] + "..."
+
+
+def _decode_data_uri(url: str) -> bytes:
+    """解析 ``data:[<mime>][;base64],<payload>`` → raw bytes。"""
     import base64
+
+    # data:[<mediatype>][;base64],<data>
+    if "," not in url:
+        raise ValueError("非法 data URI:缺少逗号分隔 payload")
+    header, payload = url.split(",", 1)
+    if ";base64" in header.lower():
+        # 允许缺省 padding
+        pad = (-len(payload)) % 4
+        if pad:
+            payload = payload + ("=" * pad)
+        return base64.b64decode(payload)
+    # 非 base64:百分号解码
+    from urllib.parse import unquote_to_bytes
+
+    return unquote_to_bytes(payload)
+
+
+async def _decode_media_bytes(d: dict[str, Any]) -> bytes:
+    """异步下载 url 或解码 data_base64 / data URI。
+
+    约定(调用方 canvas 应先把本站相对路径内联成 data_base64):
+    - ``data_base64`` / ``data`` 优先;
+    - ``url`` 仅接受 ``http(s)://`` 公网链,或 ``data:`` URI;
+    - 相对路径 / ``asset://`` / 其它协议 → 明确 ValueError,不再丢给 httpx
+      触发难读的 ``UnsupportedProtocol``。
+    """
+    import base64
+
+    from gsuid_core.logger import logger
 
     if d.get("data_base64"):
         return base64.b64decode(d["data_base64"])
@@ -416,10 +459,42 @@ async def _decode_media_bytes(d: dict[str, Any]) -> bytes:
     url = d.get("url")
     if not url:
         raise ValueError("媒体引用缺少 url/data/data_base64")
+    if not isinstance(url, str):
+        raise ValueError(f"媒体 url 类型非法: {type(url).__name__}")
+    url = url.strip()
+    if not url:
+        raise ValueError("媒体引用 url 为空")
+
+    low = url.lower()
+    if low.startswith("data:"):
+        try:
+            raw = _decode_data_uri(url)
+        except Exception as exc:  # noqa: BLE001 — 统一成 ValueError 给调用方
+            logger.error(
+                f"[RH_ComfyUI.api] data URI 解码失败: {_preview_media_url(url)} err={type(exc).__name__}: {exc}"
+            )
+            raise ValueError(f"非法 data URI: {exc}") from exc
+        logger.debug(f"[RH_ComfyUI.api] 媒体 data URI 解码成功 size={len(raw)}")
+        return raw
+
+    if not low.startswith(("http://", "https://")):
+        # 常见漏网:本站相对路径未内联 / asset:// 误入 images / 脏 URL
+        scheme = url.split(":", 1)[0] if ":" in url and not url.startswith("/") else "(relative)"
+        preview = _preview_media_url(url)
+        logger.error(
+            f"[RH_ComfyUI.api] 媒体 url 缺少 http(s) 协议,拒绝下载: "
+            f"scheme={scheme!r} url={preview!r} "
+            f"(应先由调用方内联为 data_base64,或改走 ordered_content 透传 asset://)"
+        )
+        raise ValueError(
+            f"媒体 url 必须是 http(s) 链接或 data URI,收到不可下载的 url={preview!r}"
+        )
+
     # 异步下载:调用方在 async submit() 的上下文中,使用 AsyncClient
     # 避免同步 httpx.Client 阻塞事件循环。
     import httpx
 
+    logger.debug(f"[RH_ComfyUI.api] 下载媒体 url={_preview_media_url(url, limit=200)}")
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(url)
         r.raise_for_status()
