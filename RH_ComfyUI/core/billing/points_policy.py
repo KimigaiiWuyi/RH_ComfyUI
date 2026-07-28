@@ -1,4 +1,4 @@
-"""RHBind 积分策略 — 平移 utils/points.py + rh_generate 退款逻辑"""
+"""RHBind 三重余额策略 — bot / agent 入口默认。"""
 
 from __future__ import annotations
 
@@ -12,10 +12,19 @@ class PointsBillingPolicy(BillingPolicy):
     async def reserve(self, ctx: BillingContext, cost: int) -> BillingReservation:
         from ...utils.database.models import RHBind
 
-        ok = await RHBind.deduct_point(ctx.user_id, ctx.bot_id, cost)
+        # vip_tier=None → 使用 RHBind 行上已存档位(与 bot_id 无关)
+        ok, detail = await RHBind.deduct_triple(
+            ctx.user_id,
+            ctx.bot_id,
+            cost,
+            vip_tier=None,
+        )
         if not ok:
-            current = await RHBind.get_point(ctx.user_id, ctx.bot_id)
-            raise BillingDeniedError(f"积分不足:本次需要 {cost} 积分,当前剩余 {current} 积分")
+            reason = detail.get("reason") or f"积分不足:本次需要 {cost} 积分"
+            avail = detail.get("available", 0)
+            raise BillingDeniedError(
+                f"{reason}(需要 {cost},可用 {avail})"
+            )
         return BillingReservation(cost=cost, context=ctx)
 
     async def refund(self, reservation: BillingReservation) -> None:
@@ -23,10 +32,12 @@ class PointsBillingPolicy(BillingPolicy):
             return
         from ...utils.database.models import RHBind
 
-        await RHBind.add_point(
+        await RHBind.add_triple(
             reservation.context.user_id,
             reservation.context.bot_id,
             reservation.cost,
+            vip_tier=None,
+            cap_to_tier=True,
         )
         reservation.refunded = True
 

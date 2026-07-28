@@ -13,6 +13,7 @@ from gsuid_core.utils.plugins_config.models import (
     GSC,
     GsDivider,
     GsIntConfig,
+    GsStrConfig,
 )
 
 PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
@@ -80,4 +81,37 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
         15,
         options=[5, 10, 15, 20],
     ),
+    # ── 三重余额额度(5h / 日 / 周);扣费从三桶同扣,可用=min ──
+    "_divider_quota_tiers": GsDivider(
+        "额度档位(三重余额)",
+        "5 小时 / 自然日 / 自然周 三桶满额;档位 free/basic/pro/enterprise 与 bot_id 无关,"
+        "存在 RHBind.vip_tier,画布/bot/agent 通用",
+    ),
+    "Quota_Timezone": GsStrConfig(
+        "额度日/周界时区",
+        "自然日 0 点与周一开始的时区,默认 Asia/Shanghai",
+        "Asia/Shanghai",
+    ),
+    "Quota_5h_Seconds": GsIntConfig(
+        "5 小时桶滚动秒数",
+        "自上次补满起经过多少秒再补满 5h 桶,默认 18000=5 小时",
+        18000,
+        options=[3600, 7200, 18000, 36000],
+    ),
+    # free
+    "Quota_Free_5h": GsIntConfig("免费档·5小时额度", "free 档 5h 桶满额", 8000),
+    "Quota_Free_Day": GsIntConfig("免费档·日额度", "free 档日桶满额", 20000),
+    "Quota_Free_Week": GsIntConfig("免费档·周额度", "free 档周桶满额", 80000),
+    # basic
+    "Quota_Basic_5h": GsIntConfig("基础档·5小时额度", "basic 档 5h 桶满额", 20000),
+    "Quota_Basic_Day": GsIntConfig("基础档·日额度", "basic 档日桶满额", 50000),
+    "Quota_Basic_Week": GsIntConfig("基础档·周额度", "basic 档周桶满额", 200000),
+    # pro
+    "Quota_Pro_5h": GsIntConfig("专业档·5小时额度", "pro 档 5h 桶满额", 40000),
+    "Quota_Pro_Day": GsIntConfig("专业档·日额度", "pro 档日桶满额", 100000),
+    "Quota_Pro_Week": GsIntConfig("专业档·周额度", "pro 档周桶满额", 400000),
+    # enterprise
+    "Quota_Enterprise_5h": GsIntConfig("企业档·5小时额度", "enterprise 档 5h 桶满额", 80000),
+    "Quota_Enterprise_Day": GsIntConfig("企业档·日额度", "enterprise 档日桶满额", 200000),
+    "Quota_Enterprise_Week": GsIntConfig("企业档·周额度", "enterprise 档周桶满额", 800000),
 }

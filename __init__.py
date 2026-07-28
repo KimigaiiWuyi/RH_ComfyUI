@@ -23,7 +23,16 @@ from .RH_ComfyUI.api import (  # noqa: F401
     is_available,
     get_point_cost,
     get_model_input_schema,
+    charge_points,
+    refund_points,
+    get_quota_status,
+    force_refill_points,
+    get_all_tier_quotas,
 )
+from .RH_ComfyUI.core.billing.points_api import PointsDeniedError  # noqa: F401
+from .RH_ComfyUI.core.billing.points_api import force_refill_bot_pool  # noqa: F401
+from .RH_ComfyUI.core.billing.points_api import set_vip_tier as set_points_vip_tier  # noqa: F401
+from .RH_ComfyUI.core.billing.points_api import refill_buckets  # noqa: F401
 from .RH_ComfyUI.utils.backends import (  # noqa: F401
     AdapterRegistry,
     init_backends,
@@ -64,6 +73,16 @@ __all__ = [
     "GenerationResult",
     "ProgressEvent",
     "RHGenerationError",
+    # 三重余额
+    "charge_points",
+    "refund_points",
+    "get_quota_status",
+    "force_refill_points",
+    "force_refill_bot_pool",
+    "get_all_tier_quotas",
+    "set_points_vip_tier",
+    "refill_buckets",
+    "PointsDeniedError",
     # 高级(允许需要写 Adapter / Pipeline 的下游插件访问内部注册表)
     "NodeDef",
     "pipeline_registry",

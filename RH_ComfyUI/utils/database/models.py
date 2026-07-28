@@ -26,12 +26,547 @@ class TaskSummary(TypedDict):
     avg_elapsed_ms: int
     by_task_type: dict[str, int]
 
+
 DEFAULT_POINT: int = PLUGIN_CONFIG.get_config("Default_Point").data
 
 
 class RHBind(Bind, table=True):
+    """积分绑定表 — 三重余额(5h / 日 / 周)。
+
+    ``point`` 为兼容字段,恒等于 min(point_5h, point_day, point_week)。
+    扣费/退款/查询请优先走 ``deduct_triple`` / ``add_triple`` / ``get_quota_status``;
+    旧 ``deduct_point`` / ``add_point`` / ``get_point`` 已转发到三桶逻辑。
+    """
+
     __table_args__ = {"extend_existing": True}
-    point: int = Field(default=20, title="积分")
+    point: int = Field(default=20, title="可用积分(min三桶)")
+    point_5h: int = Field(default=0, title="5小时桶余额")
+    point_day: int = Field(default=0, title="日桶余额")
+    point_week: int = Field(default=0, title="周桶余额")
+    # 5h 计时语义(与日/周固定日历不同):
+    #   refreshed_at_5h == 0 → 未开始计时(满额闲置,用后才启动)
+    #   refreshed_at_5h  > 0 → 首次消费时刻,经过 Quota_5h_Seconds 后补满并清零
+    refreshed_at_5h: int = Field(default=0, title="5h计时起点unix(0=未计时)")
+    refreshed_at_day: int = Field(default=0, title="日桶上次补满unix")
+    refreshed_at_week: int = Field(default=0, title="周桶上次补满unix")
+    vip_tier: str = Field(default="free", title="额度档 free/basic/pro/enterprise", max_length=16)
+
+    # ── 内部:三桶读写 ────────────────────────────────────────────
+
+    @classmethod
+    def _bucket_vals(cls, row: "RHBind") -> tuple[int, int, int]:
+        return (
+            int(getattr(row, "point_5h", 0) or 0),
+            int(getattr(row, "point_day", 0) or 0),
+            int(getattr(row, "point_week", 0) or 0),
+        )
+
+    @classmethod
+    def _sync_available(cls, h5: int, day: int, week: int) -> int:
+        return max(0, min(int(h5), int(day), int(week)))
+
+    @classmethod
+    async def _persist_buckets(
+        cls,
+        user_id: str,
+        bot_id: str,
+        *,
+        h5: int,
+        day: int,
+        week: int,
+        refreshed_at_5h: int,
+        refreshed_at_day: int,
+        refreshed_at_week: int,
+        vip_tier: str = "free",
+    ) -> int:
+        available = cls._sync_available(h5, day, week)
+        await cls.update_data(
+            user_id=user_id,
+            bot_id=bot_id,
+            point=available,
+            point_5h=int(h5),
+            point_day=int(day),
+            point_week=int(week),
+            refreshed_at_5h=int(refreshed_at_5h),
+            refreshed_at_day=int(refreshed_at_day),
+            refreshed_at_week=int(refreshed_at_week),
+            vip_tier=(vip_tier or "free")[:16],
+        )
+        return available
+
+    @classmethod
+    async def ensure_refreshed(
+        cls,
+        user_id: str,
+        bot_id: str,
+        *,
+        vip_tier: Optional[str] = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """懒刷新三桶到档位满额,返回 status dict(含 available)。
+
+        档位优先级(与 bot_id 无关):
+          1. 显式 ``vip_tier`` 参数
+          2. 行上已存 ``RHBind.vip_tier``
+          3. free
+
+        force=True 时无视时间戳,三桶立即补满(管理端/手动刷新);5h 计时清零。
+
+        5h 计时规则:
+          - 补满后 timer=0,闲置不计时
+          - 首次扣费时写入 timer=now
+          - timer 起经过窗口秒数后自动补满并 timer=0
+        """
+        from ...core.billing.tier_quota import (
+            now_ts,
+            normalize_tier,
+            get_tier_quotas,
+            needs_5h_refresh,
+            needs_day_refresh,
+            needs_week_refresh,
+            start_of_local_day,
+            start_of_local_week,
+        )
+
+        n = now_ts()
+        row = await cls.select_data(user_id=user_id, bot_id=bot_id)
+
+        if vip_tier is not None:
+            tier = normalize_tier(vip_tier)
+        elif row is not None:
+            tier = normalize_tier(getattr(row, "vip_tier", None))
+        else:
+            tier = "free"
+
+        quotas = get_tier_quotas(tier)
+
+        if row is None:
+            await cls.create_data(
+                user_id=user_id,
+                bot_id=bot_id,
+                vip_tier=tier,
+            )
+            row = await cls.select_data(user_id=user_id, bot_id=bot_id)
+            assert row is not None
+
+        h5, day, week = cls._bucket_vals(row)
+        # r5 = 5h 计时起点(0=未开始)
+        r5 = int(getattr(row, "refreshed_at_5h", 0) or 0)
+        rd = int(getattr(row, "refreshed_at_day", 0) or 0)
+        rw = int(getattr(row, "refreshed_at_week", 0) or 0)
+        old_point = int(getattr(row, "point", 0) or 0)
+
+        # 旧行迁移:日/周戳全 0 → 初始化;5h 满额且 timer=0(闲置)
+        if rd <= 0 and rw <= 0 and h5 <= 0 and day <= 0 and week <= 0:
+            h5 = quotas.h5
+            day = max(old_point, quotas.day)
+            week = quotas.week
+            r5 = 0  # 满额未用,不计时
+            rd = start_of_local_day(n)
+            rw = start_of_local_week(n)
+            available = await cls._persist_buckets(
+                user_id,
+                bot_id,
+                h5=h5,
+                day=day,
+                week=week,
+                refreshed_at_5h=r5,
+                refreshed_at_day=rd,
+                refreshed_at_week=rw,
+                vip_tier=tier,
+            )
+            return cls._status_dict(
+                available=available,
+                h5=h5,
+                day=day,
+                week=week,
+                quotas=quotas,
+                r5=r5,
+                rd=rd,
+                rw=rw,
+                tier=tier,
+            )
+
+        # 已满额但还挂着旧版滚动计时 → 清零计时(符合「满额闲置不计时」)
+        if h5 >= quotas.h5 and r5 > 0 and not force:
+            r5 = 0
+            changed_idle = True
+        else:
+            changed_idle = False
+
+        changed = changed_idle
+        if force or needs_5h_refresh(r5, n):
+            h5 = quotas.h5
+            r5 = 0  # 补满后重新闲置,等下次首次消费再计时
+            changed = True
+        if force or needs_day_refresh(rd, n):
+            day = quotas.day
+            rd = start_of_local_day(n)
+            changed = True
+        if force or needs_week_refresh(rw, n):
+            week = quotas.week
+            rw = start_of_local_week(n)
+            changed = True
+
+        # 档位变更时仍保持余额,但 stamp vip_tier
+        stored_tier = str(getattr(row, "vip_tier", "") or "free")
+        if stored_tier != tier:
+            changed = True
+
+        if changed:
+            available = await cls._persist_buckets(
+                user_id,
+                bot_id,
+                h5=h5,
+                day=day,
+                week=week,
+                refreshed_at_5h=r5,
+                refreshed_at_day=rd,
+                refreshed_at_week=rw,
+                vip_tier=tier,
+            )
+        else:
+            available = cls._sync_available(h5, day, week)
+            # 兼容字段漂移时纠偏
+            if int(getattr(row, "point", 0) or 0) != available:
+                await cls.update_data(user_id=user_id, bot_id=bot_id, point=available)
+
+        return cls._status_dict(
+            available=available,
+            h5=h5,
+            day=day,
+            week=week,
+            quotas=quotas,
+            r5=r5,
+            rd=rd,
+            rw=rw,
+            tier=tier,
+        )
+
+    @classmethod
+    def _status_dict(
+        cls,
+        *,
+        available: int,
+        h5: int,
+        day: int,
+        week: int,
+        quotas: Any,
+        r5: int,
+        rd: int,
+        rw: int,
+        tier: str,
+    ) -> dict[str, Any]:
+        from ...core.billing.tier_quota import (
+            next_5h_refresh_at,
+            next_day_refresh_at,
+            next_week_refresh_at,
+        )
+
+        return {
+            "available": int(available),
+            "point": int(available),
+            "tier": tier,
+            "label": getattr(quotas, "label", tier),
+            "buckets": {
+                "h5": {
+                    "balance": int(h5),
+                    "cap": int(quotas.h5),
+                    # 0 = 未开始计时(满额闲置);>0 = 预计补满 unix
+                    "next_refresh_at": next_5h_refresh_at(r5),
+                    "timer_started_at": int(r5),
+                    "timer_active": bool(r5 > 0),
+                },
+                "day": {
+                    "balance": int(day),
+                    "cap": int(quotas.day),
+                    "next_refresh_at": next_day_refresh_at(),
+                },
+                "week": {
+                    "balance": int(week),
+                    "cap": int(quotas.week),
+                    "next_refresh_at": next_week_refresh_at(),
+                },
+            },
+            "refreshed_at": {
+                "h5": int(r5),  # 5h:计时起点;0=未计时
+                "day": int(rd),
+                "week": int(rw),
+            },
+        }
+
+    @classmethod
+    async def get_quota_status(
+        cls,
+        user_id: str,
+        bot_id: str,
+        *,
+        vip_tier: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier)
+
+    @classmethod
+    async def deduct_triple(
+        cls,
+        user_id: str,
+        bot_id: str,
+        amount: int,
+        *,
+        vip_tier: Optional[str] = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        """三桶同扣。返回 (ok, status_or_error_detail)。"""
+        if amount <= 0:
+            st = await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier)
+            return True, st
+
+        st = await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier)
+        h5 = int(st["buckets"]["h5"]["balance"])
+        day = int(st["buckets"]["day"]["balance"])
+        week = int(st["buckets"]["week"]["balance"])
+        if h5 < amount or day < amount or week < amount:
+            short = []
+            if h5 < amount:
+                short.append(f"5小时额度不足(剩{h5})")
+            if day < amount:
+                short.append(f"今日额度不足(剩{day})")
+            if week < amount:
+                short.append(f"本周额度不足(剩{week})")
+            detail = {
+                **st,
+                "ok": False,
+                "need": amount,
+                "reason": "；".join(short),
+                "short_buckets": [b for b, bal in (("h5", h5), ("day", day), ("week", week)) if bal < amount],
+            }
+            logger.warning(
+                f"[RHBind.deduct_triple] 不足 user={user_id} bot_id={bot_id} "
+                f"need={amount} h5={h5} day={day} week={week}"
+            )
+            return False, detail
+
+        h5 -= amount
+        day -= amount
+        week -= amount
+        tier = str(st.get("tier") or "free")
+        # 5h:满额闲置(timer=0)时首次消费 → 启动计时
+        from ...core.billing.tier_quota import now_ts, get_tier_quotas
+
+        r5 = int(st["refreshed_at"]["h5"])
+        if r5 <= 0:
+            r5 = now_ts()
+        rd = int(st["refreshed_at"]["day"])
+        rw = int(st["refreshed_at"]["week"])
+        available = await cls._persist_buckets(
+            user_id,
+            bot_id,
+            h5=h5,
+            day=day,
+            week=week,
+            refreshed_at_5h=r5,
+            refreshed_at_day=rd,
+            refreshed_at_week=rw,
+            vip_tier=tier,
+        )
+
+        out = cls._status_dict(
+            available=available,
+            h5=h5,
+            day=day,
+            week=week,
+            quotas=get_tier_quotas(tier),
+            r5=r5,
+            rd=rd,
+            rw=rw,
+            tier=tier,
+        )
+        logger.info(
+            f"[RHBind.deduct_triple] ok user={user_id} bot_id={bot_id} -{amount} "
+            f"→ avail={available} (h5={h5},day={day},week={week})"
+        )
+        return True, out
+
+    @classmethod
+    async def add_triple(
+        cls,
+        user_id: str,
+        bot_id: str,
+        amount: int,
+        *,
+        vip_tier: Optional[str] = None,
+        cap_to_tier: bool = True,
+    ) -> dict[str, Any]:
+        """三桶同加;默认不超过档位 cap(退款场景)。"""
+        from ...core.billing.tier_quota import normalize_tier, get_tier_quotas
+
+        if amount <= 0:
+            return await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier)
+
+        # 退款不触发周期刷新,避免「失败退款却顺带把桶补满」
+        row = await cls.select_data(user_id=user_id, bot_id=bot_id)
+        if vip_tier is not None:
+            tier = normalize_tier(vip_tier)
+        elif row is not None:
+            tier = normalize_tier(getattr(row, "vip_tier", None))
+        else:
+            tier = "free"
+        quotas = get_tier_quotas(tier)
+        if row is None:
+            await cls.create_data(user_id=user_id, bot_id=bot_id, vip_tier=tier)
+            row = await cls.select_data(user_id=user_id, bot_id=bot_id)
+            assert row is not None
+
+        h5, day, week = cls._bucket_vals(row)
+        h5 += amount
+        day += amount
+        week += amount
+        if cap_to_tier:
+            h5 = min(h5, quotas.h5)
+            day = min(day, quotas.day)
+            week = min(week, quotas.week)
+
+        r5 = int(getattr(row, "refreshed_at_5h", 0) or 0)
+        rd = int(getattr(row, "refreshed_at_day", 0) or 0)
+        rw = int(getattr(row, "refreshed_at_week", 0) or 0)
+        available = await cls._persist_buckets(
+            user_id,
+            bot_id,
+            h5=h5,
+            day=day,
+            week=week,
+            refreshed_at_5h=r5,
+            refreshed_at_day=rd,
+            refreshed_at_week=rw,
+            vip_tier=tier,
+        )
+        logger.info(
+            f"[RHBind.add_triple] user={user_id} bot_id={bot_id} +{amount} "
+            f"→ avail={available} (h5={h5},day={day},week={week})"
+        )
+        return cls._status_dict(
+            available=available,
+            h5=h5,
+            day=day,
+            week=week,
+            quotas=quotas,
+            r5=r5,
+            rd=rd,
+            rw=rw,
+            tier=tier,
+        )
+
+    @classmethod
+    async def force_refill(
+        cls,
+        user_id: str,
+        bot_id: str,
+        *,
+        vip_tier: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """管理端:立刻把三桶补到当前档满额。"""
+        return await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier, force=True)
+
+    @classmethod
+    async def refill_buckets(
+        cls,
+        user_id: str,
+        bot_id: str,
+        buckets: list[str] | tuple[str, ...] | str = "all",
+        *,
+        vip_tier: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """管理端:只补满指定桶(h5 / day / week / all)。
+
+        补满 5h 时会清零 5h 计时(回到闲置)。
+        """
+        from ...core.billing.tier_quota import (
+            get_tier_quotas,
+            normalize_tier,
+            now_ts,
+            start_of_local_day,
+            start_of_local_week,
+        )
+
+        st = await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier, force=False)
+        tier = normalize_tier(vip_tier or st.get("tier"))
+        quotas = get_tier_quotas(tier)
+        n = now_ts()
+
+        if isinstance(buckets, str):
+            keys = ["h5", "day", "week"] if buckets in ("all", "*") else [buckets]
+        else:
+            keys = list(buckets)
+        keys = [k.strip().lower() for k in keys if k]
+        valid = {"h5", "day", "week"}
+        keys = [k for k in keys if k in valid]
+        if not keys:
+            return st
+
+        h5 = int(st["buckets"]["h5"]["balance"])
+        day = int(st["buckets"]["day"]["balance"])
+        week = int(st["buckets"]["week"]["balance"])
+        r5 = int(st["refreshed_at"]["h5"])
+        rd = int(st["refreshed_at"]["day"])
+        rw = int(st["refreshed_at"]["week"])
+
+        if "h5" in keys:
+            h5 = quotas.h5
+            r5 = 0
+        if "day" in keys:
+            day = quotas.day
+            rd = start_of_local_day(n)
+        if "week" in keys:
+            week = quotas.week
+            rw = start_of_local_week(n)
+
+        available = await cls._persist_buckets(
+            user_id,
+            bot_id,
+            h5=h5,
+            day=day,
+            week=week,
+            refreshed_at_5h=r5,
+            refreshed_at_day=rd,
+            refreshed_at_week=rw,
+            vip_tier=tier,
+        )
+        return cls._status_dict(
+            available=available,
+            h5=h5,
+            day=day,
+            week=week,
+            quotas=quotas,
+            r5=r5,
+            rd=rd,
+            rw=rw,
+            tier=tier,
+        )
+
+    @classmethod
+    async def set_vip_tier(
+        cls,
+        user_id: str,
+        bot_id: str,
+        tier: str,
+        *,
+        refill: bool = True,
+    ) -> dict[str, Any]:
+        """设置该 (user_id, bot_id) 池的额度档;默认立即按新档三桶补满。
+
+        与 bot_id 平台无关 — qq / canvas / 其它一律可设 basic/pro/enterprise。
+        """
+        from ...core.billing.tier_quota import normalize_tier
+
+        t = normalize_tier(tier)
+        row = await cls.select_data(user_id=user_id, bot_id=bot_id)
+        if row is None:
+            await cls.create_data(user_id=user_id, bot_id=bot_id, vip_tier=t)
+        else:
+            await cls.update_data(user_id=user_id, bot_id=bot_id, vip_tier=t[:16])
+        if refill:
+            return await cls.ensure_refreshed(user_id, bot_id, vip_tier=t, force=True)
+        return await cls.ensure_refreshed(user_id, bot_id, vip_tier=t, force=False)
+
+    # ── 兼容旧 API ───────────────────────────────────────────────
 
     @classmethod
     async def create_data(
@@ -39,15 +574,41 @@ class RHBind(Bind, table=True):
         user_id: str,
         bot_id: str,
         point: Optional[int] = None,
+        *,
+        vip_tier: str = "free",
     ):
-        if point is None:
-            point = DEFAULT_POINT
+        from ...core.billing.tier_quota import (
+            now_ts,
+            normalize_tier,
+            get_tier_quotas,
+            start_of_local_day,
+            start_of_local_week,
+        )
+
+        tier = normalize_tier(vip_tier)
+        quotas = get_tier_quotas(tier)
+        n = now_ts()
+        # point 参数仅作兼容:若显式传入,日桶至少这么多
+        day = quotas.day
+        if point is not None:
+            day = max(int(point), quotas.day)
+        h5, week = quotas.h5, quotas.week
+        available = cls._sync_available(h5, day, week)
+        # 新建满额:5h 计时=0(闲置,首次消费才启动)
+        r5 = 0
 
         await cls.insert_data(
             group_id=None,
             user_id=user_id,
             bot_id=bot_id,
-            point=point,
+            point=available,
+            point_5h=h5,
+            point_day=day,
+            point_week=week,
+            refreshed_at_5h=r5,
+            refreshed_at_day=start_of_local_day(n),
+            refreshed_at_week=start_of_local_week(n),
+            vip_tier=tier[:16],
         )
         bind_data = await cls.select_data(
             user_id=user_id,
@@ -58,7 +619,14 @@ class RHBind(Bind, table=True):
                 group_id=None,
                 user_id=user_id,
                 bot_id=bot_id,
-                point=point,
+                point=available,
+                point_5h=h5,
+                point_day=day,
+                point_week=week,
+                refreshed_at_5h=r5,
+                refreshed_at_day=start_of_local_day(n),
+                refreshed_at_week=start_of_local_week(n),
+                vip_tier=tier[:16],
             )
         return bind_data
 
@@ -69,22 +637,8 @@ class RHBind(Bind, table=True):
         bot_id: str,
         add_point_num: int,
     ) -> int:
-        bind_data = await cls.select_data(
-            user_id=user_id,
-            bot_id=bot_id,
-        )
-        if bind_data is None:
-            bind_data = await cls.create_data(
-                user_id=user_id,
-                bot_id=bot_id,
-            )
-
-        bind_data.point += add_point_num
-        await cls.update_data(
-            user_id=user_id,
-            bot_id=bot_id,
-            point=bind_data.point,
-        )
+        """兼容旧接口:三桶同加并封顶档位。"""
+        await cls.add_triple(user_id, bot_id, add_point_num, cap_to_tier=True)
         return 0
 
     @classmethod
@@ -93,13 +647,9 @@ class RHBind(Bind, table=True):
         user_id: str,
         bot_id: str,
     ) -> int:
-        bind_data = await cls.select_data(
-            user_id=user_id,
-            bot_id=bot_id,
-        )
-        if bind_data is None:
-            return 0
-        return bind_data.point
+        """兼容旧接口:懒刷新后返回 available。"""
+        st = await cls.ensure_refreshed(user_id, bot_id)
+        return int(st.get("available") or 0)
 
     @classmethod
     async def deduct_point(
@@ -108,39 +658,13 @@ class RHBind(Bind, table=True):
         bot_id: str,
         deduct_point_num: int,
         initial_point: int = DEFAULT_POINT,
+        *,
+        vip_tier: Optional[str] = None,
     ) -> bool:
-        """扣减积分;无记录时先建账(初始积分可选,默认 ``DEFAULT_POINT``)。"""
-        bind_data = await cls.select_data(
-            user_id=user_id,
-            bot_id=bot_id,
-        )
-        if bind_data is None:
-            logger.info(f"[RHBind.deduct_point] 建账 user={user_id} bot_id={bot_id} initial={initial_point}")
-            bind_data = await cls.create_data(
-                user_id=user_id,
-                bot_id=bot_id,
-                point=initial_point,
-            )
-
-        if bind_data.point < deduct_point_num:
-            logger.warning(
-                f"[RHBind.deduct_point] 积分不足 user={user_id} bot_id={bot_id}"
-                f" current={bind_data.point} need={deduct_point_num}"
-            )
-            return False
-
-        old_point = bind_data.point
-        bind_data.point -= deduct_point_num
-        await cls.update_data(
-            user_id=user_id,
-            bot_id=bot_id,
-            point=bind_data.point,
-        )
-        logger.info(
-            f"[RHBind.deduct_point] 扣减成功 user={user_id} bot_id={bot_id}"
-            f" {old_point} -> {bind_data.point} (deducted {deduct_point_num})"
-        )
-        return True
+        """兼容旧接口:三桶同扣。``initial_point`` 忽略(建账走档位满额)。"""
+        del initial_point  # 三重余额下建账由 ensure_refreshed/create_data 按档位初始化
+        ok, _ = await cls.deduct_triple(user_id, bot_id, deduct_point_num, vip_tier=vip_tier)
+        return ok
 
 
 @site.register_admin
@@ -759,11 +1283,7 @@ class RHVoiceCloneCache(SQLModel, table=True):
         audio_hash: str,
     ) -> Optional[str]:
         """命中返回已克隆音色 id,未命中返回 None"""
-        stmt = (
-            select(cls)
-            .where(and_(col(cls.provider) == provider, col(cls.audio_hash) == audio_hash))
-            .limit(1)
-        )
+        stmt = select(cls).where(and_(col(cls.provider) == provider, col(cls.audio_hash) == audio_hash)).limit(1)
         row = (await session.execute(stmt)).scalar_one_or_none()
         return row.voice_model_id if row is not None else None
 
@@ -780,11 +1300,7 @@ class RHVoiceCloneCache(SQLModel, table=True):
         created_by: str = "",
     ) -> None:
         """记住一条映射;并发下若已存在则跳过,避免重复行"""
-        stmt = (
-            select(cls)
-            .where(and_(col(cls.provider) == provider, col(cls.audio_hash) == audio_hash))
-            .limit(1)
-        )
+        stmt = select(cls).where(and_(col(cls.provider) == provider, col(cls.audio_hash) == audio_hash)).limit(1)
         if (await session.execute(stmt)).scalar_one_or_none() is not None:
             return
         session.add(
@@ -817,5 +1333,13 @@ exec_list.extend(
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN backend_key_prefix VARCHAR(16) DEFAULT ""',
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN saved_files_json TEXT DEFAULT ""',
         'ALTER TABLE rhcomfyuitaskrecord ADD COLUMN request_body_json TEXT DEFAULT ""',
+        # 三重余额(5h/日/周);旧行戳为 0 时 ensure_refreshed 会迁移初始化
+        "ALTER TABLE rhbind ADD COLUMN point_5h INTEGER DEFAULT 0",
+        "ALTER TABLE rhbind ADD COLUMN point_day INTEGER DEFAULT 0",
+        "ALTER TABLE rhbind ADD COLUMN point_week INTEGER DEFAULT 0",
+        "ALTER TABLE rhbind ADD COLUMN refreshed_at_5h INTEGER DEFAULT 0",
+        "ALTER TABLE rhbind ADD COLUMN refreshed_at_day INTEGER DEFAULT 0",
+        "ALTER TABLE rhbind ADD COLUMN refreshed_at_week INTEGER DEFAULT 0",
+        'ALTER TABLE rhbind ADD COLUMN vip_tier VARCHAR(16) DEFAULT "free"',
     ]
 )

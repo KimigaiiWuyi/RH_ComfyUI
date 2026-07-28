@@ -501,6 +501,42 @@ async def _decode_media_bytes(d: dict[str, Any]) -> bytes:
         return r.content
 
 
+# ── 三重余额公开 API(canvas / 外部插件预扣) ──────────────────────────
+
+
+async def charge_points(user_id: str, bot_id: str, amount: int, *, vip_tier=None, reason: str = ""):
+    """预扣三桶余额;不足抛 PointsDeniedError。"""
+    from .core.billing.points_api import charge_points as _charge
+
+    return await _charge(user_id, bot_id, amount, vip_tier=vip_tier, reason=reason)
+
+
+async def refund_points(user_id: str, bot_id: str, amount: int, *, vip_tier=None, reason: str = ""):
+    """退回三桶(封顶档位 cap)。"""
+    from .core.billing.points_api import refund_points as _refund
+
+    return await _refund(user_id, bot_id, amount, vip_tier=vip_tier, reason=reason)
+
+
+async def get_quota_status(user_id: str, bot_id: str, *, vip_tier=None):
+    """查询三桶余额与下次刷新时间。"""
+    from .core.billing.points_api import get_quota_status as _status
+
+    return await _status(user_id, bot_id, vip_tier=vip_tier)
+
+
+async def force_refill_points(user_id: str, bot_id: str, *, vip_tier=None):
+    from .core.billing.points_api import force_refill_points as _refill
+
+    return await _refill(user_id, bot_id, vip_tier=vip_tier)
+
+
+def get_all_tier_quotas():
+    from .core.billing.points_api import get_all_tier_quotas as _tiers
+
+    return _tiers()
+
+
 __all__ = [
     "GenerationResult",
     "ProgressEvent",
@@ -510,4 +546,9 @@ __all__ = [
     "list_models",
     "get_model_input_schema",
     "is_available",
+    "charge_points",
+    "refund_points",
+    "get_quota_status",
+    "force_refill_points",
+    "get_all_tier_quotas",
 ]
