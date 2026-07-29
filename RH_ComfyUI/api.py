@@ -106,13 +106,9 @@ async def submit(
             TaskType(task_type)
         except ValueError:
             valid = [t.value for t in TaskType]
-            raise ValueError(
-                f"未知 task_type: {task_type!r},合法值: {valid}"
-            ) from None
+            raise ValueError(f"未知 task_type: {task_type!r},合法值: {valid}") from None
         if task_type != model_task_type:
-            raise ValueError(
-                f"模型 {model!r} 的 task_type={model_task_type} 与请求 {task_type!r} 不一致"
-            )
+            raise ValueError(f"模型 {model!r} 的 task_type={model_task_type} 与请求 {task_type!r} 不一致")
         final_task_type = task_type
     else:
         final_task_type = model_task_type
@@ -309,19 +305,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
         else:
             passthrough[k] = v
 
-    # 处理 images: 支持 list[bytes] 和 list[dict] (dict 可能含 url,需异步下载)
-    if "images" in req_kwargs and req_kwargs["images"]:
-        images: list[bytes] = []
-        for d in req_kwargs["images"]:
-            if isinstance(d, dict):
-                images.append(await _decode_media_dict(d))
-            else:
-                images.append(d)
-        req_kwargs["images"] = images
-    else:
-        req_kwargs["images"] = []
-
-    # video_refs / audio_refs: list[dict] → list[MediaRef]
+    # video_refs / audio_refs 先就位,便于下面把误入 images 的视频/音频回流
     for list_field in ("video_refs", "audio_refs"):
         if list_field in req_kwargs and req_kwargs[list_field]:
             kind = MediaKind.VIDEO if list_field == "video_refs" else MediaKind.AUDIO
@@ -329,7 +313,65 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
         else:
             req_kwargs[list_field] = []
 
-    # ordered_content: list[dict] → list[ContentItem]
+    # 处理 images: 支持 list[bytes] 和 list[dict] (dict 可能含 url,需异步下载)。
+    # 关键:若 bytes/mime/扩展名实为视频/音频,不得继续走 image 通道 —— 否则
+    # Seedance content[] 会以 type=image_url 发出,上游返回
+    # "image format is not supported"(VID-4001)。
+    from .utils.core.types import MediaRef, sniff_media_kind
+
+    video_refs: list = list(req_kwargs["video_refs"])
+    audio_refs: list = list(req_kwargs["audio_refs"])
+    if "images" in req_kwargs and req_kwargs["images"]:
+        images: list[bytes] = []
+        for d in req_kwargs["images"]:
+            if isinstance(d, dict):
+                raw = await _decode_media_dict(d)
+                kind = (
+                    sniff_media_kind(
+                        data=raw,
+                        mime=d.get("mime_type"),
+                        url=d.get("url"),
+                        filename=d.get("filename"),
+                    )
+                    or MediaKind.IMAGE
+                )
+                if kind == MediaKind.VIDEO:
+                    video_refs.append(
+                        MediaRef(
+                            kind=MediaKind.VIDEO,
+                            data=raw,
+                            role=d.get("role"),
+                            mime_type=d.get("mime_type"),
+                            filename=d.get("filename"),
+                        )
+                    )
+                elif kind == MediaKind.AUDIO:
+                    audio_refs.append(
+                        MediaRef(
+                            kind=MediaKind.AUDIO,
+                            data=raw,
+                            role=d.get("role"),
+                            mime_type=d.get("mime_type"),
+                            filename=d.get("filename"),
+                        )
+                    )
+                else:
+                    images.append(raw)
+            else:
+                kind = sniff_media_kind(data=d) or MediaKind.IMAGE
+                if kind == MediaKind.VIDEO:
+                    video_refs.append(MediaRef(kind=MediaKind.VIDEO, data=d))
+                elif kind == MediaKind.AUDIO:
+                    audio_refs.append(MediaRef(kind=MediaKind.AUDIO, data=d))
+                else:
+                    images.append(d)
+        req_kwargs["images"] = images
+    else:
+        req_kwargs["images"] = []
+    req_kwargs["video_refs"] = video_refs
+    req_kwargs["audio_refs"] = audio_refs
+
+    # ordered_content: list[dict] → list[ContentItem](内部会按 mime/字节纠正 type)
     if "ordered_content" in req_kwargs and req_kwargs["ordered_content"]:
         req_kwargs["ordered_content"] = [_to_content_item(d) for d in req_kwargs["ordered_content"]]
 
@@ -374,7 +416,12 @@ def _to_media_ref(d: dict[str, Any], kind: MediaKind) -> MediaRef:
 
 
 def _to_content_item(d: dict[str, Any]) -> ContentItem:
-    """dict → ContentItem。"""
+    """dict → ContentItem。
+
+    前端/调用方约定 type 为 image_url|video_url|audio_url|text|draft_task。
+    若 type 与真实媒体不符(常见:视频被标成 image_url),以 mime/文件头/扩展名纠正,
+    保证下游 Seedance content[] 使用正确的 video_url / audio_url 键。
+    """
     from .utils.core.types import MediaKind, ContentItem, ContentItemType
 
     t = d.get("type")
@@ -383,18 +430,35 @@ def _to_content_item(d: dict[str, Any]) -> ContentItem:
     role = d.get("role")
     if t == "text":
         return ContentItem(type=ContentItemType.TEXT, text=d.get("text", ""), role=role)
-    if t in ("image_url", "image"):
-        media = _to_media_ref(d.get("media") or {"url": d.get("url"), "role": role}, MediaKind.IMAGE)
-        return ContentItem(type=ContentItemType.IMAGE, media=media, role=role)
-    if t in ("video_url", "video"):
-        media = _to_media_ref(d.get("media") or {"url": d.get("url"), "role": role}, MediaKind.VIDEO)
-        return ContentItem(type=ContentItemType.VIDEO, media=media, role=role)
-    if t in ("audio_url", "audio"):
-        media = _to_media_ref(d.get("media") or {"url": d.get("url"), "role": role}, MediaKind.AUDIO)
-        return ContentItem(type=ContentItemType.AUDIO, media=media, role=role)
     if t == "draft_task":
         return ContentItem(type=ContentItemType.DRAFT_TASK, draft_task_id=d.get("draft_task_id", ""))
-    raise ValueError(f"未知 ordered_content.type: {t!r}")
+
+    declared: MediaKind | None = None
+    if t in ("image_url", "image"):
+        declared = MediaKind.IMAGE
+    elif t in ("video_url", "video"):
+        declared = MediaKind.VIDEO
+    elif t in ("audio_url", "audio"):
+        declared = MediaKind.AUDIO
+    else:
+        raise ValueError(f"未知 ordered_content.type: {t!r}")
+
+    media_payload = d.get("media") or {
+        "url": d.get("url"),
+        "role": role,
+        "mime_type": d.get("mime_type"),
+        "filename": d.get("filename"),
+        "data_base64": d.get("data_base64"),
+        "data": d.get("data"),
+    }
+    media = _to_media_ref(media_payload, declared)
+    # MediaRef.__post_init__ 已按 sniff 纠正 kind;ContentItem.type 必须跟 kind 对齐
+    type_map = {
+        MediaKind.IMAGE: ContentItemType.IMAGE,
+        MediaKind.VIDEO: ContentItemType.VIDEO,
+        MediaKind.AUDIO: ContentItemType.AUDIO,
+    }
+    return ContentItem(type=type_map[media.kind], media=media, role=role)
 
 
 async def _decode_media_dict(d: dict[str, Any]) -> bytes:
@@ -486,9 +550,7 @@ async def _decode_media_bytes(d: dict[str, Any]) -> bytes:
             f"scheme={scheme!r} url={preview!r} "
             f"(应先由调用方内联为 data_base64,或改走 ordered_content 透传 asset://)"
         )
-        raise ValueError(
-            f"媒体 url 必须是 http(s) 链接或 data URI,收到不可下载的 url={preview!r}"
-        )
+        raise ValueError(f"媒体 url 必须是 http(s) 链接或 data URI,收到不可下载的 url={preview!r}")
 
     # 异步下载:调用方在 async submit() 的上下文中,使用 AsyncClient
     # 避免同步 httpx.Client 阻塞事件循环。

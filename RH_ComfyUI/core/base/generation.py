@@ -118,6 +118,14 @@ class AIGCGenerationBase(ABC):
         """默认值填充与归一化(如把 "1080P" 统一成 "1080p"),默认原样返回"""
         return request
 
+    async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
+        """异步预处理钩子(下载/重编码参考视频等 IO 操作)。
+
+        在 ``normalize`` 之后、通道选择之前调用。默认原样返回。
+        Seedance 等需要钳参考视频时长的模型覆盖本方法。
+        """
+        return request
+
     def estimate_cost(self, request: GenerationRequest) -> int:
         """本次请求的预估扣费(动态计费钩子)
 
@@ -201,6 +209,7 @@ class AIGCGenerationBase(ABC):
         """
         self.validate(request)
         request = self.normalize(request)
+        request = await self.prepare_request(request)
 
         bindings = self.channel_bindings()
         if not bindings:
@@ -228,7 +237,7 @@ class AIGCGenerationBase(ABC):
 
         ordered = self.balancer().order_candidates(scope=self.name, candidates=bindings)
 
-        from ..dispatch.concurrency import channel_slot, channel_slot_for_model, channel_has_capacity
+        from ..dispatch.concurrency import channel_slot, channel_has_capacity, channel_slot_for_model
 
         # 供应商软排序:满载(在途数 ≥ 并发上限)的通道排到末尾,优先溢到空闲供应商,
         # 避免阻塞在繁忙供应商的信号量上;组内保持负载均衡给出的顺序

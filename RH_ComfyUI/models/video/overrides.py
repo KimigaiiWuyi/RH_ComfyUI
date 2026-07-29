@@ -54,6 +54,66 @@ class SeedanceVideoModel(VideoPipelineModel):
         if len(request.audio_refs) > 3:
             raise ValidationError(f"{self.display_name} 最多接受 3 段参考音频,当前 {len(request.audio_refs)} 段")
 
+    async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
+        """Seedance 参考视频时长钳位:[2, 15]s;过短循环到 2.5s,过长裁到 14.5s。
+
+        覆盖 video_refs 与 ordered_content 中的 VIDEO 项。探测/编码失败时放行原片
+        (不阻断任务),由上游 API 自行拒收或接受。
+        """
+        from ...core.schema.types import MediaRef, MediaKind, ContentItem, ContentItemType
+        from ...utils.video_process import ensure_media_bytes, clamp_seedance_ref_video
+
+        async def _clamp_ref(ref: MediaRef) -> MediaRef:
+            if ref.kind != MediaKind.VIDEO:
+                return ref
+            raw = await ensure_media_bytes(ref)
+            if not raw:
+                return ref
+            new_data, _dur, action = await clamp_seedance_ref_video(raw)
+            if action is None and new_data is raw:
+                # 时长合法或跳过:若原先只有 url、刚下载了 bytes,仍写回 data
+                # 避免下游再 GET 一次;合法区间内若 data 已在则原样返回。
+                if ref.data is None and new_data:
+                    return MediaRef(
+                        kind=MediaKind.VIDEO,
+                        data=new_data,
+                        url=None,
+                        role=ref.role,
+                        mime_type=ref.mime_type or "video/mp4",
+                        filename=ref.filename,
+                    )
+                return ref
+            return MediaRef(
+                kind=MediaKind.VIDEO,
+                data=new_data,
+                url=None,  # 已内联字节,清掉 url 防下游再拉旧片
+                role=ref.role,
+                mime_type="video/mp4",
+                filename=ref.filename,
+            )
+
+        if request.video_refs:
+            request.video_refs = [await _clamp_ref(v) for v in request.video_refs]
+
+        if request.ordered_content:
+            new_oc: list[ContentItem] = []
+            for item in request.ordered_content:
+                if item.type == ContentItemType.VIDEO and item.media is not None and item.media.kind == MediaKind.VIDEO:
+                    new_media = await _clamp_ref(item.media)
+                    new_oc.append(
+                        ContentItem(
+                            type=item.type,
+                            media=new_media,
+                            role=item.role,
+                            text=item.text,
+                        )
+                    )
+                else:
+                    new_oc.append(item)
+            request.ordered_content = new_oc
+
+        return request
+
     # ── 多供应商通道(交给通用 LoadBalancer 排序 / 熔断 / 故障切换) ──
 
     def _vendor_model_for(self, provider_name: str) -> Optional[str]:
@@ -151,9 +211,7 @@ class Wan22VideoModel(VideoPipelineModel):
     def validate(self, request: GenerationRequest) -> None:
         # 音视频参考直接拒绝并给出替代建议(而非静默忽略)
         if request.video_refs or request.audio_refs:
-            raise ValidationError(
-                "Wan 2.2 不支持视频/音频参考,请改用 Seedance 2.0(模型名 seedance2)"
-            )
+            raise ValidationError("Wan 2.2 不支持视频/音频参考,请改用 Seedance 2.0(模型名 seedance2)")
         # 图片数量硬上限:超过 2 张明确拒绝并指向 Seedance(避免 schema 静默丢弃多余图)
         n_imgs = len(request.images)
         if n_imgs > self.MAX_IMAGES:
@@ -165,9 +223,7 @@ class Wan22VideoModel(VideoPipelineModel):
         if (request.resolution or "").lower() in ("1080p", "4k"):
             raise ValidationError(f"Wan 2.2 最高支持 720p,不支持 {request.resolution}")
         if request.width * request.height > self.MAX_PIXELS:
-            raise ValidationError(
-                f"Wan 2.2 最高支持 720p(约 92 万像素),当前 {request.width}x{request.height} 超限"
-            )
+            raise ValidationError(f"Wan 2.2 最高支持 720p(约 92 万像素),当前 {request.width}x{request.height} 超限")
 
 
 __all__ = ["SeedanceVideoModel", "Wan22VideoModel"]

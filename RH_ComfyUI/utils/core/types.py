@@ -208,6 +208,78 @@ def _guess_mime(data: bytes, kind: MediaKind) -> str:
     return "application/octet-stream"
 
 
+def sniff_media_kind(
+    *,
+    data: Optional[bytes] = None,
+    mime: Optional[str] = None,
+    url: Optional[str] = None,
+    filename: Optional[str] = None,
+) -> Optional[MediaKind]:
+    """从 mime / 文件头 / 扩展名推断媒体 kind;无法判断时返回 None。
+
+    用于纠正"视频/音频误入 images / type=image_url"这类上游传参错误 —
+    Seedance content[] 若把 mp4 当成 image_url 会触发上游
+    ``image format is not supported``(VID-4001)。
+    """
+    m = (mime or "").strip().lower()
+    if m.startswith("video/"):
+        return MediaKind.VIDEO
+    if m.startswith("audio/"):
+        return MediaKind.AUDIO
+    if m.startswith("image/"):
+        return MediaKind.IMAGE
+
+    if data:
+        if len(data) >= 12 and data[4:8] == b"ftyp":
+            return MediaKind.VIDEO
+        if b"ftyp" in data[:32]:
+            return MediaKind.VIDEO
+        if data[:3] == b"ID3" or data[:2] in (b"\xff\xfb", b"\xff\xf3"):
+            return MediaKind.AUDIO
+        if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+            return MediaKind.AUDIO
+        if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return MediaKind.IMAGE
+        if data[:8] == b"\x89PNG\r\n\x1a\n" or data[:3] == b"\xff\xd8\xff" or data[:4] == b"GIF8":
+            return MediaKind.IMAGE
+
+    name = (filename or "").strip().lower()
+    if not name and url:
+        # 去掉 query/fragment 再取扩展名
+        name = (url or "").split("?", 1)[0].split("#", 1)[0].rsplit("/", 1)[-1].lower()
+    if name:
+        if name.endswith((".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv")):
+            return MediaKind.VIDEO
+        if name.endswith((".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus")):
+            return MediaKind.AUDIO
+        if name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff")):
+            return MediaKind.IMAGE
+    return None
+
+
+def correct_media_kind(ref: "MediaRef", declared: Optional[MediaKind] = None) -> MediaKind:
+    """以 sniff 结果优先纠正 MediaRef 的 kind;嗅不到则保留 declared/原值。"""
+    base = declared if declared is not None else ref.kind
+    sniffed = sniff_media_kind(
+        data=ref.data,
+        mime=ref.mime_type,
+        url=ref.url,
+        filename=ref.filename,
+    )
+    return sniffed if sniffed is not None else _to_media_kind(base)
+
+
+def default_mime_for_kind(kind: MediaKind) -> str:
+    """按 kind 给出 materialize 用的保守默认 mime(避免视频被标成 image/png)。"""
+    if kind == MediaKind.VIDEO:
+        return "video/mp4"
+    if kind == MediaKind.AUDIO:
+        return "audio/mpeg"
+    if kind == MediaKind.IMAGE:
+        return "image/png"
+    return "application/octet-stream"
+
+
 @dataclass
 class MediaRef:
     """对一段媒体(图片/视频/音频)的引用
@@ -228,6 +300,20 @@ class MediaRef:
         self.kind = _to_media_kind(self.kind)
         if self.data is None and self.url is None:
             raise ValueError("MediaRef 必须提供 data 或 url 之一")
+        # 纠正误标 kind(例如 mp4 被塞进 images 通道声明为 IMAGE)——
+        # 必须在猜 mime 之前,否则会用 image/png 默认值污染 video 字节。
+        corrected = correct_media_kind(self, self.kind)
+        if corrected != self.kind:
+            self.kind = corrected
+            # 旧 mime 若与纠正后 kind 明显冲突(image/* vs video/*),清掉重猜
+            if self.mime_type:
+                m = self.mime_type.lower()
+                if corrected == MediaKind.VIDEO and m.startswith("image/"):
+                    self.mime_type = None
+                elif corrected == MediaKind.AUDIO and m.startswith("image/"):
+                    self.mime_type = None
+                elif corrected == MediaKind.IMAGE and (m.startswith("video/") or m.startswith("audio/")):
+                    self.mime_type = None
         # 自动推断 mime_type
         if self.mime_type is None and self.data is not None:
             self.mime_type = _guess_mime(self.data, self.kind)

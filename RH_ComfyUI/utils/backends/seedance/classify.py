@@ -177,6 +177,7 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
             if orig_pos not in keep_orig:
                 # 重复图:跳过(不占 content[] 位置;文本仍按位置保留)
                 continue
+            # 以 MediaRef.kind 为准(构造时已按 mime/文件头纠正 video/audio 误标为 image)
             kind = MediaKind(item.media.kind.value)
             role = MediaRole.REFERENCE
             if item.role:
@@ -190,19 +191,28 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
             media.append(spec_media)
             ordered_segments.append(OrderedSegment(kind="media", media=spec_media))
 
+        # 有序分支也要把"连线但未进 ordered_content"的扁平 video/audio/images
+        # 追加进尾部(前端 GenerationNode 通常已写进 OC;Agent/主页部分路径
+        # 会把未 @ 的素材只放在 video_refs/images 里 —— 旧逻辑会整批丢掉)。
+        media, ordered_segments = _append_flat_media_not_in_ordered(media, ordered_segments, request)
+
     else:
         for v in request.video_refs:
-            idx = _next_index(media, MediaKind.VIDEO)
-            media.append(SpecMedia(kind=MediaKind.VIDEO, role=MediaRole.REFERENCE, ref=v, index=idx))
+            kind = MediaKind(v.kind.value)
+            idx = _next_index(media, kind)
+            media.append(SpecMedia(kind=kind, role=MediaRole.REFERENCE, ref=v, index=idx))
         for a in request.audio_refs:
-            idx = _next_index(media, MediaKind.AUDIO)
-            media.append(SpecMedia(kind=MediaKind.AUDIO, role=MediaRole.REFERENCE, ref=a, index=idx))
+            kind = MediaKind(a.kind.value)
+            idx = _next_index(media, kind)
+            media.append(SpecMedia(kind=kind, role=MediaRole.REFERENCE, ref=a, index=idx))
         for raw_img in request.images:
             from ...core.types import image_ref
 
             ref = image_ref(data=raw_img)
-            idx = _next_index(media, MediaKind.IMAGE)
-            media.append(SpecMedia(kind=MediaKind.IMAGE, role=MediaRole.REFERENCE, ref=ref, index=idx))
+            # image_ref 构造后 __post_init__ 可能把 mp4 纠正为 VIDEO
+            kind = MediaKind(ref.kind.value)
+            idx = _next_index(media, kind)
+            media.append(SpecMedia(kind=kind, role=MediaRole.REFERENCE, ref=ref, index=idx))
 
     n_img = len([m for m in media if m.kind == MediaKind.IMAGE])
     has_av = any(m.kind in (MediaKind.VIDEO, MediaKind.AUDIO) for m in media)
@@ -248,9 +258,7 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     )
 
 
-def _apply_default_roles(
-    media: list[SpecMedia], shape: VideoTaskShape, frame_mode: str = "auto"
-) -> list[SpecMedia]:
+def _apply_default_roles(media: list[SpecMedia], shape: VideoTaskShape, frame_mode: str = "auto") -> list[SpecMedia]:
     """未显式提供 ordered_content 时,按形态/frame_mode 回填首帧/尾帧/参考。"""
     if frame_mode == "reference":
         return media  # 全部保持 REFERENCE
@@ -267,6 +275,54 @@ def _apply_default_roles(
         if images:
             images[0].role = MediaRole.FIRST_FRAME
     return media
+
+
+def _media_identity(ref: MediaRef) -> Optional[str]:
+    """去重键:优先 sha256(bytes),否则 url;都无则 None(每次都视为新项)。"""
+    key = _media_dedup_key(ref)
+    if key is not None:
+        return f"data:{key}"
+    if ref.url:
+        return f"url:{(ref.url or '').strip()}"
+    return None
+
+
+def _append_flat_media_not_in_ordered(
+    media: list[SpecMedia],
+    ordered_segments: list[OrderedSegment],
+    request: GenerationRequest,
+) -> tuple[list[SpecMedia], list[OrderedSegment]]:
+    """把 request 的扁平 video_refs / audio_refs / images 中尚未出现在
+    ordered_content 里的素材,以 REFERENCE 角色追加到 media 与有序段尾部。
+    """
+    seen: set[str] = set()
+    for m in media:
+        ident = _media_identity(m.ref)
+        if ident:
+            seen.add(ident)
+
+    def _add(ref: MediaRef, kind: MediaKind) -> None:
+        nonlocal media, ordered_segments
+        ident = _media_identity(ref)
+        if ident and ident in seen:
+            return
+        if ident:
+            seen.add(ident)
+        idx = _next_index(media, kind)
+        spec_media = SpecMedia(kind=kind, role=MediaRole.REFERENCE, ref=ref, index=idx)
+        media.append(spec_media)
+        ordered_segments.append(OrderedSegment(kind="media", media=spec_media))
+
+    for v in request.video_refs:
+        _add(v, MediaKind(v.kind.value))
+    for a in request.audio_refs:
+        _add(a, MediaKind(a.kind.value))
+    for raw_img in request.images:
+        from ...core.types import image_ref
+
+        ref = image_ref(data=raw_img)
+        _add(ref, MediaKind(ref.kind.value))
+    return media, ordered_segments
 
 
 __all__ = ["classify_video_spec"]

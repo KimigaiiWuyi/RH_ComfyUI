@@ -23,11 +23,22 @@ from ..provider import (
 )
 from ....core.types import MediaKind
 
+# Seedance / 方舟 content[] 协议:每种媒体的 type 键与 payload 键同名。
+# 视频必须是 video_url(不是 image_url),音频必须是 audio_url —— 否则上游
+# 会按图片校验并返回 "image format is not supported"(VID-4001)。
 _TYPE_KEY: dict[MediaKind, str] = {
     MediaKind.IMAGE: "image_url",
     MediaKind.VIDEO: "video_url",
     MediaKind.AUDIO: "audio_url",
 }
+
+
+def _content_type_key(kind: MediaKind) -> str:
+    """SpecMedia.kind → content[].type;未知 kind 不静默回落 image。"""
+    try:
+        return _TYPE_KEY[kind]
+    except KeyError as exc:
+        raise ValueError(f"Seedance content[] 不支持的媒体 kind: {kind!r}") from exc
 
 
 class ContentArrayMixin:
@@ -80,19 +91,22 @@ class ContentArrayMixin:
                 url = next(url_iter, None)
                 if not url:
                     continue
-                key = _TYPE_KEY[seg.media.kind]
+                # SpecMedia.kind 与 MediaRef.kind 可能因历史路径不一致;
+                # 以 ref.kind 为准(构造时已按文件头/mime 纠正),避免视频走 image_url。
+                kind = MediaKind(seg.media.ref.kind.value) if seg.media.ref is not None else seg.media.kind
+                key = _content_type_key(kind)
                 d = {"type": key, key: {"url": url}}
-                d["role"] = self._role_str(seg.media.role, seg.media.kind)
+                d["role"] = self._role_str(seg.media.role, kind)
 
-                if seg.media.kind == MediaKind.IMAGE:
+                if kind == MediaKind.IMAGE:
                     img_idx += 1
                     text_parts.append(f"【图片{img_idx}】")
                     images.append(d)
-                elif seg.media.kind == MediaKind.VIDEO:
+                elif kind == MediaKind.VIDEO:
                     vid_idx += 1
                     text_parts.append(f"【视频{vid_idx}】")
                     videos.append(d)
-                elif seg.media.kind == MediaKind.AUDIO:
+                elif kind == MediaKind.AUDIO:
                     aud_idx += 1
                     text_parts.append(f"【音频{aud_idx}】")
                     audios.append(d)
@@ -118,9 +132,10 @@ class ContentArrayMixin:
         for m, url in zip(spec.media, urls):
             if not url:
                 continue
-            key = _TYPE_KEY[m.kind]
+            kind = MediaKind(m.ref.kind.value) if m.ref is not None else m.kind
+            key = _content_type_key(kind)
             d: dict[str, Any] = {"type": key, key: {"url": url}}
-            d["role"] = self._role_str(m.role, m.kind)
+            d["role"] = self._role_str(m.role, kind)
             items.append(d)
         return items
 
