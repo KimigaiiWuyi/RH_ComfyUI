@@ -140,7 +140,7 @@ class GPTImage2Adapter(Adapter):
     name = "gpt_image2"
 
     async def check_available(self) -> bool:
-        # 检查 GPT_Image2_apikey 是否已配置
+        # 检查 OpenAI_Image_apikey 是否已配置
 
     async def execute(self, request, node, *, on_progress=None) -> NodeOutput:
         # 注入 backend_model（节点 YAML 中声明的 vendor model id）
@@ -190,6 +190,6 @@ class RHAppAdapter(Adapter):
 | 连接方式 | WebSocket + HTTP | HTTP REST | HTTP REST | HTTP REST | HTTP REST | HTTP REST |
 | 工作流 | JSON 工作流文件 | 无（直接调 API） | WebApp ID | 无（直接调 API） | 无（直接调 API） | 无（直接调 API） |
 | 映射模式 | 声明式 / 编程式 | 仅编程式 | 声明式 | 仅编程式 | 仅编程式 | 仅编程式 |
-| 可用性检查 | ComfyUI_BaseURL | GPT_Image2_apikey | RH_apikey | MiniMax_apikey | MIMO_apikey | Seedance_apikey_ark/_gateway/_runninghub |
+| 可用性检查 | ComfyUI_BaseURL | OpenAI_Image_apikey | RH_apikey | MiniMax_apikey | MIMO_apikey | Seedance_apikey_ark/_gateway/_runninghub |
 | 支持任务 | 全部 | 图片生成/编辑 | 全部 | 图片/语音 | 语音 | 视频 |
 | 代理支持 | RunningHub 代理 | 任意 OpenAI 兼容网关 | 原生 | 原生 | 原生 | 原生 |

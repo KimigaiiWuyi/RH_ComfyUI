@@ -28,21 +28,15 @@ class GPTImage2API:
     @property
     def api_key(self) -> str:
         if self._api_key is None:
-            # 优先读取新名称,回退到旧名称兼容已有配置
-            key = SERVICE_CONFIG.get_config("OpenAI_Image_apikey").data
-            if not key:
-                key = SERVICE_CONFIG.get_config("GPT_Image2_apikey").data
-            self._api_key = key or ""
+            self._api_key = SERVICE_CONFIG.get_config("OpenAI_Image_apikey").data or ""
         return self._api_key or ""
 
     @property
     def base_url(self) -> str:
         if self._base_url is None:
-            # 优先读取新名称,回退到旧名称兼容已有配置
-            url = SERVICE_CONFIG.get_config("OpenAI_Image_BaseURL").data
-            if not url:
-                url = SERVICE_CONFIG.get_config("GPT_Image2_BaseURL").data
-            self._base_url = url or "https://api.openai.com/v1"
+            self._base_url = (
+                SERVICE_CONFIG.get_config("OpenAI_Image_BaseURL").data or "https://api.openai.com/v1"
+            )
         return self._base_url or "https://api.openai.com/v1"
 
     def update_urls(self) -> None:
@@ -56,7 +50,7 @@ class GPTImage2API:
     def refresh_config(self) -> None:
         self._api_key = None
         self._base_url = None
-        # 强制清空缓存,下次访问时重新读取(已包含新旧名称 fallback)
+        # 强制清空缓存,下次访问时重新读取 OpenAI_Image_* 配置
         self.update_urls()
 
     async def _base_request(
