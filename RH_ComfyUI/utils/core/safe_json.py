@@ -5,12 +5,13 @@ from __future__ import annotations
 import re
 import enum
 import json
+import hashlib
 import datetime as _datetime
 import dataclasses
 from typing import Any
 from pathlib import Path
 
-# data URL 的 payload 只保留类型和长度,避免图片/音频内容进入日志或数据库。
+# data URL 的 payload 只保留类型和长度/摘要,避免图片/音频内容进入日志或数据库。
 _DATA_URL_RE = re.compile(r"^(data:[\w./+\-]+;base64,)([A-Za-z0-9+/=\s]+)$", re.IGNORECASE)
 _BARE_B64_RE = re.compile(r"^[A-Za-z0-9+/=]+$")
 _BARE_B64_THRESHOLD = 256
@@ -30,12 +31,20 @@ _BASE64_FIELD_NAMES = frozenset(
     }
 )
 _NORMALIZED_BASE64_FIELD_NAMES = frozenset(re.sub(r"[^a-z0-9]", "", x) for x in _BASE64_FIELD_NAMES)
-_MASKED_BASE64_RE = re.compile(r"^<base64 len=\d+>$")
+# 新格式 <base64://{sha10}#{len}>；兼容旧 <base64 len=N>
+_MASKED_BASE64_RE = re.compile(r"^(?:<base64 len=\d+>|<base64://[0-9a-f]+#\d+>)$", re.IGNORECASE)
 _MASKED_BYTES_RE = re.compile(r"^<bytes len=\d+>$")
 _MASKED_DATA_URL_RE = re.compile(
-    r"^data:[\w./+\-]+;base64,<\d+ chars omitted>$",
+    r"^data:[\w./+\-]+;base64,(?:<\d+ chars omitted>|<base64://[0-9a-f]+#\d+>)$",
     re.IGNORECASE,
 )
+
+
+def _base64_token(payload: str) -> str:
+    """与 canvas_backend.utils.params_sanitize 同形：``<base64://{sha10}#{len}>``。"""
+    compact = re.sub(r"\s+", "", payload)
+    digest = hashlib.sha256(compact.encode("ascii", errors="ignore")).hexdigest()[:10]
+    return f"<base64://{digest}#{len(compact)}>"
 
 
 def _is_base64_field(name: str | None) -> bool:
@@ -54,11 +63,11 @@ def _mask_base64_string(value: str, *, force: bool = False) -> str:
     match = _DATA_URL_RE.match(value)
     if match:
         prefix, payload = match.groups()
-        return f"{prefix}<{len(payload)} chars omitted>"
+        return f"{prefix}{_base64_token(payload)}"
     if force:
-        return f"<base64 len={len(value)}>"
+        return _base64_token(value)
     if len(value) >= _BARE_B64_THRESHOLD and _BARE_B64_RE.fullmatch(value):
-        return f"<base64 len={len(value)}>"
+        return _base64_token(value)
     return value
 
 
@@ -86,8 +95,10 @@ def _normalize(node: Any, *, seen: set[int], field_name: str | None = None) -> A
     if isinstance(node, (bytes, bytearray, memoryview)):
         return f"<bytes len={len(node)}>"
 
-    if isinstance(node, (Path, _datetime.datetime, _datetime.date, _datetime.time)):
-        return node.isoformat() if hasattr(node, "isoformat") else str(node)
+    if isinstance(node, Path):
+        return str(node)
+    if isinstance(node, (_datetime.datetime, _datetime.date, _datetime.time)):
+        return node.isoformat()
 
     # 所有容器/对象都做环引用保护。遇到循环时保留可读占位,不能让统计失败。
     is_container = isinstance(node, (dict, list, tuple, set, frozenset)) or dataclasses.is_dataclass(node)
@@ -110,8 +121,7 @@ def _normalize(node: Any, *, seen: set[int], field_name: str | None = None) -> A
 
         if isinstance(node, dict):
             return {
-                _json_key(key): _normalize(value, seen=seen, field_name=_json_key(key))
-                for key, value in node.items()
+                _json_key(key): _normalize(value, seen=seen, field_name=_json_key(key)) for key, value in node.items()
             }
 
         if isinstance(node, (list, tuple, set, frozenset)):

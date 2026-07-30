@@ -29,9 +29,11 @@ def test_mask_body_preserves_structure_and_masks_media() -> None:
     masked = mask_body(body)
 
     assert masked["prompt"] == "猫"
-    assert masked["image_base64"] == "<base64 len=4>"
-    assert masked["content"][0] == "data:image/png;base64,<12 chars omitted>"
-    assert masked["content"][1] == "<base64 len=256>"
+    assert masked["image_base64"].startswith("<base64://")
+    assert masked["image_base64"].endswith("#4>")
+    assert masked["content"][0].startswith("data:image/png;base64,<base64://")
+    assert masked["content"][1].startswith("<base64://")
+    assert masked["content"][1].endswith("#256>")
     assert masked["content"][2] == "ordinary text"
     assert masked["binary"] == "<bytes len=4>"
     assert json.loads(dump_body(body)) == masked
@@ -51,7 +53,9 @@ def test_mask_body_serializes_generation_request_without_image_bytes() -> None:
     assert masked["task_type"] == "image"
     assert masked["prompt"] == "original prompt"
     assert masked["images"] == ["<bytes len=11>"]
-    assert masked["params"] == {"image_base64": "<base64 len=4>", "quality": "high"}
+    assert masked["params"]["quality"] == "high"
+    assert masked["params"]["image_base64"].startswith("<base64://")
+    assert masked["params"]["image_base64"].endswith("#4>")
     assert masked["extra"] == {"custom": 1}
 
 

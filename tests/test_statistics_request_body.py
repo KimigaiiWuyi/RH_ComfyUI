@@ -55,6 +55,7 @@ def test_record_task_writes_complete_sanitized_request_body(monkeypatch) -> None
     assert record_id == 42
     stored = json.loads(captured["request_body_json"])
     assert stored["prompt"] == "keep this prompt"
-    assert stored["params"]["image_base64"] == "<base64 len=4>"
+    assert stored["params"]["image_base64"].startswith("<base64://")
+    assert stored["params"]["image_base64"].endswith("#4>")
     assert stored["params"]["nested"]["text"] == "keep this value"
     assert "AQID" not in captured["request_body_json"]
