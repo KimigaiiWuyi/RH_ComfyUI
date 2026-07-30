@@ -277,14 +277,24 @@ def _apply_default_roles(media: list[SpecMedia], shape: VideoTaskShape, frame_mo
     return media
 
 
-def _media_identity(ref: MediaRef) -> Optional[str]:
-    """去重键:优先 sha256(bytes),否则 url;都无则 None(每次都视为新项)。"""
+def _media_identities(ref: MediaRef) -> list[str]:
+    """同一 MediaRef 可能同时有 bytes 与 url —— 两套键都登记,避免「OC 侧 url、
+    扁平侧 bytes」对不上而把同图追加两次,顶破 max_images=9。
+    """
+    ids: list[str] = []
     key = _media_dedup_key(ref)
     if key is not None:
-        return f"data:{key}"
-    if ref.url:
-        return f"url:{(ref.url or '').strip()}"
-    return None
+        ids.append(f"data:{key}")
+    url = (ref.url or "").strip()
+    if url:
+        ids.append(f"url:{url}")
+    return ids
+
+
+def _media_identity(ref: MediaRef) -> Optional[str]:
+    """兼容旧调用:返回第一个可用去重键。"""
+    ids = _media_identities(ref)
+    return ids[0] if ids else None
 
 
 def _append_flat_media_not_in_ordered(
@@ -294,20 +304,28 @@ def _append_flat_media_not_in_ordered(
 ) -> tuple[list[SpecMedia], list[OrderedSegment]]:
     """把 request 的扁平 video_refs / audio_refs / images 中尚未出现在
     ordered_content 里的素材,以 REFERENCE 角色追加到 media 与有序段尾部。
+
+    注意:
+    - 前端 GenerationNode 在 Seedance 多参考路径会**同时**发 ordered_content(已含
+      @ + 未 @ 连线)与扁平 images(兼容备份)。旧实现只认单一 identity,url/bytes
+      不一致时会把 9 张图再追加一遍 → 18 张 → MEDIA_OVERFLOW(图≤9)。
+    - 若有序段**已有图**,跳过扁平 images(有序段已是权威图列表;扁平只服务
+      Agent/主页等未写 OC 的入口)。video/audio 仍按 identity 去重追加。
     """
     seen: set[str] = set()
     for m in media:
-        ident = _media_identity(m.ref)
-        if ident:
+        for ident in _media_identities(m.ref):
             seen.add(ident)
+
+    oc_has_image = any(m.kind == MediaKind.IMAGE for m in media)
 
     def _add(ref: MediaRef, kind: MediaKind) -> None:
         nonlocal media, ordered_segments
-        ident = _media_identity(ref)
-        if ident and ident in seen:
+        idents = _media_identities(ref)
+        if idents and any(i in seen for i in idents):
             return
-        if ident:
-            seen.add(ident)
+        for i in idents:
+            seen.add(i)
         idx = _next_index(media, kind)
         spec_media = SpecMedia(kind=kind, role=MediaRole.REFERENCE, ref=ref, index=idx)
         media.append(spec_media)
@@ -317,11 +335,14 @@ def _append_flat_media_not_in_ordered(
         _add(v, MediaKind(v.kind.value))
     for a in request.audio_refs:
         _add(a, MediaKind(a.kind.value))
-    for raw_img in request.images:
-        from ...core.types import image_ref
 
-        ref = image_ref(data=raw_img)
-        _add(ref, MediaKind(ref.kind.value))
+    # 有序段已有图 → 不再从扁平 images 补图(防双计)
+    if not oc_has_image:
+        for raw_img in request.images:
+            from ...core.types import image_ref
+
+            ref = image_ref(data=raw_img)
+            _add(ref, MediaKind(ref.kind.value))
     return media, ordered_segments
 
 

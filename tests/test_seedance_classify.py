@@ -76,6 +76,26 @@ def test_ordered_content_merges_flat_video_refs():
     assert spec.shape == VideoTaskShape.MULTIMODAL
 
 
+def test_ordered_content_does_not_double_count_flat_images():
+    """有序段已有图时,扁平 images 即使是同图不同 identity 形态也不得再追加。
+
+    回归:前端 Seedance 路径同时发 ordered_content + images;旧实现 url-vs-bytes
+    去重失败会把 9 张变成 18 张 → MEDIA_OVERFLOW(图≤9)。
+    """
+    imgs = [_img_item(bytes([i]) + b"PNG") for i in range(9)]
+    # 扁平侧用同一批 bytes(模拟 RH api 解码后的 list[bytes])
+    flat_bytes = [bytes([i]) + b"PNG" for i in range(9)]
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="多参考",
+        ordered_content=[_txt("多参考"), *imgs],
+        images=flat_bytes,
+        params={"frame_mode": "reference"},
+    )
+    spec = classify_video_spec(req)
+    assert len(spec.images()) == 9, f"应保持 9 张,实际 {len(spec.images())}"
+
+
 def test_mp4_bytes_in_images_become_video_kind():
     """images 通道误塞 mp4 字节时,MediaRef 纠正为 VIDEO(防 content[] image_url)。"""
     req = GenerationRequest(
