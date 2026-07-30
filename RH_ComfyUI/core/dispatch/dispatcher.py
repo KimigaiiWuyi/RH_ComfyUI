@@ -4,9 +4,10 @@
   1. route()           失败 → ModelUnavailableError(不扣费)
   2. validate 前置     失败 → ValidationError(不扣费)★ 校验先于扣费
   3. policy.reserve(model.estimate_cost(request))  失败 → BillingDeniedError
+  3.5 begin_dispatch() 插入 RHComfyuiTaskRecord status=running(可查进行中)
   4. model.run() 内自带两层并发闸(供应商全局闸 + (model,channel) 闸),
        整体受超时预算约束(Dispatch_Timeout,0=不限)
-       成功 → policy.commit() → record_dispatch(status=ok)
+       成功 → policy.commit() → record_dispatch(status=ok) 更新同一行
        失败/超时 → record_dispatch(status=failed) → policy.refund() → 原样抛出
        取消/中断(BaseException,如 CancelledError / DryRunInterrupt)
             → record_dispatch(status=cancelled|failed) → 退款 → 原样抛出
@@ -24,7 +25,7 @@ from .context import DispatchContext
 from ..base.errors import GenerationError, describe_exception
 from ..schema.types import NodeOutput
 from ..schema.request import GenerationResult, GenerationRequest
-from ..telemetry.recorder import record_dispatch
+from ..telemetry.recorder import begin_dispatch, record_dispatch
 from ...utils.core.safe_json import mask_body
 
 
@@ -63,6 +64,14 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
     # 4. 执行
     request.user_id = request.user_id or ctx.billing.user_id
     request.trace_id = request.trace_id or ctx.trace_id
+    # 预扣成功立刻写 running 行,消费列表可见进行中任务
+    record_id = await begin_dispatch(
+        request=request,
+        request_body=request_body,
+        model=model,
+        ctx=ctx,
+        point_cost=cost,
+    )
     start = time.monotonic()
     output: Optional[NodeOutput] = None
     result: Optional[GenerationResult] = None
@@ -111,6 +120,7 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
             error=None,
             ctx=ctx,
             point_cost=cost,
+            record_id=record_id,
         )
         return result
     except BaseException as e:
@@ -119,7 +129,7 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
         # "预扣了积分但没有产物",漏接会导致积分被吞、统计缺行。
         elapsed_ms = int((time.monotonic() - start) * 1000)
         status = "cancelled" if isinstance(e, asyncio.CancelledError) else "failed"
-        # 先落统计(status=failed),再退款并标记 refunded,顺序保证标记能找到记录
+        # 先更新统计为终态,再退款并 mark refunded(需 status=failed 已落库)
         await record_dispatch(
             request=request,
             request_body=request_body,
@@ -128,11 +138,11 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
             model=model,
             status=status,
             elapsed_ms=elapsed_ms,
-            # 展开成因链:AllChannelsFailedError 的真实根因在 .cause 里,
-            # 仅 repr(e) 会让每条失败记录都记成无信息量的"所有通道均失败"
+            # 展开成因链:AllChannelsFailedError 的真实根因在 .cause 里
             error=describe_exception(e),
             ctx=ctx,
             point_cost=cost,
+            record_id=record_id,
         )
         await ctx.policy.refund(reservation)
         if reservation.refunded:

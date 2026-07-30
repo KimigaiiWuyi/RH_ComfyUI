@@ -682,18 +682,23 @@ class SsPushAdmin(GsAdminModel):
 # ═══════════════════════════════════════════════════════════════════════
 #  任务执行统计表
 #
-#  每次 execute_generation() 完成(成功/失败)由 utils.database.statistics
-#  模块函数 record_task() 写入一条。该模型同时承载 AI 工具与 WebConsole
-#  后台的查询入口。
+#  生命周期:begin_task(status=running) → record_task(终态 UPDATE/INSERT)。
+#  历史行仅有终态,无 running;查询/汇总须兼容。WebConsole 与消费 API 共用。
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class RHComfyuiTaskStatus(str, Enum):
-    """任务执行状态枚举"""
+    """任务执行状态枚举
 
+    - running: 预扣后、执行中(begin_task 写入)
+    - ok / failed / cancelled: 终态(record_task 更新或旧路径一次插入)
+    历史数据仅有终态,无 running 行,查询需兼容。
+    """
+
+    RUNNING = "running"
     OK = "ok"
     FAILED = "failed"
-    CANCELLED = "cancelled"  # 预留:支持取消时使用
+    CANCELLED = "cancelled"
 
 
 class RHComfyuiTaskRecord(SQLModel, table=True):
@@ -730,7 +735,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     prompt: str = Field(default="", title="生成提示词", max_length=4000)
 
     # ── 执行结果 ──
-    status: str = Field(title="状态 ok/failed/cancelled", index=True, max_length=16)
+    status: str = Field(title="状态 running/ok/failed/cancelled", index=True, max_length=16)
     elapsed_ms: Optional[int] = Field(default=None, title="任务耗时(毫秒)")
     point_cost: int = Field(default=0, title="本次消耗积分数")
     refunded: bool = Field(default=False, title="失败时是否已退回积分")
@@ -861,18 +866,49 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         )
         success = int(success_rows.scalar() or 0)
 
-        avg_rows = await session.execute(select(func.avg(col(cls.elapsed_ms))).select_from(base_sub))
+        # 失败口径:failed + cancelled;running 不计入 failed(否则进行中任务会被当失败)
+        # 旧数据无 running,total-success 与 failed+cancelled 在旧数据上等价
+        failed_rows = await session.execute(
+            select(func.count())
+            .select_from(
+                base.where(
+                    col(cls.status).in_(
+                        (
+                            RHComfyuiTaskStatus.FAILED.value,
+                            RHComfyuiTaskStatus.CANCELLED.value,
+                        )
+                    )
+                ).subquery()
+            )
+        )
+        failed = int(failed_rows.scalar() or 0)
+
+        # 平均耗时只统计已终态(elapsed_ms 有意义)
+        terminal_sub = (
+            base.where(
+                col(cls.status).in_(
+                    (
+                        RHComfyuiTaskStatus.OK.value,
+                        RHComfyuiTaskStatus.FAILED.value,
+                        RHComfyuiTaskStatus.CANCELLED.value,
+                    )
+                )
+            ).subquery()
+        )
+        avg_rows = await session.execute(select(func.avg(col(cls.elapsed_ms))).select_from(terminal_sub))
         avg_elapsed = float(avg_rows.scalar() or 0)
 
         type_rows = await session.execute(
             select(col(cls.task_type), func.count()).select_from(base_sub).group_by(col(cls.task_type))
         )
         by_type_pairs = type_rows.all()
+        # success_rate 分母用终态数,避免 running 稀释成功率
+        terminal_total = success + failed
         return {
             "total": total,
             "success": success,
-            "failed": total - success,
-            "success_rate": round(success / total, 4) if total else 0.0,
+            "failed": failed,
+            "success_rate": round(success / terminal_total, 4) if terminal_total else 0.0,
             "avg_elapsed_ms": int(avg_elapsed),
             "by_task_type": {k: int(v) for k, v in by_type_pairs if k},
         }
@@ -996,13 +1032,23 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         )
         agg_rows = (await session.execute(agg_stmt)).all()
 
-        # 按 user_id + status 聚合:成功/失败计数
+        # 按 user_id + status 聚合:成功 / 失败(含 cancelled);running 单独不计 failed
         success_stmt = (
             select(base_sub.c.user_id, func.count())
             .where(base_sub.c.status == RHComfyuiTaskStatus.OK.value)
             .group_by(base_sub.c.user_id)
         )
         success_map = {uid: int(cnt) for uid, cnt in (await session.execute(success_stmt)).all()}
+        failed_stmt = (
+            select(base_sub.c.user_id, func.count())
+            .where(
+                base_sub.c.status.in_(
+                    (RHComfyuiTaskStatus.FAILED.value, RHComfyuiTaskStatus.CANCELLED.value)
+                )
+            )
+            .group_by(base_sub.c.user_id)
+        )
+        failed_map = {uid: int(cnt) for uid, cnt in (await session.execute(failed_stmt)).all()}
 
         # 按 user_id + task_type 聚合:任务类型分布
         type_stmt = select(base_sub.c.user_id, base_sub.c.task_type, func.count()).group_by(
@@ -1021,7 +1067,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
                     "user_id": str(uid),
                     "total": int(total),
                     "success": success_map.get(uid, 0),
-                    "failed": int(total) - success_map.get(uid, 0),
+                    "failed": failed_map.get(uid, 0),
                     "total_points": int(total_points),
                     "by_task_type": by_type,
                 }
@@ -1075,18 +1121,30 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             .group_by(base_sub.c.backend_provider)
         )
         success_map = {p: int(cnt) for p, cnt in (await session.execute(success_stmt)).all()}
+        failed_stmt = (
+            select(base_sub.c.backend_provider, func.count())
+            .where(
+                base_sub.c.status.in_(
+                    (RHComfyuiTaskStatus.FAILED.value, RHComfyuiTaskStatus.CANCELLED.value)
+                )
+            )
+            .group_by(base_sub.c.backend_provider)
+        )
+        failed_map = {p: int(cnt) for p, cnt in (await session.execute(failed_stmt)).all()}
 
         results: list[dict[str, Any]] = []
         for provider, total, avg_elapsed, total_points in agg_rows:
             total_i = int(total)
             success = success_map.get(provider, 0)
+            failed = failed_map.get(provider, 0)
+            terminal = success + failed
             results.append(
                 {
                     "provider": str(provider),
                     "total": total_i,
                     "success": success,
-                    "failed": total_i - success,
-                    "success_rate": round(success / total_i, 4) if total_i else 0.0,
+                    "failed": failed,
+                    "success_rate": round(success / terminal, 4) if terminal else 0.0,
                     "avg_elapsed_ms": int(float(avg_elapsed or 0)),
                     "total_points": int(total_points),
                 }
@@ -1199,6 +1257,62 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         session.add(record)
         await session.flush()  # 获取 id
         return int(record.id or 0)
+
+    @classmethod
+    @with_session
+    async def update_task_record(
+        cls,
+        session: AsyncSession,
+        record_id: int,
+        *,
+        status: str,
+        elapsed_ms: Optional[int] = None,
+        error_message: str = "",
+        raw_response_json: str = "",
+        saved_files_json: str = "",
+        backend: str = "",
+        backend_model: str = "",
+        backend_provider: str = "",
+        backend_key_prefix: str = "",
+        point_cost: Optional[int] = None,
+        extra_params_json: Optional[str] = None,
+        request_body_json: Optional[str] = None,
+        refunded: Optional[bool] = None,
+    ) -> bool:
+        """按主键更新任务记录(执行中 → 终态)。找不到行返回 False。"""
+        if record_id <= 0:
+            return False
+        stmt = select(cls).where(col(cls.id) == record_id)
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return False
+        row.status = status[:16]
+        if elapsed_ms is not None:
+            row.elapsed_ms = elapsed_ms
+        if error_message:
+            row.error_message = error_message
+        if raw_response_json:
+            row.raw_response_json = raw_response_json
+        if saved_files_json:
+            row.saved_files_json = saved_files_json
+        if backend:
+            row.backend = backend[:32]
+        if backend_model:
+            row.backend_model = backend_model[:128]
+        if backend_provider:
+            row.backend_provider = backend_provider[:32]
+        if backend_key_prefix:
+            row.backend_key_prefix = backend_key_prefix[:16]
+        if point_cost is not None:
+            row.point_cost = int(point_cost)
+        if extra_params_json is not None:
+            row.extra_params_json = extra_params_json
+        if request_body_json is not None:
+            row.request_body_json = request_body_json
+        if refunded is not None:
+            row.refunded = bool(refunded)
+        session.add(row)
+        return True
 
     @classmethod
     async def cleanup_old_records(cls, keep_days: int = 90) -> int:

@@ -1,8 +1,10 @@
 """任务统计写入 — 模块函数,无 DI、无单例
 
-execute_generation() 的 finally 块直接 import 调用 record_task();
-落库细节由 `RHComfyuiTaskRecord.insert_task_record` 负责
-(classmethod + @with_session,统一 session 管理 + 重试 + commit)。
+生命周期:
+  begin_task()   — 预扣后立刻插入 status=running(可在消费列表看到进行中)
+  record_task()  — 终态:有 record_id 则 UPDATE,否则 INSERT(兼容旧调用 / begin 失败)
+
+dispatch / execute_generation 的失败路径都调 record_task;写库失败仅打日志。
 """
 
 from __future__ import annotations
@@ -19,7 +21,9 @@ from ..core.safe_json import dump_body
 
 if TYPE_CHECKING:
     from ..core.request import GenerationResult, GenerationRequest
-    from ..core.pipeline import NodeDef
+
+# node 为 NodeDef 或 telemetry 的 duck-typed 视图(有 name/backend/point_cost 等)
+NodeLike = Any
 
 # ── 写入上限(防止数据库膨胀 / 长字符串拖垮 ORM) ──
 RAW_RESPONSE_MAX_BYTES = 64 * 1024  # 厂商原始响应截断 64KB
@@ -49,12 +53,7 @@ def _truncate_str(s: str, max_chars: int) -> str:
 
 
 def _relativize_saved_files(paths: Any) -> list[str]:
-    """把 executor._save_output 写进 metadata 的落盘绝对路径转为相对 OUTPUT_PATH。
-
-    入库存相对路径:换机器/挪目录后记录不失效,消费详情接口也只允许
-    OUTPUT_PATH 内的文件被映射(天然防目录穿越)。不在 OUTPUT_PATH 下的
-    路径直接丢弃。
-    """
+    """把 executor._save_output 写进 metadata 的落盘绝对路径转为相对 OUTPUT_PATH。"""
     if not isinstance(paths, (list, tuple)):
         return []
     try:
@@ -133,14 +132,136 @@ def _extract_core_params(request: "GenerationRequest") -> dict[str, Any]:
     return extractor(request)
 
 
+def _resolve_user_id(request: "GenerationRequest") -> str:
+    user_id_raw = request.user_id
+    return (user_id_raw if user_id_raw else "unknown")[:64]
+
+
+def _resolve_provider_model(node: NodeLike) -> tuple[str, str]:
+    """返回 (provider, model_id)。"""
+    provider = getattr(node, "provider", None) or ""
+    model_id = getattr(node, "backend_model", None) or ""
+    backend_models = getattr(node, "backend_models", None) or {}
+    if provider and backend_models:
+        selected = backend_models.get(provider)
+        if selected:
+            model_id = selected
+    return str(provider), str(model_id)
+
+
+def _merged_extra_json(request: "GenerationRequest") -> str:
+    merged_params: dict[str, Any] = {}
+    if request.params:
+        merged_params.update(request.params)
+    if request.extra:
+        merged_params.update(request.extra)
+    if not merged_params:
+        return ""
+    return _safe_json_dumps(merged_params, EXTRA_PARAMS_MAX_BYTES)
+
+
+def _build_common_insert_kwargs(
+    *,
+    request: "GenerationRequest",
+    node: NodeLike,
+    bot_id: str,
+    group_id: str,
+    trace_id: str,
+    entry_point: str,
+    backend_key_prefix: str,
+    request_body: Optional[dict[str, Any]],
+    status: str,
+    elapsed_ms: Optional[int],
+    point_cost: int,
+    error: Optional[str] = None,
+    raw_json: str = "",
+    saved_files_json: str = "",
+) -> dict[str, Any]:
+    core = _extract_core_params(request)
+    provider, model_id = _resolve_provider_model(node)
+    request_body_json = dump_body(request_body if request_body is not None else request)
+    return {
+        "user_id": _resolve_user_id(request),
+        "bot_id": bot_id[:64] if bot_id else "",
+        "group_id": group_id[:64] if group_id else "",
+        "task_type": request.task_type.value,
+        "task_name": node.name[:128],
+        "backend": node.backend[:32] if node.backend else "",
+        "backend_model": model_id[:128],
+        "backend_provider": provider[:32],
+        "backend_key_prefix": backend_key_prefix[:16],
+        "duration_seconds": core.get("duration_seconds"),
+        "width": core.get("width"),
+        "height": core.get("height"),
+        "ratio": str(core.get("ratio", ""))[:16],
+        "resolution": str(core.get("resolution", ""))[:16],
+        "seed": core.get("seed"),
+        "voice_id": str(core.get("voice_id", ""))[:64],
+        "extra_params_json": _merged_extra_json(request),
+        "prompt": _truncate_str(request.prompt or "", 4000),
+        "status": status[:16],
+        "elapsed_ms": elapsed_ms,
+        "point_cost": int(point_cost or 0),
+        "error_message": _truncate_str(error or "", ERROR_MESSAGE_MAX_CHARS),
+        "raw_response_json": raw_json,
+        "request_body_json": request_body_json,
+        "trace_id": trace_id[:64] if trace_id else "",
+        "created_at": datetime.now(timezone.utc),
+        "entry_point": entry_point[:16] if entry_point else "",
+        "saved_files_json": saved_files_json,
+    }
+
+
 # ── 核心入口 ──
+
+
+async def begin_task(
+    *,
+    request: "GenerationRequest",
+    node: NodeLike,
+    bot_id: str = "",
+    group_id: str = "",
+    trace_id: str = "",
+    entry_point: str = "",
+    point_cost: int = 0,
+    request_body: Optional[dict[str, Any]] = None,
+) -> Optional[int]:
+    """任务创建/预扣后立刻落库 status=running,返回 record id。
+
+    失败返回 None,不抛出——调用方仍可在 record_task 时一次 INSERT 终态。
+    """
+    try:
+        from .models import RHComfyuiTaskRecord, RHComfyuiTaskStatus
+
+        kwargs = _build_common_insert_kwargs(
+            request=request,
+            node=node,
+            bot_id=bot_id,
+            group_id=group_id,
+            trace_id=trace_id or (request.trace_id or ""),
+            entry_point=entry_point,
+            backend_key_prefix="",
+            request_body=request_body,
+            status=RHComfyuiTaskStatus.RUNNING.value,
+            elapsed_ms=0,
+            point_cost=point_cost if point_cost else int(node.point_cost or 0),
+        )
+        record_id = await RHComfyuiTaskRecord.insert_task_record(**kwargs)
+        logger.info(
+            f"[RHComfyUI.Statistics] began id={record_id} task={node.name} "
+            f"user={kwargs['user_id']} status=running cost={kwargs['point_cost']}"
+        )
+        return record_id
+    except Exception as e:  # noqa: BLE001 - 统计失败不影响主流程
+        logger.warning(f"[RHComfyUI.Statistics] begin_task 失败(已忽略): {e}")
+        return None
 
 
 async def record_task(
     *,
     request: "GenerationRequest",
     result: Optional["GenerationResult"],
-    node: "NodeDef",
+    node: NodeLike,
     status: str,
     elapsed_ms: int,
     error: Optional[str] = None,
@@ -150,52 +271,23 @@ async def record_task(
     entry_point: str = "",
     backend_key_prefix: str = "",
     request_body: Optional[dict[str, Any]] = None,
+    record_id: Optional[int] = None,
+    point_cost: Optional[int] = None,
 ) -> Optional[int]:
-    """记录一次任务执行(模块函数,从 executor.py 直接调用)。
+    """记录/更新任务终态。
+
+    - ``record_id`` 有值:UPDATE 已有 running 行(创建时 begin_task 写入)
+    - 否则:INSERT 终态行(兼容历史只在结束写一次的调用方;begin 失败时的回落)
 
     整体 try/except 兜底:写库失败仅 logger.warning,不影响主流程。
     """
     try:
-        # 1. 提取核心输入参数
-        core = _extract_core_params(request)
+        from .models import RHComfyuiTaskRecord
 
-        # dispatcher 传入的快照通常已经脱敏; dump_body 对其再次处理是幂等的,
-        # 也兼容旧调用点/第三方直接传入未脱敏 dict 的情况。
-        request_body_json = dump_body(request_body if request_body is not None else request)
-
-        # 2. 序列化原始厂商响应(失败时 result 为 None,跳过)
         raw_json = ""
         if result is not None and result.raw:
             raw_json = _safe_json_dumps(result.raw, RAW_RESPONSE_MAX_BYTES)
 
-        # 3. 序列化 extra params(用户 params + extra 合并)
-        merged_params: dict[str, Any] = {}
-        if request.params:
-            merged_params.update(request.params)
-        if request.extra:
-            merged_params.update(request.extra)
-        extra_json = _safe_json_dumps(merged_params, EXTRA_PARAMS_MAX_BYTES) if merged_params else ""
-
-        # 4. 错误信息截断
-        error_msg = _truncate_str(error or "", ERROR_MESSAGE_MAX_CHARS)
-
-        # 5. backend_provider: 优先 node.provider
-        provider = node.provider or ""
-
-        # 6. backend_model: 多供应商时取 backend_models[provider],回退 backend_model
-        model_id = node.backend_model or ""
-        if provider and node.backend_models:
-            selected = node.backend_models.get(provider)
-            if selected:
-                model_id = selected
-
-        # 6.5) prompt:从 GenerationRequest.prompt 透传,截断到 4000 字符
-        #   (与模型字段 max_length=4000 对齐;语音/音乐通常 < 200,视频图描述可上千字)
-        prompt_str: str = _truncate_str(request.prompt or "", 4000)
-
-        # 6.6) 本地产物路径:_save_output 把落盘绝对路径写进 result.metadata
-        #   ("saved_files" 全量列表;旧路径只有 "saved_path" 主产物,做回退)。
-        #   供应商返回 base64/二进制时 raw 里没有 URL,消费详情靠这一列映射文件。
         saved_files_json = ""
         if result is not None and result.metadata:
             saved_paths = result.metadata.get("saved_files")
@@ -205,54 +297,62 @@ async def record_task(
             if rel_files:
                 saved_files_json = _safe_json_dumps(rel_files, EXTRA_PARAMS_MAX_BYTES)
 
-        # 7. 调 RHComfyuiTaskRecord.insert_task_record 落库
-        #    局部 import 避免循环引用(models 已 import statistics 链路,或反之)
-        from .models import RHComfyuiTaskRecord
+        cost = int(point_cost) if point_cost is not None else int(node.point_cost or 0)
+        provider, model_id = _resolve_provider_model(node)
+        error_msg = _truncate_str(error or "", ERROR_MESSAGE_MAX_CHARS)
 
-        # user_id: 空字符串 / None 都视为 "unknown",与旧行为一致
-        user_id_raw = request.user_id
-        resolved_user_id: str = user_id_raw if user_id_raw else "unknown"
-        record_id: int = await RHComfyuiTaskRecord.insert_task_record(
-            user_id=resolved_user_id[:64],
-            bot_id=bot_id[:64] if bot_id else "",
-            group_id=group_id[:64] if group_id else "",
-            task_type=request.task_type.value,
-            task_name=node.name[:128],
-            backend=node.backend[:32] if node.backend else "",
-            backend_model=model_id[:128],
-            backend_provider=provider[:32],
-            backend_key_prefix=backend_key_prefix[:16],
-            duration_seconds=core.get("duration_seconds"),
-            width=core.get("width"),
-            height=core.get("height"),
-            ratio=str(core.get("ratio", ""))[:16],
-            resolution=str(core.get("resolution", ""))[:16],
-            seed=core.get("seed"),
-            voice_id=str(core.get("voice_id", ""))[:64],
-            extra_params_json=extra_json,
-            prompt=prompt_str,
-            status=status[:16],
+        # 优先 UPDATE 已有 running 行
+        if record_id is not None and int(record_id) > 0:
+            ok = await RHComfyuiTaskRecord.update_task_record(
+                int(record_id),
+                status=status[:16],
+                elapsed_ms=elapsed_ms,
+                error_message=error_msg,
+                raw_response_json=raw_json,
+                saved_files_json=saved_files_json,
+                backend=node.backend[:32] if node.backend else "",
+                backend_model=model_id[:128],
+                backend_provider=provider[:32],
+                backend_key_prefix=backend_key_prefix[:16] if backend_key_prefix else "",
+                point_cost=cost,
+            )
+            if ok:
+                logger.info(
+                    f"[RHComfyUI.Statistics] updated id={record_id} task={node.name} "
+                    f"status={status} elapsed={elapsed_ms}ms"
+                )
+                return int(record_id)
+            logger.warning(
+                f"[RHComfyUI.Statistics] update id={record_id} 未找到行,回落 INSERT status={status}"
+            )
+
+        # INSERT 终态(旧路径 / begin 失败 / update 未命中)
+        kwargs = _build_common_insert_kwargs(
+            request=request,
+            node=node,
+            bot_id=bot_id,
+            group_id=group_id,
+            trace_id=trace_id or (request.trace_id or ""),
+            entry_point=entry_point,
+            backend_key_prefix=backend_key_prefix,
+            request_body=request_body,
+            status=status,
             elapsed_ms=elapsed_ms,
-            point_cost=int(node.point_cost or 0),
-            error_message=error_msg,
-            raw_response_json=raw_json,
-            request_body_json=request_body_json,
-            trace_id=trace_id[:64] if trace_id else "",
-            created_at=datetime.now(timezone.utc),
-            entry_point=entry_point[:16] if entry_point else "",
+            point_cost=cost,
+            error=error,
+            raw_json=raw_json,
             saved_files_json=saved_files_json,
         )
-
+        new_id: int = await RHComfyuiTaskRecord.insert_task_record(**kwargs)
         logger.info(
-            f"[RHComfyUI.Statistics] recorded id={record_id} task={node.name} "
-            f"user={user_id_raw} status={status} elapsed={elapsed_ms}ms"
+            f"[RHComfyUI.Statistics] recorded id={new_id} task={node.name} "
+            f"user={kwargs['user_id']} status={status} elapsed={elapsed_ms}ms"
         )
-        return record_id
+        return new_id
 
-    except Exception as e:
-        # 兜底:统计失败不影响主流程
+    except Exception as e:  # noqa: BLE001 - 统计失败不影响主流程
         logger.warning(f"[RHComfyUI.Statistics] 记录失败(已忽略): {e}")
         return None
 
 
-__all__ = ["record_task"]
+__all__ = ["begin_task", "record_task"]

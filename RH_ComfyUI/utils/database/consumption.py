@@ -152,7 +152,7 @@ async def build_user_consumption_payload(
         bot_id: Bot 平台 ID(如 "qq")。
         limit: 最多返回条数。
         days: 仅统计最近 N 天,None 表示不限制(与 date_from/date_to 互斥)。
-        status: 任务状态过滤(ok / failed / cancelled)。
+        status: 任务状态过滤(running / ok / failed / cancelled)。
         task_type: 任务类型过滤(image / video / music / speech)。
         task_name: 节点名过滤(精确匹配)。
         trace_id: 追踪 ID 过滤(精确匹配)。
@@ -193,6 +193,8 @@ async def build_user_consumption_payload(
     records = records or []
     record_dicts = [_record_to_dict(r) for r in records]
     success_count = sum(1 for r in records if r.is_success)
+    running_count = sum(1 for r in records if r.status == "running")
+    failed_count = sum(1 for r in records if r.status in ("failed", "cancelled"))
 
     return {
         "view": "user",
@@ -217,7 +219,9 @@ async def build_user_consumption_payload(
         "total_count": len(records),
         "total_points": sum(int(r.point_cost or 0) for r in records),
         "success_count": success_count,
-        "failed_count": len(records) - success_count,
+        "running_count": running_count,
+        # 失败含 cancelled;不含 running(旧口径 total-success 会把进行中算失败)
+        "failed_count": failed_count,
         "by_task_type": _aggregate_by_task_type(records),
         "records": record_dicts,
     }

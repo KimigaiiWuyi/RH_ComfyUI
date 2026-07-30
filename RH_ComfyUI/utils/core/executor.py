@@ -21,7 +21,7 @@ from gsuid_core.logger import logger
 from .types import NodeOutput, ProgressEvent
 from .request import OutputType, GenerationResult, GenerationRequest
 from .safe_json import mask_body
-from ..database.statistics import record_task
+from ..database.statistics import begin_task, record_task
 
 if TYPE_CHECKING:
     from .pipeline import NodeDef
@@ -158,6 +158,16 @@ async def execute_generation(
         raise RuntimeError(f"Adapter {node.backend} 未注册")
 
     sem = _get_semaphore()
+    # 进入执行闸前写入 running(旧路径无预扣;仍先可见进行中)
+    record_id = await begin_task(
+        request=request,
+        request_body=request_body,
+        node=node,
+        bot_id=bot_id,
+        group_id=group_id,
+        trace_id=request.trace_id or "",
+        point_cost=int(node.point_cost or 0),
+    )
     start_ts = time.monotonic()
     status = "ok"
     error_repr: Optional[str] = None
@@ -195,8 +205,7 @@ async def execute_generation(
             error_repr = repr(e)
             raise
         finally:
-            # 成功 / 失败两条路径都被 finally 覆盖
-            # record_task() 内部 try/except 兜底,失败仅打日志
+            # 成功 / 失败两条路径都被 finally 覆盖;有 record_id 则 UPDATE
             elapsed_ms = int((time.monotonic() - start_ts) * 1000)
             await record_task(
                 request=request,
@@ -209,6 +218,7 @@ async def execute_generation(
                 bot_id=bot_id,
                 group_id=group_id,
                 trace_id=request.trace_id or "",
+                record_id=record_id,
             )
 
 

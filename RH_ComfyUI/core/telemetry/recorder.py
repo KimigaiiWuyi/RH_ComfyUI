@@ -1,8 +1,9 @@
 """record_dispatch — 调度器侧的统计/落盘封装
 
 职责(全部失败不影响主流程):
-1. 产物落盘 OUTPUT_PATH(自旧 executor._save_output 平移,职责归遥测侧)
-2. record_task() 落库,补 entry_point / channel 两个维度
+1. begin_dispatch() 预扣后插入 status=running
+2. 产物落盘 OUTPUT_PATH
+3. record_dispatch() 终态 UPDATE/INSERT,补 entry_point / channel
 """
 
 from __future__ import annotations
@@ -33,11 +34,7 @@ class _RecordNode:
 
 
 def _node_view(model: "AIGCGenerationBase", output: Optional[NodeOutput], point_cost: Optional[int]) -> _RecordNode:
-    """把模型实例(可能是 YAML 桥接模型)投影为统计所需的节点视图
-
-    point_cost 传 dispatcher 实际 reserve 的金额(动态计费钩子 estimate_cost
-    的结果);None 时回落模型静态 point_cost(非 dispatch 调用点)。
-    """
+    """把模型实例投影为统计所需的节点视图。"""
     node = model.node
     channel = ""
     vendor_model = ""
@@ -74,6 +71,33 @@ async def _save_output(output: NodeOutput, task_type_str: str) -> None:
         logger.warning(f"[Telemetry] 保存生成结果失败(不影响返回): {e}")
 
 
+async def begin_dispatch(
+    *,
+    request: GenerationRequest,
+    model: "AIGCGenerationBase",
+    ctx: "DispatchContext",
+    point_cost: int,
+    request_body: Optional[dict[str, Any]] = None,
+) -> Optional[int]:
+    """预扣成功后立刻写入 running 行;失败返回 None。"""
+    try:
+        from ...utils.database.statistics import begin_task
+
+        return await begin_task(
+            request=request,
+            request_body=request_body,
+            node=_node_view(model, None, point_cost),
+            bot_id=ctx.billing.bot_id,
+            group_id=ctx.group_id,
+            trace_id=request.trace_id or ctx.trace_id,
+            entry_point=ctx.billing.entry_point,
+            point_cost=point_cost,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[Telemetry] begin_dispatch 失败(已忽略): {e}")
+        return None
+
+
 async def record_dispatch(
     *,
     request: GenerationRequest,
@@ -86,11 +110,12 @@ async def record_dispatch(
     ctx: "DispatchContext",
     point_cost: Optional[int] = None,
     request_body: Optional[dict[str, Any]] = None,
+    record_id: Optional[int] = None,
 ) -> None:
-    """统计落库(内部兜底,永不抛出)
+    """终态统计落库(内部兜底,永不抛出)
 
-    调用点在 dispatcher 的失败路径里位于 refund 之前 —— 这里一旦抛出,
-    退款就会被跳过,所以整体 try/except 兜底(record_task 内部另有一层)。
+    有 record_id 时 UPDATE 对应 running 行;否则 INSERT 终态(兼容 begin 失败)。
+    失败路径位于 refund 之前 —— 不得抛出以免跳过退款。
     """
     try:
         if output is not None and status == "ok":
@@ -104,7 +129,7 @@ async def record_dispatch(
             request=request,
             request_body=request_body,
             result=result,
-            node=_node_view(model, output, point_cost),  # type: ignore[arg-type]  # duck-typed NodeDef 视图
+            node=_node_view(model, output, point_cost),
             status=status,
             elapsed_ms=elapsed_ms,
             error=error,
@@ -113,9 +138,11 @@ async def record_dispatch(
             trace_id=request.trace_id or ctx.trace_id,
             entry_point=ctx.billing.entry_point,
             backend_key_prefix=key_prefix,
+            record_id=record_id,
+            point_cost=point_cost,
         )
     except Exception as e:  # noqa: BLE001 — 统计失败不能影响主流程(尤其是退款)
         logger.warning(f"[Telemetry] record_dispatch 失败(已忽略): {e}")
 
 
-__all__ = ["record_dispatch"]
+__all__ = ["begin_dispatch", "record_dispatch"]

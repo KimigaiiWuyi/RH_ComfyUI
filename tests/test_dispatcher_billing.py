@@ -316,9 +316,13 @@ def test_dispatch_records_request_before_model_mutates_it(monkeypatch):
     captured: dict[str, Any] = {}
     disp = importlib.import_module("RH_ComfyUI.core.dispatch.dispatcher")
 
+    async def _begin(**kwargs):
+        return 1
+
     async def _capture(**kwargs):
         captured.update(kwargs)
 
+    monkeypatch.setattr(disp, "begin_dispatch", _begin)
     monkeypatch.setattr(disp, "record_dispatch", _capture)
     model = _MutatingModel()
     model_registry.register(model)
@@ -333,10 +337,9 @@ def test_dispatch_records_request_before_model_mutates_it(monkeypatch):
 
         assert request.prompt == "normalized prompt"
         assert captured["request_body"]["prompt"] == "original prompt"
-        assert captured["request_body"]["params"] == {
-            "quality": "original",
-            "image_base64": "<base64 len=4>",
-        }
+        assert captured["request_body"]["params"]["quality"] == "original"
+        assert captured["request_body"]["params"]["image_base64"].startswith("<base64://")
+        assert captured.get("record_id") == 1
     finally:
         model_registry.unregister(model.name)
 
@@ -352,6 +355,10 @@ def _mute_recording(monkeypatch):
     async def _noop(**kwargs):
         return None
 
+    async def _begin(**kwargs):
+        return None
+
+    monkeypatch.setattr(disp, "begin_dispatch", _begin)
     monkeypatch.setattr(disp, "record_dispatch", _noop)
 
 
@@ -361,8 +368,12 @@ def _capture_recording(monkeypatch, statuses: list):
 
     disp = importlib.import_module("RH_ComfyUI.core.dispatch.dispatcher")
 
+    async def _begin(**kwargs):
+        return 99
+
     async def _capture(**kwargs):
         statuses.append(kwargs.get("status"))
         return None
 
+    monkeypatch.setattr(disp, "begin_dispatch", _begin)
     monkeypatch.setattr(disp, "record_dispatch", _capture)
