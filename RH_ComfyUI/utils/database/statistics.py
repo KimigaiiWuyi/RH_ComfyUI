@@ -247,6 +247,12 @@ async def begin_task(
             point_cost=point_cost if point_cost else int(node.point_cost or 0),
         )
         record_id = await RHComfyuiTaskRecord.insert_task_record(**kwargs)
+        try:
+            from .stats_cache import invalidate_stats_cache
+
+            await invalidate_stats_cache(bot_id=bot_id or kwargs.get("bot_id") or None)
+        except Exception:  # noqa: BLE001
+            pass
         logger.info(
             f"[RHComfyUI.Statistics] began id={record_id} task={node.name} "
             f"user={kwargs['user_id']} status=running cost={kwargs['point_cost']}"
@@ -317,6 +323,12 @@ async def record_task(
                 point_cost=cost,
             )
             if ok:
+                try:
+                    from .stats_cache import invalidate_stats_cache
+
+                    await invalidate_stats_cache(bot_id=bot_id or None)
+                except Exception:  # noqa: BLE001
+                    pass
                 logger.info(
                     f"[RHComfyUI.Statistics] updated id={record_id} task={node.name} "
                     f"status={status} elapsed={elapsed_ms}ms"
@@ -344,6 +356,12 @@ async def record_task(
             saved_files_json=saved_files_json,
         )
         new_id: int = await RHComfyuiTaskRecord.insert_task_record(**kwargs)
+        try:
+            from .stats_cache import invalidate_stats_cache
+
+            await invalidate_stats_cache(bot_id=bot_id or kwargs.get("bot_id") or None)
+        except Exception:  # noqa: BLE001
+            pass
         logger.info(
             f"[RHComfyUI.Statistics] recorded id={new_id} task={node.name} "
             f"user={kwargs['user_id']} status={status} elapsed={elapsed_ms}ms"

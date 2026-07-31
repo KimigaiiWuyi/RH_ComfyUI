@@ -46,11 +46,18 @@ class PointsBillingPolicy(BillingPolicy):
         from ...utils.database.models import RHComfyuiTaskRecord
 
         try:
-            await RHComfyuiTaskRecord.mark_last_failed_refunded(
+            ok = await RHComfyuiTaskRecord.mark_last_failed_refunded(
                 user_id=reservation.context.user_id,
                 bot_id=reservation.context.bot_id,
                 task_name=model_name,
             )
+            if ok:
+                try:
+                    from ...utils.database.stats_cache import invalidate_stats_cache
+
+                    await invalidate_stats_cache(bot_id=reservation.context.bot_id or None)
+                except Exception:  # noqa: BLE001
+                    pass
         except Exception as e:  # noqa: BLE001 — 标记失败不影响主流程
             logger.warning(f"[Billing] mark refunded 失败(已忽略): {e}")
 

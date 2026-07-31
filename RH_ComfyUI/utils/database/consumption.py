@@ -309,10 +309,28 @@ async def build_admin_consumption_payload(
     else:
         start, end = _now_window(days)
 
-    # 1) 全局汇总
-    summary = await RHComfyuiTaskRecord.get_summary(start_time=start, end_time=end)
+    from .stats_cache import get_summary_cached, get_user_summaries_cached
 
-    # 2) 跨用户条件原始记录
+    # 1) 全局汇总 — 合并 SQL + 表缓存(L1/L2)
+    summary = await get_summary_cached(
+        bot_id=bot_id,
+        start_time=start,
+        end_time=end,
+        days=days if date_from is None and date_to is None else None,
+    )
+
+    # 2) 按用户聚合 TOP — 条件聚合 + 表缓存
+    user_summaries = await get_user_summaries_cached(
+        bot_id=bot_id,
+        start_time=start,
+        end_time=end,
+        top_n=top_users,
+        days=days if date_from is None and date_to is None else None,
+    )
+    user_summaries = user_summaries or []
+
+    # 3) 最近明细(轻量 LIMIT;大 JSON defer)。admin HTTP 页另有 /records 分页,
+    #    但 bot 文本仍依赖本段 records,故保留。
     records = await RHComfyuiTaskRecord.list_all(
         bot_id=bot_id,
         group_id=group_id,
@@ -330,14 +348,6 @@ async def build_admin_consumption_payload(
         limit=limit,
     )
     records = records or []  # 防御:@with_session 重试耗尽返回 None
-
-    # 3) 按用户聚合 TOP
-    user_summaries = await RHComfyuiTaskRecord.get_user_summaries(
-        start_time=start,
-        end_time=end,
-        top_n=top_users,
-    )
-    user_summaries = user_summaries or []  # 防御同上
 
     return {
         "view": "global",

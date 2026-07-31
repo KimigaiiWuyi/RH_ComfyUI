@@ -3,9 +3,10 @@ from typing import Any, Optional, TypedDict
 from datetime import datetime, timezone
 
 from sqlmodel import Field, SQLModel, col
-from sqlalchemy import ColumnElement, and_, func, delete, select
+from sqlalchemy import ColumnElement, Index, and_, case, func, delete, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from gsuid_core.logger import logger
 from gsuid_core.webconsole.mount_app import PageSchema, GsAdminModel, site
@@ -704,7 +705,15 @@ class RHComfyuiTaskStatus(str, Enum):
 class RHComfyuiTaskRecord(SQLModel, table=True):
     """RH_ComfyUI 任务执行统计记录"""
 
-    __table_args__ = {"extend_existing": True}
+    # 复合索引: admin stats / list / TOP 用户 主路径 (bot_id + 时间/用户/状态)
+    # 旧库由文末 exec_list CREATE INDEX IF NOT EXISTS 补齐
+    __table_args__ = (
+        Index("ix_rhcomfyuitaskrecord_bot_created", "bot_id", "created_at"),
+        Index("ix_rhcomfyuitaskrecord_bot_user", "bot_id", "user_id"),
+        Index("ix_rhcomfyuitaskrecord_bot_status_created", "bot_id", "status", "created_at"),
+        Index("ix_rhcomfyuitaskrecord_user_created", "user_id", "created_at"),
+        {"extend_existing": True},
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True, title="序号")
 
@@ -760,7 +769,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     entry_point: str = Field(default="", title="触发入口 command/agent/http", max_length=16)
 
     # ── 时间戳 ──
-    # 索引单列 + 部分数据库可优化按 user_id 时间范围扫描的复合索引
+    # 单列索引保留;复合见 __table_args__
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         title="创建时间 UTC",
@@ -833,7 +842,14 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         if end_time is not None:
             conds.append(col(cls.created_at) <= end_time)
 
-        stmt = select(cls).where(and_(*conds)).order_by(col(cls.created_at).desc()).offset(offset).limit(limit)
+        stmt = (
+            select(cls)
+            .options(*cls._defer_heavy_columns())
+            .where(and_(*conds))
+            .order_by(col(cls.created_at).desc())
+            .offset(offset)
+            .limit(limit)
+        )
         rows = (await session.execute(stmt)).scalars().all()
         return list(rows)
 
@@ -844,65 +860,73 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         session: AsyncSession,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
+        bot_id: Optional[str] = None,
     ) -> TaskSummary:
-        """聚合统计:总任务数 / 成功数 / 失败数 / 各类型计数 / 平均耗时"""
+        """聚合统计:总任务数 / 成功数 / 失败数 / 各类型计数 / 平均耗时。
+
+        ⚠️ 性能:
+          - 禁止 ``select(cls).subquery()`` 拖入大 JSON 列;
+          - 主指标合并为 **1 条** 条件聚合 SQL(旧 5 次 COUNT/AVG 串行);
+          - by_task_type 另 1 条 GROUP BY;
+          - 上层 ``stats_cache`` 表缓存 + 写路径失效。
+        """
         conds: list[ColumnElement[bool]] = []
+        if bot_id is not None:
+            conds.append(col(cls.bot_id) == bot_id)
         if start_time is not None:
             conds.append(col(cls.created_at) >= start_time)
         if end_time is not None:
             conds.append(col(cls.created_at) <= end_time)
 
-        # 基础子查询统一带 WHERE,避免 4 条查询各自拼条件
-        base = select(cls)
-        if conds:
-            base = base.where(and_(*conds))
-        base_sub = base.subquery()
+        def _where(stmt):  # type: ignore[no-untyped-def]
+            return stmt.where(and_(*conds)) if conds else stmt
 
-        total_rows = await session.execute(select(func.count()).select_from(base_sub))
-        total = int(total_rows.scalar() or 0)
+        ok_v = RHComfyuiTaskStatus.OK.value
+        failed_v = RHComfyuiTaskStatus.FAILED.value
+        cancelled_v = RHComfyuiTaskStatus.CANCELLED.value
 
-        success_rows = await session.execute(
-            select(func.count()).select_from(base.where(col(cls.status) == RHComfyuiTaskStatus.OK.value).subquery())
-        )
-        success = int(success_rows.scalar() or 0)
-
-        # 失败口径:failed + cancelled;running 不计入 failed(否则进行中任务会被当失败)
-        # 旧数据无 running,total-success 与 failed+cancelled 在旧数据上等价
-        failed_rows = await session.execute(
-            select(func.count())
-            .select_from(
-                base.where(
-                    col(cls.status).in_(
-                        (
-                            RHComfyuiTaskStatus.FAILED.value,
-                            RHComfyuiTaskStatus.CANCELLED.value,
+        # 单次扫描: total / success / failed / avg(终态 elapsed)
+        agg_stmt = _where(
+            select(
+                func.count().label("total"),
+                func.coalesce(
+                    func.sum(case((col(cls.status) == ok_v, 1), else_=0)),
+                    0,
+                ).label("success"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (col(cls.status).in_((failed_v, cancelled_v)), 1),
+                            else_=0,
                         )
+                    ),
+                    0,
+                ).label("failed"),
+                func.avg(
+                    case(
+                        (
+                            col(cls.status).in_((ok_v, failed_v, cancelled_v)),
+                            col(cls.elapsed_ms),
+                        ),
+                        else_=None,
                     )
-                ).subquery()
-            )
+                ).label("avg_elapsed"),
+            ).select_from(cls)
         )
-        failed = int(failed_rows.scalar() or 0)
-
-        # 平均耗时只统计已终态(elapsed_ms 有意义)
-        terminal_sub = (
-            base.where(
-                col(cls.status).in_(
-                    (
-                        RHComfyuiTaskStatus.OK.value,
-                        RHComfyuiTaskStatus.FAILED.value,
-                        RHComfyuiTaskStatus.CANCELLED.value,
-                    )
-                )
-            ).subquery()
-        )
-        avg_rows = await session.execute(select(func.avg(col(cls.elapsed_ms))).select_from(terminal_sub))
-        avg_elapsed = float(avg_rows.scalar() or 0)
+        row = (await session.execute(agg_stmt)).one()
+        total = int(row.total or 0)
+        success = int(row.success or 0)
+        failed = int(row.failed or 0)
+        avg_elapsed = float(row.avg_elapsed or 0)
 
         type_rows = await session.execute(
-            select(col(cls.task_type), func.count()).select_from(base_sub).group_by(col(cls.task_type))
+            _where(
+                select(col(cls.task_type), func.count())
+                .select_from(cls)
+                .group_by(col(cls.task_type))
+            )
         )
         by_type_pairs = type_rows.all()
-        # success_rate 分母用终态数,避免 running 稀释成功率
         terminal_total = success + failed
         return {
             "total": total,
@@ -912,6 +936,16 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             "avg_elapsed_ms": int(avg_elapsed),
             "by_task_type": {k: int(v) for k, v in by_type_pairs if k},
         }
+
+    @classmethod
+    def _defer_heavy_columns(cls):
+        """列表查询跳过大 JSON 列(详情接口懒加载 raw/request_body)。"""
+        return (
+            defer(cls.raw_response_json),
+            defer(cls.request_body_json),
+            defer(cls.extra_params_json),
+            defer(cls.saved_files_json),
+        )
 
     @classmethod
     @with_session
@@ -938,6 +972,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         """跨用户条件查询任务记录(按时间倒序);任一筛选条件为 None 则不加入 WHERE
 
         与 list_by_user 的区别:不强制 user_id,用于管理员查看全员消费记录。
+        大字段(raw_response/request_body 等)默认 defer,避免列表把每行 64KB 全读出。
         """
         conds: list[ColumnElement[bool]] = []
         if user_id is not None:
@@ -969,7 +1004,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         if end_time is not None:
             conds.append(col(cls.created_at) <= end_time)
 
-        stmt = select(cls)
+        stmt = select(cls).options(*cls._defer_heavy_columns())
         if conds:
             stmt = stmt.where(and_(*conds))
         stmt = stmt.order_by(col(cls.created_at).desc()).offset(offset).limit(limit)
@@ -995,6 +1030,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         top_n: int = 20,
+        bot_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """按用户聚合消费摘要(供管理员查看"谁花了多少")
 
@@ -1007,69 +1043,82 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             "total_points": int,
             "by_task_type": {task_type: count},
           }
+
+        ⚠️ 性能:主榜 1 条 GROUP BY(条件聚合 success/failed);
+        by_task_type 仅对 TOP user 再 1 条查询;禁止 select(cls) 子查询。
         """
         conds: list[ColumnElement[bool]] = []
+        if bot_id is not None:
+            conds.append(col(cls.bot_id) == bot_id)
         if start_time is not None:
             conds.append(col(cls.created_at) >= start_time)
         if end_time is not None:
             conds.append(col(cls.created_at) <= end_time)
 
-        base = select(cls)
-        if conds:
-            base = base.where(and_(*conds))
-        base_sub = base.subquery()
+        def _where(stmt):  # type: ignore[no-untyped-def]
+            return stmt.where(and_(*conds)) if conds else stmt
 
-        # 按 user_id 聚合:总条数 / 总积分
-        agg_stmt = (
+        ok_v = RHComfyuiTaskStatus.OK.value
+        failed_v = RHComfyuiTaskStatus.FAILED.value
+        cancelled_v = RHComfyuiTaskStatus.CANCELLED.value
+
+        # 主榜: total / points / success / failed 一次 GROUP BY
+        agg_stmt = _where(
             select(
-                base_sub.c.user_id.label("user_id"),
+                col(cls.user_id).label("user_id"),
                 func.count().label("total"),
-                func.coalesce(func.sum(base_sub.c.point_cost), 0).label("total_points"),
+                func.coalesce(func.sum(col(cls.point_cost)), 0).label("total_points"),
+                func.coalesce(
+                    func.sum(case((col(cls.status) == ok_v, 1), else_=0)),
+                    0,
+                ).label("success"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (col(cls.status).in_((failed_v, cancelled_v)), 1),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("failed"),
             )
-            .group_by(base_sub.c.user_id)
-            .order_by(func.sum(base_sub.c.point_cost).desc())
+            .select_from(cls)
+            .group_by(col(cls.user_id))
+            .order_by(func.sum(col(cls.point_cost)).desc())
             .limit(top_n)
         )
         agg_rows = (await session.execute(agg_stmt)).all()
+        if not agg_rows:
+            return []
 
-        # 按 user_id + status 聚合:成功 / 失败(含 cancelled);running 单独不计 failed
-        success_stmt = (
-            select(base_sub.c.user_id, func.count())
-            .where(base_sub.c.status == RHComfyuiTaskStatus.OK.value)
-            .group_by(base_sub.c.user_id)
-        )
-        success_map = {uid: int(cnt) for uid, cnt in (await session.execute(success_stmt)).all()}
-        failed_stmt = (
-            select(base_sub.c.user_id, func.count())
-            .where(
-                base_sub.c.status.in_(
-                    (RHComfyuiTaskStatus.FAILED.value, RHComfyuiTaskStatus.CANCELLED.value)
-                )
-            )
-            .group_by(base_sub.c.user_id)
-        )
-        failed_map = {uid: int(cnt) for uid, cnt in (await session.execute(failed_stmt)).all()}
+        top_uids = [r.user_id for r in agg_rows]
+        uid_conds = list(conds) + [col(cls.user_id).in_(top_uids)]
 
-        # 按 user_id + task_type 聚合:任务类型分布
-        type_stmt = select(base_sub.c.user_id, base_sub.c.task_type, func.count()).group_by(
-            base_sub.c.user_id, base_sub.c.task_type
+        type_stmt = (
+            select(col(cls.user_id), col(cls.task_type), func.count())
+            .select_from(cls)
+            .where(and_(*uid_conds))
+            .group_by(col(cls.user_id), col(cls.task_type))
         )
         type_pairs = (await session.execute(type_stmt)).all()
+        by_type_map: dict[Any, dict[str, int]] = {}
+        for row_uid, ttype, cnt in type_pairs:
+            if not ttype:
+                continue
+            bucket = by_type_map.setdefault(row_uid, {})
+            bucket[str(ttype)] = int(cnt)
 
         results: list[dict[str, Any]] = []
-        for uid, total, total_points in agg_rows:
-            by_type: dict[str, int] = {}
-            for row_uid, ttype, cnt in type_pairs:
-                if row_uid == uid and ttype:
-                    by_type[ttype] = int(cnt)
+        for r in agg_rows:
+            uid = r.user_id
             results.append(
                 {
                     "user_id": str(uid),
-                    "total": int(total),
-                    "success": success_map.get(uid, 0),
-                    "failed": failed_map.get(uid, 0),
-                    "total_points": int(total_points),
-                    "by_task_type": by_type,
+                    "total": int(r.total or 0),
+                    "success": int(r.success or 0),
+                    "failed": int(r.failed or 0),
+                    "total_points": int(r.total_points or 0),
+                    "by_task_type": by_type_map.get(uid, {}),
                 }
             )
         return results
@@ -1372,6 +1421,126 @@ class RHComfyuiTaskRecordAdmin(GsAdminModel):
 # ═══════════════════════════════════════════════════════════════════════
 
 
+# ═══════════════════════════════════════════════════════════════════════
+#  消费统计表缓存(admin /stats summary + TOP 用户)
+#  写路径(insert/update/refund)调用 invalidate_stats_cache 清相关 bot_id
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class RHComfyuiStatsCache(SQLModel, table=True):
+    """admin 消费统计结果缓存表。
+
+    - cache_key: 业务键(含 bot_id / 时间窗 / kind / top_n 等)
+    - payload_json: JSON 可序列化结果
+    - expires_at: unix 秒,过期行可惰性忽略并由下次写入覆盖
+    """
+
+    __tablename__ = "rhcomfyuistatscache"
+    __table_args__ = (
+        Index("ix_rhcomfyuistatscache_bot_exp", "bot_id", "expires_at"),
+        {"extend_existing": True},
+    )
+
+    cache_key: str = Field(primary_key=True, max_length=256, title="缓存键")
+    bot_id: str = Field(default="", index=True, max_length=64, title="Bot 平台")
+    kind: str = Field(default="", max_length=32, title="summary|user_summaries")
+    payload_json: str = Field(default="", title="JSON 载荷")
+    expires_at: int = Field(default=0, title="过期 unix 秒")
+    updated_at: int = Field(default=0, title="更新 unix 秒")
+
+    @classmethod
+    @with_session
+    async def get_valid(
+        cls,
+        session: AsyncSession,
+        cache_key: str,
+        *,
+        now: Optional[int] = None,
+    ) -> Optional[str]:
+        """命中且未过期返回 payload_json,否则 None。"""
+        import time as _time
+
+        ts = int(now if now is not None else _time.time())
+        stmt = select(cls).where(col(cls.cache_key) == cache_key).limit(1)
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return None
+        if int(row.expires_at or 0) <= ts:
+            return None
+        return row.payload_json or None
+
+    @classmethod
+    @with_session
+    async def upsert(
+        cls,
+        session: AsyncSession,
+        *,
+        cache_key: str,
+        bot_id: str,
+        kind: str,
+        payload_json: str,
+        ttl_seconds: int,
+        now: Optional[int] = None,
+    ) -> None:
+        """写入/覆盖一条缓存。"""
+        import time as _time
+
+        ts = int(now if now is not None else _time.time())
+        ttl = max(1, int(ttl_seconds))
+        exp = ts + ttl
+        stmt = select(cls).where(col(cls.cache_key) == cache_key).limit(1)
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            session.add(
+                cls(
+                    cache_key=cache_key[:256],
+                    bot_id=(bot_id or "")[:64],
+                    kind=(kind or "")[:32],
+                    payload_json=payload_json,
+                    expires_at=exp,
+                    updated_at=ts,
+                )
+            )
+        else:
+            row.bot_id = (bot_id or "")[:64]
+            row.kind = (kind or "")[:32]
+            row.payload_json = payload_json
+            row.expires_at = exp
+            row.updated_at = ts
+            session.add(row)
+
+    @classmethod
+    @with_session
+    async def invalidate(
+        cls,
+        session: AsyncSession,
+        bot_id: Optional[str] = None,
+    ) -> int:
+        """失效缓存。bot_id 为空则清空全表;否则只清该 bot 相关行。返回删除行数。"""
+        if bot_id:
+            stmt = delete(cls).where(col(cls.bot_id) == bot_id)
+        else:
+            stmt = delete(cls)
+        result = await session.execute(stmt)
+        # CursorResult.rowcount 在部分驱动上可能是 -1
+        try:
+            return int(getattr(result, "rowcount", 0) or 0)
+        except Exception:
+            return 0
+
+
+@site.register_admin
+class RHComfyuiStatsCacheAdmin(GsAdminModel):
+    """WebConsole 查看/清理消费统计缓存"""
+
+    pk_name = "cache_key"
+    page_schema = PageSchema(
+        label="RH_ComfyUI 消费统计缓存",
+        icon="fa fa-database",
+    )  # type: ignore
+    model = RHComfyuiStatsCache
+
+
 class RHVoiceCloneCache(SQLModel, table=True):
     """参考音频哈希 → 已克隆音色 id 的持久映射(全局去重)"""
 
@@ -1455,5 +1624,17 @@ exec_list.extend(
         "ALTER TABLE rhbind ADD COLUMN refreshed_at_day INTEGER DEFAULT 0",
         "ALTER TABLE rhbind ADD COLUMN refreshed_at_week INTEGER DEFAULT 0",
         'ALTER TABLE rhbind ADD COLUMN vip_tier VARCHAR(16) DEFAULT "free"',
+        # ── admin stats 复合索引(与 SQLModel __table_args__ 对齐;旧库启动补齐) ──
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_created "
+        "ON rhcomfyuitaskrecord (bot_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_user "
+        "ON rhcomfyuitaskrecord (bot_id, user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_status_created "
+        "ON rhcomfyuitaskrecord (bot_id, status, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_user_created "
+        "ON rhcomfyuitaskrecord (user_id, created_at)",
+        # 统计缓存表索引(表由 create_all 建出后补索引)
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuistatscache_bot_exp "
+        "ON rhcomfyuistatscache (bot_id, expires_at)",
     ]
 )
