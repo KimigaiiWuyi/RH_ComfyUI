@@ -520,10 +520,13 @@ def _render_admin_text(payload: dict) -> str:
         f"📊 全员消费记录({scope})",
         "",
         "📈 全局汇总:",
+        f"  · 总积分消耗: {summary.get('total_points', 0)}",
         f"  · 总任务: {summary.get('total', 0)} 条",
         f"  · 成功: {summary.get('success', 0)} / 失败: {summary.get('failed', 0)}",
         f"  · 成功率: {summary.get('success_rate', 0.0) * 100:.2f}%",
         f"  · 平均耗时: {summary.get('avg_elapsed_ms', 0)}ms",
+        f"  · 活跃用户: {summary.get('active_users', 0)}",
+        f"  · 平均单次积分: {summary.get('avg_points', 0)}",
     ]
     by_type = summary.get("by_task_type") or {}
     if by_type:

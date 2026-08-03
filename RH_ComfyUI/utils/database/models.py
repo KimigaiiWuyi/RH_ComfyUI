@@ -18,13 +18,24 @@ from ...rh_config.comfyui_config import PLUGIN_CONFIG
 
 
 class TaskSummary(TypedDict):
-    """RHComfyuiTaskRecord.get_summary() 的固定返回结构。"""
+    """RHComfyuiTaskRecord.get_summary() 的固定返回结构。
+
+    字段:
+      total / success / failed / success_rate / avg_elapsed_ms — 任务量与质量
+      total_points — 时间窗内 point_cost 合计
+      active_users — 去重 user_id 数
+      avg_points — total_points / total(无任务时为 0)
+      by_task_type — 各 task_type 计数
+    """
 
     total: int
     success: int
     failed: int
     success_rate: float
     avg_elapsed_ms: int
+    total_points: int
+    active_users: int
+    avg_points: float
     by_task_type: dict[str, int]
 
 
@@ -862,7 +873,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         end_time: Optional[datetime] = None,
         bot_id: Optional[str] = None,
     ) -> TaskSummary:
-        """聚合统计:总任务数 / 成功数 / 失败数 / 各类型计数 / 平均耗时。
+        """聚合统计:任务量 / 质量 / 积分 / 活跃用户 / 类型分布。
 
         ⚠️ 性能:
           - 禁止 ``select(cls).subquery()`` 拖入大 JSON 列;
@@ -885,7 +896,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         failed_v = RHComfyuiTaskStatus.FAILED.value
         cancelled_v = RHComfyuiTaskStatus.CANCELLED.value
 
-        # 单次扫描: total / success / failed / avg(终态 elapsed)
+        # 单次扫描: total / success / failed / avg(终态 elapsed) / points / users
         agg_stmt = _where(
             select(
                 func.count().label("total"),
@@ -911,6 +922,8 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
                         else_=None,
                     )
                 ).label("avg_elapsed"),
+                func.coalesce(func.sum(col(cls.point_cost)), 0).label("total_points"),
+                func.count(func.distinct(col(cls.user_id))).label("active_users"),
             ).select_from(cls)
         )
         row = (await session.execute(agg_stmt)).one()
@@ -918,6 +931,8 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         success = int(row.success or 0)
         failed = int(row.failed or 0)
         avg_elapsed = float(row.avg_elapsed or 0)
+        total_points = int(row.total_points or 0)
+        active_users = int(row.active_users or 0)
 
         type_rows = await session.execute(
             _where(
@@ -934,6 +949,9 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             "failed": failed,
             "success_rate": round(success / terminal_total, 4) if terminal_total else 0.0,
             "avg_elapsed_ms": int(avg_elapsed),
+            "total_points": total_points,
+            "active_users": active_users,
+            "avg_points": round(total_points / total, 2) if total else 0.0,
             "by_task_type": {k: int(v) for k, v in by_type_pairs if k},
         }
 
