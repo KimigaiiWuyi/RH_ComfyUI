@@ -22,18 +22,20 @@ def _png_b64() -> str:
 
 
 def test_size_mapping():
+    # 与 gpt_image2_billing._RATIO_SIZE_MAP 同源
     # 旧二参数形态(无 image_size):回落 2K 档
-    assert oapi.size_for("16:9", 720, 1280) == "2048x1152"
+    assert oapi.size_for("16:9", 720, 1280) == "2560x1440"
     # 新三参数形态:ratio + image_size → 像素值
-    # 注:16:9 1K = 1792x1008(精确比例,不再是历史错误的 1024x1024 正方形)
     assert oapi.size_for("16:9", 720, 1280, image_size="1K") == "1792x1008"
-    assert oapi.size_for("16:9", 720, 1280, image_size="2K") == "2048x1152"
+    assert oapi.size_for("16:9", 720, 1280, image_size="2K") == "2560x1440"
     assert oapi.size_for("16:9", 720, 1280, image_size="4K") == "3840x2160"
-    assert oapi.size_for("1:1", 1024, 1024, image_size="2K") == "2048x2048"
+    assert oapi.size_for("1:1", 1024, 1024, image_size="2K") == "2560x2560"
+    assert oapi.size_for("2:1", 0, 0, image_size="2K") == "2560x1280"
+    assert oapi.size_for("1:2", 0, 0, image_size="2K") == "1280x2560"
     # auto → "auto"
     assert oapi.size_for("auto", 720, 1280, image_size="2K") == "auto"
     # 无 ratio 时按宽高取最接近枚举(仍回落 2K 档)
-    assert oapi.size_for(None, 1024, 1024) == "2048x2048"
+    assert oapi.size_for(None, 1024, 1024) == "2560x2560"
     assert oapi.ratio_from_wh(1920, 1080) == "16:9"
 
 

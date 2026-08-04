@@ -8,6 +8,7 @@ from RH_ComfyUI.utils.mappers.gpt_image2_billing import (
     calculate_image_tokens,
     estimate_gpt_image2_points,
     resolve_dimensions,
+    resolve_size_string,
 )
 from RH_ComfyUI.models.image.defs import GptImage2Def, BananaProDef
 from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
@@ -27,38 +28,52 @@ def test_points_per_million_tokens_constant():
 @pytest.mark.parametrize(
     "ratio,image_size,expected",
     [
-        # 1:1 系列
+        # 与 _RATIO_SIZE_MAP 真源一致(计费 = 实际 size)
         ("1:1", "1K", (1024, 1024)),
-        ("1:1", "2K", (2048, 2048)),
+        ("1:1", "2K", (2560, 2560)),
         ("1:1", "4K", (2880, 2880)),  # 像素上限封顶,不能 3840x3840
-        # 16:9 / 9:16
-        ("16:9", "2K", (2048, 1152)),
+        ("16:9", "1K", (1792, 1008)),
+        ("16:9", "2K", (2560, 1440)),
         ("16:9", "4K", (3840, 2160)),
-        ("9:16", "2K", (1152, 2048)),
+        ("9:16", "2K", (1440, 2560)),
         ("9:16", "4K", (2160, 3840)),
-        # 4:3 / 3:4 — 历史 bug:曾给 2048x2048(1:1)
-        ("4:3", "2K", (2048, 1536)),
+        ("4:3", "2K", (2560, 1920)),
         ("4:3", "4K", (3264, 2448)),
-        ("3:4", "2K", (1536, 2048)),
+        ("3:4", "2K", (1920, 2560)),
         ("3:4", "4K", (2448, 3264)),
-        # 3:2 / 2:3
         ("3:2", "1K", (1536, 1024)),
-        ("3:2", "2K", (3072, 2048)),  # 历史 bug:曾给 2048x1152(16:9)
-        ("3:2", "4K", (3456, 2304)),
+        ("3:2", "2K", (3072, 2048)),
+        ("3:2", "4K", (3504, 2336)),
         ("2:3", "1K", (1024, 1536)),
-        ("2:3", "2K", (2048, 3072)),  # 历史 bug:曾给 2048x2048(正方形!)
-        ("2:3", "4K", (2304, 3456)),  # 历史 bug:曾给 2160x3840(9:16)
-        # 21:9
+        ("2:3", "2K", (2048, 3072)),
+        ("2:3", "4K", (2336, 3504)),
+        ("2:1", "1K", (1152, 576)),
+        ("2:1", "2K", (2560, 1280)),
+        ("2:1", "4K", (3840, 1920)),
+        ("1:2", "1K", (576, 1152)),
+        ("1:2", "2K", (1280, 2560)),
+        ("1:2", "4K", (1920, 3840)),
         ("21:9", "4K", (3808, 1632)),
         # 默认/回落
-        ("auto", "2K", (1024, 1024)),   # auto → 默认尺寸
-        (None, "2K", (1024, 1024)),    # None → 默认尺寸
-        ("1:1", None, (2048, 2048)),   # size 缺失 → 2K
-        ("1:1", "9K", (2048, 2048)),   # 非法档 → 2K
+        ("auto", "2K", (1024, 1024)),  # auto → 默认尺寸(估价)
+        (None, "2K", (1024, 1024)),
+        ("1:1", None, (2560, 2560)),  # size 缺失 → 2K
+        ("1:1", "9K", (2560, 2560)),  # 非法档 → 2K
     ],
 )
 def test_resolve_dimensions(ratio, image_size, expected):
     assert resolve_dimensions(ratio, image_size) == expected
+
+
+def test_resolve_size_string_matches_api_and_includes_1_2():
+    """计费 size 字符串须与 GPTImage2API / openai 生图共用;含 1:2/2:1。"""
+    from RH_ComfyUI.utils.backends.gpt_image2.api import GPTImage2API
+
+    assert resolve_size_string("2:1", "2K") == "2560x1280"
+    assert resolve_size_string("1:2", "2K") == "1280x2560"
+    assert resolve_size_string("auto", "2K") == "auto"
+    assert GPTImage2API.resolve_size("1:2", "4K") == resolve_size_string("1:2", "4K")
+    assert GPTImage2API.resolve_size("16:9", "2K") == "2560x1440"
 
 
 # ── token 计算 ──
@@ -127,8 +142,8 @@ def test_estimate_auto_ratio():
 
 
 def test_estimate_explicit():
-    """显式参数"""
-    assert estimate_gpt_image2_points("low", "16:9", "2K") == calculate_image_points("low", 2048, 1152)
+    """显式参数(16:9 2K = 2560x1440,与真源表一致)"""
+    assert estimate_gpt_image2_points("low", "16:9", "2K") == calculate_image_points("low", 2560, 1440)
 
 
 # ── 模型 estimate_cost 钩子 ──

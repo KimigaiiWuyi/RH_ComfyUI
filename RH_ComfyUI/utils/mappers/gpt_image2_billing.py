@@ -1,10 +1,16 @@
-"""GPT-Image-2 动态积分计价
+"""GPT-Image-2 动态积分计价 + ratio/size 像素真源
 
 计价规则:210 元(RMB)/1M tokens,1 积分 = 1 分钱 → 210 元 = 21_000 积分 / 1M tokens。
 token 计算公式由上游 OpenAI 兼容网关公开,按 quality 档位 + 输出像素面积分档。
 
-size 像素值由 ratio + image_size 二维映射决定(与 openai_image/api.py 的
-_RATIO_SIZE_MAP 保持一致);ratio="auto" 时按 1024x1024 估算。
+## `_RATIO_SIZE_MAP` 是唯一真源
+
+本表同时驱动:
+  1. 积分估算 (`resolve_dimensions` / `estimate_gpt_image2_points`)
+  2. 实际上游 `size` 参数 (`resolve_size_string` → GPTImage2API / openai_image)
+  3. 模型目录 ratio 枚举 (`ratio_enum_values` → GptImage2Def / BananaProDef)
+
+禁止在 backends 或 defs 再维护第二份 ratio→像素表。
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ IMAGE_MODEL_SPECS: dict[str, dict] = {
 # 210 元 / 1M tokens,1 元 = 100 积分 → 210 * 100 = 21_000 积分 / 1M tokens
 POINTS_PER_MILLION_TOKENS: int = 21_000
 
-# ratio + image_size → 像素尺寸(与 openai_image/api.py::_RATIO_SIZE_MAP 保持一致)
+# ratio + image_size → 像素尺寸(计费 / 实际上游 size / schema 共用)
 #
 # 每个 cell 都必须满足 OpenAI 上游的 4 条硬约束(参见 IMAGE_MODEL_SPECS.size_limits):
 #   1. 两边都是 16 的倍数
@@ -58,9 +64,25 @@ _RATIO_SIZE_MAP: dict[str, dict[str, str]] = {
     "1:2": {"1K": "576x1152", "2K": "1280x2560", "4K": "1920x3840"},
 }
 
+# 前端 /models schema 展示顺序(auto 置顶;表中新增 ratio 未列入时会追加到末尾)
+_RATIO_ENUM_ORDER: tuple[str, ...] = (
+    "auto",
+    "1:1",
+    "16:9",
+    "9:16",
+    "4:3",
+    "3:4",
+    "3:2",
+    "2:3",
+    "2:1",
+    "1:2",
+    "21:9",
+)
+
 # ratio="auto" 时的默认估算尺寸
 _AUTO_WIDTH: int = 1024
 _AUTO_HEIGHT: int = 1024
+_FALLBACK_SIZE_STR: str = "2048x2048"
 
 
 def _parse_size(size_str: str) -> tuple[int, int]:
@@ -69,18 +91,43 @@ def _parse_size(size_str: str) -> tuple[int, int]:
     return int(w), int(h)
 
 
+def ratio_enum_values() -> list[str]:
+    """模型目录 ratio 枚举:auto + 表中全部 ratio(顺序稳定)。"""
+    known = set(_RATIO_SIZE_MAP.keys())
+    out = [r for r in _RATIO_ENUM_ORDER if r == "auto" or r in known]
+    for key in _RATIO_SIZE_MAP:
+        if key not in out:
+            out.append(key)
+    return out
+
+
+def resolve_size_string(ratio: Optional[str], image_size: Optional[str]) -> str:
+    """ratio + image_size → 上游 size 字符串(如 '2560x1440' 或 'auto')。
+
+    实际生图(GPTImage2API / openai_image.size_for)必须走这里,与计费同源。
+    ratio 为 'auto' / None / 未匹配 → 'auto'(交给上游自适应)。
+    已知 ratio 但 tier 缺失 → 回落 2K;2K 也缺失 → `_FALLBACK_SIZE_STR`。
+    """
+    if not ratio or ratio == "auto":
+        return "auto"
+    tier = image_size if image_size in ("1K", "2K", "4K") else "2K"
+    tier_map = _RATIO_SIZE_MAP.get(ratio)
+    if tier_map is None:
+        return "auto"
+    return tier_map.get(tier) or tier_map.get("2K") or _FALLBACK_SIZE_STR
+
+
 def resolve_dimensions(ratio: Optional[str], image_size: Optional[str]) -> tuple[int, int]:
     """ratio + image_size → (width, height) 像素。
 
     ratio 为 'auto' / None / 未匹配 → 回落 _AUTO_WIDTH x _AUTO_HEIGHT。
+    与 resolve_size_string 同源(auto 时估价用默认正方形,上游 size 用 'auto')。
     """
     if not ratio or ratio == "auto":
         return _AUTO_WIDTH, _AUTO_HEIGHT
-    tier = image_size if image_size in ("1K", "2K", "4K") else "2K"
-    tier_map = _RATIO_SIZE_MAP.get(ratio)
-    if tier_map is None:
+    size_str = resolve_size_string(ratio, image_size)
+    if size_str == "auto":
         return _AUTO_WIDTH, _AUTO_HEIGHT
-    size_str = tier_map.get(tier, "2048x2048")
     return _parse_size(size_str)
 
 
@@ -150,6 +197,9 @@ def estimate_gpt_image2_points(
 __all__ = [
     "IMAGE_MODEL_SPECS",
     "POINTS_PER_MILLION_TOKENS",
+    "_RATIO_SIZE_MAP",
+    "ratio_enum_values",
+    "resolve_size_string",
     "resolve_dimensions",
     "calculate_image_tokens",
     "calculate_image_points",

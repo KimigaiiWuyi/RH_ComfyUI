@@ -53,7 +53,7 @@ def test_ratio_based_image_models_expose_ratio_not_wh(cls):
     # 这些模型的真实请求参数是宽高比(aspect_ratio / aspect_ratio+image_size→size),
     # 不吃宽高像素 —— schema 必须暴露 ratio 枚举,不得假装接受 width/height。
     # (与 test_gemini_image 对 banana2/banana1 的同类断言口径一致)
-    from RH_ComfyUI.utils.backends.openai_image.api import _RATIO_SIZE_MAP
+    from RH_ComfyUI.utils.mappers.gpt_image2_billing import _RATIO_SIZE_MAP
 
     node = cls.node_def()
     assert "width" not in node.inputs and "height" not in node.inputs
@@ -63,6 +63,22 @@ def test_ratio_based_image_models_expose_ratio_not_wh(cls):
     ratio_values = set(ratio.values) - {"auto"}
     assert ratio_values <= set(_RATIO_SIZE_MAP), f"{cls.__name__} ratio 枚举超出上游支持范围"
     assert ratio.default in ratio.values
+
+
+@pytest.mark.parametrize("cls", [BananaProDef, GptImage2Def])
+def test_gpt_image2_family_exposes_all_billing_ratios_including_1_2(cls):
+    """计费/像素真源表中的 ratio(含 1:2、2:1)必须完整暴露到 /models schema。"""
+    from RH_ComfyUI.utils.mappers.gpt_image2_billing import _RATIO_SIZE_MAP
+
+    node = cls.node_def()
+    ratio = node.inputs.get("ratio")
+    assert ratio is not None
+    exposed = set(ratio.values) - {"auto"}
+    assert exposed == set(_RATIO_SIZE_MAP), (
+        f"{cls.__name__} ratio 与 _RATIO_SIZE_MAP 不一致: "
+        f"missing={set(_RATIO_SIZE_MAP) - exposed} extra={exposed - set(_RATIO_SIZE_MAP)}"
+    )
+    assert "1:2" in ratio.values and "2:1" in ratio.values
 
 
 @pytest.mark.parametrize("cls", [AnimaDef, Qwen2512Def, Wan22VideogenDef])

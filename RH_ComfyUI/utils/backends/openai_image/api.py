@@ -21,23 +21,11 @@ from PIL import Image
 
 from gsuid_core.logger import logger
 
-# ratio + image_size → OpenAI images size 映射(二维,与 gpt_image2_billing 对齐)
-# 有效尺寸必须满足上游约束:最大边 ≤3840 / 双边 16 整除 / 长宽比精确且 ≤3:1 /
-#                       像素 ∈ [655360, 8294400]
-# tier 语义:短边 ≈ 1K/2K/4K。
-# 注:本表 2026-07 重建,纠正早期"占位值"错误(2:3 + 2K 不再是正方形)。
-_RATIO_SIZE_MAP: Dict[str, Dict[str, str]] = {
-    # Landscape (width > height)
-    "1:1": {"1K": "1024x1024", "2K": "2048x2048", "4K": "2880x2880"},
-    "16:9": {"1K": "1792x1008", "2K": "2048x1152", "4K": "3840x2160"},
-    "4:3": {"1K": "1280x960", "2K": "2048x1536", "4K": "3264x2448"},
-    "3:2": {"1K": "1536x1024", "2K": "3072x2048", "4K": "3456x2304"},
-    "21:9": {"1K": "2464x1056", "2K": "2688x1152", "4K": "3808x1632"},
-    # Portrait (width < height)
-    "9:16": {"1K": "1008x1792", "2K": "1152x2048", "4K": "2160x3840"},
-    "3:4": {"1K": "960x1280", "2K": "1536x2048", "4K": "2448x3264"},
-    "2:3": {"1K": "1024x1536", "2K": "2048x3072", "4K": "2304x3456"},
-}
+# 像素真源:gpt_image2_billing._RATIO_SIZE_MAP(计费 / 生图 / schema 共用)
+from ...mappers.gpt_image2_billing import (
+    _RATIO_SIZE_MAP,
+    resolve_size_string,
+)
 
 # 扁平旧表保留作 fallback 用(取 2K 档)
 _RATIO_TO_SIZE: Dict[str, str] = {ratio: tiers["2K"] for ratio, tiers in _RATIO_SIZE_MAP.items()}
@@ -84,11 +72,8 @@ def size_for(
     # ratio 缺失 → 按像素宽高取最接近枚举
     key = ratio or ratio_from_wh(width, height)
     if image_size:
-        tier = image_size if image_size in ("1K", "2K", "4K") else "2K"
-        tier_map = _RATIO_SIZE_MAP.get(key)
-        if tier_map is None:
-            return "auto"
-        return tier_map.get(tier, "2048x2048")
+        # 与计费同源(含 1:2 / 2:1 等)
+        return resolve_size_string(key, image_size)
     # 旧二参数形态:仅 ratio(或按 wh 兜底),取 2K 档
     return _RATIO_TO_SIZE.get(key, "2048x2048")
 

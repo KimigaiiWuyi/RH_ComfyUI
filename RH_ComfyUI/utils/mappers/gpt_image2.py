@@ -13,18 +13,19 @@ if TYPE_CHECKING:
 
 
 def _calculate_aspect_ratio(w: int, h: int) -> str:
-    """根据宽度和高度自动计算最接近的宽高比"""
-    actual_ratio = w / h
-    ratios = {
-        "21:9": 21 / 9,
-        "16:9": 16 / 9,
-        "4:3": 4 / 3,
-        "1:1": 1 / 1,
-        "3:4": 3 / 4,
-        "9:16": 9 / 16,
-    }
-    closest_ratio = min(ratios.keys(), key=lambda k: abs(ratios[k] - actual_ratio))
-    return closest_ratio
+    """根据宽度和高度自动计算最接近的宽高比(候选来自像素真源表)。"""
+    from .gpt_image2_billing import _RATIO_SIZE_MAP
+
+    actual_ratio = (w / h) if h else 1.0
+
+    def _rv(ratio: str) -> float:
+        a, _, b = ratio.partition(":")
+        try:
+            return int(a) / int(b) if b and int(b) else 1.0
+        except ValueError:
+            return 1.0
+
+    return min(_RATIO_SIZE_MAP.keys(), key=lambda k: abs(_rv(k) - actual_ratio))
 
 
 async def gpt_image2_mapper(

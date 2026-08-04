@@ -228,35 +228,16 @@ class GPTImage2API:
             logger.error(f"[GPT-Image2] 解析 Chat Completions 失败: {e}")
             return 500
 
-    # ratio + image_size → OpenAI images API 的 size 参数映射(二维)
-    # 有效尺寸:1024x1024 / 1536x1024 / 1024x1536 / 2048x2048 / 2048x1152 /
-    #          3840x2160 / 2160x3840 / auto
-    # 约束:最大边 ≤3840 / 双边 16 整除 / 长宽比 ≤3:1 / 像素 ∈ [655360, 8294400]
-    _RATIO_SIZE_MAP: Dict[str, Dict[str, str]] = {
-        "1:1":   {"1K": "1024x1024", "2K": "2048x2048", "4K": "3840x2160"},
-        "16:9":  {"1K": "1024x1024", "2K": "2048x1152", "4K": "3840x2160"},
-        "9:16":  {"1K": "1024x1024", "2K": "2048x2048", "4K": "2160x3840"},
-        "4:3":   {"1K": "1024x1024", "2K": "2048x2048", "4K": "3840x2160"},
-        "3:4":   {"1K": "1024x1024", "2K": "2048x2048", "4K": "2160x3840"},
-        "3:2":   {"1K": "1536x1024", "2K": "2048x1152", "4K": "3840x2160"},
-        "2:3":   {"1K": "1024x1536", "2K": "2048x2048", "4K": "2160x3840"},
-        "21:9":  {"1K": "1024x1024", "2K": "2048x1152", "4K": "3840x2160"},
-    }
-
     @staticmethod
     def resolve_size(ratio: Optional[str], image_size: Optional[str]) -> str:
         """ratio + image_size → 像素尺寸字符串。
 
-        未匹配的组合回落到 2048x2048(2K 正方形,满足全部约束);
-        ratio 为 "auto" 或空 → 返回 "auto"。
+        与计费模块 `gpt_image2_billing.resolve_size_string` 同源:
+        同一 ratio/image_size 估价像素与实际上游 size 一致。
         """
-        if not ratio or ratio == "auto":
-            return "auto"
-        tier = image_size if image_size in ("1K", "2K", "4K") else "2K"
-        tier_map = GPTImage2API._RATIO_SIZE_MAP.get(ratio)
-        if tier_map is None:
-            return "auto"
-        return tier_map.get(tier, "2048x2048")
+        from ....utils.mappers.gpt_image2_billing import resolve_size_string
+
+        return resolve_size_string(ratio, image_size)
 
     async def draw_image(
         self,

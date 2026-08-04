@@ -16,6 +16,7 @@ from ...utils.core.pipeline import NodeDef
 from ...core.channels.channel import ChannelBinding
 from ...utils.mappers.seedream import seedream_mapper as _seedream_mapper
 from ...utils.mappers.gpt_image2 import gpt_image2_mapper as _gpt_image2_mapper
+from ...utils.mappers.gpt_image2_billing import ratio_enum_values as _gpt_image2_ratio_values
 from ...utils.mappers.image_edit import qwen_edit_mapper as _qwen_edit_mapper
 from ...utils.mappers.banana_pro_billing import estimate_banana_pro_points
 from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minimax_image01_mapper
@@ -484,11 +485,11 @@ class BananaProDef(ImagePipelineModel):
                     title="参考图片",
                     description="参考图片:0 张=文生图,1+ 张=图片编辑",
                 ),
-                # 上游按 ratio + image_size → size 映射请求(GPTImage2API),不吃宽高像素
+                # 上游按 ratio + image_size → size 映射请求(与计费表同源)
                 "ratio": PortSpec(
                     type=PortType.ENUM,
                     default="auto",
-                    values=["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    values=_gpt_image2_ratio_values(),
                     title="宽高比",
                     description="输出宽高比,与分辨率组合映射为 size 参数",
                 ),
@@ -594,10 +595,11 @@ class GptImage2Def(ImagePipelineModel):
                     description="参考图片,可选。上传即自动进入图生图/编辑模式,留空即为文生图",
                 ),
                 # OpenAI images API 接受 size(由 ratio + image_size 共同映射) + quality
+                # ratio 枚举来自计费/像素真源表(含 1:2 / 2:1)
                 "ratio": PortSpec(
                     type=PortType.ENUM,
                     default="auto",
-                    values=["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    values=_gpt_image2_ratio_values(),
                     title="宽高比",
                     description="输出宽高比,与分辨率组合映射为 size 参数",
                 ),

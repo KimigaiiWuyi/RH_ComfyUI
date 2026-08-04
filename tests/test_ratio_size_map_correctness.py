@@ -90,7 +90,7 @@ def test_user_case_2_3_2k_vs_4k():
     assert pts_4k > pts_2k
     # 同时确认尺寸表已修正:2K 应该是 2048x3072(不是 2048x2048 正方形)
     assert resolve_dimensions("2:3", "2K") == (2048, 3072)
-    assert resolve_dimensions("2:3", "4K") == (2304, 3456)
+    assert resolve_dimensions("2:3", "4K") == (2336, 3504)
 
 
 # ── 表覆盖完整性 ──

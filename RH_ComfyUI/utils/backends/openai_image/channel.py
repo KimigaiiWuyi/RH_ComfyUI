@@ -72,7 +72,13 @@ class OpenAIImageChannel(ProviderChannel):
                 user_message="未配置该供应商对应的模型名。",
             )
 
-        size = size_for(request.ratio, request.width, request.height)
+        # 与 gpt_image2_billing 像素真源同源;有 image_size 时按档映射,否则回落 2K
+        size = size_for(
+            request.ratio,
+            request.width,
+            request.height,
+            image_size=request.params.get("image_size"),
+        )
         quality = str(request.params.get("quality") or "medium")
         try:
             data = await generate_image(
