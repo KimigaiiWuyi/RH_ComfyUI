@@ -324,6 +324,75 @@ class ImageMattingDef(ImagePipelineModel):
             raise ValidationError(f"{self.display_name}:必须提供 1 张待抠图原图")
 
 
+class ImageUpscaleDef(ImagePipelineModel):
+    """RH 高清放大 — RunningHub AI App 2084945150656212993
+
+    单张输入图 → 高清放大输出。
+    走 rh_app OpenAPI v2（nodeInfoList），凭证复用 RH_apikey。
+    固定积分 point_cost（无动态计费）。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="rh_image_upscale",
+            display_name="RH 高清放大",
+            task_type=TaskType("image"),
+            catalog_group="tool",
+            backend="rh_app",
+            point_cost=3,
+            description="基于 RunningHub AI 应用的图片高清放大",
+            knowledge_content=(
+                "RH 高清放大基于 RunningHub AI App 2084945150656212993 实现图片超分放大。"
+                "\n"
+                "优势:单图一键提升清晰度与分辨率，适合模糊图修复、印刷/展示前放大。"
+                "\n"
+                "输入:必传 1 张参考图；无需提示词与其它参数。"
+                "\n"
+                "凭证:复用 RH_apikey（RunningHub 通用 key）。"
+                "\n"
+            ),
+            requirements=["rh_apikey"],
+            workflow_file="2084945150656212993",
+            mode="declarative",
+            mappings=[
+                {
+                    "source": "images.0",
+                    "target": "2.image",
+                    "type": "upload_image",
+                    "description": "image",
+                },
+            ],
+            inputs={
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    required=True,
+                    min_items=1,
+                    max_items=1,
+                    item_type=PortType.IMAGE,
+                    title="参考图",
+                    description="待放大原图(必传 1 张)",
+                ),
+            },
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="高清放大后的图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="async_poll",
+                priority=55,
+            ),
+        )
+
+    def validate(self, request: GenerationRequest) -> None:
+        super().validate(request)
+        if not request.images:
+            raise ValidationError(f"{self.display_name}:必须提供 1 张待放大原图")
+
+
 class Banana2Def(ImagePipelineModel):
     """Nano Banana 2 — 走原生 Gemini Interactions API(非 OpenAI 兼容网关)
 
@@ -1150,6 +1219,7 @@ ALL_MODELS = [
     BananaProDef,
     CameraAngleDef,
     ImageMattingDef,
+    ImageUpscaleDef,
     GptImage2Def,
     MinimaxImage01Def,
     Qwen2511Def,

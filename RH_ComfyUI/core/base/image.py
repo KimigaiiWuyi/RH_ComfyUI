@@ -29,7 +29,15 @@ class ImageGenerationBase(AIGCGenerationBase):
             raise ValidationError(f"{self.display_name} 不支持尺寸 {request.width}x{request.height},可选: {allowed}")
 
     def normalize(self, request: GenerationRequest) -> GenerationRequest:
-        """透明参考图合白底(平移 rh_generate 逻辑,避免各入口重复处理)"""
+        """媒体代号兜底 + 透明参考图合白底。
+
+        ``ensure_media_ref_labels``:有 ordered_content 时把 [@] 剥空后的空洞
+        prompt 重建为「图片N」写法,并在扁平 images 为空时从 OC 回填 ——
+        banana / gpt-image-2 / seedream 等只读 prompt+images 的模型统一受益。
+        """
+        from ...utils.core.media_labels import ensure_media_ref_labels
+
+        request = ensure_media_ref_labels(request)
         if request.images:
             from ...utils.image_process import flatten_transparent_to_white
 

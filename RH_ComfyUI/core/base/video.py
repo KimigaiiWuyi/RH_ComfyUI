@@ -78,12 +78,20 @@ class VideoGenerationBase(AIGCGenerationBase):
                 )
 
     def normalize(self, request: GenerationRequest) -> GenerationRequest:
-        """视频通用预处理:分辨率统一小写 + 参考图等比缩放/EXIF 校正
+        """视频通用预处理:媒体代号兜底 + 分辨率统一小写 + 参考图缩放/EXIF
+
+        ``ensure_media_ref_labels``:有 ordered_content 时重建「图片N/视频N/
+        音频N」写入 prompt —— happyhorse r2v(``图片N``→``[Image N]``)、
+        wan 位置插值、以及只读 prompt 的视频通道统一受益;Seedance 仍走
+        ordered_segments 注入【图片N】,prompt 带代号也不冲突。
 
         images 与 ordered_content 里的图片项统一走 preprocess_for_video
         (等比缩放最长边 ≤ 800px);入口层(api.submit / bot 命令)不再各自
         预处理,run() 是唯一执行路径所以此处天然覆盖三入口。
         """
+        from ...utils.core.media_labels import ensure_media_ref_labels
+
+        request = ensure_media_ref_labels(request)
         if request.resolution:
             request.resolution = request.resolution.lower()
         from ...utils.image_process import preprocess_for_video
