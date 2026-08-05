@@ -87,6 +87,10 @@ class NodeDef:
     # 能力声明
     capabilities: CapabilityManifest = field(default_factory=CapabilityManifest)
 
+    # 目录分组(HTTP /models 与命令列表用)。None 时回退为 task_type.value。
+    # 例:多角度 / 抠图等"专用工具"挂 catalog_group="tool",不进图片生成主列表。
+    catalog_group: Optional[str] = None
+
 
 class PipelineRegistry:
     """节点(NodeDef)目录 —— core.routing.model_registry 的派生只读视图。

@@ -29,6 +29,8 @@ _MODEL_ENTRY_GOLDEN: dict[str, type] = {
     "execution_mode": str,
     "accepts_images": bool,
     "max_input_images": int,
+    "point_range": dict,
+    "catalog_group": str,
 }
 
 

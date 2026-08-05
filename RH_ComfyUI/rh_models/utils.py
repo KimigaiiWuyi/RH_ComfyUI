@@ -46,13 +46,14 @@ def format_text(catalog: dict[str, object], task_filter: str | None = None) -> s
         lines.append("📦 RH_ComfyUI 可用模型清单")
     lines.append("=" * 32)
 
-    # 按 task_type 分组
+    # 按目录分组(catalog_group; 缺省回退 task_type)
     grouped: dict[str, list[ModelEntry]] = {}
     for m in models:  # type: ignore[union-attr]
         if not isinstance(m, dict):
             continue
         entry = ModelEntry.from_dict(m)
-        grouped.setdefault(entry.task_type, []).append(entry)
+        group_key = entry.catalog_group or entry.task_type
+        grouped.setdefault(group_key, []).append(entry)
 
     for task, entries in grouped.items():
         lines.append(f"\n【{task_display.get(task, task)}】")

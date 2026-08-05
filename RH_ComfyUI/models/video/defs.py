@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from .overrides import Wan22VideoModel, SeedanceVideoModel
+from .overrides import Wan22VideoModel, SeedanceVideoModel, HappyHorseVideoModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
@@ -19,6 +19,7 @@ from ...utils.mappers.seedance_billing import (
     estimate_seedance15_pro_points,
 )
 from ...utils.mappers.extra_billing import estimate_wan22_points
+from ...utils.mappers.happyhorse_billing import estimate_happyhorse_points
 
 
 class Seedance15ProDef(SeedanceVideoModel):
@@ -514,6 +515,186 @@ class Seedance2FastDef(SeedanceVideoModel):
         )
 
 
+class HappyHorse11Def(HappyHorseVideoModel):
+    """HappyHorse 1.1 — 统一视频入口(文生/图生/参考/编辑),对外仅暴露 happyhorse1.1
+
+    内部按 input_schema 自动适配供应商 model:
+      0 图 → happyhorse-1.1-t2v
+      1 图 → happyhorse-1.1-i2v
+      2~9 图 / frame_mode=reference → happyhorse-1.1-r2v
+      有 video_refs → happyhorse-1.0-video-edit
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="happyhorse1.1",
+            display_name="HappyHorse 1.1",
+            task_type=TaskType("video"),
+            backend="happyhorse",
+            point_cost=500,
+            description=(
+                "HappyHorse 1.1 统一视频生成:按输入自动切换 "
+                "文生 / 图生(首帧) / 多图参考 / 视频编辑,无需手动选子模型"
+            ),
+            knowledge_content=(
+                "阿里云 DashScope HappyHorse 1.1 统一视频节点。"
+                "\n"
+                "一个节点覆盖全部形态,由输入自动决定供应商 model:"
+                "\n"
+                "  - 不传图           → 文生视频 (happyhorse-1.1-t2v)"
+                "\n"
+                "  - 传 1 张图         → 图生视频首帧 (happyhorse-1.1-i2v)"
+                "\n"
+                "  - 传 2~9 张图       → 参考生视频 (happyhorse-1.1-r2v);"
+                "prompt 中用 [Image 1]/[Image 2] 引用"
+                "\n"
+                "  - 传输入视频(+可选参考图) → 视频编辑 (happyhorse-1.0-video-edit)"
+                "\n"
+                "frame_mode=reference 时,即使只有 1 张图也走参考生而非首帧。"
+                "\n"
+                "分辨率 480p/720p/1080p(视频编辑仅 720p/1080p),时长 3~15 秒,"
+                "宽高比 16:9/9:16/1:1/4:3/3:4/4:5/5:4/9:21/21:9"
+                "(图生视频宽高比跟随首帧)。"
+                "\n"
+                "原生输出有声视频;不支持参考音频;无独立首尾帧端点。"
+                "\n"
+            ),
+            requirements=["happyhorse_apikey"],
+            # 逻辑名;真实 vendor model 由通道按形态解析
+            backend_model="happyhorse1.1",
+            backend_models={"dashscope": "happyhorse1.1"},
+            mode="declarative",
+            inputs={
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=True,
+                    title="提示词",
+                    description=(
+                        "视频描述。参考生视频可用 [Image 1]/[Image 2] 引用下方图片;"
+                        "也支持「图片1」写法,系统会自动改写。"
+                        "图生视频可不传(模型根据首帧推断运动)。"
+                    ),
+                ),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=9,
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description=(
+                        "图片输入自动决定形态:\n"
+                        "  - 0 张 = 文生视频\n"
+                        "  - 1 张 = 图生视频(该图作为首帧)\n"
+                        "  - 2~9 张 = 参考生视频(多主体融合)\n"
+                        "frame_mode=reference 时 1 张也走参考生"
+                    ),
+                ),
+                "video_refs": PortSpec(
+                    type=PortType.LIST,
+                    max_items=1,
+                    item_type=PortType.VIDEO,
+                    title="输入视频",
+                    description=(
+                        "传入 1 段视频时切换为视频编辑模式"
+                        "(可附 0~5 张参考图做风格/局部替换)。"
+                        "输入时长 3~60 秒,输出上限 15 秒。"
+                    ),
+                ),
+                "frame_mode": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "first_frame", "reference"],
+                    title="图片角色",
+                    description=(
+                        "图片角色判定:\n"
+                        "  - auto: 1 图=首帧图生, ≥2 图=参考生\n"
+                        "  - first_frame: 强制图生视频(仅用第 1 张作首帧)\n"
+                        "  - reference: 全部图片作参考素材(r2v)"
+                    ),
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="16:9",
+                    values=[
+                        "16:9",
+                        "9:16",
+                        "1:1",
+                        "4:3",
+                        "3:4",
+                        "4:5",
+                        "5:4",
+                        "9:21",
+                        "21:9",
+                    ],
+                    title="宽高比",
+                    description="视频宽高比(图生视频跟随首帧,本参数不生效)",
+                ),
+                "resolution": PortSpec(
+                    type=PortType.ENUM,
+                    default="720p",
+                    values=["480p", "720p", "1080p"],
+                    title="分辨率",
+                    description="视频分辨率;视频编辑模式仅支持 720p / 1080p",
+                ),
+                "duration": PortSpec(
+                    type=PortType.INTEGER,
+                    default=5,
+                    minimum=3,
+                    maximum=15,
+                    title="时长",
+                    description="输出视频时长(秒),3~15;视频编辑模式由输入视频决定",
+                ),
+                "seed": PortSpec(
+                    type=PortType.INTEGER,
+                    title="随机种子",
+                    description="随机种子,留空则随机",
+                ),
+                "watermark": PortSpec(
+                    type=PortType.BOOLEAN,
+                    default=False,
+                    title="水印",
+                    description='是否添加 "Happy Horse" 水印(右下角)',
+                ),
+                "audio_setting": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "origin"],
+                    title="声音控制",
+                    description=(
+                        "仅视频编辑模式生效:\n"
+                        "  - auto: 由模型控制\n"
+                        "  - origin: 保留输入视频原声"
+                    ),
+                ),
+            },
+            outputs={
+                "video": PortSpec(type=PortType.OUTPUT_VIDEO, description="生成的视频(MP4, H.264, 24fps)"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["video"],
+                mode="async_poll",
+                priority=88,
+            ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按分辨率 × 输出时长。"""
+        resolution = request.params.get("resolution") or request.resolution or "720p"
+        duration = float(request.duration or request.params.get("duration") or 5)
+        return estimate_happyhorse_points(resolution, duration)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(480p + 3s) ~ 最大(1080p + 15s)。"""
+        return (
+            estimate_happyhorse_points("480p", 3),
+            estimate_happyhorse_points("1080p", 15),
+        )
+
+
 class Wan22VideogenDef(Wan22VideoModel):
     """Wan2.2 视频生成 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)
 
@@ -615,4 +796,11 @@ class Wan22VideogenDef(Wan22VideoModel):
         )
 
 
-ALL_MODELS = [Seedance15ProDef, Seedance2Def, Seedance2MiniDef, Seedance2FastDef, Wan22VideogenDef]
+ALL_MODELS = [
+    Seedance15ProDef,
+    Seedance2Def,
+    Seedance2MiniDef,
+    Seedance2FastDef,
+    HappyHorse11Def,
+    Wan22VideogenDef,
+]

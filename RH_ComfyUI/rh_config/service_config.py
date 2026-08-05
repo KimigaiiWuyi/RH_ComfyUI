@@ -280,4 +280,35 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "(method/url/headers[脱敏]/body[全量 JSON])。不会真正发送请求,不会消耗配额。",
         False,
     ),
+    "divider_happyhorse": GsDivider(
+        "HappyHorse 视频生成(DashScope)",
+        "阿里云 DashScope HappyHorse 1.1 视频生成服务配置。"
+        "对外模型名 happyhorse1.1,内部按输入自动路由 t2v / i2v / r2v / video-edit。",
+        "HappyHorse DashScope 服务配置",
+    ),
+    "HappyHorse_apikey_dashscope": GsStrConfig(
+        "DashScope API Key",
+        "阿里云 DashScope / 千问AI 平台 API Key,用于 HappyHorse 1.1 视频生成。",
+        "",
+    ),
+    "HappyHorse_BaseURL_dashscope": GsStrConfig(
+        "DashScope Base URL",
+        "DashScope API 根地址(不含尾斜杠)。默认华北2北京;"
+        "国际站等可改为对应 region 地址。",
+        "https://dashscope.aliyuncs.com/api/v1",
+        options=[
+            "https://dashscope.aliyuncs.com/api/v1",
+            "https://dashscope-intl.aliyuncs.com/api/v1",
+        ],
+    ),
+    "HappyHorse_Enable_dashscope": GsBoolConfig(
+        "启用 DashScope 供应商",
+        "是否启用 DashScope HappyHorse 通道。禁用后 happyhorse1.1 不可用。",
+        True,
+    ),
+    "HappyHorse_Dry_Run": GsBoolConfig(
+        "HappyHorse Dry-Run(拦截请求 + 打印)",
+        "开启后,HappyHorse 出站请求会被拦截并打印完整请求体,不会真正调用上游。",
+        False,
+    ),
 }

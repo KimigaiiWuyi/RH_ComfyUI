@@ -22,6 +22,7 @@ from ...utils.core.pipeline import NodeDef
 from ...core.channels.channel import ChannelBinding
 from ...core.channels.registry import channel_registry
 from ...utils.backends.seedance.channel import builtin_seedance_channels
+from ...utils.backends.happyhorse.channel import builtin_happyhorse_channels
 
 
 class SeedanceVideoModel(VideoPipelineModel):
@@ -226,4 +227,121 @@ class Wan22VideoModel(VideoPipelineModel):
             raise ValidationError(f"Wan 2.2 最高支持 720p(约 92 万像素),当前 {request.width}x{request.height} 超限")
 
 
-__all__ = ["SeedanceVideoModel", "Wan22VideoModel"]
+class HappyHorseVideoModel(VideoPipelineModel):
+    """HappyHorse 1.1:文生 / 图生(首帧) / 多图参考 / 视频编辑 统一入口
+
+    对外模型名固定 ``happyhorse1.1``;内部按输入自动映射:
+    - 0 图 → happyhorse-1.1-t2v
+    - 1 图 → happyhorse-1.1-i2v(首帧)
+    - 2~9 图 / frame_mode=reference → happyhorse-1.1-r2v
+    - 有输入视频 → happyhorse-1.0-video-edit
+    """
+
+    MAX_IMAGES = 9
+    MAX_VIDEOS = 1
+
+    def __init__(self, node: NodeDef) -> None:
+        super().__init__(node)
+        self.supported_shapes = {
+            VideoTaskShape.TEXT2VIDEO,
+            VideoTaskShape.IMAGE2VIDEO,
+            VideoTaskShape.MULTIMODAL,
+            VideoTaskShape.FIRST_LAST_FRAME,  # 降级为 r2v
+            VideoTaskShape.VIDEO_EDIT,
+        }
+        self.supported_resolutions = ["480p", "720p", "1080p"]
+        self.supported_ratios = [
+            "16:9",
+            "9:16",
+            "1:1",
+            "4:3",
+            "3:4",
+            "4:5",
+            "5:4",
+            "9:21",
+            "21:9",
+        ]
+        # 原生输出有声视频且无 generate_audio 开关;标 True 避免
+        # GenerationRequest.generate_audio 默认 True 触发「不支持有声」误拒。
+        self.supports_generate_audio = True
+        self.max_reference_total = self.MAX_IMAGES + self.MAX_VIDEOS
+        self.card = ModelCard(
+            description=node.description
+            or "阿里云 HappyHorse 1.1 统一视频生成,按输入自动切换文生/图生/参考/编辑",
+            strengths=[
+                "文生/图生/多参考一体",
+                "物理真实运动流畅",
+                "最高 1080P、最长 15 秒",
+                "参考图可用 [Image N] 在 prompt 中引用",
+            ],
+            categories=["短视频", "电商广告", "角色一致性", "视频编辑"],
+            weaknesses=["无首尾帧专用端点(多图走参考生)", "不支持参考音频", "视频编辑仅 1.0 档"],
+            sample_prompts=[
+                "一只猫在草地上奔跑",
+                "[Image 1]中的女性优雅转身,展开[Image 2]中的折扇",
+            ],
+            languages=["zh", "en"],
+            speed_hint="slow",
+        )
+
+    def validate(self, request: GenerationRequest) -> None:
+        if request.audio_refs:
+            raise ValidationError(f"{self.display_name} 不支持参考音频,请移除音频素材")
+        if len(request.video_refs) > self.MAX_VIDEOS:
+            raise ValidationError(
+                f"{self.display_name} 最多 1 段输入视频,当前 {len(request.video_refs)} 段"
+            )
+        if len(request.images) > self.MAX_IMAGES:
+            raise ValidationError(
+                f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,"
+                f"当前 {len(request.images)} 张"
+            )
+        # 视频编辑:分辨率仅 720p/1080p
+        if request.video_refs:
+            res = (request.resolution or request.params.get("resolution") or "1080p")
+            if str(res).lower() in ("480p", "4k"):
+                raise ValidationError(
+                    f"{self.display_name} 视频编辑仅支持 720p / 1080p,当前 {res}"
+                )
+        super().validate(request)
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        node = self.node
+        builtins = builtin_happyhorse_channels()
+        external = channel_registry.bindings_for(node.name)
+
+        if node.provider:
+            ch = builtins.get(node.provider)
+            if ch is not None:
+                return [ChannelBinding(ch, vendor_model=None)]
+            return [b for b in external if b.channel.name == node.provider]
+
+        bindings: list[ChannelBinding] = []
+        for _name, ch in builtins.items():
+            # vendor_model 留空:通道内按形态自动解析 t2v/i2v/r2v/edit
+            bindings.append(ChannelBinding(ch, vendor_model=None))
+        bindings.extend(external)
+        return bindings
+
+    async def execute_on_channel(
+        self,
+        request: GenerationRequest,
+        binding: ChannelBinding,
+        *,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> NodeOutput:
+        return await binding.channel.invoke(
+            request=request,
+            node=self.node,
+            on_progress=on_progress,
+            vendor_model=binding.vendor_model,
+        )
+
+    async def unavailable_reason(self) -> str:
+        return (
+            f"{self.display_name} 无可用供应商:请在 Web 控制台配置 "
+            "HappyHorse_apikey_dashscope 并启用 HappyHorse_Enable_dashscope"
+        )
+
+
+__all__ = ["SeedanceVideoModel", "Wan22VideoModel", "HappyHorseVideoModel"]

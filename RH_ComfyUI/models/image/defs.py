@@ -122,6 +122,7 @@ class CameraAngleDef(ImagePipelineModel):
             name="rh_camera_angle",
             display_name="RH 多角度",
             task_type=TaskType("image"),
+            catalog_group="tool",
             backend="rh_app",
             point_cost=5,
             description="基于 RunningHub 工作流的图片摄像机多角度生成,支持水平旋转、垂直俯仰、景别缩放",
@@ -252,6 +253,75 @@ class CameraAngleDef(ImagePipelineModel):
 
             request.images = [preprocess_for_camera_angle(img) for img in request.images]
         return super().normalize(request)
+
+
+class ImageMattingDef(ImagePipelineModel):
+    """RH 抠图 — RunningHub AI App 2084821698574114817
+
+    单张输入图 → 去除背景，输出透明底主体图。
+    走 rh_app OpenAPI v2（nodeInfoList），凭证复用 RH_apikey。
+    固定积分 point_cost（无动态计费）。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="rh_image_matting",
+            display_name="RH 抠图",
+            task_type=TaskType("image"),
+            catalog_group="tool",
+            backend="rh_app",
+            point_cost=2,
+            description="基于 RunningHub AI 应用的图片抠图，去除背景输出透明底主体",
+            knowledge_content=(
+                "RH 抠图基于 RunningHub AI App 2084821698574114817 实现主体抠图。"
+                "\n"
+                "优势:单图一键去背景，输出透明底 PNG，适合贴图合成、电商主图、素材提取。"
+                "\n"
+                "输入:必传 1 张参考图；无需提示词与其它参数。"
+                "\n"
+                "凭证:复用 RH_apikey（RunningHub 通用 key）。"
+                "\n"
+            ),
+            requirements=["rh_apikey"],
+            workflow_file="2084821698574114817",
+            mode="declarative",
+            mappings=[
+                {
+                    "source": "images.0",
+                    "target": "29.image",
+                    "type": "upload_image",
+                    "description": "image",
+                },
+            ],
+            inputs={
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    required=True,
+                    min_items=1,
+                    max_items=1,
+                    item_type=PortType.IMAGE,
+                    title="参考图",
+                    description="待抠图原图(必传 1 张)",
+                ),
+            },
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="抠图后的透明底图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="async_poll",
+                priority=55,
+            ),
+        )
+
+    def validate(self, request: GenerationRequest) -> None:
+        super().validate(request)
+        if not request.images:
+            raise ValidationError(f"{self.display_name}:必须提供 1 张待抠图原图")
 
 
 class Banana2Def(ImagePipelineModel):
@@ -1079,6 +1149,7 @@ ALL_MODELS = [
     Banana2Def,
     BananaProDef,
     CameraAngleDef,
+    ImageMattingDef,
     GptImage2Def,
     MinimaxImage01Def,
     Qwen2511Def,

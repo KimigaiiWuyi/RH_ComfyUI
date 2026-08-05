@@ -107,6 +107,13 @@ TASK_DISPLAY_NAME: dict[TaskType, str] = {
     TaskType.ASR: "语音识别",
 }
 
+# 目录分组显示名(catalog_group; 与 TaskType 可不同)
+# 专用工具模型(多角度/抠图等)挂 "tool",与图片生成主列表分离
+CATALOG_GROUP_DISPLAY: dict[str, str] = {
+    **{t.value: name for t, name in TASK_DISPLAY_NAME.items()},
+    "tool": "杂项工具",
+}
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  GenerationRequest

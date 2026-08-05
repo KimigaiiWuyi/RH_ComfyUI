@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from gsuid_core.logger import logger
 
-from .video import Wan22VideoModel, SeedanceVideoModel
+from .video import Wan22VideoModel, SeedanceVideoModel, HappyHorseVideoModel
 from .speech import IndexTTS2Model
 from .asr import FishAsrModel
 
@@ -43,6 +43,7 @@ __all__ = [
     "discover_builtin_models",
     "SeedanceVideoModel",
     "Wan22VideoModel",
+    "HappyHorseVideoModel",
     "IndexTTS2Model",
     "FishAsrModel",
 ]

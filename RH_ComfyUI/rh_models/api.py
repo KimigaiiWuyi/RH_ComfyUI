@@ -19,11 +19,11 @@ from typing import Any, Optional
 from dataclasses import field, asdict, dataclass
 
 from ..utils.backends import backend_registry
-from ..utils.core.request import TASK_DISPLAY_NAME, TaskType
-from ..utils.core.pipeline import pipeline_registry
+from ..utils.core.request import CATALOG_GROUP_DISPLAY, TASK_DISPLAY_NAME, TaskType
+from ..utils.core.pipeline import NodeDef, pipeline_registry
 
 # ═══════════════════════════════════════════════════════════════════════
-#  TaskType 别名 — 接受中文友好查询
+#  TaskType / catalog_group 别名 — 接受中文友好查询
 # ═══════════════════════════════════════════════════════════════════════
 
 _TASK_ALIAS: dict[str, str] = {
@@ -38,6 +38,11 @@ _TASK_ALIAS: dict[str, str] = {
     "语音": "speech",
     "speech": "speech",
     "tts": "speech",
+    # 目录分组:专用工具(非通用生成主列表)
+    "tool": "tool",
+    "misc": "tool",
+    "杂项": "tool",
+    "杂项工具": "tool",
 }
 
 
@@ -51,6 +56,27 @@ def _resolve_task_type(raw: str | None) -> Optional[TaskType]:
         return TaskType(key)
     except ValueError:
         return None
+
+
+def _resolve_catalog_group(raw: str | None) -> Optional[str]:
+    """规范化目录分组键(含 tool 等非 TaskType 分组)。"""
+    if not raw:
+        return None
+    key = raw.strip().lower()
+    key = _TASK_ALIAS.get(key, key)
+    if key in CATALOG_GROUP_DISPLAY:
+        return key
+    # 兼容未知但合法的自定义分组字符串
+    if key and key.isidentifier():
+        return key
+    return None
+
+
+def _node_catalog_group(node: NodeDef) -> str:
+    """NodeDef 的目录分组:显式 catalog_group 优先,否则 task_type。"""
+    if node.catalog_group:
+        return str(node.catalog_group)
+    return node.task_type.value
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -86,6 +112,8 @@ class ModelEntry:
     max_input_images: int = 0
     # ── 2026-07-21 积分范围新增:前端展示"最低~最高积分"用 ──
     point_range: dict[str, int] = field(default_factory=lambda: {"min": 0, "max": 0})
+    # ── 目录分组:默认等于 task_type;专用工具为 "tool"(不进图片生成主列表) ──
+    catalog_group: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -108,6 +136,7 @@ class ModelEntry:
             output_schema=dict(data.get("output_schema", {})),
             requirements=list(data.get("requirements", [])),
             point_range=data.get("point_range", {"min": 0, "max": 0}),
+            catalog_group=str(data.get("catalog_group") or data.get("task_type") or ""),
         )
 
 
@@ -211,6 +240,7 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
         accepts_images=accepts_images,
         max_input_images=max_input_images,
         point_range={"min": range_min, "max": range_max},
+        catalog_group=_node_catalog_group(node),
     )
 
 
@@ -259,17 +289,18 @@ async def _build_entry_from_model(model) -> ModelEntry:  # noqa: ANN001
     except Exception:  # noqa: BLE001
         pass
 
+    modality = model.modality.value
     return ModelEntry(
         name=model.name,
         display_name=model.display_name,
-        task_type=model.modality.value,
+        task_type=modality,
         backend="",
         description=model.card.description,
         point_cost=model.point_cost,
         priority=model.priority,
         available=available,
         unavailable_reason=None if available else reason,
-        supported_tasks=[model.modality.value],
+        supported_tasks=[modality],
         input_schema=_port_to_schema(input_schema),
         output_schema=_port_to_schema(model.output_schema()),
         card=model.card.to_dict(),
@@ -278,6 +309,7 @@ async def _build_entry_from_model(model) -> ModelEntry:  # noqa: ANN001
         accepts_images=accepts_images,
         max_input_images=max_input_images,
         point_range={"min": range_min, "max": range_max},
+        catalog_group=modality,
     )
 
 
@@ -328,10 +360,11 @@ async def build_model_catalog(
 
         _ensure_runtime_initialized(pipeline_registry)
 
-    target_task = _resolve_task_type(task_type)
+    # 过滤键:优先按 catalog_group(含 tool);兼容旧调用按 TaskType
+    target_group = _resolve_catalog_group(task_type)
     nodes = pipeline_registry.all_pipelines()
-    if target_task is not None:
-        nodes = [n for n in nodes if n.task_type == target_task]
+    if target_group is not None:
+        nodes = [n for n in nodes if _node_catalog_group(n) == target_group]
 
     entries: list[ModelEntry] = []
     for n in nodes:
@@ -348,7 +381,8 @@ async def build_model_catalog(
     for model in model_registry.all_models():
         if model.node is not None or model.name in node_names:
             continue
-        if target_task is not None and model.modality != target_task:
+        modality = model.modality.value
+        if target_group is not None and modality != target_group:
             continue
         entry = await _build_entry_from_model(model)
         if not include_unavailable and not entry.available:
@@ -359,13 +393,18 @@ async def build_model_catalog(
     # 解决运行时路径存在重复 YAML 副本导致调用方看到重复模型的问题
     entries = _deduplicate_by_name(entries)
 
-    # 按 task_type 排序,内部按 priority 倒序
-    entries.sort(key=lambda e: (e.task_type, -e.priority, e.display_name))
+    # 按目录分组排序,内部按 priority 倒序
+    entries.sort(key=lambda e: (e.catalog_group or e.task_type, -e.priority, e.display_name))
 
-    task_display = {t.value: name for t, name in TASK_DISPLAY_NAME.items()}
+    task_display = dict(CATALOG_GROUP_DISPLAY)
+    # 保证实际出现的分组都有显示名
+    for e in entries:
+        g = e.catalog_group or e.task_type
+        task_display.setdefault(g, g)
 
     result: dict[str, Any] = {
-        "task_types": sorted({e.task_type for e in entries}),
+        # 对外 task_types = 目录分组键(含 tool);执行模态仍在每条 model.task_type
+        "task_types": sorted({(e.catalog_group or e.task_type) for e in entries}),
         "task_display": task_display,
         "total": len(entries),
         "available_count": sum(1 for e in entries if e.available),
@@ -373,7 +412,7 @@ async def build_model_catalog(
     }
 
     if as_text:
-        result["text"] = _entries_to_text(entries, task_display, target_task.value if target_task else None)
+        result["text"] = _entries_to_text(entries, task_display, target_group)
     return result
 
 
@@ -388,7 +427,7 @@ def _entries_to_text(entries: list[ModelEntry], task_display: dict[str, str], ta
         lines.append("可用模型清单:")
     grouped: dict[str, list[ModelEntry]] = {}
     for e in entries:
-        grouped.setdefault(e.task_type, []).append(e)
+        grouped.setdefault(e.catalog_group or e.task_type, []).append(e)
     for task, items in grouped.items():
         lines.append(f"\n[{task_display.get(task, task)}]")
         for e in items:
@@ -398,14 +437,18 @@ def _entries_to_text(entries: list[ModelEntry], task_display: dict[str, str], ta
 
 
 async def get_models_by_task(task_type: str, *, include_unavailable: bool = True) -> dict[str, Any]:
-    """按任务类型过滤 — FastAPI 路由 /api/RH_ComfyUI/models/{task_type} 使用"""
-    target_task = _resolve_task_type(task_type)
-    if target_task is None:
+    """按目录分组过滤 — FastAPI 路由 /api/RH_ComfyUI/models/{task_type} 使用
+
+    参数名仍叫 task_type(兼容旧客户端),语义为 catalog_group:
+    image / video / music / speech / tool …
+    """
+    target_group = _resolve_catalog_group(task_type)
+    if target_group is None:
         return {
             "error": f"未知任务类型: {task_type!r}",
-            "valid_types": [t.value for t in TaskType],
+            "valid_types": sorted(CATALOG_GROUP_DISPLAY.keys()),
         }
-    return await build_model_catalog(include_unavailable=include_unavailable, task_type=target_task.value)
+    return await build_model_catalog(include_unavailable=include_unavailable, task_type=target_group)
 
 
 async def build_backend_summary() -> dict[str, Any]:
