@@ -1,4 +1,4 @@
-"""媒体引用代号 — 从 ordered_content 重建 prompt 中的 图片N/视频N/音频N
+"""媒体引用代号 — 从 ordered_content 重建 prompt 中的结构化参考标记
 
 背景
 ----
@@ -7,8 +7,12 @@ provider 注入 ``【图片N】``;但 banana / gpt-image-2 / seedream / happyhor
 wan 等只吃扁平 ``prompt + images`` 的模型,若调用方把 ``[@]`` 直接剥空,
 会得到「将  中的角色替换为  」这类空洞 prompt。
 
+约定代号(有结构,便于模型与下游改写识别):
+  ``[参考图片N]`` / ``[参考视频N]`` / ``[参考音频N]``
+与扁平 ``images[N-1]`` / ``video_refs`` / ``audio_refs`` 下标对齐。
+
 本模块在 RH 入口层统一兜底:
-1. 有 ``ordered_content`` 媒体项时,按书写顺序重建带 ``图片N/视频N/音频N`` 的 prompt;
+1. 有 ``ordered_content`` 媒体项时,按书写顺序重建带结构化代号的 prompt;
 2. 扁平 ``images`` 为空时,从 OC 抽出图片 bytes,供只读 images 的通道使用。
 
 与前端 ``stripMentions(..., titleToNode)``、canvas agent
@@ -50,7 +54,7 @@ def _kind_of(item: ContentItem) -> Optional[MediaKind]:
 
 
 def labeled_prompt_from_ordered_content(items: list[ContentItem]) -> str:
-    """按 ordered_content 书写顺序拼出带 图片N/视频N/音频N 的 prompt。
+    """按 ordered_content 书写顺序拼出带 ``[参考图片N]`` 等结构化代号的 prompt。
 
     文本段原样拼接;媒体项插入对应代号(同 media 去重复用序号)。
     无任何有效段时返回空串。
@@ -79,19 +83,19 @@ def labeled_prompt_from_ordered_content(items: list[ContentItem]) -> str:
             if n is None:
                 n = len(image_nums) + 1
                 image_nums[key] = n
-            parts.append(f"图片{n}")
+            parts.append(f"[参考图片{n}]")
         elif kind == MediaKind.VIDEO:
             n = video_nums.get(key)
             if n is None:
                 n = len(video_nums) + 1
                 video_nums[key] = n
-            parts.append(f"视频{n}")
+            parts.append(f"[参考视频{n}]")
         elif kind == MediaKind.AUDIO:
             n = audio_nums.get(key)
             if n is None:
                 n = len(audio_nums) + 1
                 audio_nums[key] = n
-            parts.append(f"音频{n}")
+            parts.append(f"[参考音频{n}]")
 
     return "".join(parts)
 
@@ -128,7 +132,7 @@ def ensure_media_ref_labels(request: GenerationRequest) -> GenerationRequest:
     labeled = labeled_prompt_from_ordered_content(oc)
     if labeled.strip():
         # OC 是书写顺序的权威来源:banana/gpt-image/happyhorse 等只读 prompt 时
-        # 必须能在文本里看到 图片N;Seedance content[] 仍走 ordered_segments 注入。
+        # 必须能在文本里看到 [参考图片N];Seedance content[] 仍走 ordered_segments 注入。
         request.prompt = labeled
 
     # 只读 images 的通道(banana / gpt-image / seedream…):OC 有图而扁平 images 空时回填
@@ -181,19 +185,19 @@ def labeled_prompt_from_oc_dicts(items: list[Any]) -> str:
             if n is None:
                 n = len(image_nums) + 1
                 image_nums[key] = n
-            parts.append(f"图片{n}")
+            parts.append(f"[参考图片{n}]")
         elif t in ("video_url", "video"):
             n = video_nums.get(key)
             if n is None:
                 n = len(video_nums) + 1
                 video_nums[key] = n
-            parts.append(f"视频{n}")
+            parts.append(f"[参考视频{n}]")
         elif t in ("audio_url", "audio"):
             n = audio_nums.get(key)
             if n is None:
                 n = len(audio_nums) + 1
                 audio_nums[key] = n
-            parts.append(f"音频{n}")
+            parts.append(f"[参考音频{n}]")
 
     return "".join(parts)
 

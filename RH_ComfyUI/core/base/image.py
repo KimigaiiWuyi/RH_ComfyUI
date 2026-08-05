@@ -32,7 +32,7 @@ class ImageGenerationBase(AIGCGenerationBase):
         """媒体代号兜底 + 透明参考图合白底。
 
         ``ensure_media_ref_labels``:有 ordered_content 时把 [@] 剥空后的空洞
-        prompt 重建为「图片N」写法,并在扁平 images 为空时从 OC 回填 ——
+        prompt 重建为「[参考图片N]」写法,并在扁平 images 为空时从 OC 回填 ——
         banana / gpt-image-2 / seedream 等只读 prompt+images 的模型统一受益。
         """
         from ...utils.core.media_labels import ensure_media_ref_labels

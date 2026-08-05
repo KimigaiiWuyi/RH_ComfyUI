@@ -2,9 +2,9 @@
 
 验证:
 1. ensure_media_ref_labels 不破坏 Seedance OC 语义(不双计 media)
-2. OC text 段本身不含「图片N」,Ark 侧仍只注入一次【图片N】
+2. OC text 段本身不含结构化代号,Ark 侧仍只注入一次【图片N】
 3. 扁平 banana/gpt-image 路径 ensure 为 no-op
-4. happyhorse 能从重建 prompt 改写 [Image N]
+4. happyhorse 能把 [参考图片N] 改写为 [Image N]
 """
 
 from __future__ import annotations
@@ -52,38 +52,34 @@ def test_seedance_oc_hollow_prompt_rebuild_no_double_media():
         params={"frame_mode": "reference"},
     )
     req = ensure_media_ref_labels(req)
-    assert req.prompt == "将图片1中的角色替换为图片2，其他不变"
+    assert req.prompt == "将[参考图片1]中的角色替换为[参考图片2]，其他不变"
     assert len(req.images) == 2
 
     spec = classify_video_spec(req)
     assert len(spec.media) == 2
     assert len(spec.ordered_segments) == 5
-    # OC text 段不应已被写入「图片N」(注入留给 Ark content[])
     joined_text = "".join(s.text or "" for s in spec.ordered_segments if s.kind == "text")
-    assert "图片1" not in joined_text
+    assert "参考图片" not in joined_text
     assert _ark_like_text(spec) == "将【图片1】中的角色替换为【图片2】，其他不变"
 
 
 def test_seedance_oc_with_frontend_labels_still_single_inject():
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
-        prompt="将图片1中的角色替换为图片2，其他不变",
+        prompt="将[参考图片1]中的角色替换为[参考图片2]，其他不变",
         ordered_content=_oc_swap(),
         images=[],
         params={"frame_mode": "reference"},
     )
     req = ensure_media_ref_labels(req)
-    assert req.prompt == "将图片1中的角色替换为图片2，其他不变"
+    assert req.prompt == "将[参考图片1]中的角色替换为[参考图片2]，其他不变"
     spec = classify_video_spec(req)
     assert len(spec.media) == 2
-    # RunningHub 读 spec.prompt → 已有代号
-    assert "图片1" in spec.prompt and "图片2" in spec.prompt
-    # Ark content 仍只注入一次
+    assert "[参考图片1]" in spec.prompt and "[参考图片2]" in spec.prompt
     assert _ark_like_text(spec) == "将【图片1】中的角色替换为【图片2】，其他不变"
 
 
 def test_seedance_dual_send_oc_and_images_no_double_count():
-    """防回归:OC 已有图时扁平 images 不得再追加(即便 ensure 回填了 bytes)。"""
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
         prompt="x",
@@ -99,21 +95,26 @@ def test_seedance_dual_send_oc_and_images_no_double_count():
 def test_banana_flat_ensure_noop():
     req = GenerationRequest(
         task_type=TaskType.IMAGE,
-        prompt="将图片1中的角色替换为图片2，其他不变",
+        prompt="将[参考图片1]中的角色替换为[参考图片2]，其他不变",
         images=[png_a, png_b],
         ordered_content=[],
     )
     out = ensure_media_ref_labels(req)
-    assert out.prompt == "将图片1中的角色替换为图片2，其他不变"
+    assert out.prompt == "将[参考图片1]中的角色替换为[参考图片2]，其他不变"
     assert out.images == [png_a, png_b]
 
 
-def test_wan_uses_chinese_labels_for_interpolation():
+def test_wan_uses_structured_and_bare_labels_for_interpolation():
+    assert "首帧图" in interpolate_prompt_refs("[参考图片1] 走向 [参考图片2]", image_count=2)
+    assert "尾帧图" in interpolate_prompt_refs("[参考图片1] 走向 [参考图片2]", image_count=2)
+    # 旧裸写法仍兼容
     assert "首帧图" in interpolate_prompt_refs("图片1 走向 图片2", image_count=2)
-    assert "尾帧图" in interpolate_prompt_refs("图片1 走向 图片2", image_count=2)
 
 
-def test_happyhorse_r2v_from_rebuilt_prompt():
+def test_happyhorse_r2v_from_structured_and_bare():
+    assert rewrite_prompt_for_r2v("看[参考图片1]和[参考图片2]") == "看[Image 1]和[Image 2]"
+    assert rewrite_prompt_for_r2v("图片1中的女孩与图片 2") == "[Image 1]中的女孩与[Image 2]"
+
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
         prompt="将 中的角色替换为 ",
@@ -123,7 +124,7 @@ def test_happyhorse_r2v_from_rebuilt_prompt():
     )
     req = ensure_media_ref_labels(req)
     rewritten = rewrite_prompt_for_r2v(req.prompt)
-    assert "[Image 1]" in rewritten and "[Image 2]" in rewritten
+    assert rewritten == "将[Image 1]中的角色替换为[Image 2]，其他不变"
     spec = classify_happyhorse(req)
     assert len(spec.media) == 2
 
@@ -131,12 +132,12 @@ def test_happyhorse_r2v_from_rebuilt_prompt():
 def test_seedance_first_last_flat_ensure_noop():
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
-        prompt="从图片1变到图片2",
+        prompt="从[参考图片1]变到[参考图片2]",
         images=[png_a, png_b],
         ordered_content=[],
         params={"frame_mode": "first_last"},
     )
     out = ensure_media_ref_labels(req)
-    assert out.prompt == "从图片1变到图片2"
+    assert out.prompt == "从[参考图片1]变到[参考图片2]"
     spec = classify_video_spec(out)
     assert len(spec.media) == 2

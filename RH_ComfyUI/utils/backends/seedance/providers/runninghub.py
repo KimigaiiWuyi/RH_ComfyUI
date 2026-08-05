@@ -64,29 +64,31 @@ def _view_url(file_name: str) -> str:
     return f"https://www.runninghub.cn/view?filename={file_name}"
 
 
+# 结构化 [参考图片N] 优先;再匹配裸 图片N / image N
 _REF_REWRITE_RE = re.compile(
-    r"(图片\s*(\d+))|(视频\s*(\d+))|(音频\s*(\d+))"
+    r"(\[\s*参考图片\s*(\d+)\s*\])|(\[\s*参考视频\s*(\d+)\s*\])|(\[\s*参考音频\s*(\d+)\s*\])"
+    r"|(图片\s*(\d+))|(视频\s*(\d+))|(音频\s*(\d+))"
     r"|(image\s*(\d+))|(video\s*(\d+))|(audio\s*(\d+))",
     re.IGNORECASE,
 )
 
 
 def _rewrite_refs_to_at(prompt: str) -> str:
-    """把「图片1/视频1/音频1」改写为「@Image 1/@Video 1/@Audio 1」(RunningHub 引用语法)。"""
+    """把「[参考图片N]/图片N/…」改写为「@Image N/@Video N/@Audio N」(RunningHub 引用语法)。"""
 
     def _sub(match: re.Match[str]) -> str:
-        if match.group(1):
-            return f"@Image {match.group(2)}"
-        if match.group(3):
-            return f"@Video {match.group(4)}"
-        if match.group(5):
-            return f"@Audio {match.group(6)}"
-        if match.group(7):
-            return f"@Image {match.group(8)}"
-        if match.group(9):
-            return f"@Video {match.group(10)}"
-        if match.group(11):
-            return f"@Audio {match.group(12)}"
+        # 1-2: [参考图片N]  3-4: [参考视频N]  5-6: [参考音频N]
+        # 7-8: 图片N  9-10: 视频N  11-12: 音频N
+        # 13-14: image N  15-16: video N  17-18: audio N
+        if match.group(1) or match.group(7) or match.group(13):
+            n = match.group(2) or match.group(8) or match.group(14)
+            return f"@Image {n}"
+        if match.group(3) or match.group(9) or match.group(15):
+            n = match.group(4) or match.group(10) or match.group(16)
+            return f"@Video {n}"
+        if match.group(5) or match.group(11) or match.group(17):
+            n = match.group(6) or match.group(12) or match.group(18)
+            return f"@Audio {n}"
         return match.group(0)
 
     return _REF_REWRITE_RE.sub(_sub, prompt)

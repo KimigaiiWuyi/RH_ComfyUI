@@ -33,12 +33,16 @@ from ..backends.comfyui.api import ComfyUIAPI
 
 # ── Prompt 位置插值 ──────────────────────────────────────────────
 #
-# 匹配 "图片1"、"图片2"、"视频1"、"音频1" 等中文代号,
+# 匹配结构化 "[参考图片1]" 与裸 "图片1"/"视频1"/"音频1" 等中文代号,
 # 允许 "图片 1"(中间带空格)的形式。
 # 索引上限 2:Wan 2.2 只支持首尾帧,没有 "图片3+";
 # Seedance 等多参考节点若需要支持 3+ 图,请在其自己的 mapper 里扩展。
 
-_PROMPT_REF_PATTERN = re.compile(r"(图片|视频|音频)\s*(\d{1,2})")
+# 组1=结构化 kind(图片|视频|音频), 组2=其序号;
+# 组3=裸 kind, 组4=其序号。结构化必须优先匹配,避免「[参考图片1]」被拆坏。
+_PROMPT_REF_PATTERN = re.compile(
+    r"\[\s*参考(图片|视频|音频)\s*(\d{1,2})\s*\]" r"|(图片|视频|音频)\s*(\d{1,2})"
+)
 # Wan 2.2 实际能消费的图索引上限(首帧=1, 尾帧=2)
 _MAX_WAN_IMAGE_INDEX = 2
 
@@ -59,11 +63,11 @@ def _build_image_position_labels(n: int) -> list[str]:
 
 
 def interpolate_prompt_refs(prompt: str, *, image_count: int) -> str:
-    """把 prompt 中的 "图片1/图片2/..." 替换为对应的位置标签
+    """把 prompt 中的 "[参考图片N]" / "图片N" 替换为对应的位置标签
 
     规则(Wan 2.2 视角):
-    - "图片1" / "图片 1" → "首帧图"
-    - "图片2" / "图片 2" → "尾帧图"
+    - "[参考图片1]" / "图片1" / "图片 1" → "首帧图"
+    - "[参考图片2]" / "图片2" / "图片 2" → "尾帧图"
     - "图片3+"            → 越界,保持原样(路由层不会让 Wan 2.2 收到 3+ 张图)
     - 其他类型("视频1"/"音频1")不在 ComfyUI Wan 工作流中支持,保持原样
     """
@@ -73,8 +77,11 @@ def interpolate_prompt_refs(prompt: str, *, image_count: int) -> str:
     labels = _build_image_position_labels(image_count)
 
     def _replace(match: re.Match[str]) -> str:
-        kind = match.group(1)
-        idx = int(match.group(2))
+        kind = match.group(1) or match.group(3)
+        raw_idx = match.group(2) or match.group(4)
+        if not kind or not raw_idx:
+            return match.group(0)
+        idx = int(raw_idx)
         if kind != "图片" or idx < 1 or idx > len(labels):
             return match.group(0)
         return labels[idx - 1]
