@@ -1,9 +1,11 @@
-"""并发闸热更新 — Channel_Concurrency / (model, channel) 闸 改配置即刻生效
+"""并发闸热更新 — Channel_Concurrency / RH_Channel_Concurrency / (model, channel) 闸
 
-新架构(无全局兜底闸):
+新架构:
   1. 供应商全局闸 key=channel.name,上限 Channel_Concurrency(默认 10)
+     例外:runninghub / rh_app / comfyui 归一到共享 key=`rh`,
+     上限 RH_Channel_Concurrency(默认 1)——共用同一 RH 账户配额,必须串行化排队
   2. (model, channel) 闸 key=(model.name, channel.name),
-     上限 = min(Channel_Concurrency, model.max_concurrency)
+     上限 = min(通道基线, model.max_concurrency)
 """
 
 import importlib
@@ -31,23 +33,31 @@ def _reset(monkeypatch):
     monkeypatch.setattr(conc, "_pair_inflight", {})
 
 
-def test_channel_semaphore_unified_baseline(monkeypatch):
-    """所有 channel 共享同一基线 Channel_Concurrency(不再区分 RH/非 RH)"""
+def test_rh_channels_share_low_concurrency_pool(monkeypatch):
+    """RH 相关通道共享一把闸,默认 RH_Channel_Concurrency=1;其它供应商走 Channel_Concurrency"""
     _reset(monkeypatch)
-    monkeypatch.setattr(cfgmod, "PLUGIN_CONFIG", _FakeCfg(Channel_Concurrency=10))
+    monkeypatch.setattr(
+        cfgmod,
+        "PLUGIN_CONFIG",
+        _FakeCfg(Channel_Concurrency=10, RH_Channel_Concurrency=1),
+    )
 
-    rh_sem = conc._get_channel_semaphore("runninghub")
-    gpu_sem = conc._get_channel_semaphore("comfyui")
+    rh_app_sem = conc._get_channel_semaphore("rh_app")
+    runninghub_sem = conc._get_channel_semaphore("runninghub")
+    comfyui_sem = conc._get_channel_semaphore("comfyui")
     ark_sem = conc._get_channel_semaphore("ark")
     gw_sem = conc._get_channel_semaphore("gateway")
     fish_sem = conc._get_channel_semaphore("fishaudio")
 
-    # 不再区分 RH=1 vs 其他=10,统一基线
-    assert all(s._value == 10 for s in (rh_sem, gpu_sem, ark_sem, gw_sem, fish_sem))
-    # 各 channel 独立对象
-    assert len({id(rh_sem), id(gpu_sem), id(ark_sem), id(gw_sem), id(fish_sem)}) == 5
-    # 同名 channel 复用同一把闸
+    # RH 三通道共享同一信号量对象,上限 1
+    assert rh_app_sem is runninghub_sem is comfyui_sem
+    assert rh_app_sem._value == 1
+    # 非 RH 各自独立,上限 10
+    assert ark_sem._value == 10 and gw_sem._value == 10 and fish_sem._value == 10
+    assert len({id(ark_sem), id(gw_sem), id(fish_sem), id(rh_app_sem)}) == 4
+    # 同名 channel 复用
     assert conc._get_channel_semaphore("ark") is ark_sem
+    assert conc._get_channel_semaphore("rh_app") is rh_app_sem
 
 
 def test_channel_semaphore_hot_reload_and_default(monkeypatch):
@@ -64,6 +74,53 @@ def test_channel_semaphore_hot_reload_and_default(monkeypatch):
     monkeypatch.setattr(cfgmod, "PLUGIN_CONFIG", _FakeCfg())
     assert conc._get_channel_semaphore("fishaudio")._value == 10
     assert conc._get_channel_semaphore("") is conc._get_channel_semaphore("unknown")
+
+    # RH 缺省回落 RH_Channel_Concurrency=1
+    assert conc._get_channel_semaphore("rh_app")._value == 1
+
+
+def test_rh_shared_slot_queues_second_request(monkeypatch):
+    """RH 共享闸=1 时,第 2 个请求排队等待(不报错),跨 rh_app/runninghub 也串行"""
+    _reset(monkeypatch)
+    monkeypatch.setattr(
+        cfgmod,
+        "PLUGIN_CONFIG",
+        _FakeCfg(Channel_Concurrency=10, RH_Channel_Concurrency=1),
+    )
+
+    async def _scenario():
+        entered1 = asyncio.Event()
+        release1 = asyncio.Event()
+        entered2 = asyncio.Event()
+
+        async def _hold_rh_app():
+            async with conc.channel_slot("rh_app"):
+                entered1.set()
+                await release1.wait()
+
+        async def _try_runninghub():
+            async with conc.channel_slot("runninghub"):
+                entered2.set()
+
+        t1 = asyncio.create_task(_hold_rh_app())
+        await entered1.wait()
+        assert conc._channel_inflight[conc._RH_SHARED_KEY] == 1
+        assert not conc.channel_has_capacity("rh_app")
+        assert not conc.channel_has_capacity("runninghub")  # 共享池,跨通道也满
+        assert conc.channel_has_capacity("ark")  # 其它供应商不受影响
+
+        t2 = asyncio.create_task(_try_runninghub())
+        # 给若干 tick:t2 应阻塞在信号量上,不能进入
+        await asyncio.sleep(0.05)
+        assert not entered2.is_set(), "RH 共享闸满时应排队,不应立刻进入"
+
+        release1.set()
+        await asyncio.gather(t1, t2)
+        assert entered2.is_set(), "前一任务释放后,排队请求应成功进入"
+        assert conc._channel_inflight.get(conc._RH_SHARED_KEY, 0) == 0
+        assert conc.channel_has_capacity("rh_app")
+
+    asyncio.run(_scenario())
 
 
 def test_channel_slot_tracks_inflight_and_capacity(monkeypatch):
@@ -103,24 +160,38 @@ def test_channel_slot_tracks_inflight_and_capacity(monkeypatch):
 
 
 def test_pair_slot_respects_model_max_concurrency(monkeypatch):
-    """(model, channel) 闸:上限 = min(Channel_Concurrency, model.max_concurrency)"""
+    """(model, channel) 闸:上限 = min(通道基线, model.max_concurrency)"""
     _reset(monkeypatch)
-    monkeypatch.setattr(cfgmod, "PLUGIN_CONFIG", _FakeCfg(Channel_Concurrency=10))
+    monkeypatch.setattr(
+        cfgmod,
+        "PLUGIN_CONFIG",
+        _FakeCfg(Channel_Concurrency=10, RH_Channel_Concurrency=1),
+    )
 
     # model.max_concurrency=3 → (model, channel) 闸 = min(10, 3) = 3
     model_a = SimpleNamespace(name="seedance10_pro_fast", max_concurrency=3)
-    sem_a = conc._get_pair_semaphore(model_a.name, "aifoundation", conc._pair_limit(model_a))
+    sem_a = conc._get_pair_semaphore(
+        model_a.name, "aifoundation", conc._pair_limit(model_a, "aifoundation")
+    )
     assert sem_a._value == 3
 
     # model.max_concurrency=1 → (model, channel) 闸 = 1(本地 ComfyUI 工作流)
     model_b = SimpleNamespace(name="IndexTTS2", max_concurrency=1)
-    sem_b = conc._get_pair_semaphore(model_b.name, "comfyui", conc._pair_limit(model_b))
+    sem_b = conc._get_pair_semaphore(
+        model_b.name, "comfyui", conc._pair_limit(model_b, "comfyui")
+    )
     assert sem_b._value == 1
 
-    # model.max_concurrency=0 → 退化为 Channel_Concurrency
+    # model.max_concurrency=0 在非 RH 通道 → 退化为 Channel_Concurrency
     model_c = SimpleNamespace(name="fish_tts", max_concurrency=0)
-    sem_c = conc._get_pair_semaphore(model_c.name, "fishaudio", conc._pair_limit(model_c))
+    sem_c = conc._get_pair_semaphore(
+        model_c.name, "fishaudio", conc._pair_limit(model_c, "fishaudio")
+    )
     assert sem_c._value == 10
+
+    # model.max_concurrency=0 在 RH 通道 → 退化为 RH_Channel_Concurrency=1
+    model_d = SimpleNamespace(name="anima", max_concurrency=0)
+    assert conc._pair_limit(model_d, "rh_app") == 1
 
     # 不同 (model, channel) 组合 → 独立闸
     assert sem_a is not sem_b and sem_b is not sem_c
@@ -166,18 +237,18 @@ def test_pair_slot_isolation_per_model_and_channel(monkeypatch):
         await asyncio.sleep(0.01)
         assert entered_b.is_set(), "m2+aifoundation 应能立即拿到许可(独立于 m1+aifoundation)"
 
-        # 同时:m1+runninghub 也是独立闸(同模型不同 channel)
+        # 同时:m1 在另一非 RH 通道也是独立 pair 闸
         entered_c = asyncio.Event()
 
         async def _try_enter_other_ch():
             async with conc.channel_slot_for_model(
-                SimpleNamespace(name="m1", max_concurrency=0), "runninghub"
+                SimpleNamespace(name="m1", max_concurrency=0), "gateway"
             ):
                 entered_c.set()
 
         t_c = asyncio.create_task(_try_enter_other_ch())
         await asyncio.sleep(0.01)
-        assert entered_c.is_set(), "m1+runninghub 应能立即拿到许可(独立于 m1+aifoundation)"
+        assert entered_c.is_set(), "m1+gateway 应能立即拿到许可(独立于 m1+aifoundation)"
 
         # 释放所有
         release_a.set()

@@ -23,12 +23,20 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "Channel_Concurrency": GsIntConfig(
         "供应商通道并发数（每通道一把闸，作为 (model, channel) 闸的基线）",
-        "所有供应商通道（runninghub / rh_app / comfyui / ark / gateway / aifoundation / "
-        "azure / fishaudio / minimax / gemini-image / gpt-image-2 / mimo 等）共享此基线；"
+        "非 RunningHub 供应商通道（ark / gateway / aifoundation / azure / fishaudio / "
+        "minimax / gemini-image / gpt-image-2 / mimo 等）使用此基线；"
         "本地 ComfyUI 工作流自带 max_concurrency=1，会被 (model, channel) 闸自动收窄为 1。"
         "改动即刻生效",
         10,
         options=[5, 10, 20, 50],
+    ),
+    "RH_Channel_Concurrency": GsIntConfig(
+        "RunningHub 共享并发数（rh_app / runninghub / comfyui 共用一把闸）",
+        "这三条通道共用同一 RH 账户并发配额；上游超限返回 421 TASK_QUEUE_MAXED（请自行排队）。"
+        "本地用同一把信号量串行化，超限请求排队等待而不是打到上游报错。默认 1。"
+        "改动即刻生效",
+        1,
+        options=[1, 2, 3, 5, 10],
     ),
     "Dispatch_Timeout": GsIntConfig(
         "单任务超时预算（秒）",

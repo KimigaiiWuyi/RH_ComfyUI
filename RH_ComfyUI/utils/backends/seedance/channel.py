@@ -235,11 +235,15 @@ class SeedanceProviderChannel(ProviderChannel):
         except SeedanceProviderError as exc:
             # retryable 尊重供应商侧标注(HTTP 状态/网关 data.retryable/raise 点语义):
             # 参数类失败(4xx/VID-*)换通道也解决不了,不再盲目 failover 烧钱;
-            # 429/503 额外标 transient,run() 先在原通道退避重试一次
+            # 429/503/421(RunningHub 并发满)额外标 transient,run() 先在原通道退避重试一次
+            queue_full = (exc.http_status in (421, 415)) or (
+                (exc.code or "").upper() in {"TASK_QUEUE_MAXED", "TASK_INSTANCE_MAXED"}
+            )
             raise ChannelError(
                 str(exc),
                 retryable=exc.retryable,
-                transient=exc.retryable and exc.http_status in (429, 503),
+                transient=exc.retryable
+                and (exc.http_status in (429, 503, 415, 421) or queue_full),
                 channel=self.name,
                 code=exc.code or "",
                 user_message=exc.user_message,

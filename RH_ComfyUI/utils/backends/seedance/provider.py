@@ -149,6 +149,31 @@ def http_status_retryable(status: int) -> bool:
     return status in (401, 403, 408, 429)
 
 
+_RH_QUEUE_FULL_CODES = frozenset({415, 421})
+_RH_QUEUE_FULL_MARKERS = frozenset(
+    {
+        "TASK_QUEUE_MAXED",
+        "TASK_INSTANCE_MAXED",
+        "APIKEY_TASK_IS_RUNNING",
+    }
+)
+
+
+def _is_rh_queue_full_response(resp: dict[str, Any]) -> bool:
+    """识别 RunningHub 并发/队列已满(常 HTTP 200 + body.code=421,无 taskId)。"""
+    raw_code = resp.get("code")
+    try:
+        code = int(raw_code) if raw_code is not None else None
+    except (TypeError, ValueError):
+        code = None
+    if code in _RH_QUEUE_FULL_CODES:
+        return True
+    blob = " ".join(
+        str(resp.get(k) or "") for k in ("msg", "errorMessage", "message", "error")
+    ).upper()
+    return any(token in blob for token in _RH_QUEUE_FULL_MARKERS)
+
+
 def normalize_usage(vendor: str, raw: dict[str, Any]) -> dict[str, Any]:
     """把各家异构的 usage 字段归一化为统一二级 Key。"""
     raw = raw or {}
@@ -520,12 +545,20 @@ class SeedanceProvider(ABC):
         resp = await self._request(method, url, headers=headers, json=body)
         task_id = self.parse_create(resp)
         if not task_id:
+            # RunningHub 等共享 API 并发满时常 HTTP 200 + code=421 且无 taskId。
+            # 标 transient:run() 层会在原通道退避重试一次;主路径仍靠 RH 共享并发闸排队。
+            queue_full = _is_rh_queue_full_response(resp) if isinstance(resp, dict) else False
             raise SeedanceProviderError(
                 f"{self.name} 未返回 task id: {resp}",
-                code="NO_TASK_ID",
+                code="TASK_QUEUE_MAXED" if queue_full else "NO_TASK_ID",
                 retryable=True,  # 尚未产生任务,换通道重建无重复计费风险
                 provider=self.name,
-                user_message="上游未返回任务 ID,请稍后重试。",
+                http_status=421 if queue_full else None,
+                user_message=(
+                    "RunningHub 并发已满,请稍后重试。"
+                    if queue_full
+                    else "上游未返回任务 ID,请稍后重试。"
+                ),
             )
         logger.info(f"[Seedance:{self.name}] 任务已创建: task_id={task_id}")
         return await self.poll_until_done(task_id, on_progress=on_progress)

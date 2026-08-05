@@ -39,6 +39,34 @@ _RUNNINGHUB_FAILURE_STATUSES = frozenset({
     "INTERRUPTED",
 })
 
+# 共享型 API 并发打满 / 独占机器不足(官方:请自行排队 / 稍后重试)
+_RUNNINGHUB_QUEUE_FULL_CODES = frozenset({415, 421})
+_RUNNINGHUB_QUEUE_FULL_MARKERS = frozenset(
+    {
+        "TASK_QUEUE_MAXED",
+        "TASK_INSTANCE_MAXED",
+        "APIKEY_TASK_IS_RUNNING",
+    }
+)
+
+
+def _runninghub_queue_full_reason(data: Dict[str, Any]) -> Optional[str]:
+    """识别 RunningHub 并发/队列已满响应,供提交重试路径使用。"""
+    raw_code = data.get("code")
+    code: Optional[int]
+    try:
+        code = int(raw_code) if raw_code is not None else None
+    except (TypeError, ValueError):
+        code = None
+    msg = str(data.get("msg") or data.get("errorMessage") or data.get("message") or "")
+    marker = msg.strip().upper()
+    if code in _RUNNINGHUB_QUEUE_FULL_CODES:
+        return f"code={code} {msg or 'queue full'}".strip()
+    for token in _RUNNINGHUB_QUEUE_FULL_MARKERS:
+        if token in marker:
+            return f"{token}: {msg}".strip(": ")
+    return None
+
 
 def _write_bytes_sync(path: Path, data: bytes) -> None:
     """同步写盘;大音视频勿在事件循环直接调用。"""
@@ -172,17 +200,34 @@ class ComfyUIAPI:
 
         p = {"prompt": prompt, "client_id": self.client_id}
         headers = {"Content-Type": "application/json"}
-        async with httpx.AsyncClient(timeout=6000, follow_redirects=True) as client:
-            req = await client.post(f"{self.url}/prompt", json=p, headers=headers)
-            req.raise_for_status()
-            prompt_data = req.json()
-        logger.info(f"Prompt ID: {prompt_data}")
-        # RunningHub 代理在失败时返回 HTTP 200 + {"code":...,"msg":"NOT_FOUND",...},
-        # raise_for_status() 抓不到;若无 prompt_id 直接抛错,避免下游
-        # prompt_data["prompt_id"] 抛出难以定位的 KeyError。
-        if not isinstance(prompt_data, dict) or "prompt_id" not in prompt_data:
-            raise RuntimeError(f"[ComfyUI] 提交工作流失败,响应缺少 prompt_id: {prompt_data}")
-        return prompt_data
+        # RunningHub 代理并发满(421 TASK_QUEUE_MAXED 等)时本地排队重试;
+        # 主路径已有 RH 共享并发闸,此处兜底外部占用同一 key 的情况。
+        max_attempts = 24 if self.is_runninghub else 1
+        last_payload: Any = None
+        for attempt in range(1, max_attempts + 1):
+            async with httpx.AsyncClient(timeout=6000, follow_redirects=True) as client:
+                req = await client.post(f"{self.url}/prompt", json=p, headers=headers)
+                req.raise_for_status()
+                prompt_data = req.json()
+            logger.info(f"Prompt ID: {prompt_data}")
+            last_payload = prompt_data
+            # RunningHub 代理在失败时返回 HTTP 200 + {"code":...,"msg":"NOT_FOUND",...},
+            # raise_for_status() 抓不到;若无 prompt_id 直接抛错,避免下游
+            # prompt_data["prompt_id"] 抛出难以定位的 KeyError。
+            if isinstance(prompt_data, dict) and "prompt_id" in prompt_data:
+                return prompt_data
+            if self.is_runninghub and isinstance(prompt_data, dict):
+                reason = _runninghub_queue_full_reason(prompt_data)
+                if reason and attempt < max_attempts:
+                    wait_s = min(5.0 * attempt, 30.0)
+                    logger.warning(
+                        f"[ComfyUI] RunningHub 并发/队列已满({reason}),"
+                        f"{wait_s:.0f}s 后排队重试({attempt}/{max_attempts})"
+                    )
+                    await asyncio.sleep(wait_s)
+                    continue
+            break
+        raise RuntimeError(f"[ComfyUI] 提交工作流失败,响应缺少 prompt_id: {last_payload}")
 
     def save_image(self, images: List[Dict[str, Any]], output_path: Path, image_name: str) -> Optional[Image.Image]:
         """同步解码+落盘 JPEG;异步调用方请用 ``asyncio.to_thread(self.save_image, ...)``。"""

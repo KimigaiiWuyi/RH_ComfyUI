@@ -3,13 +3,52 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
 
 from gsuid_core.logger import logger
 
 from ....rh_config.comfyui_config import SERVICE_CONFIG
+
+# RunningHub 共享型/独占型 API 并发或机器数打满时的业务码。
+# 官方文档:421 TASK_QUEUE_MAXED「并发达上限，请自行排队」;
+# 415 TASK_INSTANCE_MAXED「独占型机器不足，请等待后重试」。
+# HTTP 常为 200 + body.code,raise_for_status 抓不到,必须看业务码。
+_RH_QUEUE_FULL_CODES = frozenset({415, 421})
+_RH_QUEUE_FULL_MARKERS = frozenset(
+    {
+        "TASK_QUEUE_MAXED",
+        "TASK_INSTANCE_MAXED",
+        "APIKEY_TASK_IS_RUNNING",
+    }
+)
+_RH_QUEUE_RETRY_ATTEMPTS = 24  # 约 2~6 分钟量级,视退避而定
+_RH_QUEUE_RETRY_BASE_S = 5.0
+_RH_QUEUE_RETRY_MAX_S = 30.0
+
+
+def _rh_business_code(data: Dict[str, Any]) -> Optional[int]:
+    raw = data.get("code")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _rh_queue_full_reason(data: Dict[str, Any]) -> Optional[str]:
+    """若响应表示 RH 并发/队列已满,返回可读原因;否则 None。"""
+    code = _rh_business_code(data)
+    msg = str(data.get("msg") or data.get("errorMessage") or data.get("message") or "")
+    marker = msg.strip().upper()
+    if code in _RH_QUEUE_FULL_CODES:
+        return f"code={code} {msg or 'queue full'}".strip()
+    for token in _RH_QUEUE_FULL_MARKERS:
+        if token in marker or token in str(data).upper():
+            return f"{token}: {msg}".strip(": ")
+    return None
 
 
 class RHAppAPI:
@@ -113,6 +152,10 @@ class RHAppAPI:
             node_info_list: 节点参数映射列表
             instance_type: 实例类型（default/plus）
             use_personal_queue: 是否使用个人独占队列
+
+        并发已满(421 TASK_QUEUE_MAXED 等)时本地排队重试,而不是立刻报错。
+        主路径依赖 core.dispatch 的 RH 共享并发闸;此处是兜底
+        (多进程 / 外部占用同一 API Key / 配置大于账户配额时仍可能撞上限)。
         """
         url = f"{self.base_url}/openapi/v2/run/ai-app/{webapp_id}"
 
@@ -122,13 +165,36 @@ class RHAppAPI:
             "usePersonalQueue": "true" if use_personal_queue else "false",
         }
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            response = await client.post(url, headers=self._headers(), json=payload)
-            response.raise_for_status()
-            data = response.json()
+        last_reason = "queue full"
+        for attempt in range(1, _RH_QUEUE_RETRY_ATTEMPTS + 1):
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                response = await client.post(url, headers=self._headers(), json=payload)
+                response.raise_for_status()
+                data = response.json()
 
-        logger.info(f"[RHApp] 任务提交返回: {data}")
-        return data
+            if not isinstance(data, dict):
+                logger.info(f"[RHApp] 任务提交返回: {data}")
+                return data  # type: ignore[return-value]
+
+            reason = _rh_queue_full_reason(data)
+            # 有 taskId 说明已入队成功,即便 body 带其它字段也不重试
+            if reason is None or data.get("taskId"):
+                logger.info(f"[RHApp] 任务提交返回: {data}")
+                return data
+
+            last_reason = reason
+            if attempt >= _RH_QUEUE_RETRY_ATTEMPTS:
+                break
+            wait_s = min(_RH_QUEUE_RETRY_BASE_S * attempt, _RH_QUEUE_RETRY_MAX_S)
+            logger.warning(
+                f"[RHApp] RunningHub 并发/队列已满({reason}),"
+                f"{wait_s:.0f}s 后排队重试({attempt}/{_RH_QUEUE_RETRY_ATTEMPTS})"
+            )
+            await asyncio.sleep(wait_s)
+
+        raise RuntimeError(
+            f"[RHApp] RunningHub 并发已满,排队重试 {_RH_QUEUE_RETRY_ATTEMPTS} 次仍失败: {last_reason}"
+        )
 
     async def query_task(self, task_id: str) -> Dict[str, Any]:
         """查询任务状态和结果（OpenAPI v2）"""
