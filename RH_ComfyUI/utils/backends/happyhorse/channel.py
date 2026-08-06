@@ -1,7 +1,8 @@
 """HappyHorseChannel — DashScope HappyHorse → 通用 ProviderChannel
 
 内置供应商 dashscope:凭证读 SERVICE_CONFIG 的 HappyHorse_* 键。
-外部插件可通过 channel_registry.register_binding("happyhorse1.1", ch) 注入。
+外部插件可通过构造 ``HappyHorseChannel(provider_cls=..., credentials_resolver=...)``
+再 ``channel_registry.register_binding("happyhorse1.1", ch)`` 注入。
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ class ProviderCredentials:
 
 
 ConfigResolver = Callable[[], ProviderCredentials]
+DryRunResolver = Callable[[], bool]
 
 
 def service_config_credentials() -> ProviderCredentials:
@@ -64,7 +66,17 @@ def _dry_run_enabled() -> bool:
 
 
 class HappyHorseChannel(ProviderChannel):
-    """DashScope HappyHorse 通道。"""
+    """HappyHorse 通道:包装任意 ``HappyHorseProvider`` 子类。
+
+    Args:
+        provider_cls: 供应商实现类(默认官方 DashScope ``HappyHorseProvider``;
+            外部聚合网关可注入自己的子类)。
+        weight: 负载均衡权重。
+        credentials_resolver: 凭证回调;默认读宿主 ``HappyHorse_*`` 配置。
+        name: 通道名;默认取 ``provider_cls.name``。
+        dry_run_resolver: Dry-Run 开关;默认读宿主 ``HappyHorse_Dry_Run``。
+            外部插件应用自己的开关,避免误读宿主 DashScope Dry-Run。
+    """
 
     name = "dashscope"
     weight = 1
@@ -72,14 +84,20 @@ class HappyHorseChannel(ProviderChannel):
 
     def __init__(
         self,
+        provider_cls: type[HappyHorseProvider] = HappyHorseProvider,
         *,
         weight: int = 1,
         credentials_resolver: Optional[ConfigResolver] = None,
-        name: str = "dashscope",
+        name: Optional[str] = None,
+        dry_run_resolver: Optional[DryRunResolver] = None,
     ) -> None:
-        self.name = name
+        if not getattr(provider_cls, "name", None):
+            raise ValueError(f"供应商类 {provider_cls.__qualname__} 缺少 name 属性")
+        self._provider_cls = provider_cls
+        self.name = name or provider_cls.name
         self.weight = weight
         self._resolve_creds: ConfigResolver = credentials_resolver or service_config_credentials
+        self._resolve_dry_run: DryRunResolver = dry_run_resolver or _dry_run_enabled
         self._cached: Optional[HappyHorseProvider] = None
 
     def credentials(self) -> ProviderCredentials:
@@ -87,25 +105,27 @@ class HappyHorseChannel(ProviderChannel):
 
     def _get_provider(self) -> Optional[HappyHorseProvider]:
         creds = self._resolve_creds()
-        dry_run = _dry_run_enabled()
+        dry_run = bool(self._resolve_dry_run())
+        default_base = self._provider_cls.DEFAULT_BASE_URL or ""
+        base_url = (creds.base_url or default_base or "").rstrip("/") or default_base
         cached = self._cached
         if cached is not None:
             if (
                 cached.api_key != creds.api_key
-                or cached.base_url != (creds.base_url or HappyHorseProvider.DEFAULT_BASE_URL).rstrip("/")
+                or cached.base_url != base_url
                 or cached.dry_run != dry_run
             ):
                 cached.update_credentials(
                     api_key=creds.api_key,
-                    base_url=creds.base_url,
+                    base_url=base_url or None,
                     dry_run=dry_run,
                 )
                 logger.info(f"[HappyHorse] 供应商 {self.name} 凭证已热更新")
             return cached
 
-        provider = HappyHorseProvider(
+        provider = self._provider_cls(
             api_key=creds.api_key,
-            base_url=creds.base_url,
+            base_url=base_url or None,
             dry_run=dry_run,
         )
         if not creds.api_key:
