@@ -11,7 +11,7 @@ python -m pytest tests/ -q      # 在插件根目录执行
 | `test_registry.py` | ModelRegistry 注册/去重/按模态查询 |
 | `test_schema_validation.py` | PortSpec 通用校验 + Seedance/Wan 跨字段约束(多参考上限、分辨率约束等) |
 | `test_dispatcher_billing.py` | dispatch 计费路径:成功 commit / 校验失败不扣费 / 失败退款幂等 / BaseException 退款 / estimate_cost 动态计费 / 超时预算 |
-| `test_channel_failover.py` | 错误翻译、多通道故障切换、非重试不计熔断、transient(429/503)原通道退避重试 |
+| `test_channel_failover.py` | 错误翻译、多通道故障切换、非重试不计熔断、transient(429/503)原通道最长 1h 排队 |
 | `test_seedance_channel.py` | SeedanceProviderChannel 凭证热更新、异常翻译、Dry-Run 透传 |
 | `test_gemini_image.py` | Gemini 双模判定、steps 图片提取、banana2 接线 |
 | `test_openai_image.py` | 供应商池配置解析(含 weight)、sync/resync、/images/edits 端点分流 |

@@ -7,7 +7,8 @@
       ├─ 2. normalize(request)           # 默认值填充 / 单位归一化(可覆盖)
       ├─ 3. balancer.order_candidates()  # 负载均衡选通道(多通道时)
       ├─ 4. execute_on_channel(...)      # ★ 子类核心:组装请求并执行
-      │     ├─ 瞬时失败(transient,如 429/503)→ 原通道退避重试一次
+      │     ├─ 瞬时失败(transient,如 429/503)→ 原通道指数退避排队
+      │     │   (最长 transient_retry_max_wait=1h;超时放弃该通道)
       │     └─ 失败且可重试 → 记熔断 → 换下一个通道
       └─ 5. postprocess(output)          # 输出归一化(可覆盖)
 
@@ -19,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar, Optional
 
@@ -57,8 +59,12 @@ class AIGCGenerationBase(ABC):
     card: ModelCard
     point_cost: int = 2
 
-    # ── 弹性:瞬时错误(429/503)在原通道退避重试一次的间隔秒数 ──
+    # ── 弹性:瞬时错误(429/503)原通道排队退避 ──
+    # 初始间隔 → 指数增长,单次上限 max_delay;累计等待超过 max_wait 则放弃该通道
+    # (再 failover / 整单失败)。不计熔断(通道健康,只是瞬时过载)。
     transient_retry_delay: ClassVar[float] = 2.0
+    transient_retry_max_delay: ClassVar[float] = 60.0
+    transient_retry_max_wait: ClassVar[float] = 3600.0  # 1 小时
 
     # ── 路由 ──
     priority: int = 50  # 数字越大越优先
@@ -247,11 +253,26 @@ class AIGCGenerationBase(ABC):
                 ordered = free + [b for b in ordered if b not in free]
 
         last_error: Optional[Exception] = None
+        # 预统计 available 候选,避免「len(ordered)>1 但其余 check_available=False」
+        # 时误打「切换下一通道」后立刻 AllChannelsFailed。
+        available_names: list[str] = []
+        for b in ordered:
+            if await b.channel.check_available():
+                available_names.append(b.channel.name)
+
         for binding in ordered:
-            if not await binding.channel.check_available():
-                continue
+            if binding.channel.name not in available_names:
+                # 与上面预检一致;运行中凭证被关掉时再读一次以跳过
+                if not await binding.channel.check_available():
+                    logger.debug(
+                        f"[{self.name}] 跳过不可用通道 {binding.channel.name}: "
+                        f"{await binding.channel.unavailable_reason()}"
+                    )
+                    continue
             output = None
-            retried_transient = False
+            # 本通道 429/503 排队窗口:从首次 transient 起算,超时放弃该通道
+            transient_started_at: Optional[float] = None
+            transient_attempt = 0
             while output is None:
                 try:
                     # 两层闸嵌套:
@@ -267,20 +288,65 @@ class AIGCGenerationBase(ABC):
                         # 参数类失败(换通道也没用)不计入熔断:通道本身是健康的,
                         # 用户反复提交坏请求不应把通道推入冷却期
                         raise
-                    if e.transient and not retried_transient:
-                        # 瞬时限流/过载(429/503):切通道会整单重跑更烧钱,
-                        # 先在原通道退避重试一次;不计失败(通道是健康的)
-                        retried_transient = True
-                        logger.warning(
-                            f"[{self.name}] 通道 {binding.channel.name} 瞬时失败({e}),"
-                            f"{self.transient_retry_delay:.1f}s 后原通道重试"
+                    if e.transient:
+                        now = time.monotonic()
+                        if transient_started_at is None:
+                            transient_started_at = now
+                        elapsed = now - transient_started_at
+                        max_wait = float(self.transient_retry_max_wait)
+                        if elapsed < max_wait:
+                            # 指数退避:delay * 2^(n-1),封顶 max_delay,且不超过剩余预算
+                            transient_attempt += 1
+                            base = float(self.transient_retry_delay)
+                            cap = float(self.transient_retry_max_delay)
+                            delay = min(base * (2 ** (transient_attempt - 1)), cap, max_wait - elapsed)
+                            delay = max(0.0, delay)
+                            remain = max_wait - elapsed
+                            logger.warning(
+                                f"[{self.name}] 通道 {binding.channel.name} 瞬时限流({e}),"
+                                f"排队第 {transient_attempt} 次,"
+                                f"{delay:.1f}s 后原通道重试"
+                                f"(已等 {elapsed:.0f}s / 上限 {max_wait:.0f}s,剩余 {remain:.0f}s)"
+                            )
+                            await self._emit_transient_progress(
+                                on_progress,
+                                channel=binding.channel.name,
+                                attempt=transient_attempt,
+                                delay=delay,
+                                elapsed=elapsed,
+                                max_wait=max_wait,
+                            )
+                            if delay > 0:
+                                await asyncio.sleep(delay)
+                            continue
+                        # 排队预算耗尽:记失败并切通道/整单失败(任务移除由 dispatcher 退款落库)
+                        logger.error(
+                            f"[{self.name}] 通道 {binding.channel.name} 429/503 排队已达上限 "
+                            f"{max_wait:.0f}s,放弃该通道"
                         )
-                        await asyncio.sleep(self.transient_retry_delay)
-                        continue
+                        last_error = ChannelError(
+                            f"{binding.channel.name} 限流排队超过 {max_wait:.0f}s: {e}",
+                            retryable=True,
+                            transient=False,
+                            channel=binding.channel.name,
+                            code="TRANSIENT_QUEUE_TIMEOUT",
+                            user_message=(
+                                f"上游繁忙,排队已超过 {int(max_wait // 60)} 分钟仍未恢复,任务已取消。"
+                            ),
+                        )
                     self.balancer().record_failure(scope=self.name, member=binding.channel.name)
-                    if len(ordered) == 1:
-                        raise
-                    logger.warning(f"[{self.name}] 通道 {binding.channel.name} 失败({e}),切换下一通道")
+                    available_names = [n for n in available_names if n != binding.channel.name]
+                    if available_names:
+                        logger.warning(
+                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),切换下一通道"
+                        )
+                    else:
+                        # 无更多可用通道:跳出后由 AllChannelsFailedError 收口
+                        # (单通道时 last_error 即根因;多通道时 cause 保留最后一家)
+                        logger.warning(
+                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),"
+                            f"无更多可用通道"
+                        )
                     break
             if output is None:
                 continue
@@ -291,6 +357,37 @@ class AIGCGenerationBase(ABC):
             return self.postprocess(output)
 
         raise AllChannelsFailedError(f"{self.display_name} 所有通道均失败", cause=last_error)
+
+    async def _emit_transient_progress(
+        self,
+        on_progress: Optional[ProgressCallback],
+        *,
+        channel: str,
+        attempt: int,
+        delay: float,
+        elapsed: float,
+        max_wait: float,
+    ) -> None:
+        """429 排队时向入口播报进度(可选;失败不影响主流程)。"""
+        if on_progress is None:
+            return
+        try:
+            from ...utils.core.types import ProgressEvent
+
+            percent = min(90.0, 10.0 + (elapsed / max_wait) * 80.0) if max_wait > 0 else 10.0
+            event = ProgressEvent(
+                stage="queued",
+                percent=percent,
+                message=(
+                    f"上游限流排队中({channel}) 第 {attempt} 次,"
+                    f"{delay:.0f}s 后重试 · 已等 {elapsed:.0f}s/{max_wait:.0f}s"
+                ),
+            )
+            result = on_progress(event)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:  # noqa: BLE001 - 进度播报失败不影响排队主流程
+            pass
 
 
 __all__ = ["AIGCGenerationBase"]

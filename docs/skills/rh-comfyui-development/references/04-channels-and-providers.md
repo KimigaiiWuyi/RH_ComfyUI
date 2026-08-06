@@ -44,9 +44,10 @@ class MyGatewayChannel(ProviderChannel):
 **错误翻译是通道的义务**:上游异常必须翻译为 `ChannelError`,
 `retryable` 决定 run() 是否切换下一通道并记熔断;参数类错误(换通道也没用)
 必须 `retryable=False`,避免无谓重试烧钱;HTTP 429/503 这类瞬时错误
-**加标 `transient=True`**(retryable 仍为 True),run() 会先在原通道退避
-`transient_retry_delay`(默认 2s)重试一次、不计熔断,仍失败才切换。
-`openai_image` 通道已按 http_status 自动标注,新通道照做。
+**加标 `transient=True`**(retryable 仍为 True),run() 在原通道做指数退避
+排队(初始 `transient_retry_delay=2s`、单次上限 60s、累计最长
+`transient_retry_max_wait=3600s`),排队期间不计熔断;超时后放弃该通道再
+failover / 整单失败。`openai_image` / `gemini` 通道已按限流文案自动标注。
 
 ## 4.3 给现有模型加一家供应商
 

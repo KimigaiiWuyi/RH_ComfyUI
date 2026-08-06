@@ -148,6 +148,28 @@ def test_banana1_served_by_gemini_first_gen():
     assert "ratio" in schema and "image_size" not in schema
 
 
+def test_banana_pro_includes_gemini_pro_image():
+    # banana_pro 内置 Gemini 3 Pro Image + gpt-image-2 适配,外部可再注入
+    from RH_ComfyUI.models.image.defs import BananaProDef
+
+    channel_registry.clear()
+    pro = BananaProDef()
+    bindings = pro.channel_bindings()
+    names = [b.channel.name for b in bindings]
+    assert names[0] == "gemini"
+    assert bindings[0].vendor_model == "gemini-3-pro-image-preview"
+    assert "gpt-image-2" in names
+    assert pro.GEMINI_VENDOR_MODEL == "gemini-3-pro-image-preview"
+
+
+def test_gemini_channel_marks_429_as_transient():
+    from RH_ComfyUI.utils.backends.gemini_image.channel import _is_rate_limited
+
+    assert _is_rate_limited(RuntimeError('Resource exhausted code":429'))
+    assert _is_rate_limited(RuntimeError("HTTP 503 Service Unavailable"))
+    assert not _is_rate_limited(RuntimeError("invalid argument"))
+
+
 def test_mapper_omits_image_size_for_first_gen(monkeypatch):
     # 回归:一代不支持 image_config.image_size,mapper 必须整个字段不发;
     # 3.x 系保持既有默认 2K

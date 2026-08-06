@@ -155,6 +155,8 @@ class _TransientModel(AIGCGenerationBase):
     modality = TaskType.IMAGE
     card = ModelCard(description="x")
     transient_retry_delay = 0.0  # 单测不真等退避
+    transient_retry_max_delay = 0.0
+    transient_retry_max_wait = 3600.0
 
     def __init__(self, channel: ProviderChannel, balancer: LoadBalancer) -> None:
         self.name = "transient_model"
@@ -177,14 +179,14 @@ class _TransientModel(AIGCGenerationBase):
         return self._balancer
 
 
-def test_transient_error_retries_same_channel_once():
-    # 429/503:先在原通道退避重试一次(切通道整单重跑更烧钱),且不计熔断失败
+def test_transient_error_retries_same_channel_until_success():
+    # 429/503:原通道排队退避,成功前不计熔断
     lb = LoadBalancer(BalancerConfig(mode="least_failures", failure_threshold=1))
     ch = _RateLimitedChannel()
     model = _TransientModel(ch, lb)
     out = asyncio.run(model.run(GenerationRequest(task_type=TaskType.IMAGE, prompt="hi")))
     assert out.data == b"retried-ok"
-    assert ch.calls == 2  # 第一次 429,原通道重试一次成功
+    assert ch.calls == 2  # 第一次 429,原通道再试成功
     assert lb.health_snapshot() == {}  # 瞬时失败未计入熔断
 
 
@@ -196,13 +198,35 @@ class _AlwaysRateLimitedChannel(_RateLimitedChannel):
         raise ChannelError("HTTP 429", retryable=True, transient=True, channel=self.name)
 
 
-def test_transient_retry_only_once_then_fails_over():
-    # 重试一次仍 429:按常规可重试失败处理(记熔断计数,单通道时原样抛出)
+def test_transient_queue_budget_exhausted_then_fails():
+    # 排队预算耗尽(max_wait=0 → 首次 transient 即超时):记熔断并失败
     lb = LoadBalancer(BalancerConfig(mode="least_failures", failure_threshold=5))
     ch = _AlwaysRateLimitedChannel()
     model = _TransientModel(ch, lb)
-    with pytest.raises(ChannelError):
+    model.transient_retry_max_wait = 0.0
+    with pytest.raises((ChannelError, Exception)) as ei:
         asyncio.run(model.run(GenerationRequest(task_type=TaskType.IMAGE, prompt="hi")))
-    assert ch.calls == 2  # 原通道只补试一次,不无限重试
+    # 预算 0:首次 429 即放弃,只调用 1 次
+    assert ch.calls == 1
     snapshot = lb.health_snapshot()
     assert snapshot.get("transient_model/always429", {}).get("failure_count") == 1
+    # 用户文案应体现排队超时
+    err = ei.value
+    from RH_ComfyUI.core.base.errors import AllChannelsFailedError
+
+    root = err.cause if isinstance(err, AllChannelsFailedError) else err
+    assert root is not None
+    assert "排队" in str(getattr(root, "user_message", "") or root) or getattr(root, "code", "") == (
+        "TRANSIENT_QUEUE_TIMEOUT"
+    )
+
+
+def test_transient_queue_retries_multiple_times_within_budget():
+    # 预算内可多次重试(delay=0 加速)
+    lb = LoadBalancer(BalancerConfig(mode="least_failures", failure_threshold=99))
+    ch = _AlwaysRateLimitedChannel()
+    model = _TransientModel(ch, lb)
+    model.transient_retry_max_wait = 0.05  # 50ms 窗口,delay=0 可连打多次
+    with pytest.raises(Exception):
+        asyncio.run(model.run(GenerationRequest(task_type=TaskType.IMAGE, prompt="hi")))
+    assert ch.calls >= 2  # 至少重试过

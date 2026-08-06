@@ -574,17 +574,23 @@ class Banana1Def(ImagePipelineModel):
 
 
 class BananaProDef(ImagePipelineModel):
-    """Nano Banana Pro — 定义迁移自 pipelines YAML(2026-07 起以代码为准)
+    """Nano Banana Pro — 高质量 Nano Banana
 
-    与 gpt-image-2 共享后端(gpt-image-2)和 mapper,但计费独立:
-    输入 0.0011 美元/张 + 输出 120 美元/1M tokens 按分辨率分档(1K~2K 同价,4K 单独一档)。
-    point_cost 仅作未知参数时的兜底。
+    通道:
+    1. 原生 Gemini(``gemini-3-pro-image-preview``),与 banana1/2 共用 Gemini_* 配置;
+    2. 内置 OpenAI 兼容 gpt-image-2 适配(``nano-banana-2-2k``);
+    3. 外部插件经 channel_registry 注入(如 aifoundation NBP)。
 
-    ⚠️ 注意:此模型 schema 中**没有** quality 字段。banana_pro 与 gpt-image-2 共享
-    后端 API(支持透传 quality),但官方计费曲线不区分 quality 档位 —— 因此把 quality
-    暴露给前端会让用户在切换 quality 时看到积分不变,造成"积分 bug"误判。前端要切 quality
-    请用 gpt-image-2。
+    计费独立:输入 0.0011 美元/张 + 输出 120 美元/1M tokens 按分辨率分档
+    (1K~2K 同价,4K 单独一档)。point_cost 仅作未知参数时的兜底。
+
+    ⚠️ 注意:此模型 schema 中**没有** quality 字段。官方计费曲线不区分 quality
+    档位 —— 暴露会让用户在切换 quality 时看到积分不变,造成"积分 bug"误判。
+    前端要切 quality 请用 gpt-image-2。
     """
+
+    # 原生 Gemini 侧的 vendor model id(与 banana2 的 flash 代际区分)
+    GEMINI_VENDOR_MODEL = "gemini-3-pro-image-preview"
 
     def __init__(self) -> None:
         super().__init__(self.node_def())
@@ -597,13 +603,16 @@ class BananaProDef(ImagePipelineModel):
             task_type=TaskType("image"),
             backend="gpt-image-2",
             point_cost=3,
-            description="Nano Banana 2.2K 高质量图像生成/编辑模型",
+            description="Nano Banana Pro 高质量图像生成/编辑模型(Gemini 3 Pro Image + 兼容通道)",
             knowledge_content=(
-                "Nano Banana 2.2K 高质量图像生成/编辑模型。"
+                "Nano Banana Pro 高质量图像生成/编辑模型。"
                 "\n"
                 "优势:图像质量非常高,细节丰富细腻,色彩表现优秀,适合专业输出;"
                 "\n"
                 "同时支持图片编辑(传入 1~N 张参考图时自动进入编辑模式)。"
+                "\n"
+                "内置供应商:Gemini 3 Pro Image(gemini-3-pro-image-preview,与 banana1/2 共用"
+                "Gemini 配置)+ OpenAI 兼容 gpt-image-2 通道;外部插件可追加更多供应商。"
                 "\n"
                 "适用场景:需要最终输出的高质量图像,专业创作场景,商业项目,精细细节的画面,精细图片编辑。"
                 "\n"
@@ -650,6 +659,24 @@ class BananaProDef(ImagePipelineModel):
                 mode="sync",
                 priority=60,
             ),
+        )
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        """Gemini Pro 优先 + 内置 gpt-image-2 适配 + 外部注入通道。"""
+        from ...core.channels.registry import channel_registry
+        from ...utils.backends.gemini_image.channel import GeminiImageChannel
+
+        bindings = [
+            ChannelBinding(GeminiImageChannel(), vendor_model=self.GEMINI_VENDOR_MODEL),
+            ChannelBinding(channel=self._channel, vendor_model=self.node.backend_model),
+        ]
+        bindings.extend(channel_registry.bindings_for(self.name))
+        return bindings
+
+    async def unavailable_reason(self) -> str:
+        return (
+            "Nano Banana Pro 无可用供应商:配置 Gemini(Gemini_Image_apikey / Vertex) "
+            "或 OpenAI 兼容生图(OpenAI_Image_apikey / 配置池)或外部供应商插件"
         )
 
     def estimate_cost(self, request: GenerationRequest) -> int:

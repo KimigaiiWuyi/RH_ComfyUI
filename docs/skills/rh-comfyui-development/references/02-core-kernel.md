@@ -20,14 +20,18 @@ run(request)
   ├─ 2. normalize(request)           # 默认值填充/单位归一化(可覆盖)
   ├─ 3. balancer.order_candidates()  # 负载均衡排序通道
   ├─ 4. execute_on_channel(...)      # ★ 子类核心
-  │     ├─ ChannelError(transient=True,如 429/503)→ 原通道退避重试一次
-  │     │   (间隔 transient_retry_delay=2s,不计熔断;仅补试一次)
+  │     ├─ ChannelError(transient=True,如 429/503)→ 原通道指数退避排队
+  │     │   (初始 transient_retry_delay=2s,单次上限 60s,
+  │     │    累计最长 transient_retry_max_wait=3600s=1h;超时放弃该通道;
+  │     │    排队期间不计熔断)
   │     └─ ChannelError(retryable=True)→ 记熔断 → 换下一通道
   └─ 5. postprocess(output)          # 输出归一化(可覆盖)
 ```
 
-同通道退避重试的动机:切换通道意味着整单重新生成(重复烧钱),而 429/503
-是"通道健康、瞬时过载",原地等一下更省;重试仍失败才走常规切换。
+同通道排队的动机:切换通道意味着整单重新生成(重复烧钱),而 429/503
+是"通道健康、瞬时过载",原地退避更省;排队超过 1 小时仍未恢复则放弃该
+通道(有其它供应商则 failover,否则整单失败退款)。注意 dispatcher 的
+`Dispatch_Timeout` 若小于 1h 会先截断整单,需要长排队时请把超时调到 ≥3600。
 
 子类必须实现三个抽象方法:
 

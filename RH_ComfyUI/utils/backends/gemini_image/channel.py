@@ -1,9 +1,9 @@
 """GeminiImageChannel — 把 Gemini Interactions API 接成一个通用 ProviderChannel
 
-作为 banana2(Nano Banana 2)的一路供应商:对外仍是 Nano Banana 2,内部与
-OpenAI 兼容网关通道一起参与负载均衡。没填 key → 不可用自动让路;出错抛可重试
-ChannelError 切下一通道。vendor model id(gemini-3.1-flash-image-preview)只在
-内部请求里出现。
+挂在 banana1 / banana2 / banana_pro 上:对外仍是统一模型名,vendor model id
+(如 gemini-3.1-flash-image-preview / gemini-3-pro-image-preview)只在内部请求里出现。
+没填 key → 不可用自动让路;出错抛可重试 ChannelError 切下一通道。
+429/503 标 transient,由 run() 做最长 1 小时的原通道排队退避。
 """
 
 from __future__ import annotations
@@ -17,8 +17,25 @@ from ...mappers.gemini_image import gemini_flash_image_mapper
 from ....core.channels.channel import ProviderChannel
 
 
+def _is_rate_limited(exc: BaseException) -> bool:
+    """上游限流/配额耗尽:Resource exhausted、HTTP 429/503 等。"""
+    text = str(exc).lower()
+    if "resource exhausted" in text or "resource_exhausted" in text:
+        return True
+    if "rate limit" in text or "too many requests" in text:
+        return True
+    if "429" in text or "503" in text:
+        return True
+    # google-genai / grpc 常见码
+    code = getattr(exc, "code", None)
+    if code is not None and str(code) in {"429", "8", "RESOURCE_EXHAUSTED"}:
+        return True
+    status = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
+    return status in (429, 503)
+
+
 class GeminiImageChannel(ProviderChannel):
-    """Gemini 3.1 Flash Image 通道(VertexAI / AI Studio 双模)"""
+    """Gemini 生图通道(VertexAI / AI Studio 双模;vendor_model 区分 Flash / Pro)"""
 
     name = "gemini"
     weight = 2
@@ -53,12 +70,17 @@ class GeminiImageChannel(ProviderChannel):
 
         try:
             output = await gemini_flash_image_mapper(request, self._api)
-        except Exception as exc:  # noqa: BLE001 - 统一翻译成可切换的通道错误
+        except Exception as exc:  # noqa: BLE001 - 统一翻译成可切换/可排队的通道错误
+            rate_limited = _is_rate_limited(exc)
             raise ChannelError(
                 f"Gemini 生图失败: {exc}",
                 retryable=True,
+                transient=rate_limited,
                 channel=self.name,
-                user_message="Gemini 生图失败,请稍后重试。",
+                code="RATE_LIMITED" if rate_limited else "GEMINI_FAILED",
+                user_message=(
+                    "Gemini 生图繁忙,正在排队重试…" if rate_limited else "Gemini 生图失败,请稍后重试。"
+                ),
             ) from exc
 
         # 消费统计维度:区分 VertexAI / AI Studio
