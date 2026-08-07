@@ -74,6 +74,7 @@ class VideoGenSpec:
 
     ratio: Optional[str] = None
     resolution: Optional[str] = None
+    # 输出时长(秒)。Seedance 2.5 视频编辑/延长支持 -1=跟随输入视频时长。
     duration: int = 5
     seed: Optional[int] = None
     generate_audio: bool = False
@@ -81,6 +82,8 @@ class VideoGenSpec:
     camera_fixed: bool = False
     return_last_frame: bool = False
     service_tier: str = "default"
+    # 输出容器格式(Seedance 2.5 支持 mp4 / mov;2.0 仅 mp4 时忽略)
+    output_format: Optional[str] = None
 
     # 供应商私有旁路:real_person_mode / conversion_slots / draft / callback_url / ...
     params: dict[str, Any] = field(default_factory=dict)

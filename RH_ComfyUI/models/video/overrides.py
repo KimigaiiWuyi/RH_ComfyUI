@@ -1,7 +1,9 @@
-"""视频模态的编程式模型类 — Seedance 2.0 与 Wan 2.2(蓝图 §5.2 范本)
+"""视频模态的编程式模型类 — Seedance 2.x / Wan 2.2 / HappyHorse(蓝图 §5.2 范本)
 
-两个参数面严重不一致的模型在同一 ABC 下共存:
+参数面严重不一致的模型在同一 ABC 下共存:
 - Seedance 2.0:多参考(≤12 素材)/首尾帧/单图/纯文本;480p~4k;有声开关
+- Seedance 2.5:多参考(≤50=图30+视频10+音频10)/编辑/延长/首尾帧;仅 480p~720p;
+  时长 4~30s 或 -1;output_format mp4/mov;复用火山方舟 Key
 - Wan 2.2:仅首尾帧/首帧/纯文本;≤720p(像素积约束);任意宽高比;无有声
 
 执行链仍复用桥接层(NodeDef + Adapter),差异全部体现在能力声明与
@@ -176,6 +178,136 @@ class SeedanceVideoModel(VideoPipelineModel):
         )
 
 
+class Seedance25VideoModel(SeedanceVideoModel):
+    """Seedance 2.5:30s 连贯直出 / 50 多模态参考 / 视频编辑 / 延长 / mov 输出
+
+    与 2.0 类型分开(独立模型名 seedance2.5 + 独立 vendor model id),
+    凭证复用火山方舟 Seedance_apikey_ark。任务形态可通过 task_mode 显式指定:
+      - auto: 按输入自动(文生/图生/首尾帧/多模态)
+      - edit: 视频编辑(建议 ratio=adaptive, duration=-1)
+      - extend: 视频延长(建议 ratio=adaptive)
+    """
+
+    MAX_IMAGES = 30
+    MAX_VIDEOS = 10
+    MAX_AUDIOS = 10
+    MAX_REFERENCE_TOTAL = 50
+
+    def __init__(self, node: NodeDef) -> None:
+        super().__init__(node)
+        self.supported_shapes = {
+            VideoTaskShape.TEXT2VIDEO,
+            VideoTaskShape.IMAGE2VIDEO,
+            VideoTaskShape.FIRST_LAST_FRAME,
+            VideoTaskShape.MULTIMODAL,
+            VideoTaskShape.VIDEO_EDIT,
+            VideoTaskShape.VIDEO_EXTEND,
+        }
+        self.supported_resolutions = ["480p", "720p"]
+        self.supports_generate_audio = True
+        self.max_reference_total = self.MAX_REFERENCE_TOTAL
+        self.card = ModelCard(
+            description=node.description
+            or "字节跳动 Seedance 2.5 统一视频生成:最长 30 秒、最多 50 多模态参考、支持编辑/延长",
+            strengths=[
+                "最长 30 秒连贯直出",
+                "最多 50 个多模态参考(图 30 + 视频 10 + 音频 10)",
+                "视频编辑 / 视频延长",
+                "输出 mp4 或 mov",
+                "中文语义与动作流畅",
+            ],
+            categories=["短视频", "长镜头", "多素材合成", "视频编辑", "视频延长"],
+            weaknesses=[
+                "分辨率仅 480p / 720p(无 1080p/4K)",
+                "编辑/延长/首尾帧须 ratio=adaptive,自定义比例会异步报错",
+            ],
+            sample_prompts=[
+                "图片1为主角,在草原上奔跑 30 秒长镜头",
+                "编辑视频1:把背景换成海边日落",
+                "延长视频1,接上视频2 的运镜与动作",
+            ],
+            languages=["zh", "en"],
+            speed_hint="slow",
+        )
+
+    def validate(self, request: GenerationRequest) -> None:
+        # 先做 2.5 专属数量上限(父类 SeedanceVideoModel 只限制视频/音频 ≤3)
+        if len(request.images) > self.MAX_IMAGES:
+            raise ValidationError(
+                f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,"
+                f"当前 {len(request.images)} 张"
+            )
+        if len(request.video_refs) > self.MAX_VIDEOS:
+            raise ValidationError(
+                f"{self.display_name} 最多 {self.MAX_VIDEOS} 段参考视频,"
+                f"当前 {len(request.video_refs)} 段"
+            )
+        if len(request.audio_refs) > self.MAX_AUDIOS:
+            raise ValidationError(
+                f"{self.display_name} 最多 {self.MAX_AUDIOS} 段参考音频,"
+                f"当前 {len(request.audio_refs)} 段"
+            )
+
+        # 跳过 SeedanceVideoModel.validate 的 3 段音视频上限,直接走通用基类 + 本类约束
+        from ...core.base.video import VideoGenerationBase
+
+        VideoGenerationBase.validate(self, request)
+
+        task_mode = str((request.params or {}).get("task_mode") or "auto").strip().lower()
+        frame_mode = str((request.params or {}).get("frame_mode") or "auto").strip().lower()
+        duration = request.duration
+        ratio = (request.ratio or "").strip().lower()
+        n_img = len(request.images)
+        has_av = bool(request.video_refs or request.audio_refs)
+
+        # duration=-1 仅编辑/延长合法;其余形态要求 4~30
+        if duration == -1:
+            if task_mode not in ("edit", "extend") and not request.video_refs:
+                raise ValidationError(
+                    f"{self.display_name} 的 duration=-1 仅用于视频编辑/延长"
+                    "(请设 task_mode=edit 或 extend,并提供参考视频)"
+                )
+        elif duration is not None and duration != 0 and not (4 <= int(duration) <= 30):
+            raise ValidationError(
+                f"{self.display_name} 时长须为 4~30 秒或 -1(跟随输入),当前 {duration}"
+            )
+
+        # 官方约束:视频编辑 / 延长 / 首帧·首尾帧 必须 ratio=adaptive,自定义比例会异步报错
+        # 多模态参考(带视频/音频,或 frame_mode=reference)与纯文生可用自定义比例
+        is_edit_or_extend = task_mode in ("edit", "extend")
+        is_frame_driven = (
+            not has_av
+            and frame_mode != "reference"
+            and n_img >= 1
+            and task_mode == "auto"
+        ) or frame_mode == "first_last"
+        if (is_edit_or_extend or is_frame_driven) and ratio and ratio != "adaptive":
+            raise ValidationError(
+                f"{self.display_name} 在视频编辑/延长/首帧·首尾帧任务下须使用 ratio=adaptive,"
+                f"当前 {request.ratio}(自定义比例会触发上游异步报错)"
+            )
+
+        if is_edit_or_extend and not request.video_refs:
+            # ordered_content 里也可能只挂了视频
+            from ...core.schema.types import MediaKind, ContentItemType
+
+            oc_has_video = any(
+                item.type == ContentItemType.VIDEO
+                or (item.media is not None and item.media.kind == MediaKind.VIDEO)
+                for item in (request.ordered_content or [])
+            )
+            if not oc_has_video:
+                raise ValidationError(
+                    f"{self.display_name} 的 {task_mode} 任务至少需要 1 段参考视频"
+                )
+
+    async def unavailable_reason(self) -> str:
+        return (
+            f"{self.display_name} 无可用供应商:请在 Web 控制台配置 "
+            "Seedance_Enable_ark + Seedance_apikey_ark(复用火山方舟 Key)"
+        )
+
+
 class Wan22VideoModel(VideoPipelineModel):
     """Wan 2.2:仅支持 首帧 + 尾帧 两类图,无音视频参考,无有声,≤720p(像素积)
 
@@ -344,4 +476,9 @@ class HappyHorseVideoModel(VideoPipelineModel):
         )
 
 
-__all__ = ["SeedanceVideoModel", "Wan22VideoModel", "HappyHorseVideoModel"]
+__all__ = [
+    "SeedanceVideoModel",
+    "Seedance25VideoModel",
+    "Wan22VideoModel",
+    "HappyHorseVideoModel",
+]

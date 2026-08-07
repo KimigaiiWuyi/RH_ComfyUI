@@ -526,6 +526,7 @@ async def estimate_model_points(
     generate_audio: Optional[bool] = None,
     num_input_images: int = 0,
     num_video_refs: int = 0,
+    input_video_duration: Optional[float] = None,
 ) -> dict[str, Any]:
     """根据用户实时选择的参数,估算某模型消耗的积分。
 
@@ -545,6 +546,9 @@ async def estimate_model_points(
             不读图片内容,用占位 bytes 即可,避免下载/解析真实图片。
         num_video_refs: 已连输入视频参考数(0=文生视频)。同 num_input_images,
             用占位对象让 len() 命中。
+        input_video_duration: 输入参考视频总时长(秒)。Seedance token 公式:
+            (输入视频时长+输出时长)×宽×高×fps/1024;前端探测到后传入,
+            未传时按「每段默认 5s × 段数」估算。
 
     Returns:
         {
@@ -564,6 +568,7 @@ async def estimate_model_points(
                 "generate_audio": bool|null,
                 "num_input_images": int,
                 "num_video_refs": int,
+                "input_video_duration": float|null,
             },
         }
     """
@@ -586,6 +591,7 @@ async def estimate_model_points(
                 generate_audio=generate_audio,
                 num_input_images=num_input_images,
                 num_video_refs=num_video_refs,
+                input_video_duration=input_video_duration,
             ),
         }
 
@@ -600,11 +606,13 @@ async def estimate_model_points(
         params["duration"] = duration
     if generate_audio is not None:
         params["generate_audio"] = generate_audio
+    if input_video_duration is not None:
+        params["input_video_duration"] = input_video_duration
 
     # 占位 bytes:estimate_cost 只调 len() 不读内容,避免下载真实图片。
     # 这里跟实际生成路径用的同一份 GenerationRequest,保证字段语义一致。
     placeholder_images = [b""] * max(num_input_images, 0) if num_input_images > 0 else []
-    # video_refs 同理:占位对象仅供 len() 命中(video_refs 是 list[MediaRef],estimate 只判 bool/length)
+    # video_refs 同理:占位对象仅供 len() 命中;真实时长靠 input_video_duration 传入
     placeholder_video_refs = [object()] * max(num_video_refs, 0) if num_video_refs > 0 else []
 
     # ratio 顶层 + duration 顶层,因为部分模型(Seedance2Def 等)直接从 request.duration/request.ratio 读
@@ -637,6 +645,7 @@ async def estimate_model_points(
                 generate_audio=generate_audio,
                 num_input_images=num_input_images,
                 num_video_refs=num_video_refs,
+                input_video_duration=input_video_duration,
             ),
         }
 
@@ -662,6 +671,7 @@ async def estimate_model_points(
             generate_audio=generate_audio,
             num_input_images=num_input_images,
             num_video_refs=num_video_refs,
+            input_video_duration=input_video_duration,
         ),
     }
 
@@ -676,6 +686,7 @@ def _build_echo_params(
     generate_audio: Optional[bool],
     num_input_images: int,
     num_video_refs: int,
+    input_video_duration: Optional[float] = None,
 ) -> dict[str, Any]:
     """构造 estimate 返回值里的 params echo 字典,所有路径共用避免漂移。"""
     return {
@@ -687,6 +698,7 @@ def _build_echo_params(
         "generate_audio": generate_audio,
         "num_input_images": num_input_images,
         "num_video_refs": num_video_refs,
+        "input_video_duration": input_video_duration,
     }
 
 

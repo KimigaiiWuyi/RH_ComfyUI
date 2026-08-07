@@ -44,6 +44,7 @@ description: >
 | 十六 | **模型目录与 estimate API 契约**(`/models` 系列端点、input_schema 结构、point_range 双重作用、兼容性矩阵) | [references/16-models-catalog-api.md](./references/16-models-catalog-api.md) |
 | 十七 | **新增/修改模型 与 计费改动 完整交接清单**(改文件顺序、跑测试、常见出错模式、提交前自检) | [references/17-adding-models-billing-handoff.md](./references/17-adding-models-billing-handoff.md) |
 | 十八 | **图片像素量压缩**(上传/传输前瘦身、compress_to_max_pixels、1080P 阈值、格式保持、调用方接入) | [references/18-image-compression.md](./references/18-image-compression.md) |
+| 十九 | **Seedance 2.5 与输入视频时长计费**(模型 seedance2.5、费率 70/42、token 公式含输入时长、task_mode、canvas/前端透传) | [references/19-seedance25-and-input-duration.md](./references/19-seedance25-and-input-duration.md) |
 
 ## 快速决策表(先看这里)
 
@@ -70,6 +71,7 @@ description: >
 | **改 schema 字段 / 加新参数面 / 排查 estimate 失效** | defs 的 `node_def()` `inputs` + `rh_models/webapi.py` 路由 handler + `rh_models/api.py:estimate_model_points` | **十六、十七** |
 | **前端报"积分不变" / 不调 estimate / 422 / 4K 反便宜** | 跨前后端双侧排查 | **十五** |
 | 上传/传输前压缩图片(4K→1080P、格式不变) | `RH_ComfyUI.utils.image_process.compress_to_max_pixels_async` | **十八** |
+| **加/改 Seedance 2.5 / 输入视频时长影响积分** | defs `seedance2.5` + billing `input_video_duration` + canvas/前端透传 | **十九、十五** |
 
 ## 三条最高红线(违反必被打回)
 

@@ -296,11 +296,14 @@ class SeedanceProviderChannel(ProviderChannel):
         if on_progress is not None:
             await _safe_emit(on_progress, _evt("done", 100, "Seedance 完成"))
 
+        out_fmt = (spec.output_format or "mp4").strip().lower()
+        mime = "video/quicktime" if out_fmt == "mov" else "video/mp4"
+
         return NodeOutput(
             status="ok",
             output_type="video",
             data=video,
-            mime_type="video/mp4",
+            mime_type=mime,
             outputs=outputs,
             usage=usage,
             raw=final.raw,
@@ -309,6 +312,7 @@ class SeedanceProviderChannel(ProviderChannel):
                 "provider": self.name,
                 "model": vendor_model,
                 "shape": spec.shape.value,
+                "output_format": out_fmt,
             },
         )
 

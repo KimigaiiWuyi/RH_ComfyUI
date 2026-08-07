@@ -161,6 +161,7 @@ async def estimate_model_cost(
     generate_audio: Optional[bool] = None,
     num_input_images: int = 0,
     num_video_refs: int = 0,
+    input_video_duration: Optional[float] = None,
 ) -> dict[str, object]:
     """根据用户实时选择的参数,估算某模型消耗的积分。
 
@@ -171,9 +172,13 @@ async def estimate_model_cost(
       ``GET /models/estimate?model=gpt-image-2&ratio=1:1&image_size=4K&quality=high&num_input_images=3``
     例(视频模型):
       ``GET /models/estimate?model=seedance2&resolution=1080p&duration=10&num_video_refs=1``
+    例(带输入视频真实时长):
+      ``GET /models/estimate?model=seedance2.5&resolution=720p&duration=5&num_video_refs=1&input_video_duration=12.5``
 
     num_input_images / num_video_refs 为已连输入数量(0=文生)。后端用占位 bytes/对象表示,
     estimate_cost 只取 len()/bool 不读内容,不会触发真实媒体下载。
+    input_video_duration 为输入参考视频总时长(秒),用于 Seedance token 公式中的
+    「输入视频时长」;未传时按每段默认 5 秒 × 段数估算。
 
     对未覆盖 ``estimate_cost()`` 的模型,返回其静态 point_cost。
     """
@@ -187,6 +192,7 @@ async def estimate_model_cost(
         generate_audio=generate_audio,
         num_input_images=num_input_images,
         num_video_refs=num_video_refs,
+        input_video_duration=input_video_duration,
     )
 
 

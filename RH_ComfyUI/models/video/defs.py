@@ -7,18 +7,25 @@
 
 from __future__ import annotations
 
-from .overrides import Wan22VideoModel, SeedanceVideoModel, HappyHorseVideoModel
+from .overrides import (
+    Wan22VideoModel,
+    SeedanceVideoModel,
+    HappyHorseVideoModel,
+    Seedance25VideoModel,
+)
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.video import wan_videogen_mapper as _wan_videogen_mapper
+from ...utils.mappers.extra_billing import estimate_wan22_points
 from ...utils.mappers.seedance_billing import (
     estimate_seedance2_points,
+    estimate_seedance25_points,
     estimate_seedance2_fast_points,
     estimate_seedance2_mini_points,
     estimate_seedance15_pro_points,
+    input_video_duration_from_params,
 )
-from ...utils.mappers.extra_billing import estimate_wan22_points
 from ...utils.mappers.happyhorse_billing import estimate_happyhorse_points
 
 
@@ -159,13 +166,16 @@ class Seedance15ProDef(SeedanceVideoModel):
             duration,
             generate_audio=generate_audio,
             video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
         )
 
     def point_range(self) -> tuple[int, int]:
-        """积分范围:最小(480p + 4s + 无声) ~ 最大(1080p + 12s + 有声 + 输入视频)。"""
+        """积分范围:最小(480p + 4s + 无声) ~ 最大(1080p + 12s + 有声 + 输入 15s)。"""
         return (
             estimate_seedance15_pro_points("480p", 4, generate_audio=False, video_refs=None),
-            estimate_seedance15_pro_points("1080p", 12, generate_audio=True, video_refs=[object()]),
+            estimate_seedance15_pro_points(
+                "1080p", 12, generate_audio=True, input_video_duration=15.0
+            ),
         )
 
 
@@ -301,27 +311,234 @@ class Seedance2Def(SeedanceVideoModel):
         )
 
     def estimate_cost(self, request: GenerationRequest) -> int:
-        """动态计费:按 token 用量计费(分分辨率 + 有无输入视频)。"""
+        """动态计费:token = (输入视频时长 + 输出时长) × 宽 × 高 × fps / 1024。"""
         resolution = request.params.get("resolution", "720p")
         duration = float(request.duration or 5)
         return estimate_seedance2_points(
             resolution,
             duration,
             video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
         )
 
     def point_range(self) -> tuple[int, int]:
-        """积分范围:最小(480p + 4s + 无输入) ~ 最大(4K + 15s + 有输入)。
+        """积分范围:最小(480p + 4s + 无输入) ~ 最大(各档扫描 + 输入 15s)。
 
         注意:4K 费率最低但像素最多,实际需要比较各档位的积分值。
         """
         candidates = []
         for res in ("480p", "720p", "1080p", "4k"):
             for dur in (4, 15):
-                for has_input in (False, True):
-                    refs = [object()] if has_input else None
-                    candidates.append(estimate_seedance2_points(res, dur, video_refs=refs))
+                candidates.append(estimate_seedance2_points(res, dur, video_refs=None))
+                candidates.append(
+                    estimate_seedance2_points(res, dur, input_video_duration=15.0)
+                )
         return (min(candidates), max(candidates))
+
+
+class Seedance25Def(Seedance25VideoModel):
+    """Seedance 2.5 — 火山方舟 doubao-seedance-2-5-260628
+
+    与 seedance2 / seedance2_fast 类型分开;复用 Seedance_apikey_ark。
+    能力差异(相对 2.0):
+      - 输出时长 4~30 秒,编辑/延长可用 -1 跟随输入
+      - 分辨率仅 480p / 720p
+      - 多模态参考上限 50(图 30 + 视频 10 + 音频 10)
+      - 支持 output_format=mp4|mov
+      - task_mode 可显式选择 generate(auto)/edit/extend
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="seedance2.5",
+            display_name="Seedance 2.5",
+            task_type=TaskType("video"),
+            backend="seedance",
+            # 静态兜底 ≈ 720p 5s 无输入视频(官方示例 7.56 元 = 756 积分)
+            point_cost=756,
+            description=(
+                "Seedance 2.5 统一视频生成:最长 30 秒、最多 50 多模态参考,"
+                "支持文生/图生/首尾帧/多模态/编辑/延长;复用火山方舟 Key"
+            ),
+            knowledge_content=(
+                "字节跳动 Seedance 2.5(Model ID: doubao-seedance-2-5-260628)。"
+                "\n"
+                "与 Seedance 2.0 类型分开的新一代模型,凭证复用火山方舟 Ark Key。"
+                "\n"
+                "任务形态(task_mode):"
+                "\n"
+                "  - auto(默认): 按输入自动 文生/图生/首尾帧/多模态"
+                "\n"
+                "  - edit: 视频编辑(需参考视频;建议 ratio=adaptive, duration=-1)"
+                "\n"
+                "  - extend: 视频延长(需参考视频;建议 ratio=adaptive)"
+                "\n"
+                "多图角色(frame_mode)与 2.0 相同:auto / first_last / reference。"
+                "\n"
+                "优势:最长 30 秒连贯直出、50 个多模态参考、mov/mp4 输出、编辑与延长。"
+                "\n"
+                "限制:仅 480p/720p;编辑/延长/首尾帧必须 ratio=adaptive,否则上游异步报错。"
+                "\n"
+                "支持时长:4~30 秒,或 -1 跟随输入视频(仅 edit/extend)。"
+                "\n"
+            ),
+            requirements=["seedance_apikey"],
+            backend_model="doubao-seedance-2-5-260628",
+            # 仅挂 ark(官方 2.5);不挂 runninghub 端点(端点即 2.0 标准档)
+            backend_models={"ark": "doubao-seedance-2-5-260628"},
+            mode="declarative",
+            inputs={
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=True,
+                    title="提示词",
+                    description=(
+                        '视频生成提示词。多模态可用 "图片1"/"视频1"/"音频1" 代号引用素材;'
+                        "编辑/延长任务避免误用对方关键词以免触发错误任务类型。"
+                    ),
+                ),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=30,
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description=(
+                        "参考图片(最多 30 张):0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考"
+                    ),
+                ),
+                "video_refs": PortSpec(
+                    type=PortType.LIST,
+                    max_items=10,
+                    item_type=PortType.VIDEO,
+                    title="参考视频",
+                    description='参考视频(最多 10 段),prompt 中用 "视频1/视频2/..." 引用;编辑/延长必需',
+                ),
+                "audio_refs": PortSpec(
+                    type=PortType.LIST,
+                    max_items=10,
+                    item_type=PortType.AUDIO,
+                    title="参考音频",
+                    description='参考音频(最多 10 段),prompt 中用 "音频1/音频2/..." 引用',
+                ),
+                "task_mode": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "edit", "extend"],
+                    title="任务类型",
+                    description=(
+                        "任务类型(与 2.0 类型分开的显式开关):\n"
+                        "  - auto: 按输入自动 文生/图生/首尾帧/多模态\n"
+                        "  - edit: 视频编辑(需参考视频;ratio 须 adaptive,duration 建议 -1)\n"
+                        "  - extend: 视频延长(需参考视频;ratio 须 adaptive)"
+                    ),
+                ),
+                "frame_mode": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "first_last", "reference"],
+                    title="多图角色",
+                    description=(
+                        "多图时图片角色:\n"
+                        "  - auto: 2 张图默认首尾帧\n"
+                        "  - first_last: 强制首尾帧(须 ratio=adaptive)\n"
+                        "  - reference: 全部图片仅作参考"
+                    ),
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="adaptive",
+                    values=["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+                    title="宽高比",
+                    description=(
+                        "视频宽高比;默认 adaptive。"
+                        "编辑/延长/首帧·首尾帧必须用 adaptive,自定义比例会异步报错;"
+                        "纯文生与多模态参考可用固定比例"
+                    ),
+                ),
+                "resolution": PortSpec(
+                    type=PortType.ENUM,
+                    default="720p",
+                    values=["480p", "720p"],
+                    title="分辨率",
+                    description="视频分辨率(2.5 仅支持 480p / 720p)",
+                ),
+                "duration": PortSpec(
+                    type=PortType.INTEGER,
+                    default=5,
+                    minimum=-1,
+                    maximum=30,
+                    title="时长",
+                    description=(
+                        "输出时长(秒):4~30;填 -1 表示跟随输入视频时长"
+                        "(仅 edit/extend 合法)"
+                    ),
+                ),
+                "seed": PortSpec(type=PortType.INTEGER, title="随机种子", description="随机种子,留空则随机"),
+                "generate_audio": PortSpec(
+                    type=PortType.BOOLEAN, default=True, title="同步音频", description="是否生成同步音频"
+                ),
+                "watermark": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="AI 水印", description="是否添加 AI 水印"
+                ),
+                "camera_fixed": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="固定镜头", description="摄像机是否固定"
+                ),
+                "return_last_frame": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="返回尾帧", description="是否同时返回尾帧图"
+                ),
+                "output_format": PortSpec(
+                    type=PortType.ENUM,
+                    default="mp4",
+                    values=["mp4", "mov"],
+                    title="输出格式",
+                    description="输出视频容器格式(2.5 支持 mp4 / mov)",
+                ),
+            },
+            outputs={
+                "video": PortSpec(type=PortType.OUTPUT_VIDEO, description="生成的视频(MP4/MOV)"),
+                "last_frame": PortSpec(
+                    type=PortType.OUTPUT_IMAGE, description="视频尾帧图(仅在 return_last_frame=true 时返回)"
+                ),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["video"],
+                mode="async_poll",
+                priority=92,
+            ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:token = (输入视频时长 + 输出时长) × 宽 × 高 × fps / 1024。
+
+        输入时长优先读 params.input_video_duration,否则累加 video_refs 各段时长
+        (未知段按 5s);duration=-1 时输出时长跟输入总时长。
+        """
+        resolution = request.params.get("resolution") or request.resolution or "720p"
+        duration = request.duration
+        if duration is None:
+            duration = request.params.get("duration", 5)
+        try:
+            duration_f = float(duration)
+        except (TypeError, ValueError):
+            duration_f = 5.0
+        return estimate_seedance25_points(
+            str(resolution),
+            duration_f,
+            video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
+        )
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(480p + 4s + 无输入) ~ 最大(720p + 30s + 输入 150s=10×15)。"""
+        return (
+            estimate_seedance25_points("480p", 4, video_refs=None),
+            estimate_seedance25_points("720p", 30, input_video_duration=150.0),
+        )
 
 
 class Seedance2MiniDef(SeedanceVideoModel):
@@ -375,13 +592,14 @@ class Seedance2MiniDef(SeedanceVideoModel):
             resolution,
             duration,
             video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
         )
 
     def point_range(self) -> tuple[int, int]:
-        """积分范围:最小(480p + 4s + 无输入) ~ 最大(720p + 15s + 有输入)。"""
+        """积分范围:最小(480p + 4s + 无输入) ~ 最大(720p + 15s + 输入 15s)。"""
         return (
             estimate_seedance2_mini_points("480p", 4, video_refs=None),
-            estimate_seedance2_mini_points("720p", 15, video_refs=[object()]),
+            estimate_seedance2_mini_points("720p", 15, input_video_duration=15.0),
         )
 
 
@@ -505,13 +723,14 @@ class Seedance2FastDef(SeedanceVideoModel):
             resolution,
             duration,
             video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
         )
 
     def point_range(self) -> tuple[int, int]:
-        """积分范围:最小(480p + 4s + 无输入) ~ 最大(720p + 15s + 有输入)。"""
+        """积分范围:最小(480p + 4s + 无输入) ~ 最大(720p + 15s + 输入 15s)。"""
         return (
             estimate_seedance2_fast_points("480p", 4, video_refs=None),
-            estimate_seedance2_fast_points("720p", 15, video_refs=[object()]),
+            estimate_seedance2_fast_points("720p", 15, input_video_duration=15.0),
         )
 
 
@@ -799,6 +1018,7 @@ class Wan22VideogenDef(Wan22VideoModel):
 ALL_MODELS = [
     Seedance15ProDef,
     Seedance2Def,
+    Seedance25Def,
     Seedance2MiniDef,
     Seedance2FastDef,
     HappyHorse11Def,

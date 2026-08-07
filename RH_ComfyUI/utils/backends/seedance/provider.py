@@ -285,10 +285,12 @@ class SeedanceProvider(ABC):
             and spec.ratio not in self.supported_ratios
         ):
             return False
-        if self.min_duration and spec.duration and spec.duration < self.min_duration:
-            return False
-        if self.max_duration and spec.duration and spec.duration > self.max_duration:
-            return False
+        # duration=-1 表示「跟随输入视频」(Seedance 2.5 编辑/延长),跳过上下限
+        if spec.duration != -1:
+            if self.min_duration and spec.duration and spec.duration < self.min_duration:
+                return False
+            if self.max_duration and spec.duration and spec.duration > self.max_duration:
+                return False
         return True
 
     def validate_spec(self, spec: VideoGenSpec) -> None:
@@ -325,18 +327,20 @@ class SeedanceProvider(ABC):
                 f"供应商 {self.name or self.__class__.__name__} 不支持宽高比 {spec.ratio}",
                 code="UNSUPPORTED_RATIO",
             )
-        if self.min_duration and spec.duration and spec.duration < self.min_duration:
-            raise UnsupportedProviderShapeError(
-                f"供应商 {self.name or self.__class__.__name__} 不支持时长 {spec.duration}s"
-                f"(下限 {self.min_duration}s)",
-                code="UNSUPPORTED_DURATION",
-            )
-        if self.max_duration and spec.duration and spec.duration > self.max_duration:
-            raise UnsupportedProviderShapeError(
-                f"供应商 {self.name or self.__class__.__name__} 不支持时长 {spec.duration}s"
-                f"(上限 {self.max_duration}s)",
-                code="UNSUPPORTED_DURATION",
-            )
+        # duration=-1 是官方「自适应输入时长」语义,不走 min/max 校验
+        if spec.duration != -1:
+            if self.min_duration and spec.duration and spec.duration < self.min_duration:
+                raise UnsupportedProviderShapeError(
+                    f"供应商 {self.name or self.__class__.__name__} 不支持时长 {spec.duration}s"
+                    f"(下限 {self.min_duration}s)",
+                    code="UNSUPPORTED_DURATION",
+                )
+            if self.max_duration and spec.duration and spec.duration > self.max_duration:
+                raise UnsupportedProviderShapeError(
+                    f"供应商 {self.name or self.__class__.__name__} 不支持时长 {spec.duration}s"
+                    f"(上限 {self.max_duration}s)",
+                    code="UNSUPPORTED_DURATION",
+                )
         n_img = len(spec.images())
         n_vid = len(spec.videos())
         n_aud = len(spec.audios())

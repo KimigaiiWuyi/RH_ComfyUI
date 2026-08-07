@@ -71,13 +71,43 @@ def test_estimate_video_params_echoed_in_response():
     """新参数应回显在 response.params 里,前端可观测"""
     r = asyncio.run(
         estimate_model_points(
-            "seedance2", resolution="1080p", duration=10, generate_audio=False, num_video_refs=2
+            "seedance2",
+            resolution="1080p",
+            duration=10,
+            generate_audio=False,
+            num_video_refs=2,
+            input_video_duration=12.0,
         )
     )
     assert r["params"]["resolution"] == "1080p"
     assert r["params"]["duration"] == 10
     assert r["params"]["generate_audio"] is False
     assert r["params"]["num_video_refs"] == 2
+    assert r["params"]["input_video_duration"] == 12.0
+
+
+def test_seedance25_input_video_duration_changes_cost():
+    """Seedance 2.5:显式输入视频时长进入 token 公式"""
+    r_short = asyncio.run(
+        estimate_model_points(
+            "seedance2.5",
+            resolution="720p",
+            duration=5,
+            num_video_refs=1,
+            input_video_duration=5.0,
+        )
+    )
+    r_long = asyncio.run(
+        estimate_model_points(
+            "seedance2.5",
+            resolution="720p",
+            duration=5,
+            num_video_refs=1,
+            input_video_duration=15.0,
+        )
+    )
+    assert r_long["point_cost"] > r_short["point_cost"]
+    assert r_long["point_cost"] == 1815
 
 
 def test_image_model_ignores_video_params_gracefully():

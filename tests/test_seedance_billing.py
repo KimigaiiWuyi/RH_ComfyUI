@@ -1,34 +1,31 @@
 """Seedance 视频模型动态计价:token 计算/积分换算/estimate_cost 钩子"""
 
-import pytest
 
-from RH_ComfyUI.utils.mappers.seedance_billing import (
-    _YUAN_TO_POINTS,
-    _DEFAULT_INPUT_VIDEO_DURATION,
-    _calculate_tokens,
-    _tokens_to_points,
-    _get_resolution_spec,
-    estimate_seedance2_points,
-    estimate_seedance2_fast_points,
-    estimate_seedance2_mini_points,
-    estimate_seedance15_pro_points,
-    estimate_seedance10_pro_points,
-    _RESOLUTION_SPECS,
-    _SEEDANCE2_RATES,
-    _SEEDANCE2_FAST_RATES,
-    _SEEDANCE2_MINI_RATES,
-    _SEEDANCE15_PRO_WITH_AUDIO,
-    _SEEDANCE15_PRO_WITHOUT_AUDIO,
-    _SEEDANCE10_PRO_RATE,
-)
 from RH_ComfyUI.models.video.defs import (
     Seedance2Def,
-    Seedance2MiniDef,
+    Seedance25Def,
     Seedance2FastDef,
+    Seedance2MiniDef,
     Seedance15ProDef,
 )
 from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
-
+from RH_ComfyUI.utils.mappers.seedance_billing import (
+    _YUAN_TO_POINTS,
+    _SEEDANCE2_RATES,
+    _RESOLUTION_SPECS,
+    _SEEDANCE25_RATES,
+    _SEEDANCE2_FAST_RATES,
+    _SEEDANCE2_MINI_RATES,
+    _SEEDANCE25_AUTO_DURATION,
+    _DEFAULT_INPUT_VIDEO_DURATION,
+    _calculate_tokens,
+    _tokens_to_points,
+    estimate_seedance2_points,
+    estimate_seedance25_points,
+    estimate_seedance2_fast_points,
+    estimate_seedance2_mini_points,
+    estimate_seedance15_pro_points,
+)
 
 # ═══════════════════════════════════════════════════════════════════════
 #  一、常量验证
@@ -72,6 +69,14 @@ def test_seedance2_mini_rates():
     """Seedance 2.0 Mini 费率正确"""
     assert _SEEDANCE2_MINI_RATES["480p"] == (23.00, 14.00)
     assert _SEEDANCE2_MINI_RATES["720p"] == (23.00, 14.00)
+
+
+def test_seedance25_rates():
+    """Seedance 2.5 费率正确(仅 480p/720p):无输入 70 元/M,有输入 42 元/M"""
+    assert _SEEDANCE25_RATES["480p"] == (70.00, 42.00)
+    assert _SEEDANCE25_RATES["720p"] == (70.00, 42.00)
+    assert "1080p" not in _SEEDANCE25_RATES
+    assert _SEEDANCE25_AUTO_DURATION == 15.0
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -206,6 +211,75 @@ def test_seedance2_mini_720p():
     assert points == 249
 
 
+def test_seedance25_720p_no_input_official_example():
+    """官方示例:720p 16:9 5s 无输入 = 7.56 元 = 756 积分
+
+    tokens = 5 × 1280 × 720 × 24 / 1024 = 108000
+    points = 108000 × 70 × 100 / 1_000_000 = 756
+    """
+    points = estimate_seedance25_points("720p", 5, video_refs=None)
+    assert points == 756
+    # 应高于同参 2.0(46 元/M)
+    assert points > estimate_seedance2_points("720p", 5, video_refs=None)
+
+
+def test_seedance25_720p_with_input_video_default_5s():
+    """有输入视频但无时长 → 默认 5s 输入,走 42 元/M"""
+    # tokens = (5+5)×1280×720×24/1024 = 216000
+    # points = 216000 × 42 × 100 / 1_000_000 = 907.2 → ceil 908
+    points = estimate_seedance25_points("720p", 5, video_refs=[object()])
+    assert points == 908
+
+
+def test_resolve_input_video_duration_sums_clips():
+    """多段参考视频时长应累加"""
+    from RH_ComfyUI.utils.mappers.seedance_billing import resolve_input_video_duration
+
+    assert resolve_input_video_duration(None) == 0.0
+    assert resolve_input_video_duration([]) == 0.0
+    # 无时长对象 → 默认 5 × 段数
+    assert resolve_input_video_duration([object(), object()]) == 10.0
+    # 显式总时长优先
+    assert resolve_input_video_duration([object()], input_video_duration=12.5) == 12.5
+    # 可从 dict / 数值读单段
+    assert resolve_input_video_duration([{"duration": 3}, {"duration": 7}]) == 10.0
+    assert resolve_input_video_duration([8.0, 2.0]) == 10.0
+    # 部分已知 + 部分未知
+    assert resolve_input_video_duration([{"duration": 10}, object()]) == 15.0
+
+
+def test_seedance25_input_duration_affects_points():
+    """输入视频时长进入 token 公式:更长输入 → 更多积分"""
+    short_in = estimate_seedance25_points("720p", 5, input_video_duration=5.0)
+    long_in = estimate_seedance25_points("720p", 5, input_video_duration=15.0)
+    assert long_in > short_in
+    # 手算: (15+5)×1280×720×24/1024 = 432000 tokens × 42 元/M
+    # = 432000 × 4200 / 1e6 = 1814.4 → ceil 1815
+    assert long_in == 1815
+
+
+def test_seedance25_multi_clip_default_duration():
+    """3 段无时长参考视频 = 15s 输入,不等于固定 5s"""
+    one = estimate_seedance25_points("720p", 5, video_refs=[object()])
+    three = estimate_seedance25_points("720p", 5, video_refs=[object(), object(), object()])
+    assert three > one
+    assert three == estimate_seedance25_points("720p", 5, input_video_duration=15.0)
+
+
+def test_seedance25_duration_30_more_than_5():
+    """2.5 支持 30s,更长更贵"""
+    short = estimate_seedance25_points("720p", 5, video_refs=None)
+    long = estimate_seedance25_points("720p", 30, video_refs=None)
+    assert long > short
+
+
+def test_seedance25_auto_duration_minus_one():
+    """duration=-1 按 15s 估算"""
+    auto = estimate_seedance25_points("720p", -1, video_refs=None)
+    fifteen = estimate_seedance25_points("720p", 15, video_refs=None)
+    assert auto == fifteen
+
+
 def test_seedance2_mini_cheaper_than_fast():
     """Mini 比 Fast 便宜"""
     mini = estimate_seedance2_mini_points("720p", 5, video_refs=None)
@@ -317,6 +391,24 @@ def test_seedance2_mini_estimate_cost():
     assert cost == estimate_seedance2_mini_points("720p", 5, video_refs=None)
 
 
+def test_seedance25_estimate_cost_dynamic():
+    """Seedance25Def.estimate_cost 走动态计费"""
+    m = Seedance25Def()
+    req = _make_video_request(resolution="720p", duration=5)
+    cost = m.estimate_cost(req)
+    assert cost == estimate_seedance25_points("720p", 5, video_refs=None)
+
+
+def test_seedance25_point_range_dynamic():
+    """Seedance 2.5 point_range 必须 min < max(触发前端 estimate)"""
+    m = Seedance25Def()
+    lo, hi = m.point_range()
+    assert lo < hi
+    assert lo == estimate_seedance25_points("480p", 4, video_refs=None)
+    # max = 720p 30s 输出 + 150s 输入(10 段 × 15s 上限)
+    assert hi == estimate_seedance25_points("720p", 30, input_video_duration=150.0)
+
+
 def test_seedance15_pro_estimate_cost_with_audio():
     """Seedance15ProDef.estimate_cost 有声视频"""
     m = Seedance15ProDef()
@@ -335,7 +427,13 @@ def test_seedance15_pro_estimate_cost_without_audio():
 
 def test_all_video_models_minimum_one():
     """所有视频模型任何合法参数组合积分 ≥ 1"""
-    for m_cls in [Seedance2Def, Seedance2FastDef, Seedance2MiniDef, Seedance15ProDef]:
+    for m_cls in [
+        Seedance2Def,
+        Seedance25Def,
+        Seedance2FastDef,
+        Seedance2MiniDef,
+        Seedance15ProDef,
+    ]:
         m = m_cls()
         for res in ("480p", "720p", "1080p"):
             for dur in (4, 5, 10):

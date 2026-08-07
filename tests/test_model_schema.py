@@ -11,7 +11,12 @@ from RH_ComfyUI.models.image.defs import (
     GptImage2Def,
     MinimaxImage01Def,
 )
-from RH_ComfyUI.models.video.defs import Seedance2FastDef, Seedance15ProDef, Wan22VideogenDef
+from RH_ComfyUI.models.video.defs import (
+    Seedance25Def,
+    Seedance2FastDef,
+    Seedance15ProDef,
+    Wan22VideogenDef,
+)
 from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
 
 
@@ -40,12 +45,20 @@ def test_text_only_image_models_have_no_image_port_and_reject_images(cls):
         m.validate(req)
 
 
-@pytest.mark.parametrize("cls", [Seedance15ProDef, Seedance2FastDef])
+@pytest.mark.parametrize("cls", [Seedance15ProDef, Seedance2FastDef, Seedance25Def])
 def test_seedance_variants_declare_media_ports(cls):
     # 模型 supported_shapes 含 图生/多模态,input_schema 必须同步声明媒体端口
     node = cls.node_def()
     for port in ("images", "video_refs", "audio_refs", "frame_mode"):
         assert port in node.inputs, f"{cls.__name__} 缺少 {port} 端口"
+
+
+def test_seedance25_declares_task_mode_and_output_format():
+    node = Seedance25Def.node_def()
+    assert "task_mode" in node.inputs
+    assert "output_format" in node.inputs
+    assert node.inputs["images"].max_items == 30
+    assert node.inputs["duration"].maximum == 30
 
 
 @pytest.mark.parametrize("cls", [BananaProDef, GptImage2Def, MinimaxImage01Def])

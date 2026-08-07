@@ -100,30 +100,37 @@ points             = (tokens * 21_000 + 999_999) // 1_000_000
 
 **point_range**:无 `point_range()` 覆盖或返回 `(point_cost, point_cost)` → 前端判定固定积分,不调 estimate API。
 
-### 15.2.4 视频 — 按 token 用量(Seedance 2.0 / 1.5 Pro / 1.0 Pro)
+### 15.2.4 视频 — 按 token 用量(Seedance 2.x / 1.5 Pro / 1.0 Pro)
 
-**公式**:
+**公式**(官方):
 
 ```
-tokens = _calculate_tokens(input_duration, output_duration, width, height, fps)
+tokens = (输入视频时长 + 输出视频时长) × 宽 × 高 × fps / 1024
 rate   = 根据 (model, resolution, has_input_video, generate_audio) 选 rate_yuan
-points = (tokens * rate_yuan * 100 + 999_999) // 1_000_000   (1 元 = 100 积分)
+points = ceil(tokens × rate_yuan × 100 / 1e6)   # 1 元 = 100 积分,最小 1
 ```
 
-`_calculate_tokens` 输入公式来自上游公开(参见 `utils/mappers/seedance_billing.py`)。
+**输入视频时长**(`resolve_input_video_duration`,详见 [§十九](./19-seedance25-and-input-duration.md)):
+1. 显式 `input_video_duration`(estimate API / params)
+2. 累加 video_refs 各段时长
+3. 有参考但无时长 → **5s × 段数**(不是固定总 5s)
+4. 无参考 → 0
 
 **关键参数**:
-- `resolution` ∈ {480p, 720p, 1080p, 4k}
-- `duration`: 视频输出时长(秒),Seedance 2.0 支持 4~15 秒
-- `video_refs` 数量:有 vs 无决定费率档位(有输入视频更贵)
+- `resolution` ∈ {480p, 720p, 1080p, 4k}(2.5 仅 480p/720p)
+- `duration`: 输出秒;2.0 为 4~15;2.5 为 4~30 或 **-1**
+- `input_video_duration` / `video_refs`:输入总时长 + 有/无输入费率档
 - `generate_audio`(仅 1.5 Pro):有声 16 元/M,无声 8 元/M
 
 **模型细分**:
-| 模型 | 后端 channel | duration 上限 |
-|---|---|---|
-| seedance2 | ark / runninghub | 4~15s |
-| seedance15_pro | ark | 4~12s |
-| seedance2_mini / _fast | 仅 runninghub | 4~15s |
+| 模型 | 后端 channel | duration | 费率(无输入/有输入 元/M) |
+|---|---|---|---|
+| seedance2 | ark / runninghub | 4~15s | 480/720:46/28;1080:51/31;4k:26/16 |
+| **seedance2.5** | **仅 ark** | **4~30s 或 -1** | **70 / 42**(仅 480p/720p) |
+| seedance15_pro | ark | 4~12s | 有声 16 / 无声 8 |
+| seedance2_mini / _fast | 外部/ark | 4~15s | mini 23/14;fast 37/22 |
+
+**2.5 官方例**:720p 5s 无输入 = 108000 tokens × 70 元/M = **7.56 元 = 756 积分**。
 
 ### 15.2.5 视频 — 按输出时长(Wan2.2)
 

@@ -222,9 +222,16 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     has_av = any(m.kind in (MediaKind.VIDEO, MediaKind.AUDIO) for m in media)
 
     frame_mode = str(params.get("frame_mode") or "auto").strip().lower()
+    # task_mode: Seedance 2.5 等把「生成 / 编辑 / 延长」显式拆开的半显式开关
+    # (与 frame_mode 正交;frame_mode 只管图片角色,task_mode 管任务形态)
+    task_mode = str(params.get("task_mode") or "auto").strip().lower()
 
     if shape_override is not None:
         shape = shape_override
+    elif task_mode == "edit":
+        shape = VideoTaskShape.VIDEO_EDIT
+    elif task_mode == "extend":
+        shape = VideoTaskShape.VIDEO_EXTEND
     elif frame_mode == "reference":
         # 全部图片仅作参考素材(多参考生成),不指定首尾帧
         shape = VideoTaskShape.MULTIMODAL if (n_img or has_av) else VideoTaskShape.TEXT2VIDEO
@@ -244,6 +251,19 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     if not request.ordered_content:
         media = _apply_default_roles(media, shape, frame_mode)
 
+    # duration=-1 是 Seedance 2.5 编辑/延长的「跟随输入」语义,必须透传,不能被 or 吃掉
+    raw_duration = request.duration
+    if raw_duration is None:
+        duration = 5
+    else:
+        duration = int(raw_duration)
+
+    output_format = params.get("output_format")
+    if isinstance(output_format, str):
+        output_format = output_format.strip().lower() or None
+    else:
+        output_format = None
+
     return VideoGenSpec(
         shape=shape,
         prompt=base_prompt,
@@ -251,13 +271,14 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
         ordered_segments=ordered_segments,
         ratio=request.ratio,
         resolution=request.resolution,
-        duration=request.duration or 5,
+        duration=duration,
         seed=request.seed,
         generate_audio=bool(request.generate_audio),
         watermark=bool(request.watermark),
         camera_fixed=bool(request.camera_fixed),
         return_last_frame=bool(request.return_last_frame),
         service_tier=request.service_tier or "default",
+        output_format=output_format,
         params=spec_params,
     )
 

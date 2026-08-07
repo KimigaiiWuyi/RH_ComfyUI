@@ -167,7 +167,14 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
         VideoTaskShape.VIDEO_EDIT,
         VideoTaskShape.VIDEO_EXTEND,
     }
+    # 2.0 支持到 4k;2.5 仅 480p/720p —— 分辨率上限由各模型 schema 约束,这里放宽全集
     supported_resolutions = {"480p", "720p", "1080p", "4k"}
+    # Seedance 2.5 放宽到 30s / 图 30 / 视频 10 / 音频 10;2.0 模型侧 max_reference 仍挡 12
+    min_duration: int = 4
+    max_duration: int = 30
+    max_images: int = 30
+    max_videos: int = 10
+    max_audios: int = 10
 
     STATUS_MAP: dict[str, NormalizedStatus] = {
         "queued": NormalizedStatus.QUEUED,
@@ -236,7 +243,8 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
             body["model"] = model
         if spec.ratio is not None:
             body["ratio"] = spec.ratio
-        if spec.duration:
+        # duration=-1 必须原样透传(2.5 编辑/延长「跟随输入」);0/None 不写
+        if spec.duration is not None and int(spec.duration) != 0:
             body["duration"] = int(spec.duration)
         if spec.resolution is not None:
             body["resolution"] = spec.resolution
@@ -252,6 +260,10 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
             body["return_last_frame"] = True
         if spec.service_tier and spec.service_tier != "default":
             body["service_tier"] = spec.service_tier
+        # Seedance 2.5: mp4 / mov;其它系列忽略(上游不认识会报错,仅非空且非默认 mp4 时写)
+        out_fmt = (spec.output_format or "").strip().lower()
+        if out_fmt and out_fmt != "mp4":
+            body["output_format"] = out_fmt
         draft = spec.params.get("draft")
         if draft is not None:
             body["draft"] = draft
