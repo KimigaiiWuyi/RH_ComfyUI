@@ -43,6 +43,10 @@ class GeminiImageChannel(ProviderChannel):
     def __init__(self) -> None:
         self._api = gemini_image_api
 
+    def supports_remote_cancel(self) -> bool:
+        """background interactions 支持 cancel(尽力)。"""
+        return True
+
     async def check_available(self) -> bool:
         return self._api.is_configured()
 
@@ -78,15 +82,11 @@ class GeminiImageChannel(ProviderChannel):
                 transient=rate_limited,
                 channel=self.name,
                 code="RATE_LIMITED" if rate_limited else "GEMINI_FAILED",
-                user_message=(
-                    "Gemini 生图繁忙,正在排队重试…" if rate_limited else "Gemini 生图失败,请稍后重试。"
-                ),
+                user_message=("Gemini 生图繁忙,正在排队重试…" if rate_limited else "Gemini 生图失败,请稍后重试。"),
             ) from exc
 
         # 消费统计维度:区分 VertexAI / AI Studio
-        output.metadata.setdefault(
-            "channel", "gemini-vertex" if self._api.is_vertex else "gemini-ai-studio"
-        )
+        output.metadata.setdefault("channel", "gemini-vertex" if self._api.is_vertex else "gemini-ai-studio")
         return output
 
 

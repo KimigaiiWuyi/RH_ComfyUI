@@ -153,6 +153,13 @@ pytest tests/test_model_schema.py -v                     # schema 契约快照
 - `models/<modality>/defs.py` 加模型类,`backend="<vendor>"`
 - 配置文件加 `<vendor>_apikey` 等
 
+**2026-08 异步 backend 额外必做**(详见 [§二十](./20-cancel-resume-and-wire-audit.md)):
+1. 上游 create 返回 task_id 后 → `bind_vendor_cancel(vendor_task_id, cancel_remote, channel_name)`
+2. 真正 POST 前 → `set_wire_from_http_body(mask_body(body))`(统计最终 prompt/body)
+3. 若支持远程 cancel → 模型/通道 `supports_remote_cancel=True`(诚实声明)
+4. 若可仅凭 task_id poll → 考虑接入 `resume.py` 分支 + `can_resume`
+5. 测:`test_cancel_generation` 模式 / wire 单测 / 契约 golden
+
 ## 17.4 改计费曲线
 
 | 改的内容 | 改的文件 | 测试 |
@@ -210,16 +217,19 @@ class ClosedSourceModel(AIGCGenerationBase):
 model_registry.register(ClosedSourceModel())
 ```
 
-## 17.7 提交前自检清单(2026-07 后必跑)
+## 17.7 提交前自检清单(2026-07 后必跑;2026-08 取消/wire 增项)
 
 - [ ] `pytest tests/ -q` 全绿(允许 pre-existing 失败)
 - [ ] `ruff check RH_ComfyUI`
 - [ ] `pytest tests/test_dynamic_estimate_trigger.py` — 动态模型 `min < max`
 - [ ] `pytest tests/test_ratio_size_map_correctness.py` — _RATIO_SIZE_MAP 单调性
-- [ ] `pytest tests/test_http_contract.py` — ModelEntry 字段契约快照
-- [ ] 浏览器实测:选新模型 → 看 schema 渲染 → 切换参数 → 看 estimate 实时更新
-- [ ] 浏览器实测:输入长文本/多图 → 看积分随输入增长
-- [ ] 手动跑 `curl /models/estimate?model=<name>&...` 验证新参数透传
+- [ ] `pytest tests/test_http_contract.py` — ModelEntry 字段契约快照(含 cancel 字段)
+- [ ] `pytest tests/test_cancel_generation.py tests/test_statistics_request_body.py` — 取消/wire
+- [ ] 异步模型:真实跑一单 → 查记录 `prompt`/`request_body_json` 是否为**改写后**上游形态
+- [ ] 异步模型:进行中 cancel → status=cancelled、不双退
+- [ ] `/models` 中 `supports_remote_cancel` 与真实 API 一致(`rh_app`=false)
+- [ ] 浏览器实测:选新模型 → schema → estimate 实时更新
+- [ ] 手动 `curl /models/estimate?model=<name>&...` 验证新参数透传
 
 ## 17.8 常见出错模式
 
@@ -233,6 +243,9 @@ model_registry.register(ClosedSourceModel())
 | FastAPI 422 拒绝 | estimate API 签名缺参数 | 加 Query 参数 |
 | dispatch 报 "积分不足" | `estimate_cost` 返回值 > 用户余额 | 改 billing mapper 或减输入 |
 | 显示 is_dynamic=false | `estimate_cost` 返回值 == `point_cost` | 检查 `point_range` 覆盖是否正确 |
+| 消费页 prompt 无【图片N】/ 仍是 [参考图片N] | 未 set_wire 或 record 未 UPDATE | §二十 §20.4 |
+| rh_app 显示可远程取消 | 通道 remote 计算错误 | §二十 §20.2 |
+| 重启后无法 resume | 未 bind_vendor_cancel / 无 vendor_task_id | §二十 §20.3 |
 
 ## 17.9 上线后 7 天监控
 

@@ -24,10 +24,13 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 | `test_concurrency_reload.py` | Max_Concurrency / 模型级并发闸热更新与非法值回落 |
 | `test_provider_stats.py` | 供应商对账命令渲染(聚合行 + 熔断快照) |
 | `test_video_normalize.py` | 视频预处理下沉:normalize() 统一缩放 images 与 ordered_content 图片项 |
+| `test_cancel_generation.py` | cancel 登记/远程 bind、`rh_app`≠`comfyui` 通道 remote cancel、`can_resume`、模型 cancel 标志 |
+| `test_statistics_request_body.py` | request_body 脱敏、**wire 优先于入参 prompt/body**、begin→update 同 id |
 
 约定:用 FakeModel + FakePolicy,不 mock 网络(内核本身不应有网络调用);
 统计落库用 `_mute_recording` monkeypatch 静音。
 新增跨字段校验的模型必须在 `test_schema_validation.py` 补用例。
+新异步 backend 应补:bind_vendor_cancel 路径 + set_wire 后 record_task 断言(或单元测 wire_capture)。
 
 ## 8.2 代码红线(违反必被打回)
 
@@ -42,7 +45,8 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
    迁移期安排,不要模仿扩大:schema 类型物理存放在 `utils/core/`(core.schema
    re-export 为规范路径)、telemetry → `utils/database`、顶层 re-export
    `SeedanceProviderChannel`、按需读 `rh_config`;
-6. **开源仓库零闭源内容**(URL/凭证/条件 import/按来源分叉的条件分支);
+6. **开源仓库零闭源 / 零宿主业务硬依赖**(URL/凭证/条件 import 宿主包/
+   按产品来源分叉;见 §七、§二十 §20.5);
 7. 模型 `name` 是主键,改名 = 下线旧 + 上线新(统计断档),慎改;
 8. `RHComfyuiTaskRecord` 既有列不改名不删;新列必须带默认值;
 9. 每个新目录必须有 README.md(目录职责 + 维护须知);
@@ -69,8 +73,10 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
       channel 正确;
 - [ ] 人为造一次失败(如错误参数):确认不扣费;造一次执行失败:确认退款;
 - [ ] 多通道模型:关掉主通道配置,确认自动切换备用通道;
+- [ ] 异步模型:进行中 cancel 一次(status=cancelled、消费记录合理);
+- [ ] 异步模型:查一条 ok 记录的 `prompt`/`request_body_json` 是否为最终上游形态;
 - [ ] 文档同步:模型能力变化 → `knowledge_content` + 相关 README;
-      架构变化 → 本 SKILL(`docs/skills/rh-comfyui-development/`)对应章节。
+      架构变化 → 本 SKILL(`docs/skills/rh-comfyui-development/`)对应章节(含 §二十)。
 
 ## 8.4 常见故障定位
 
@@ -79,6 +85,10 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 | 新模型三入口都看不到 | 是否加进 `ALL_MODELS`;启动日志有无注册行 |
 | 模型显示不可用 | `required_config` / `requirements` 对应配置键是否已配 |
 | 扣了积分没产物 | 统计表该记录 status 与退款标记(见 05 章 5.1) |
+| 取消后仍扣费/双退 | 宿主是否先退再 cancel;CancelledError 路径是否再 refund(§二十) |
+| 消费页 prompt 与上游日志不一致 | backend 是否 `set_wire_*`;record_task 是否 UPDATE 了 prompt(§二十 §20.4) |
+| 重启后任务卡 running | 有无 vendor_task_id;宿主是否 resume_poll 或 fail+退(§二十 §20.3) |
+| rh_app 目录显示可远程取消 | `_channel_supports_remote_cancel` 是否被改坏(§二十 §20.2) |
 | 参数改了调用方没变 | 调用方读的是 `input_schema` 序列化,确认改的是 defs 的 PortSpec |
 | 通道频繁切换/全挂 | 熔断日志;`ChannelError.retryable` 是否误标 |
 | import 报 `cannot import name 'dispatcher' from 'dispatch'` | 用 `importlib.import_module`(02 章 2.1 的坑) |

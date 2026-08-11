@@ -13,6 +13,7 @@ from typing import Any, Optional
 from dataclasses import dataclass
 
 from ..schema.types import NodeOutput
+from ..schema.request import GenerationRequest
 
 
 class ProviderChannel(ABC):
@@ -54,6 +55,27 @@ class ProviderChannel(ABC):
     def audit_key_prefix(self) -> str:
         """审计用:当前生效凭证 key 前 6 位(默认空;持密钥的通道覆盖)"""
         return ""
+
+    def supports_remote_cancel(self) -> bool:
+        """该供应商通道创建上游任务后是否可 DELETE/cancel。
+
+        **供应商级能力**,与模型 ClassVar 无关。默认 False(未知/无 cancel API);
+        真有上游取消的通道(ark / comfyui / gemini / dashscope / 网关异步等)覆盖为 True。
+        目录 ``channels[].supports_remote_cancel`` 与顶层 OR 均以此为准。
+        """
+        return False
+
+    def get_resume_client(self) -> Any | None:
+        """可选公开协议:返回可 poll 的 resume client(宿主注入通道实现)。
+
+        默认 None;异步网关图等覆盖为持有 poll_until_done 的 client。
+        resume_poll 优先调此方法,避免依赖私有 ``_client``。
+        """
+        return None
+
+    def get_provider_for_resume(self) -> Any | None:
+        """可选公开协议:返回 Seedance/HappyHorse 等 provider(默认可 None)。"""
+        return None
 
 
 @dataclass

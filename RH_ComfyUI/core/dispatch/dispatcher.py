@@ -23,6 +23,7 @@ from gsuid_core.logger import logger
 
 from .context import DispatchContext
 from ..base.errors import GenerationError, describe_exception
+from .active_tasks import cancel_generation, get_active_task_registry
 from ..schema.types import NodeOutput
 from ..schema.request import GenerationResult, GenerationRequest
 from ..telemetry.recorder import begin_dispatch, record_dispatch
@@ -72,6 +73,19 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
         ctx=ctx,
         point_cost=cost,
     )
+    # 登记进行中任务;supports_cancel=False(如 rh_app)时 cancel_generation 会拒绝
+    active_reg = get_active_task_registry()
+    active_handle = await active_reg.register(
+        model_name=model.name,
+        trace_id=request.trace_id or ctx.trace_id or "",
+        record_id=record_id,
+        user_id=request.user_id or ctx.billing.user_id or "",
+        allow_cancel=bool(model.supports_cancel),
+    )
+    # 清空上游 wire 快照;backend 在 POST 前 set_wire_audit,record 时取最终 body
+    from ..telemetry.wire_capture import clear_wire_audit
+
+    clear_wire_audit()
     start = time.monotonic()
     output: Optional[NodeOutput] = None
     result: Optional[GenerationResult] = None
@@ -80,8 +94,7 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
         # 并发闸全部在 model.run() 内部(channel_slot + channel_slot_for_model 两层);
         # 本层仅做超时预算 + 日志。详见 core/dispatch/concurrency.py。
         logger.info(
-            f"[dispatch] 执行生成: task={request.task_type.value}, "
-            f"model={model.name}, entry={ctx.billing.entry_point}"
+            f"[dispatch] 执行生成: task={request.task_type.value}, model={model.name}, entry={ctx.billing.entry_point}"
         )
         return await model.run(request, on_progress=ctx.on_progress)
 
@@ -158,6 +171,9 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
         else:
             logger.warning(f"[dispatch] 模型 {model.name} 执行中断({type(e).__name__}),已退款")
         raise
+    finally:
+        await active_reg.unregister(active_handle)
+        clear_wire_audit()
 
 
-__all__ = ["dispatch"]
+__all__ = ["dispatch", "cancel_generation"]

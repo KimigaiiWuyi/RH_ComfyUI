@@ -28,7 +28,12 @@ from ...utils.backends.happyhorse.channel import builtin_happyhorse_channels
 
 
 class SeedanceVideoModel(VideoPipelineModel):
-    """Seedance 2.0:多参考(图+视频+音频 合计≤12)/首尾帧/单图/纯文本"""
+    """Seedance 2.0:多参考(图+视频+音频 合计≤12)/首尾帧/单图/纯文本
+
+    火山方舟 / 网关异步任务支持 DELETE 取消(supports_remote_cancel=True)。
+    """
+
+    supports_remote_cancel = True
 
     def __init__(self, node: NodeDef) -> None:
         super().__init__(node)
@@ -233,19 +238,14 @@ class Seedance25VideoModel(SeedanceVideoModel):
     def validate(self, request: GenerationRequest) -> None:
         # 先做 2.5 专属数量上限(父类 SeedanceVideoModel 只限制视频/音频 ≤3)
         if len(request.images) > self.MAX_IMAGES:
-            raise ValidationError(
-                f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,"
-                f"当前 {len(request.images)} 张"
-            )
+            raise ValidationError(f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,当前 {len(request.images)} 张")
         if len(request.video_refs) > self.MAX_VIDEOS:
             raise ValidationError(
-                f"{self.display_name} 最多 {self.MAX_VIDEOS} 段参考视频,"
-                f"当前 {len(request.video_refs)} 段"
+                f"{self.display_name} 最多 {self.MAX_VIDEOS} 段参考视频,当前 {len(request.video_refs)} 段"
             )
         if len(request.audio_refs) > self.MAX_AUDIOS:
             raise ValidationError(
-                f"{self.display_name} 最多 {self.MAX_AUDIOS} 段参考音频,"
-                f"当前 {len(request.audio_refs)} 段"
+                f"{self.display_name} 最多 {self.MAX_AUDIOS} 段参考音频,当前 {len(request.audio_refs)} 段"
             )
 
         # 跳过 SeedanceVideoModel.validate 的 3 段音视频上限,直接走通用基类 + 本类约束
@@ -268,18 +268,13 @@ class Seedance25VideoModel(SeedanceVideoModel):
                     "(请设 task_mode=edit 或 extend,并提供参考视频)"
                 )
         elif duration is not None and duration != 0 and not (4 <= int(duration) <= 30):
-            raise ValidationError(
-                f"{self.display_name} 时长须为 4~30 秒或 -1(跟随输入),当前 {duration}"
-            )
+            raise ValidationError(f"{self.display_name} 时长须为 4~30 秒或 -1(跟随输入),当前 {duration}")
 
         # 官方约束:视频编辑 / 延长 / 首帧·首尾帧 必须 ratio=adaptive,自定义比例会异步报错
         # 多模态参考(带视频/音频,或 frame_mode=reference)与纯文生可用自定义比例
         is_edit_or_extend = task_mode in ("edit", "extend")
         is_frame_driven = (
-            not has_av
-            and frame_mode != "reference"
-            and n_img >= 1
-            and task_mode == "auto"
+            not has_av and frame_mode != "reference" and n_img >= 1 and task_mode == "auto"
         ) or frame_mode == "first_last"
         if (is_edit_or_extend or is_frame_driven) and ratio and ratio != "adaptive":
             raise ValidationError(
@@ -292,14 +287,11 @@ class Seedance25VideoModel(SeedanceVideoModel):
             from ...core.schema.types import MediaKind, ContentItemType
 
             oc_has_video = any(
-                item.type == ContentItemType.VIDEO
-                or (item.media is not None and item.media.kind == MediaKind.VIDEO)
+                item.type == ContentItemType.VIDEO or (item.media is not None and item.media.kind == MediaKind.VIDEO)
                 for item in (request.ordered_content or [])
             )
             if not oc_has_video:
-                raise ValidationError(
-                    f"{self.display_name} 的 {task_mode} 任务至少需要 1 段参考视频"
-                )
+                raise ValidationError(f"{self.display_name} 的 {task_mode} 任务至少需要 1 段参考视频")
 
     async def unavailable_reason(self) -> str:
         return (
@@ -369,6 +361,8 @@ class HappyHorseVideoModel(VideoPipelineModel):
     - 有输入视频 → happyhorse-1.0-video-edit
     """
 
+    supports_remote_cancel = True  # DashScope POST /tasks/{id}/cancel(仅 PENDING)
+
     MAX_IMAGES = 9
     MAX_VIDEOS = 1
 
@@ -398,8 +392,7 @@ class HappyHorseVideoModel(VideoPipelineModel):
         self.supports_generate_audio = True
         self.max_reference_total = self.MAX_IMAGES + self.MAX_VIDEOS
         self.card = ModelCard(
-            description=node.description
-            or "阿里云 HappyHorse 1.1 统一视频生成,按输入自动切换文生/图生/参考/编辑",
+            description=node.description or "阿里云 HappyHorse 1.1 统一视频生成,按输入自动切换文生/图生/参考/编辑",
             strengths=[
                 "文生/图生/多参考一体",
                 "物理真实运动流畅",
@@ -420,21 +413,14 @@ class HappyHorseVideoModel(VideoPipelineModel):
         if request.audio_refs:
             raise ValidationError(f"{self.display_name} 不支持参考音频,请移除音频素材")
         if len(request.video_refs) > self.MAX_VIDEOS:
-            raise ValidationError(
-                f"{self.display_name} 最多 1 段输入视频,当前 {len(request.video_refs)} 段"
-            )
+            raise ValidationError(f"{self.display_name} 最多 1 段输入视频,当前 {len(request.video_refs)} 段")
         if len(request.images) > self.MAX_IMAGES:
-            raise ValidationError(
-                f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,"
-                f"当前 {len(request.images)} 张"
-            )
+            raise ValidationError(f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,当前 {len(request.images)} 张")
         # 视频编辑:分辨率仅 720p/1080p
         if request.video_refs:
-            res = (request.resolution or request.params.get("resolution") or "1080p")
+            res = request.resolution or request.params.get("resolution") or "1080p"
             if str(res).lower() in ("480p", "4k"):
-                raise ValidationError(
-                    f"{self.display_name} 视频编辑仅支持 720p / 1080p,当前 {res}"
-                )
+                raise ValidationError(f"{self.display_name} 视频编辑仅支持 720p / 1080p,当前 {res}")
         super().validate(request)
 
     def channel_bindings(self) -> list[ChannelBinding]:

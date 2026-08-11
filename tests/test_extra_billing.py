@@ -1,22 +1,19 @@
 """额外模型计费测试:Wan2.2 / MiMo TTS / MiniMax T2A Speech"""
 
-import pytest
-
+from RH_ComfyUI.models.video.defs import Wan22VideogenDef
+from RH_ComfyUI.models.speech.defs import MimoTtsDef, MinimaxT2aSpeechDef
+from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.extra_billing import (
     WAN22_POINTS_PER_SECOND,
     MIMO_POINTS_PER_MILLION_BYTES,
     MINIMAX_T2A_POINTS_PER_10K_CHARS,
-    calculate_wan22_points,
     estimate_wan22_points,
-    calculate_mimo_tts_points,
+    calculate_wan22_points,
     estimate_mimo_tts_points,
-    calculate_minimax_t2a_points,
+    calculate_mimo_tts_points,
     estimate_minimax_t2a_points,
+    calculate_minimax_t2a_points,
 )
-from RH_ComfyUI.models.video.defs import Wan22VideogenDef
-from RH_ComfyUI.models.speech.defs import MimoTtsDef, MinimaxT2aSpeechDef
-from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  一、Wan2.2 视频生成计费测试
@@ -47,6 +44,7 @@ def test_wan22_estimate():
 
 
 # ── Wan22VideogenDef.estimate_cost 钩子 ──
+
 
 def _make_wan22_request(duration: int = 5) -> GenerationRequest:
     return GenerationRequest(
@@ -103,6 +101,7 @@ def test_mimo_proportional():
 
 # ── MimoTtsDef.estimate_cost 钩子 ──
 
+
 def _make_speech_request(prompt: str = "你好") -> GenerationRequest:
     return GenerationRequest(task_type=TaskType.SPEECH, prompt=prompt)
 
@@ -152,6 +151,7 @@ def test_minimax_t2a_proportional():
 
 
 # ── MinimaxT2aSpeechDef.estimate_cost 钩子 ──
+
 
 def test_minimax_t2a_estimate_cost():
     """MinimaxT2aSpeechDef.estimate_cost 走动态计费"""

@@ -45,7 +45,7 @@ def _map_to_canonical(fullname: str, canonical: str) -> Optional[str]:
     """把任意身份前缀下的模块名映射到规范树;不归本模块管则返回 None"""
     for prefix in IDENTITY_PREFIXES:
         if fullname == prefix or fullname.startswith(prefix + "."):
-            suffix = fullname[len(prefix):]
+            suffix = fullname[len(prefix) :]
             if prefix == "RH_ComfyUI" and not suffix:
                 return None  # 裸外层包不接管
             return canonical + suffix
@@ -104,7 +104,7 @@ def unify_module_identity(canonical: str) -> None:
     for name in list(sys.modules):
         if name != canonical and not name.startswith(canonical + "."):
             continue
-        suffix = name[len(canonical):]
+        suffix = name[len(canonical) :]
         module = sys.modules[name]
         for prefix in IDENTITY_PREFIXES:
             alias = prefix + suffix

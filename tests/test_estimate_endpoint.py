@@ -26,54 +26,40 @@ def test_estimate_gpt_image2_dynamic():
     assert r_default["model"] == "gpt-image-2"
     assert r_default["point_cost"] > 0
 
-    r_high = asyncio.run(
-        estimate_model_points("gpt-image-2", ratio="1:1", image_size="4K", quality="high")
-    )
+    r_high = asyncio.run(estimate_model_points("gpt-image-2", ratio="1:1", image_size="4K", quality="high"))
     assert r_high["point_cost"] > r_default["point_cost"]
     assert r_high["is_dynamic"] is True
 
-    r_low = asyncio.run(
-        estimate_model_points("gpt-image-2", ratio="1:1", image_size="1K", quality="low")
-    )
+    r_low = asyncio.run(estimate_model_points("gpt-image-2", ratio="1:1", image_size="1K", quality="low"))
     assert r_low["point_cost"] < r_default["point_cost"]
 
 
 def test_estimate_gpt_image2_auto_ratio():
     """ratio=auto → 1024x1024 估算,与显式 1:1 1K 同尺寸应相同"""
-    r_auto = asyncio.run(
-        estimate_model_points("gpt-image-2", ratio="auto", image_size="4K", quality="high")
-    )
+    r_auto = asyncio.run(estimate_model_points("gpt-image-2", ratio="auto", image_size="4K", quality="high"))
     # auto 回落 1024x1024,与 1:1 1K (也是 1024x1024) 同尺寸
-    r_1k = asyncio.run(
-        estimate_model_points("gpt-image-2", ratio="1:1", image_size="1K", quality="high")
-    )
+    r_1k = asyncio.run(estimate_model_points("gpt-image-2", ratio="1:1", image_size="1K", quality="high"))
     assert r_auto["point_cost"] == r_1k["point_cost"]
     # 但 auto(1024x1024) 与 4K 1:1 (3840x2160) 应不同
-    r_4k = asyncio.run(
-        estimate_model_points("gpt-image-2", ratio="1:1", image_size="4K", quality="high")
-    )
+    r_4k = asyncio.run(estimate_model_points("gpt-image-2", ratio="1:1", image_size="4K", quality="high"))
     assert r_auto["point_cost"] != r_4k["point_cost"]
 
 
-def test_estimate_banana_pro_matches_gpt_image2():
-    """banana_pro 与 gpt-image-2 共享计费逻辑"""
-    r_bp = asyncio.run(
-        estimate_model_points("banana_pro", ratio="16:9", image_size="2K", quality="medium")
-    )
-    r_gpt = asyncio.run(
-        estimate_model_points("gpt-image-2", ratio="16:9", image_size="2K", quality="medium")
-    )
-    assert r_bp["point_cost"] == r_gpt["point_cost"]
+def test_estimate_banana_pro_dynamic():
+    """banana_pro 走动态计费(与 gpt-image-2 公式独立,只断言自身动态)"""
+    r_bp = asyncio.run(estimate_model_points("banana_pro", ratio="16:9", image_size="2K", quality="medium"))
+    assert r_bp["model"] == "banana_pro"
+    assert r_bp["point_cost"] > 0
     assert r_bp["is_dynamic"] is True
+    r_4k = asyncio.run(estimate_model_points("banana_pro", ratio="16:9", image_size="4K", quality="medium"))
+    assert r_4k["point_cost"] >= r_bp["point_cost"]
 
 
 def test_estimate_static_model_fallback():
     """未覆盖 estimate_cost 的模型返回静态 point_cost"""
-    r = asyncio.run(
-        estimate_model_points("qwen_2512", ratio="1:1", image_size="4K", quality="high")
-    )
+    r = asyncio.run(estimate_model_points("qwen_2512", ratio="1:1", image_size="4K", quality="high"))
     assert r["model"] == "qwen_2512"
-    assert r["point_cost"] == 2  # 静态值
+    assert r["point_cost"] == 15  # defs 静态值
     assert r["is_dynamic"] is False
 
 
@@ -86,9 +72,7 @@ def test_estimate_unknown_model():
 
 def test_estimate_params_normalized():
     """返回的 params 与传入一致"""
-    r = asyncio.run(
-        estimate_model_points("gpt-image-2", ratio="9:16", image_size="2K", quality="low")
-    )
+    r = asyncio.run(estimate_model_points("gpt-image-2", ratio="9:16", image_size="2K", quality="low"))
     assert r["params"] == {
         "ratio": "9:16",
         "image_size": "2K",
@@ -98,11 +82,12 @@ def test_estimate_params_normalized():
         "generate_audio": None,
         "num_input_images": 0,
         "num_video_refs": 0,
+        "input_video_duration": None,
     }
 
 
 def test_estimate_partial_params():
-    """只传部分参数,缺失的不在 params 中"""
+    """只传部分参数,缺失的为 None"""
     r = asyncio.run(estimate_model_points("gpt-image-2", quality="high"))
     assert r["params"] == {
         "ratio": None,
@@ -113,6 +98,7 @@ def test_estimate_partial_params():
         "generate_audio": None,
         "num_input_images": 0,
         "num_video_refs": 0,
+        "input_video_duration": None,
     }
     r_default = asyncio.run(estimate_model_points("gpt-image-2"))
     assert r["point_cost"] > r_default["point_cost"]

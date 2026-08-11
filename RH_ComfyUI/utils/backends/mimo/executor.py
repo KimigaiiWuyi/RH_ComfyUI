@@ -47,6 +47,18 @@ class MIMOAdapter(Adapter):
         if node.mapper_func is None:
             raise RuntimeError(f"MiMo 节点 {node.name} 缺少 mapper_func")
 
+        from ....core.telemetry.wire_capture import set_wire_audit
+
+        set_wire_audit(
+            prompt=request.prompt or "",
+            request={
+                "model": node.backend_model or request.params.get("model") or "mimo",
+                "prompt": request.prompt or "",
+                "mood": request.params.get("mood"),
+                "voice_id": request.params.get("voice_id"),
+                "has_reference_audio": bool(request.params.get("reference_audio")),
+            },
+        )
         await _emit(on_progress, ProgressEvent(stage="running", percent=20, message="MiMo TTS 生成中"))
         result = await node.mapper_func(request, self.api)
         await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="完成"))

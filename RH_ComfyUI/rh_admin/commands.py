@@ -326,8 +326,7 @@ def _render_provider_stats(rows: list, snapshot: dict, scope: str) -> str:
         lines.append("🔴 熔断中(本次运行期): " + ", ".join(sorted(open_circuits)))
     if counting:
         lines.append(
-            "🟡 有连续失败计数: "
-            + ", ".join(f"{key}×{st['failure_count']}" for key, st in sorted(counting.items()))
+            "🟡 有连续失败计数: " + ", ".join(f"{key}×{st['failure_count']}" for key, st in sorted(counting.items()))
         )
     if not open_circuits and not counting:
         lines.append("🟢 当前所有通道健康(无熔断/无连续失败)")

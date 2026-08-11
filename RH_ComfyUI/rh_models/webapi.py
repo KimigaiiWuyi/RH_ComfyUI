@@ -53,6 +53,13 @@ class ModelInfo(_Base):
     description: str = ""
     input_schema: dict = {}
     output_schema: dict = {}
+    # 取消能力(2026-08):本进程 cancel_generation / 上游 DELETE(通道级)
+    # 缺省 False:未知/不完整条目 fail-closed
+    execution_mode: str = "sync"
+    supports_cancel: bool = False
+    supports_remote_cancel: bool = False
+    # channels:[{name, vendor_model, available, supports_cancel, supports_remote_cancel}]
+    channels: list[dict] = []
 
 
 class ModelCatalog(_Base):
@@ -115,11 +122,27 @@ async def list_all_models() -> dict[str, object]:
           "priority": 60,
           "description": "...",
           "input_schema": {...},
-          "output_schema": {...}
+          "output_schema": {...},
+          "execution_mode": "sync|async_poll",
+          "supports_cancel": true,
+          "supports_remote_cancel": false,
+          "channels": [
+            {"name": "ark", "vendor_model": "...", "available": true,
+             "supports_cancel": true, "supports_remote_cancel": true}
+          ]
         }
       ]
     }
     ```
+
+    取消字段(前后端统一契约 — 前端**必须**据此决定是否展示取消按钮):
+    - ``supports_cancel``: 模型顶层;本进程 ``POST .../tasks/cancel`` 是否允许
+      (有 channels 时 = 任一通道 ``channels[].supports_cancel`` 的 OR)
+    - ``supports_remote_cancel``: 创建上游后是否可远程 DELETE
+      (有 channels 时 = 通道 OR;精确路由读当前通道)
+    - ``channels[]``: 多通道时以**当前选用通道**的 ``supports_*`` 为准
+    - ``rh_app``: 顶层与通道均为 false(只能 resume,不能 cancel)
+    - 引擎 cancel 入口: ``POST /api/RH_ComfyUI/tasks/cancel``(与上述标志一致)
     """
     return await build_model_catalog(include_unavailable=True)
 
@@ -194,6 +217,73 @@ async def estimate_model_cost(
         num_video_refs=num_video_refs,
         input_video_duration=input_video_duration,
     )
+
+
+class CancelTaskBody(_Base):
+    """取消进行中任务请求体。"""
+
+    trace_id: Optional[str] = None
+    record_id: Optional[int] = None
+    reason: str = "user_cancel"
+
+
+class CancelTaskResult(_Base):
+    """取消任务结果。"""
+
+    ok: bool = False
+    found: bool = False
+    cancelled_local: bool = False
+    cancelled_remote: bool = False
+    model: str = ""
+    vendor_task_id: str = ""
+    message: str = ""
+
+
+@app.post(
+    "/api/RH_ComfyUI/tasks/cancel",
+    summary="取消进行中的生成任务",
+    tags=["生成引擎/任务"],
+    response_model=CancelTaskResult,
+)
+async def cancel_running_task(body: CancelTaskBody) -> dict[str, object]:
+    """取消本进程内进行中的生成。
+
+    前端应先读 ``GET /api/RH_ComfyUI/models`` 的 ``supports_cancel``
+    (或多通道时当前通道的 ``channels[].supports_cancel``);为 false 时
+    **不要**调本接口(如 rh_app 一律不可取消,只能 resume)。
+
+    用 ``trace_id``(推荐,与提交时相同)或 ``record_id``(统计表主键)定位。
+    支持 remote 的通道会先 DELETE 上游,再中断本地 Task;
+    dispatch 记 ``status=cancelled`` 并退款。``supports_cancel=false``
+    的进行中任务会返回 ok=false(与目录能力一致)。
+
+    例::
+
+        POST / api / RH_ComfyUI / tasks / cancel
+        {"trace_id": "job-or-trace-abc-123"}
+    """
+    from ..core.dispatch.active_tasks import cancel_generation
+
+    if not body.trace_id and body.record_id is None:
+        return {
+            "ok": False,
+            "found": False,
+            "cancelled_local": False,
+            "cancelled_remote": False,
+            "model": "",
+            "vendor_task_id": "",
+            "message": "必须提供 trace_id 或 record_id",
+        }
+    result = await cancel_generation(
+        trace_id=body.trace_id,
+        record_id=body.record_id,
+        reason=body.reason or "user_cancel",
+    )
+    logger.info(
+        f"[webapi] cancel task: trace_id={body.trace_id}, record_id={body.record_id}, "
+        f"ok={result.get('ok')}, message={result.get('message')}"
+    )
+    return result
 
 
 @app.get(

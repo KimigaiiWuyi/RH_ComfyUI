@@ -74,25 +74,29 @@ def test_wan22_schema_max_items_2():
     }
     # 0/1/2 张图都通过输入档案校验
     assert schema_supports_request(_req(task_type=TaskType.VIDEO, prompt="x"), wan22_schema) is True
-    assert schema_supports_request(
-        _req(task_type=TaskType.VIDEO, prompt="x", images=[b"1"]), wan22_schema
-    ) is True
-    assert schema_supports_request(
-        _req(task_type=TaskType.VIDEO, prompt="x", images=[b"1", b"2"]), wan22_schema
-    ) is True
+    assert schema_supports_request(_req(task_type=TaskType.VIDEO, prompt="x", images=[b"1"]), wan22_schema) is True
+    assert (
+        schema_supports_request(_req(task_type=TaskType.VIDEO, prompt="x", images=[b"1", b"2"]), wan22_schema) is True
+    )
     # 3+ 张图直接被路由层拦下(不需要走 validate 才知道)
-    assert schema_supports_request(
-        _req(task_type=TaskType.VIDEO, prompt="x", images=[b"1", b"2", b"3"]),
-        wan22_schema,
-    ) is False
-    assert schema_supports_request(
-        _req(
-            task_type=TaskType.VIDEO,
-            prompt="x",
-            images=[b"1", b"2", b"3", b"4", b"5"],
-        ),
-        wan22_schema,
-    ) is False
+    assert (
+        schema_supports_request(
+            _req(task_type=TaskType.VIDEO, prompt="x", images=[b"1", b"2", b"3"]),
+            wan22_schema,
+        )
+        is False
+    )
+    assert (
+        schema_supports_request(
+            _req(
+                task_type=TaskType.VIDEO,
+                prompt="x",
+                images=[b"1", b"2", b"3", b"4", b"5"],
+            ),
+            wan22_schema,
+        )
+        is False
+    )
 
 
 def test_wan22_validate_rejects_over_limit():

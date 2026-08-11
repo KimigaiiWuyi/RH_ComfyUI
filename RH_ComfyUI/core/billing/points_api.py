@@ -1,11 +1,11 @@
-"""对外积分 API — canvas / 其它插件与 bot 共用三桶扣费。
+"""对外积分 API — 外部宿主 / 其它插件与 bot 共用三桶扣费。
 
 用法::
 
     from RH_ComfyUI import charge_points, refund_points, get_quota_status
 
-    status = await charge_points(user_id, "canvas", cost, vip_tier="basic")
-    await refund_points(user_id, "canvas", cost, vip_tier="basic")
+    status = await charge_points(user_id, "my_bot", cost, vip_tier="basic")
+    await refund_points(user_id, "my_bot", cost, vip_tier="basic")
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from gsuid_core.logger import logger
 
-from .tier_quota import list_tier_quotas, normalize_tier
+from .tier_quota import normalize_tier, list_tier_quotas
 
 
 class PointsDeniedError(Exception):
@@ -54,9 +54,7 @@ async def charge_points(
     if amount <= 0:
         raise ValueError("amount 必须 > 0")
     # vip_tier 显式传入则用;否则 RHBind 行内档位(与 bot_id 无关)
-    ok, detail = await RHBind.deduct_triple(
-        user_id, bot_id, amount, vip_tier=vip_tier
-    )
+    ok, detail = await RHBind.deduct_triple(user_id, bot_id, amount, vip_tier=vip_tier)
     tier = str((detail or {}).get("tier") or normalize_tier(vip_tier))
     if not ok:
         msg = detail.get("reason") or f"积分不足:需要 {amount}"
@@ -86,19 +84,13 @@ async def refund_points(
     if amount <= 0:
         return await get_quota_status(user_id, bot_id, vip_tier=vip_tier)
     try:
-        st = await RHBind.add_triple(
-            user_id, bot_id, amount, vip_tier=vip_tier, cap_to_tier=True
-        )
+        st = await RHBind.add_triple(user_id, bot_id, amount, vip_tier=vip_tier, cap_to_tier=True)
         logger.info(
-            f"[refund_points] ok user={user_id} bot_id={bot_id} +{amount} "
-            f"avail={st.get('available')} ({reason})"
+            f"[refund_points] ok user={user_id} bot_id={bot_id} +{amount} avail={st.get('available')} ({reason})"
         )
         return st
     except Exception as e:  # noqa: BLE001
-        logger.warning(
-            f"[refund_points] fail user={user_id} bot_id={bot_id} "
-            f"amount={amount} ({reason}): {e}"
-        )
+        logger.warning(f"[refund_points] fail user={user_id} bot_id={bot_id} amount={amount} ({reason}): {e}")
         try:
             return await get_quota_status(user_id, bot_id, vip_tier=vip_tier)
         except Exception:  # noqa: BLE001

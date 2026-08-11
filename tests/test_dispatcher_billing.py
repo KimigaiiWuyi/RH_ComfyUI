@@ -220,9 +220,7 @@ def test_estimate_cost_drives_reserve_and_result(monkeypatch):
         policy = FakePolicy()
         result = asyncio.run(
             dispatch(
-                GenerationRequest(
-                    task_type=TaskType.IMAGE, prompt="cat", model=model.name, resolution="1080p"
-                ),
+                GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name, resolution="1080p"),
                 _ctx(policy),
             )
         )

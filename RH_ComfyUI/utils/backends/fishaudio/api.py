@@ -215,8 +215,7 @@ class FishAudioAPI:
 
         url = f"{self.base_url}/v1/asr"
         logger.info(
-            f"[FishAudio] 识别: lang={language or 'auto'}, "
-            f"timestamps={not ignore_timestamps}, bytes={len(audio)}"
+            f"[FishAudio] 识别: lang={language or 'auto'}, timestamps={not ignore_timestamps}, bytes={len(audio)}"
         )
 
         try:
@@ -237,10 +236,7 @@ class FishAudioAPI:
         text = data_resp.get("text") or ""
         duration = data_resp.get("duration") or 0.0
         segments = data_resp.get("segments") or []
-        logger.info(
-            f"[FishAudio] 识别成功: text={len(text)}字, "
-            f"duration={duration}s, segments={len(segments)}段"
-        )
+        logger.info(f"[FishAudio] 识别成功: text={len(text)}字, duration={duration}s, segments={len(segments)}段")
         return {"text": text, "duration": float(duration), "segments": segments}
 
 

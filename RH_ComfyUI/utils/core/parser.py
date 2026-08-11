@@ -85,8 +85,7 @@ def parse_model_from_prompt(
     if pipeline:
         actual_prompt = parts[1] if len(parts) > 1 else ""
         logger.info(
-            f"[Parser] 识别到模型 token: '{first_word}'(候选示例 {pipeline.name}),"
-            f" prompt={actual_prompt[:30]}..."
+            f"[Parser] 识别到模型 token: '{first_word}'(候选示例 {pipeline.name}), prompt={actual_prompt[:30]}..."
         )
         return first_word, actual_prompt
 

@@ -27,8 +27,8 @@ def _resolve_audio(request: GenerationRequest) -> bytes | None:
         if ref.data:
             return ref.data
         if ref.url:
-            # 上游一般给的是本地 /api/canvas-backend/... 路径,canvas_backend 层
-            # 已经解过;此处不主动下载(避免重复 IO 与未鉴权外链),仅记日志
+            # 调用方应在入口层把本地相对路径解成 bytes;此处不主动 GET
+            # (避免重复 IO 与未鉴权外链),仅记日志
             logger.warning("[FishAudio ASR] audio_refs[0] 只有 url 未携带 bytes,跳过")
     return None
 

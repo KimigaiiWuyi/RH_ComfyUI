@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from RH_ComfyUI.models import discover_builtin_models
 from gsuid_core.app_life import app
 from RH_ComfyUI.rh_models import webapi  # noqa: F401  确保路由已挂载
-from RH_ComfyUI.models import discover_builtin_models
 from RH_ComfyUI.utils.backends import init_backends
 from RH_ComfyUI.core.routing.registry import model_registry
 
@@ -22,10 +22,7 @@ def client():
 
 def test_estimate_endpoint_returns_dynamic_cost(client):
     """GET /models/estimate 必须返回积分估算,而不是"未知任务类型"错误"""
-    r = client.get(
-        "/api/RH_ComfyUI/models/estimate"
-        "?model=gpt-image-2&ratio=4:3&image_size=2K"
-    )
+    r = client.get("/api/RH_ComfyUI/models/estimate?model=gpt-image-2&ratio=4:3&image_size=2K")
     assert r.status_code == 200, r.text
     body = r.json()
     assert "error" not in body, f"estimate 被路由吃掉了:{body}"

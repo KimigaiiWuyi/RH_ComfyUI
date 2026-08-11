@@ -22,9 +22,7 @@ class PointsBillingPolicy(BillingPolicy):
         if not ok:
             reason = detail.get("reason") or f"积分不足:本次需要 {cost} 积分"
             avail = detail.get("available", 0)
-            raise BillingDeniedError(
-                f"{reason}(需要 {cost},可用 {avail})"
-            )
+            raise BillingDeniedError(f"{reason}(需要 {cost},可用 {avail})")
         return BillingReservation(cost=cost, context=ctx)
 
     async def refund(self, reservation: BillingReservation) -> None:
@@ -42,7 +40,7 @@ class PointsBillingPolicy(BillingPolicy):
         reservation.refunded = True
 
     async def post_refund(self, reservation: BillingReservation, *, model_name: str) -> None:
-        """把统计表最近一条失败记录标记为已退款(与旧 _do_generate 行为一致)"""
+        """统计表最近一条 failed/cancelled 未退记录 → refunded=True。"""
         from ...utils.database.models import RHComfyuiTaskRecord
 
         try:

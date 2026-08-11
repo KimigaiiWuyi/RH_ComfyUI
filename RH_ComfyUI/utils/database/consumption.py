@@ -32,6 +32,7 @@ class TaskTypeBreakdown(TypedDict):
     count: int
     points: int
 
+
 # 北京时区(UTC+8,固定偏移;不用 zoneinfo 是因为 Windows 上 zoneinfo 不可用)
 BEIJING_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
@@ -498,7 +499,7 @@ async def build_record_detail_payload(record_id: int) -> Optional[dict[str, Any]
 async def resolve_record_saved_file(record_id: int, file_index: int) -> Optional[Path]:
     """把 (record_id, saved_files 下标) 映射为 OUTPUT_PATH 内的实际文件路径。
 
-    供 HTTP 层(canvas_backend)按下标流式返回产物文件 —— 前端只拿到
+    供 HTTP 层按下标流式返回产物文件 —— 调用方只拿到
     下标而非路径,所有路径解析收在这里并强制限制在 OUTPUT_PATH 目录内
     (相对路径含 ../ 或符号链接逃逸都会被拒),文件不存在/越界返回 None。
     """

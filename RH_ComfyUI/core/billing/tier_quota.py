@@ -7,7 +7,7 @@
 
 VIP 策略(与 bot_id 无关):
   - 档位存在 RHBind.vip_tier(或调用方显式传入 vip_tier)
-  - free / basic / pro / enterprise 全入口通用(画布 / bot / agent)
+  - free / basic / pro / enterprise 全入口通用(HTTP / bot / agent)
   - 额度数字权威:``PLUGIN_CONFIG`` 的 Quota_* 键
 """
 
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 from ...rh_config.comfyui_config import PLUGIN_CONFIG
 
-# 画布池 bot_id;与 canvas_backend.credit_rh.DEFAULT_BOT_ID 对齐
+# 常用 HTTP/业务入口 bot_id 约定值(任意 bot_id 均可;仅作文档化常量)
 CANVAS_BOT_ID: Final[str] = "canvas"
 
 TIER_KEYS: Final[tuple[str, ...]] = ("free", "basic", "pro", "enterprise")

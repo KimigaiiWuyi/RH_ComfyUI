@@ -80,6 +80,19 @@ class SeedreamAdapter(Adapter):
         if request.images:
             await self._materialize_images(request.images, request.params)
 
+        from ....core.telemetry.wire_capture import set_wire_audit
+
+        set_wire_audit(
+            prompt=request.prompt or "",
+            request={
+                "model": request.params.get("model") or node.backend_model or "",
+                "prompt": request.prompt or "",
+                "ratio": request.ratio,
+                "size_mode": request.params.get("size_mode") or request.params.get("image_size"),
+                "num_images": len(request.images or []),
+                "image_urls": list(request.params.get("_image_urls") or []),
+            },
+        )
         await _emit(on_progress, ProgressEvent(stage="running", percent=15, message="Seedream 生成中"))
         result = await node.mapper_func(request, self.api)
         await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="完成"))
@@ -112,18 +125,14 @@ class SeedreamAdapter(Adapter):
     async def _materialize_images(self, images: list[bytes], params: dict) -> None:
         """bytes 列表 → 公网外链,注入 params["_image_urls"]
 
-        走 core.media_host 扩展点(由 aigc_system / canvas 侧在启动时注册 R2
+        走 core.media_host 扩展点(由宿主在启动时注册对象存储 publisher
         publisher)。未注册时返回 None → 不注入,mapper 自行 data URL 回落。
         外链化失败抛 RuntimeError,让上层 ChannelError(retryable=True) 触发 failover。
         """
         from ....core.media_host import MediaPublishError, materialize
 
         try:
-            urls = [
-                u
-                for u in await asyncio.gather(*(materialize(img, "image/png") for img in images))
-                if u
-            ]
+            urls = [u for u in await asyncio.gather(*(materialize(img, "image/png") for img in images)) if u]
             if urls:
                 params["_image_urls"] = urls
         except MediaPublishError as exc:

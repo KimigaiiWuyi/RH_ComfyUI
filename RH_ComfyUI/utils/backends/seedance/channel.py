@@ -72,9 +72,7 @@ def service_config_credentials(name: str, default_base_url: str) -> ProviderCred
     if name == "runninghub" and not api_key:
         api_key = str(_get("RH_apikey") or "")
     base_url = str(_get(f"Seedance_BaseURL_{name}") or "").strip() or None
-    return ProviderCredentials(
-        enabled=enabled, api_key=api_key, base_url=base_url or (default_base_url or None)
-    )
+    return ProviderCredentials(enabled=enabled, api_key=api_key, base_url=base_url or (default_base_url or None))
 
 
 def _dry_run_enabled() -> bool:
@@ -108,10 +106,14 @@ class SeedanceProviderChannel(ProviderChannel):
         weight: int = 1,
         credentials_resolver: Optional[ConfigResolver] = None,
         accepts_model_field: bool = True,
+        name: Optional[str] = None,
     ) -> None:
-        if not provider_cls.name:
+        if not provider_cls.name and not name:
             raise ValueError(f"供应商类 {provider_cls.__qualname__} 缺少 name 属性")
-        self.name = provider_cls.name
+        # 显式 name 优先(网关 slot 通道与 vendor_channel 对齐)
+        self.name = (name or provider_cls.name or "").strip()
+        if not self.name:
+            raise ValueError(f"供应商类 {provider_cls.__qualname__} 缺少 name 属性")
         self.weight = weight
         self.accepts_model_field = accepts_model_field
         self._provider_cls = provider_cls
@@ -135,27 +137,23 @@ class SeedanceProviderChannel(ProviderChannel):
         cached = self._cached
         if cached is not None:
             old_key, old_url = cached.api_key, cached.base_url
-            if (
-                old_key != creds.api_key
-                or old_url != creds.base_url
-                or cached.dry_run != dry_run
-            ):
-                cached.update_credentials(
-                    api_key=creds.api_key, base_url=creds.base_url, dry_run=dry_run
-                )
+            if old_key != creds.api_key or old_url != creds.base_url or cached.dry_run != dry_run:
+                cached.update_credentials(api_key=creds.api_key, base_url=creds.base_url, dry_run=dry_run)
                 logger.info(
                     f"[Seedance] 供应商 {self.name} 凭证已热更新 "
                     f"(key_changed={old_key != creds.api_key}, url_changed={old_url != creds.base_url})"
                 )
             return cached
 
-        provider = self._provider_cls(
-            api_key=creds.api_key, base_url=creds.base_url, dry_run=dry_run
-        )
+        provider = self._provider_cls(api_key=creds.api_key, base_url=creds.base_url, dry_run=dry_run)
         if not creds.api_key:
             logger.warning(f"[Seedance] 供应商 {self.name} 实例化时 API Key 为空,请求将被跳过。")
         self._cached = provider
         return provider
+
+    def get_provider_for_resume(self) -> Optional[SeedanceProvider]:
+        """公开:resume_poll 取 provider,避免调用方依赖 ``_get_provider``。"""
+        return self._get_provider()
 
     # ── ProviderChannel 契约 ──
 
@@ -168,6 +166,12 @@ class SeedanceProviderChannel(ProviderChannel):
 
     def audit_key_prefix(self) -> str:
         return (self._resolve_creds().api_key or "")[:6]
+
+    def supports_remote_cancel(self) -> bool:
+        """跟 provider 是否 override 了非 no-op ``delete``(ark/网关 True,runninghub False)。"""
+        from .provider import SeedanceProvider
+
+        return self._provider_cls.delete is not SeedanceProvider.delete
 
     def supports_request(self, request: GenerationRequest) -> bool:
         """能力预检:不发起 HTTP,仅复用 provider.can_handle_spec()。
@@ -216,9 +220,7 @@ class SeedanceProviderChannel(ProviderChannel):
             await _safe_emit(on_progress, _evt("submitting", 5, f"提交 Seedance({self.name}) 任务"))
 
         try:
-            final = await provider.run(
-                spec, model=vendor_model, on_progress=_make_progress_cb(on_progress, self.name)
-            )
+            final = await provider.run(spec, model=vendor_model, on_progress=_make_progress_cb(on_progress, self.name))
         except UnsupportedProviderShapeError as exc:
             # 形态/参数不被该供应商支持 → 不可重试(换通道也解决不了同一形态限制)
             raise ChannelError(
@@ -242,8 +244,7 @@ class SeedanceProviderChannel(ProviderChannel):
             raise ChannelError(
                 str(exc),
                 retryable=exc.retryable,
-                transient=exc.retryable
-                and (exc.http_status in (429, 503, 415, 421) or queue_full),
+                transient=exc.retryable and (exc.http_status in (429, 503, 415, 421) or queue_full),
                 channel=self.name,
                 code=exc.code or "",
                 user_message=exc.user_message,
@@ -310,6 +311,7 @@ class SeedanceProviderChannel(ProviderChannel):
             metadata={
                 "task_id": final.id,
                 "provider": self.name,
+                "channel": self.name,
                 "model": vendor_model,
                 "shape": spec.shape.value,
                 "output_format": out_fmt,
@@ -330,9 +332,7 @@ def builtin_seedance_channels() -> dict[str, SeedanceProviderChannel]:
 
         _BUILTIN_CHANNELS = {
             "ark": SeedanceProviderChannel(ArkSeedanceProvider, weight=3),
-            "runninghub": SeedanceProviderChannel(
-                RunningHubSeedanceProvider, weight=1, accepts_model_field=False
-            ),
+            "runninghub": SeedanceProviderChannel(RunningHubSeedanceProvider, weight=1, accepts_model_field=False),
         }
     return _BUILTIN_CHANNELS
 

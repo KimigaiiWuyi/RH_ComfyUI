@@ -32,14 +32,10 @@ def validate_against_schema(
         # audio_payload 端口:audio_refs 携带非空 bytes 时也视为满足
         if key == "audio_payload":
             value = request.audio_payload
-            has_alt = bool(request.audio_refs) and any(
-                bool(getattr(ref, "data", None)) for ref in request.audio_refs
-            )
+            has_alt = bool(request.audio_refs) and any(bool(getattr(ref, "data", None)) for ref in request.audio_refs)
             is_empty = not value and not has_alt
             if spec.required and is_empty:
-                raise ValidationError(
-                    f"[{model_name}] 缺少必填参数: {key}({spec.description})"
-                )
+                raise ValidationError(f"[{model_name}] 缺少必填参数: {key}({spec.description})")
             if is_empty:
                 continue
             value = value or (request.audio_refs[0].data if has_alt else None)

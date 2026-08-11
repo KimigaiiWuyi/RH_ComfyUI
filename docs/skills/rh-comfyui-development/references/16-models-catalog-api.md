@@ -53,19 +53,49 @@
       "input_schema": { /* 见 §16.4 */ },
       "output_schema": {...},
       "requirements": ["seedream_apikey"],
-      "channels": [...],
-      "execution_mode": "declarative",
+      "channels": [
+        {
+          "name": "ark",
+          "vendor_model": "...",
+          "available": true,
+          "supports_cancel": true,
+          "supports_remote_cancel": true
+        }
+      ],
+      "execution_mode": "async_poll",
       "accepts_images": true,
       "max_input_images": 10,
+      "supports_cancel": true,
+      "supports_remote_cancel": true,
       "card": {...}
     }
   ]
 }
 ```
 
+### 取消能力字段(2026-08) — 前后端统一契约
+
+前端**必须以本清单决定能否取消**,禁止写死模型名单:
+
+| 字段 | 位置 | 含义 / 前端用法 |
+|------|------|------|
+| `supports_cancel` | 模型顶层 | 是否允许 `POST /tasks/cancel`。有 `channels` 时 = 各通道 OR |
+| `supports_remote_cancel` | 模型顶层 | 是否至少一路可上游 DELETE。有 `channels` 时 = 通道 OR |
+| `channels[].supports_cancel` | 通道 | **多通道时以当前选用通道为准**展示取消按钮 |
+| `channels[].supports_remote_cancel` | 通道 | 当前通道是否 remote cancel;`rh_app` / Seedance RH 视频端为 false |
+
+规则:
+1. 单通道模型:读顶层 `supports_cancel` 即可
+2. 多通道(如 Seedance ark + runninghub):读**当前通道**的 `channels[]` 字段;顶层 true 仅表示「有的通道可以」
+3. `rh_app`:顶层与通道均为 **false**(不能 cancel,只能 resume 继续轮询)
+4. 后端 `cancel_generation` / `POST .../tasks/cancel` 与上述标志一致:false 时返回 `ok=false`
+
+实现:`rh_models/api.py` 的 `_channel_supports_cancel` / `_channel_supports_remote_cancel` / `_aggregate_cancel_flags`。  
+**勿**因共用 `RH_apikey` 让 `rh_app` 与 `comfyui` 同值 —— 见 [§二十 §20.2](./20-cancel-resume-and-wire-audit.md)。
+
 **契约红线**(HTTP 契约快照测试,见 `tests/test_http_contract.py`):
 - 字段**只增不改**:加字段直接补到 `_MODEL_ENTRY_GOLDEN`,**禁止删/改名/变类型**
-- 新字段必须有默认值(避免破坏旧前端)
+- 新字段必须有默认值(避免破坏旧调用方)
 
 ## 16.3 `/models/estimate` 实时积分预估
 

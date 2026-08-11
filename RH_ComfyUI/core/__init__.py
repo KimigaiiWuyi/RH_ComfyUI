@@ -52,12 +52,12 @@ from .channels import (
     ProviderChannel,
     channel_registry,
 )
-from .dispatch import DispatchContext, dispatch
+from .dispatch import DispatchContext, dispatch, cancel_generation
 from .media_host import (
-    MediaPublishError,
     MediaPublisher,
-    get_media_publisher,
+    MediaPublishError,
     materialize as materialize_media,
+    get_media_publisher,
     set_media_publisher,
 )
 
@@ -116,6 +116,7 @@ __all__ = [
     "ExternalPrepaidPolicy",
     "DispatchContext",
     "dispatch",
+    "cancel_generation",
     # 错误族
     "GenerationError",
     "ValidationError",

@@ -8,8 +8,8 @@ import pytest
 
 from RH_ComfyUI.core.media_host import (
     MediaPublishError,
-    get_media_publisher,
     materialize,
+    get_media_publisher,
     media_host_registry,
     set_media_publisher,
 )

@@ -8,8 +8,8 @@
      上限 = min(通道基线, model.max_concurrency)
 """
 
-import importlib
 import asyncio
+import importlib
 from types import SimpleNamespace
 
 conc = importlib.import_module("RH_ComfyUI.core.dispatch.concurrency")
@@ -170,23 +170,17 @@ def test_pair_slot_respects_model_max_concurrency(monkeypatch):
 
     # model.max_concurrency=3 → (model, channel) 闸 = min(10, 3) = 3
     model_a = SimpleNamespace(name="seedance10_pro_fast", max_concurrency=3)
-    sem_a = conc._get_pair_semaphore(
-        model_a.name, "aifoundation", conc._pair_limit(model_a, "aifoundation")
-    )
+    sem_a = conc._get_pair_semaphore(model_a.name, "aifoundation", conc._pair_limit(model_a, "aifoundation"))
     assert sem_a._value == 3
 
     # model.max_concurrency=1 → (model, channel) 闸 = 1(本地 ComfyUI 工作流)
     model_b = SimpleNamespace(name="IndexTTS2", max_concurrency=1)
-    sem_b = conc._get_pair_semaphore(
-        model_b.name, "comfyui", conc._pair_limit(model_b, "comfyui")
-    )
+    sem_b = conc._get_pair_semaphore(model_b.name, "comfyui", conc._pair_limit(model_b, "comfyui"))
     assert sem_b._value == 1
 
     # model.max_concurrency=0 在非 RH 通道 → 退化为 Channel_Concurrency
     model_c = SimpleNamespace(name="fish_tts", max_concurrency=0)
-    sem_c = conc._get_pair_semaphore(
-        model_c.name, "fishaudio", conc._pair_limit(model_c, "fishaudio")
-    )
+    sem_c = conc._get_pair_semaphore(model_c.name, "fishaudio", conc._pair_limit(model_c, "fishaudio"))
     assert sem_c._value == 10
 
     # model.max_concurrency=0 在 RH 通道 → 退化为 RH_Channel_Concurrency=1
@@ -206,9 +200,6 @@ def test_pair_slot_isolation_per_model_and_channel(monkeypatch):
     monkeypatch.setattr(cfgmod, "PLUGIN_CONFIG", _FakeCfg(Channel_Concurrency=1))
 
     async def _scenario():
-        model_a = SimpleNamespace(name="m1", max_concurrency=0)
-        model_b = SimpleNamespace(name="m2", max_concurrency=0)
-
         # m1+aifoundation 限 1,先占满
         entered_a = asyncio.Event()
         release_a = asyncio.Event()
@@ -227,9 +218,7 @@ def test_pair_slot_isolation_per_model_and_channel(monkeypatch):
         entered_b = asyncio.Event()
 
         async def _try_enter():
-            async with conc.channel_slot_for_model(
-                SimpleNamespace(name="m2", max_concurrency=0), "aifoundation"
-            ):
+            async with conc.channel_slot_for_model(SimpleNamespace(name="m2", max_concurrency=0), "aifoundation"):
                 entered_b.set()
 
         t_b = asyncio.create_task(_try_enter())
@@ -241,9 +230,7 @@ def test_pair_slot_isolation_per_model_and_channel(monkeypatch):
         entered_c = asyncio.Event()
 
         async def _try_enter_other_ch():
-            async with conc.channel_slot_for_model(
-                SimpleNamespace(name="m1", max_concurrency=0), "gateway"
-            ):
+            async with conc.channel_slot_for_model(SimpleNamespace(name="m1", max_concurrency=0), "gateway"):
                 entered_c.set()
 
         t_c = asyncio.create_task(_try_enter_other_ch())

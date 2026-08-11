@@ -41,7 +41,7 @@ _MASKED_DATA_URL_RE = re.compile(
 
 
 def _base64_token(payload: str) -> str:
-    """与 canvas_backend.utils.params_sanitize 同形：``<base64://{sha10}#{len}>``。"""
+    """脱敏占位形如 ``<base64://{sha10}#{len}>``。"""
     compact = re.sub(r"\s+", "", payload)
     digest = hashlib.sha256(compact.encode("ascii", errors="ignore")).hexdigest()[:10]
     return f"<base64://{digest}#{len(compact)}>"

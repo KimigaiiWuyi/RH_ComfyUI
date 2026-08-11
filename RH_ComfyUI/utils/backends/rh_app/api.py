@@ -80,9 +80,7 @@ class RHAppAPI:
     def _require_api_key(self) -> str:
         key = self.api_key
         if not key:
-            raise RuntimeError(
-                "[RHApp] 未配置 RunningHub API Key，请在 Web 控制台配置 RH_apikey 后重试"
-            )
+            raise RuntimeError("[RHApp] 未配置 RunningHub API Key，请在 Web 控制台配置 RH_apikey 后重试")
         return key
 
     def _headers(self) -> Dict[str, str]:
@@ -192,9 +190,7 @@ class RHAppAPI:
             )
             await asyncio.sleep(wait_s)
 
-        raise RuntimeError(
-            f"[RHApp] RunningHub 并发已满,排队重试 {_RH_QUEUE_RETRY_ATTEMPTS} 次仍失败: {last_reason}"
-        )
+        raise RuntimeError(f"[RHApp] RunningHub 并发已满,排队重试 {_RH_QUEUE_RETRY_ATTEMPTS} 次仍失败: {last_reason}")
 
     async def query_task(self, task_id: str) -> Dict[str, Any]:
         """查询任务状态和结果（OpenAPI v2）"""
@@ -206,6 +202,10 @@ class RHAppAPI:
             response = await client.post(url, headers=self._headers(), json=payload)
             response.raise_for_status()
             return response.json()
+
+    # 注意:RunningHub ``POST /task/openapi/cancel`` 是 **ComfyUI 工作流任务**
+    # 专用(见 utils/backends/comfyui/api.py),不适用于本客户端的 AI 应用
+    # (``/openapi/v2/run/ai-app/...``)任务。AI 应用暂无公开取消接口。
 
     async def wait_for_result(
         self,
@@ -233,17 +233,19 @@ class RHAppAPI:
         # 跑完,直接抛错会把整单判死并退款。容忍连续 N 次再放弃。
         poll_failures = 0
         max_poll_failures = 5
+        poll_error: Exception | None = None
 
         while True:
             try:
                 result = await self.query_task(task_id)
                 poll_failures = 0
+                poll_error = None
             except httpx.HTTPStatusError as e:
                 # 4xx 是确定性错误(鉴权/参数),重试无意义直接抛;5xx 按瞬时处理
                 if e.response.status_code < 500:
                     raise
                 result = None
-                poll_error: Exception = e
+                poll_error = e
             except httpx.HTTPError as e:
                 result = None
                 poll_error = e
@@ -251,15 +253,14 @@ class RHAppAPI:
             if result is None:
                 poll_failures += 1
                 elapsed = asyncio.get_event_loop().time() - start_time
+                err = poll_error or RuntimeError("unknown poll error")
                 if poll_failures >= max_poll_failures:
-                    raise RuntimeError(
-                        f"[RHApp] 任务 {task_id} 轮询连续失败 {poll_failures} 次: {poll_error}"
-                    ) from poll_error
+                    raise RuntimeError(f"[RHApp] 任务 {task_id} 轮询连续失败 {poll_failures} 次: {err}") from err
                 if elapsed > timeout:
                     raise TimeoutError(f"[RHApp] 任务 {task_id} 等待超时（超过 {timeout} 秒）")
                 logger.warning(
                     f"[RHApp] 任务 {task_id} 轮询失败({poll_failures}/{max_poll_failures}),"
-                    f"{poll_interval}s 后重试: {type(poll_error).__name__}: {poll_error}"
+                    f"{poll_interval}s 后重试: {type(err).__name__}: {err}"
                 )
                 await asyncio.sleep(poll_interval)
                 continue

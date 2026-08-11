@@ -2,9 +2,9 @@
 
 设计动机
 --------
-Seedream 等上游对 base64 body 有大小限制(超限 413),生产环境通常把参考图
-上传到 R2 再传外链。R2 出口属于 ``canvas_backend`` / 业务侧能力,开源引擎
-**不得**反向 import ``aigc_system`` 或 ``canvas_backend``。
+部分上游对 base64 body 有大小限制(超限 413),生产环境通常把参考图
+上传到对象存储再传公网 URL。对象存储出口属于**宿主/业务侧**能力,本引擎
+只提供注册点,不绑定任何具体存储实现。
 
 本模块提供与 ``channel_registry`` 同构的扩展点:
 
@@ -12,20 +12,25 @@ Seedream 等上游对 base64 body 有大小限制(超限 413),生产环境通常
 - 有 publisher 注册 → 调用 publisher;失败抛 ``MediaPublishError``
   (调用方翻成 retryable 错误以便 failover)
 
-闭源/宿主插件在 ``@on_core_start`` 中注册:
+宿主插件在 ``@on_core_start`` 中注册::
 
     from RH_ComfyUI.core import set_media_publisher
-    from aigc_system.aifoundation.media_host import materialize as aif_materialize
 
-    set_media_publisher(aif_materialize)
 
-开源仓库对外部实现零感知:只认 ``MediaPublisher`` 可调用契约。
+    async def my_publish(data: bytes, mime: str) -> str:
+        ...  # 返回可 GET 的 https URL
+        return url
+
+
+    set_media_publisher(my_publish)
+
+引擎对外部实现零感知:只认 ``MediaPublisher`` 可调用契约。
 """
 
 from __future__ import annotations
 
 import threading
-from typing import Awaitable, Callable, Optional
+from typing import Callable, Optional, Awaitable
 
 from gsuid_core.logger import logger
 

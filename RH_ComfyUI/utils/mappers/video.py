@@ -40,9 +40,7 @@ from ..backends.comfyui.api import ComfyUIAPI
 
 # 组1=结构化 kind(图片|视频|音频), 组2=其序号;
 # 组3=裸 kind, 组4=其序号。结构化必须优先匹配,避免「[参考图片1]」被拆坏。
-_PROMPT_REF_PATTERN = re.compile(
-    r"\[\s*参考(图片|视频|音频)\s*(\d{1,2})\s*\]" r"|(图片|视频|音频)\s*(\d{1,2})"
-)
+_PROMPT_REF_PATTERN = re.compile(r"\[\s*参考(图片|视频|音频)\s*(\d{1,2})\s*\]" r"|(图片|视频|音频)\s*(\d{1,2})")
 # Wan 2.2 实际能消费的图索引上限(首帧=1, 尾帧=2)
 _MAX_WAN_IMAGE_INDEX = 2
 

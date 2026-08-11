@@ -503,7 +503,7 @@ def _decode_data_uri(url: str) -> bytes:
 async def _decode_media_bytes(d: dict[str, Any]) -> bytes:
     """异步下载 url 或解码 data_base64 / data URI。
 
-    约定(调用方 canvas 应先把本站相对路径内联成 data_base64):
+    约定(调用方应先把本站相对路径内联成 data_base64):
     - ``data_base64`` / ``data`` 优先;
     - ``url`` 仅接受 ``http(s)://`` 公网链,或 ``data:`` URI;
     - 相对路径 / ``asset://`` / 其它协议 → 明确 ValueError,不再丢给 httpx
@@ -563,7 +563,7 @@ async def _decode_media_bytes(d: dict[str, Any]) -> bytes:
         return r.content
 
 
-# ── 三重余额公开 API(canvas / 外部插件预扣) ──────────────────────────
+# ── 三重余额公开 API(外部宿主 / 插件预扣) ──────────────────────────
 
 
 async def charge_points(user_id: str, bot_id: str, amount: int, *, vip_tier=None, reason: str = ""):
@@ -599,11 +599,62 @@ def get_all_tier_quotas():
     return _tiers()
 
 
+async def cancel_generation(
+    *,
+    trace_id: Optional[str] = None,
+    record_id: Optional[int] = None,
+    reason: str = "user_cancel",
+) -> dict[str, Any]:
+    """取消一次进行中的生成任务。
+
+    通过 ``trace_id``(与 submit 时传入的相同)或统计表 ``record_id`` 定位。
+    会先尝试上游 DELETE(Seedance ark / HappyHorse 等已 bind 的任务),再
+    cancel 本进程 asyncio.Task;dispatch 侧记 status=cancelled 并退款。
+
+    Returns:
+        dict: ok / found / cancelled_local / cancelled_remote / model / message ...
+    """
+    from .core.dispatch.active_tasks import cancel_generation as _cancel
+
+    return await _cancel(trace_id=trace_id, record_id=record_id, reason=reason)
+
+
+async def resume_poll(
+    *,
+    model: str,
+    vendor_task_id: str,
+    channel: str = "",
+    backend: str = "",
+    kind: str = "",
+    trace_id: str = "",
+    record_id: Optional[int] = None,
+    on_progress: Optional[ProgressCallback] = None,
+) -> GenerationResult:
+    """进程重启后按上游 task_id 继续轮询(不重新扣费、不重提 create)。
+
+    见 ``core.dispatch.resume``。进程重启后在有 vendor_task_id 时调用。
+    """
+    from .core.dispatch.resume import resume_poll as _resume
+
+    return await _resume(
+        model=model,
+        vendor_task_id=vendor_task_id,
+        channel=channel,
+        backend=backend,
+        kind=kind,
+        trace_id=trace_id,
+        record_id=record_id,
+        on_progress=on_progress,
+    )
+
+
 __all__ = [
     "GenerationResult",
     "ProgressEvent",
     "ProgressCallback",
     "submit",
+    "cancel_generation",
+    "resume_poll",
     "get_point_cost",
     "list_models",
     "get_model_input_schema",

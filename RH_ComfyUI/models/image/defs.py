@@ -16,9 +16,9 @@ from ...utils.core.pipeline import NodeDef
 from ...core.channels.channel import ChannelBinding
 from ...utils.mappers.seedream import seedream_mapper as _seedream_mapper
 from ...utils.mappers.gpt_image2 import gpt_image2_mapper as _gpt_image2_mapper
-from ...utils.mappers.gpt_image2_billing import ratio_enum_values as _gpt_image2_ratio_values
 from ...utils.mappers.image_edit import qwen_edit_mapper as _qwen_edit_mapper
 from ...utils.mappers.banana_pro_billing import estimate_banana_pro_points
+from ...utils.mappers.gpt_image2_billing import ratio_enum_values as _gpt_image2_ratio_values
 from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minimax_image01_mapper
 from ...utils.mappers.nanobanana1_billing import estimate_nanobanana1_points
 from ...utils.mappers.nanobanana2_billing import estimate_nanobanana2_points
@@ -216,35 +216,17 @@ class CameraAngleDef(ImagePipelineModel):
         horizontal = params.get("horizontal_angle")
         vertical = params.get("vertical_angle")
         zoom = params.get("zoom")
-        if (
-            horizontal is None
-            and vertical is None
-            and zoom is None
-        ):
+        if horizontal is None and vertical is None and zoom is None:
             # 没传任何参数视为中性,直接拒绝避免白扣
-            raise ValidationError(
-                f"{self.display_name}:三参数均为中性值(0/0/5),提交后等于生成原图,请调整至少一个参数"
-            )
-        if horizontal is not None and not (
-            CAMERA_ANGLE_HORIZ_MIN <= float(horizontal) <= CAMERA_ANGLE_HORIZ_MAX
-        ):
-            raise ValidationError(
-                f"horizontal_angle 必须在 {CAMERA_ANGLE_HORIZ_MIN:g}~{CAMERA_ANGLE_HORIZ_MAX:g} 之间"
-            )
-        if vertical is not None and not (
-            CAMERA_ANGLE_VERT_MIN <= float(vertical) <= CAMERA_ANGLE_VERT_MAX
-        ):
-            raise ValidationError(
-                f"vertical_angle 必须在 {CAMERA_ANGLE_VERT_MIN:g}~{CAMERA_ANGLE_VERT_MAX:g} 之间"
-            )
+            raise ValidationError(f"{self.display_name}:三参数均为中性值(0/0/5),提交后等于生成原图,请调整至少一个参数")
+        if horizontal is not None and not (CAMERA_ANGLE_HORIZ_MIN <= float(horizontal) <= CAMERA_ANGLE_HORIZ_MAX):
+            raise ValidationError(f"horizontal_angle 必须在 {CAMERA_ANGLE_HORIZ_MIN:g}~{CAMERA_ANGLE_HORIZ_MAX:g} 之间")
+        if vertical is not None and not (CAMERA_ANGLE_VERT_MIN <= float(vertical) <= CAMERA_ANGLE_VERT_MAX):
+            raise ValidationError(f"vertical_angle 必须在 {CAMERA_ANGLE_VERT_MIN:g}~{CAMERA_ANGLE_VERT_MAX:g} 之间")
         if zoom is not None and not (CAMERA_ANGLE_ZOOM_MIN <= float(zoom) <= CAMERA_ANGLE_ZOOM_MAX):
-            raise ValidationError(
-                f"zoom 必须在 {CAMERA_ANGLE_ZOOM_MIN:g}~{CAMERA_ANGLE_ZOOM_MAX:g} 之间"
-            )
+            raise ValidationError(f"zoom 必须在 {CAMERA_ANGLE_ZOOM_MIN:g}~{CAMERA_ANGLE_ZOOM_MAX:g} 之间")
         if is_camera_angle_neutral(horizontal, vertical, zoom):
-            raise ValidationError(
-                f"{self.display_name}:三参数均为中性值(0/0/5),提交后等于生成原图,请调整至少一个参数"
-            )
+            raise ValidationError(f"{self.display_name}:三参数均为中性值(0/0/5),提交后等于生成原图,请调整至少一个参数")
 
     def normalize(self, request: GenerationRequest) -> GenerationRequest:
         """预处理参考图:最长边 ≤ 1080px 且宽高均为 4 的倍数(RunningHub 工作流要求)。"""
@@ -457,7 +439,8 @@ class Banana2Def(ImagePipelineModel):
             },
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
-                mode="sync",
+                # Gemini background interactions + cancel(见 gemini_image/api.py)
+                mode="async_poll",
                 priority=70,
             ),
         )
@@ -547,7 +530,7 @@ class Banana1Def(ImagePipelineModel):
             },
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
-                mode="sync",
+                mode="async_poll",  # Gemini background + cancel
                 priority=55,
             ),
         )
@@ -656,7 +639,8 @@ class BananaProDef(ImagePipelineModel):
             },
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
-                mode="sync",
+                # 主路径 Gemini background;备援 gpt-image-2 仍可能同步
+                mode="async_poll",
                 priority=60,
             ),
         )

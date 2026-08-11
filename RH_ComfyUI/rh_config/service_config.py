@@ -170,8 +170,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "Seedance_BaseURL_ark": GsStrConfig(
         "ARK Base URL",
-        "火山方舟 ARK 官方 API 地址(Seedance 视频端点 + Seedream 图片端点共用)。"
-        "默认值已填,一般无需修改。",
+        "火山方舟 ARK 官方 API 地址(Seedance 视频端点 + Seedream 图片端点共用)。默认值已填,一般无需修改。",
         "https://ark.cn-beijing.volces.com/api/v3",
         options=[
             "https://ark.cn-beijing.volces.com/api/v3",
@@ -179,8 +178,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "Seedance_Enable_ark": GsBoolConfig(
         "启用 ARK 供应商",
-        "是否启用火山方舟官方供应商。禁用后,Seedance 视频与 Seedream 5.0 图片"
-        "均不会通过该供应商分发(同源开关)。",
+        "是否启用火山方舟官方供应商。禁用后,Seedance 视频与 Seedream 5.0 图片均不会通过该供应商分发(同源开关)。",
         True,
     ),
     "divider_seedance_runninghub": GsDivider(
@@ -234,8 +232,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
             "api_key": GsStrConfig("API Key", "供应商访问令牌(作 Bearer)", "", secret=True),
             "weight": GsStrConfig(
                 "负载权重",
-                "weighted 负载均衡策略下的相对权重(≥1 的整数;数值越大分到的请求越多);"
-                "其他策略下不生效",
+                "weighted 负载均衡策略下的相对权重(≥1 的整数;数值越大分到的请求越多);其他策略下不生效",
                 "1",
                 options=["1", "2", "3", "5"],
             ),
@@ -293,8 +290,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "HappyHorse_BaseURL_dashscope": GsStrConfig(
         "DashScope Base URL",
-        "DashScope API 根地址(不含尾斜杠)。默认华北2北京;"
-        "国际站等可改为对应 region 地址。",
+        "DashScope API 根地址(不含尾斜杠)。默认华北2北京;国际站等可改为对应 region 地址。",
         "https://dashscope.aliyuncs.com/api/v1",
         options=[
             "https://dashscope.aliyuncs.com/api/v1",

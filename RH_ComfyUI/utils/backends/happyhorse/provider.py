@@ -11,8 +11,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
+import asyncio
 from typing import Any, Callable, Optional
 
 import httpx
@@ -20,23 +20,23 @@ import httpx
 from gsuid_core.logger import logger
 
 from .classify import (
-    rewrite_prompt_for_r2v,
     to_api_resolution,
+    rewrite_prompt_for_r2v,
 )
+from ...core.types import MediaRef
 from ..seedance.spec import MediaRole, VideoGenSpec, VideoTaskShape
-from ..seedance.provider import (
-    NormalizedStatus,
-    NormalizedTask,
-    TERMINAL_STATUSES,
-    SeedanceProviderError,
-    DryRunInterrupt,
-    http_status_retryable,
-)
-from ...core.types import MediaKind, MediaRef
 from ...core.safe_json import dump_body, mask_body
 
 # 复用 seedance 的 header 脱敏
 from ..seedance._debug import mask_headers
+from ..seedance.provider import (
+    TERMINAL_STATUSES,
+    NormalizedTask,
+    DryRunInterrupt,
+    NormalizedStatus,
+    SeedanceProviderError,
+    http_status_retryable,
+)
 
 
 class HappyHorseProviderError(SeedanceProviderError):
@@ -51,6 +51,9 @@ class HappyHorseProvider:
 
     CREATE_PATH = "/services/aigc/video-generation/video-synthesis"
     TASK_PATH = "/tasks/{task_id}"
+    # DashScope 异步任务取消: POST /api/v1/tasks/{task_id}/cancel
+    # 仅 PENDING(排队)可取消;已 RUNNING 会 400 UnsupportedOperation
+    CANCEL_PATH = "/tasks/{task_id}/cancel"
 
     STATUS_MAP: dict[str, NormalizedStatus] = {
         "pending": NormalizedStatus.QUEUED,
@@ -416,9 +419,7 @@ class HappyHorseProvider:
                 f"  headers: {mask_headers(headers)}\n"
                 f"  body:\n{dump_body(mask_body(json))}"
             )
-            raise DryRunInterrupt(
-                f"[HappyHorse:{self.name}] Dry-Run 已启用,请求未发送: {method} {url}"
-            )
+            raise DryRunInterrupt(f"[HappyHorse:{self.name}] Dry-Run 已启用,请求未发送: {method} {url}")
 
         logger.debug(
             f"[HappyHorse:{self.name}] 请求 {method} {url}\n"
@@ -427,23 +428,24 @@ class HappyHorseProvider:
         )
         client = self._get_client()
         resp = await client.request(method, url, headers=headers, json=json)
+        resp_json: Any = None
         try:
             resp_json = resp.json()
             resp_text = dump_body(mask_body(resp_json))
         except Exception:
             resp_text = resp.text[:2000]
         emit = logger.warning if resp.status_code >= 400 else logger.debug
-        emit(
-            f"[HappyHorse:{self.name}] 响应 {resp.status_code} "
-            f"({len(resp.content)} bytes)\n  body: {resp_text}"
-        )
+        emit(f"[HappyHorse:{self.name}] 响应 {resp.status_code} ({len(resp.content)} bytes)\n  body: {resp_text}")
         if resp.status_code >= 400:
             raise self._build_http_error(resp)
+        # DELETE/空 body 响应
+        if method.upper() == "DELETE" and (resp_json is None or not (resp.content or b"").strip()):
+            return {}
         # DashScope 业务错误有时 200 但带 code/message
-        if isinstance(resp_json, dict) and resp_json.get("code") and not (resp_json.get("output") or {}).get(
-            "task_id"
-        ):
-            # 查询成功响应没有顶层 code;创建失败常有
+        # 取消成功通常只有 request_id,无 output.task_id;失败才有顶层 code
+        if isinstance(resp_json, dict) and resp_json.get("code") and not (resp_json.get("output") or {}).get("task_id"):
+            # 成功取消也可能无 code;有 code 且非 Success 才算业务错
+            # 忽略仅含 request_id 的成功体
             code = str(resp_json.get("code") or "")
             if code and code not in ("", "Success", "null"):
                 msg = resp_json.get("message") or code
@@ -454,16 +456,17 @@ class HappyHorseProvider:
                     provider=self.name,
                     user_message=str(msg),
                 )
-        try:
-            return resp.json() if not isinstance(resp_json, dict) else resp_json
-        except Exception as exc:
-            raise HappyHorseProviderError(
-                f"{self.name} 返回非 JSON: {exc}",
-                code="BAD_RESPONSE",
-                retryable=True,
-                provider=self.name,
-                user_message="上游返回格式异常,请稍后重试。",
-            ) from exc
+        if isinstance(resp_json, dict):
+            return resp_json
+        if method.upper() in ("DELETE", "POST") and not (resp.content or b"").strip():
+            return {}
+        raise HappyHorseProviderError(
+            f"{self.name} 返回非 JSON: {resp_text[:500]}",
+            code="BAD_RESPONSE",
+            retryable=True,
+            provider=self.name,
+            user_message="上游返回格式异常,请稍后重试。",
+        )
 
     def _build_http_error(self, resp: httpx.Response) -> HappyHorseProviderError:
         try:
@@ -497,10 +500,13 @@ class HappyHorseProvider:
     ) -> NormalizedTask:
         self.validate_spec(spec)
         method, url, headers, body = await self.render_create(spec, model=model)
+        masked = mask_body(body)
         logger.info(
-            f"[HappyHorse:{self.name}] 创建任务: model={model}, endpoint={url}\n"
-            f"  request:\n{dump_body(mask_body(body))}"
+            f"[HappyHorse:{self.name}] 创建任务: model={model}, endpoint={url}\n  request:\n{dump_body(masked)}"
         )
+        from ....core.telemetry.wire_capture import set_wire_from_http_body
+
+        set_wire_from_http_body(masked)
         resp = await self._request(method, url, headers=headers, json=body)
         task_id = self.parse_create(resp)
         if not task_id:
@@ -512,7 +518,88 @@ class HappyHorseProvider:
                 user_message="上游未返回任务 ID,请稍后重试。",
             )
         logger.info(f"[HappyHorse:{self.name}] 任务已创建: task_id={task_id}")
-        return await self.poll_until_done(task_id, on_progress=on_progress)
+        await self._bind_active_cancel(task_id)
+        try:
+            return await self.poll_until_done(task_id, on_progress=on_progress)
+        except asyncio.CancelledError:
+            await self._best_effort_delete(task_id)
+            raise
+
+    async def delete(self, task_id: str) -> None:
+        """取消异步任务(DashScope 官方接口)。
+
+        ``POST {base}/tasks/{task_id}/cancel``
+        (完整 URL 例: ``https://dashscope.aliyuncs.com/api/v1/tasks/{id}/cancel``)
+
+        文档约定:
+        - **仅 PENDING(排队)可取消**;已 RUNNING 返回 400 UnsupportedOperation
+        - 成功响应通常只有 ``request_id``;失败带 ``code`` / ``message``
+        - 本地 cancel 仍会退引擎预扣;RUNNING 时上游可能继续计费,宿主 UI 应提示
+        """
+        if not task_id:
+            return
+        path = self.CANCEL_PATH if hasattr(self, "CANCEL_PATH") and self.CANCEL_PATH else "/tasks/{task_id}/cancel"
+        url = f"{self.base_url}{path.format(task_id=task_id)}"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        logger.info(f"[HappyHorse:{self.name}] 上游 cancel POST task_id={task_id} url={url}")
+        try:
+            # POST 无 body;_request 在 dry_run 下抛 DryRunInterrupt
+            await self._request("POST", url, headers=headers, json=None)
+            logger.info(f"[HappyHorse:{self.name}] 上游 cancel 完成 task_id={task_id}")
+        except DryRunInterrupt:
+            logger.info(f"[HappyHorse:{self.name}] Dry-Run 跳过 cancel task_id={task_id}")
+            return
+
+    def supports_remote_cancel(self) -> bool:
+        """DashScope/网关 HappyHorse 均有真实 cancel;不支持的子类须覆盖为 False。"""
+        return True
+
+    async def _bind_active_cancel(self, task_id: str) -> None:
+        if not task_id:
+            return
+        try:
+            from ....core.dispatch.active_tasks import get_active_task_registry
+
+            provider = self
+            cancel_remote = None
+            if self.supports_remote_cancel():
+
+                async def _cancel_remote() -> None:
+                    await provider.delete(task_id)
+
+                cancel_remote = _cancel_remote
+
+            await get_active_task_registry().bind_vendor_task(
+                vendor_task_id=task_id,
+                cancel_remote=cancel_remote,
+                channel_name=self.name,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[HappyHorse:{self.name}] 绑定 vendor 任务失败(忽略): {exc}")
+
+    async def _best_effort_delete(self, task_id: str) -> None:
+        if not task_id or not self.supports_remote_cancel():
+            return
+        try:
+            from ....core.dispatch.active_tasks import remote_cancel_already_attempted
+
+            if remote_cancel_already_attempted():
+                logger.debug(
+                    f"[HappyHorse:{self.name}] 跳过 CancelledError 兜底 cancel"
+                    f"(cancel_generation 已尝试上游): {task_id}"
+                )
+                return
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await self.delete(task_id)
+            logger.info(f"[HappyHorse:{self.name}] CancelledError 兜底已 cancel 上游任务 {task_id}")
+        except Exception as exc:  # noqa: BLE001
+            # RUNNING 态取消会 400,本地 Task 仍会被 cancel,只记 warning
+            logger.warning(f"[HappyHorse:{self.name}] CancelledError 兜底 cancel 失败: {exc}")
 
     async def poll_until_done(
         self,
@@ -544,17 +631,13 @@ class HappyHorseProvider:
                 ) from poll_exc
 
             if task.status != last_status:
-                logger.info(
-                    f"[HappyHorse:{self.name}] 任务 {task_id} 状态变更: "
-                    f"{last_status} → {task.status}"
-                )
+                logger.info(f"[HappyHorse:{self.name}] 任务 {task_id} 状态变更: {last_status} → {task.status}")
                 last_status = task.status
                 poll_count = 0
             elif poll_count > 0 and poll_count % heartbeat_every == 0:
                 elapsed = loop.time() - start
                 logger.info(
-                    f"[HappyHorse:{self.name}] 任务 {task_id} 轮询中: "
-                    f"status={task.status}, 已等待={elapsed:.1f}s"
+                    f"[HappyHorse:{self.name}] 任务 {task_id} 轮询中: status={task.status}, 已等待={elapsed:.1f}s"
                 )
 
             if on_progress is not None:
@@ -569,10 +652,7 @@ class HappyHorseProvider:
                 raw_dump = dump_body(mask_body(task.raw))
                 if task.status == NormalizedStatus.FAILED:
                     vendor_msg = task.error or str(task.raw)
-                    logger.warning(
-                        f"[HappyHorse:{self.name}] 任务 {task_id} 失败: {vendor_msg}\n"
-                        f"  result:\n{raw_dump}"
-                    )
+                    logger.warning(f"[HappyHorse:{self.name}] 任务 {task_id} 失败: {vendor_msg}\n  result:\n{raw_dump}")
                     raise HappyHorseProviderError(
                         vendor_msg,
                         code="TASK_FAILED",
@@ -588,9 +668,7 @@ class HappyHorseProvider:
                         provider=self.name,
                         user_message=f"任务已{task.status.value}",
                     )
-                logger.info(
-                    f"[HappyHorse:{self.name}] 任务 {task_id} 成功\n  result:\n{raw_dump}"
-                )
+                logger.info(f"[HappyHorse:{self.name}] 任务 {task_id} 成功\n  result:\n{raw_dump}")
                 return task
 
             if loop.time() - start > max_wait:

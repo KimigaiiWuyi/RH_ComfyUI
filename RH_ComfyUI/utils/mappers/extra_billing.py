@@ -26,6 +26,7 @@ MINIMAX_T2A_POINTS_PER_10K_CHARS: int = 350
 
 # ── Wan2.2 视频生成 ──
 
+
 def calculate_wan22_points(duration: float) -> int:
     """Wan2.2:按输出视频时长计费,0.6 元/秒 = 60 积分/秒。"""
     if duration <= 0:
@@ -40,6 +41,7 @@ def estimate_wan22_points(duration: float) -> int:
 
 
 # ── MiMo TTS ──
+
 
 def calculate_mimo_tts_points(text: Optional[str]) -> int:
     """MiMo TTS:按输入文本 UTF-8 字节长度计费,6 美元/M bytes → 600 积分/M bytes。"""
@@ -56,6 +58,7 @@ def estimate_mimo_tts_points(text: Optional[str]) -> int:
 
 
 # ── MiniMax T2A Speech ──
+
 
 def calculate_minimax_t2a_points(text: Optional[str]) -> int:
     """MiniMax T2A Speech:按输入文本字符数计费,3.5 元/万字符 = 350 积分/万字符。

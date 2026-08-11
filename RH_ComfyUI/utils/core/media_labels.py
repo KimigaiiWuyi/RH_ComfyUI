@@ -2,30 +2,26 @@
 
 背景
 ----
-画布前端把 ``[@标题]`` chip 提交时,Seedance 系靠 ``ordered_content`` 交错结构 +
-provider 注入 ``【图片N】``;但 banana / gpt-image-2 / seedream / happyhorse /
-wan 等只吃扁平 ``prompt + images`` 的模型,若调用方把 ``[@]`` 直接剥空,
-会得到「将  中的角色替换为  」这类空洞 prompt。
+调用方可能提交图文交错的 ``ordered_content``,而部分模型只接受扁平
+``prompt + images``。若剥掉媒体占位只剩空白文案,会得到无主语的残缺 prompt。
 
 约定代号(有结构,便于模型与下游改写识别):
   ``[参考图片N]`` / ``[参考视频N]`` / ``[参考音频N]``
 与扁平 ``images[N-1]`` / ``video_refs`` / ``audio_refs`` 下标对齐。
 
-本模块在 RH 入口层统一兜底:
+本模块在引擎入口层统一兜底:
 1. 有 ``ordered_content`` 媒体项时,按书写顺序重建带结构化代号的 prompt;
 2. 扁平 ``images`` 为空时,从 OC 抽出图片 bytes,供只读 images 的通道使用。
 
-与前端 ``stripMentions(..., titleToNode)``、canvas agent
-``_strip_mentions_to_labels`` 语义对齐;同 media 多次出现复用同一序号
-(按 data 身份 / url 去重)。
+同 media 多次出现复用同一序号(按 data 身份 / url 去重)。
 """
 
 from __future__ import annotations
 
 from typing import Any, Optional
 
+from .types import MediaRef, MediaKind, ContentItem, ContentItemType
 from .request import GenerationRequest
-from .types import ContentItem, ContentItemType, MediaKind, MediaRef
 
 
 def _media_identity(ref: MediaRef) -> str:
@@ -145,9 +141,9 @@ def ensure_media_ref_labels(request: GenerationRequest) -> GenerationRequest:
 
 
 def labeled_prompt_from_oc_dicts(items: list[Any]) -> str:
-    """轻量版:接受 canvas_backend OrderedContentItem / dict 列表。
+    """轻量版:接受 dict / duck-type 对象列表(字段 type/text/url/media)。
 
-    供 agent 组装 GenerateRequest 时在无 ContentItem 的场景复用同一语义。
+    供在无 ``ContentItem`` 的场景复用同一套编号语义。
     """
     if not items:
         return ""

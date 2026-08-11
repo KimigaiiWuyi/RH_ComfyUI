@@ -3,10 +3,10 @@ from typing import Any, Optional, TypedDict
 from datetime import datetime, timezone
 
 from sqlmodel import Field, SQLModel, col
-from sqlalchemy import ColumnElement, Index, and_, case, func, delete, select
+from sqlalchemy import Index, ColumnElement, and_, case, func, delete, select
+from sqlalchemy.orm import defer
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import defer
 
 from gsuid_core.logger import logger
 from gsuid_core.webconsole.mount_app import PageSchema, GsAdminModel, site
@@ -491,9 +491,9 @@ class RHBind(Bind, table=True):
         补满 5h 时会清零 5h 计时(回到闲置)。
         """
         from ...core.billing.tier_quota import (
-            get_tier_quotas,
-            normalize_tier,
             now_ts,
+            normalize_tier,
+            get_tier_quotas,
             start_of_local_day,
             start_of_local_week,
         )
@@ -935,11 +935,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         active_users = int(row.active_users or 0)
 
         type_rows = await session.execute(
-            _where(
-                select(col(cls.task_type), func.count())
-                .select_from(cls)
-                .group_by(col(cls.task_type))
-            )
+            _where(select(col(cls.task_type), func.count()).select_from(cls).group_by(col(cls.task_type)))
         )
         by_type_pairs = type_rows.all()
         terminal_total = success + failed
@@ -958,11 +954,12 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     @classmethod
     def _defer_heavy_columns(cls):
         """列表查询跳过大 JSON 列(详情接口懒加载 raw/request_body)。"""
+        # SQLModel 把列注解成 str,defer 需要 ORM 属性;第三方 typing 缺口
         return (
-            defer(cls.raw_response_json),
-            defer(cls.request_body_json),
-            defer(cls.extra_params_json),
-            defer(cls.saved_files_json),
+            defer(cls.raw_response_json),  # type: ignore[arg-type]
+            defer(cls.request_body_json),  # type: ignore[arg-type]
+            defer(cls.extra_params_json),  # type: ignore[arg-type]
+            defer(cls.saved_files_json),  # type: ignore[arg-type]
         )
 
     @classmethod
@@ -1190,11 +1187,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         success_map = {p: int(cnt) for p, cnt in (await session.execute(success_stmt)).all()}
         failed_stmt = (
             select(base_sub.c.backend_provider, func.count())
-            .where(
-                base_sub.c.status.in_(
-                    (RHComfyuiTaskStatus.FAILED.value, RHComfyuiTaskStatus.CANCELLED.value)
-                )
-            )
+            .where(base_sub.c.status.in_((RHComfyuiTaskStatus.FAILED.value, RHComfyuiTaskStatus.CANCELLED.value)))
             .group_by(base_sub.c.backend_provider)
         )
         failed_map = {p: int(cnt) for p, cnt in (await session.execute(failed_stmt)).all()}
@@ -1227,8 +1220,11 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         bot_id: str,
         task_name: str,
     ) -> bool:
-        """把某用户最近一条匹配 (user, bot, task_name, status=failed, refunded=False)
-        的记录标记为 refunded=True;供 _do_generate 退积分后调用"""
+        """最近一条 failed/cancelled 且未退记录 → refunded=True(PointsBillingPolicy)。"""
+        terminal = (
+            RHComfyuiTaskStatus.FAILED.value,
+            RHComfyuiTaskStatus.CANCELLED.value,
+        )
         stmt = (
             select(cls)
             .where(
@@ -1236,7 +1232,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
                     col(cls.user_id) == user_id,
                     col(cls.bot_id) == bot_id,
                     col(cls.task_name) == task_name,
-                    col(cls.status) == RHComfyuiTaskStatus.FAILED.value,
+                    col(cls.status).in_(terminal),
                     col(cls.refunded) == False,  # noqa: E712
                 )
             )
@@ -1246,6 +1242,40 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         row = (await session.execute(stmt)).scalar_one_or_none()
         if row is None:
             return False
+        row.refunded = True
+        session.add(row)
+        return True
+
+    @classmethod
+    @with_session
+    async def mark_host_wallet_refunded(
+        cls,
+        session: AsyncSession,
+        *,
+        trace_id: str = "",
+        record_id: Optional[int] = None,
+        terminal_status: Optional[str] = None,
+    ) -> bool:
+        """宿主 ExternalPrepaid 退钱包后回写消费表(按 record_id 或 trace_id)。
+
+        - 设置 refunded=True
+        - 若 terminal_status 给定且当前为 running,同步写终态(cancelled/failed)
+        - 已 ok 的行不改(防迟到写回)
+        """
+        row: Optional[RHComfyuiTaskRecord] = None
+        if record_id is not None and int(record_id) > 0:
+            stmt = select(cls).where(col(cls.id) == int(record_id))
+            row = (await session.execute(stmt)).scalar_one_or_none()
+        tid = (trace_id or "").strip()
+        if row is None and tid:
+            stmt = select(cls).where(col(cls.trace_id) == tid).order_by(col(cls.created_at).desc()).limit(1)
+            row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return False
+        if row.status == RHComfyuiTaskStatus.OK.value:
+            return False
+        if terminal_status and row.status == RHComfyuiTaskStatus.RUNNING.value:
+            row.status = str(terminal_status)[:16]
         row.refunded = True
         session.add(row)
         return True
@@ -1344,6 +1374,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         point_cost: Optional[int] = None,
         extra_params_json: Optional[str] = None,
         request_body_json: Optional[str] = None,
+        prompt: Optional[str] = None,
         refunded: Optional[bool] = None,
     ) -> bool:
         """按主键更新任务记录(执行中 → 终态)。找不到行返回 False。"""
@@ -1376,6 +1407,8 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             row.extra_params_json = extra_params_json
         if request_body_json is not None:
             row.request_body_json = request_body_json
+        if prompt is not None:
+            row.prompt = str(prompt)[:4000]
         if refunded is not None:
             row.refunded = bool(refunded)
         session.add(row)
@@ -1453,7 +1486,8 @@ class RHComfyuiStatsCache(SQLModel, table=True):
     - expires_at: unix 秒,过期行可惰性忽略并由下次写入覆盖
     """
 
-    __tablename__ = "rhcomfyuistatscache"
+    # SQLModel/SQLAlchemy 对 __tablename__ 的 stub 与字面量赋值冲突
+    __tablename__ = "rhcomfyuistatscache"  # type: ignore[assignment]
     __table_args__ = (
         Index("ix_rhcomfyuistatscache_bot_exp", "bot_id", "expires_at"),
         {"extend_existing": True},
@@ -1643,16 +1677,12 @@ exec_list.extend(
         "ALTER TABLE rhbind ADD COLUMN refreshed_at_week INTEGER DEFAULT 0",
         'ALTER TABLE rhbind ADD COLUMN vip_tier VARCHAR(16) DEFAULT "free"',
         # ── admin stats 复合索引(与 SQLModel __table_args__ 对齐;旧库启动补齐) ──
-        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_created "
-        "ON rhcomfyuitaskrecord (bot_id, created_at)",
-        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_user "
-        "ON rhcomfyuitaskrecord (bot_id, user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_created ON rhcomfyuitaskrecord (bot_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_user ON rhcomfyuitaskrecord (bot_id, user_id)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_status_created "
         "ON rhcomfyuitaskrecord (bot_id, status, created_at)",
-        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_user_created "
-        "ON rhcomfyuitaskrecord (user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_user_created ON rhcomfyuitaskrecord (user_id, created_at)",
         # 统计缓存表索引(表由 create_all 建出后补索引)
-        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuistatscache_bot_exp "
-        "ON rhcomfyuistatscache (bot_id, expires_at)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuistatscache_bot_exp ON rhcomfyuistatscache (bot_id, expires_at)",
     ]
 )

@@ -7,7 +7,7 @@
 
 | 后端名(backend 字段) | 目录 | 上游 | 说明 |
 |---|---|---|---|
-| `comfyui` | `comfyui/` | 本地/远程 ComfyUI | WebSocket + workflow JSON;`set_workflow_override()` 支持 mapper 按输入切换工作流(如 Wan t2v/i2v) |
+| `comfyui` | `comfyui/` | 本地/远程 ComfyUI | WebSocket + workflow JSON;可 cancel(local interrupt 或 RH `/task/openapi/cancel`);可 history resume |
 | `gpt-image-2` | `gpt_image2/` | OpenAI 兼容协议 | 文生图/图生图/编辑自适应;凭证可指向 OneAPI/NewAPI 等网关(注意名字带**连字符**) |
 
 > **Gemini 不是 Adapter**:`gemini_image/` 提供一个 `GeminiImageChannel`,内部走
@@ -16,7 +16,7 @@
 > (`Client(vertexai=True, project=, location=)`,鉴权用 ADC 或服务账号 JSON——
 > SDK 限制 project 与 api_key 互斥)。banana2(Nano Banana 2)是**原生 Gemini 模型**,
 > 在 `Banana2Def.channel_bindings()` 里唯一挂这条通道,与 gpt-image-2 完全独立。
-| `rh_app` | `rh_app/` | RunningHub AI 应用 | webapp id 即 `workflow_file` |
+| `rh_app` | `rh_app/` | RunningHub **AI 应用** | webapp id=`workflow_file`;与 comfyui **不同 API**;**无** remote cancel;可 query resume |
 | `minimax` | `minimax/` | MiniMax | 图片 + 语音(T2A) |
 | `mimo` | `mimo/` | MiMo TTS | 语音 |
 
@@ -35,6 +35,10 @@ Adapter 协议(5 成员):`name` / `check_available()` / `get_unavailable_reason(
 **分工边界**:Adapter 管通信与厂商协议;模型类(models/)管参数面与校验;
 `AdapterChannel`(models/bridge.py)把 Adapter 适配为 ProviderChannel 供
 ABC 执行链使用。新上游 = 新 Adapter(或直接写 ProviderChannel,见 04 章)。
+
+> **`rh_app` ≠ `comfyui`**:即便共用 `RH_apikey`,取消/resume 能力不同。
+> 详见 [§二十 §20.2](./20-cancel-resume-and-wire-audit.md)。
+> 异步 backend 须:create 后 `bind_vendor_cancel`、POST 前 `set_wire_*`。
 
 ### Seedance 的 Provider 子层与多通道(2026-07 起单层负载均衡)
 

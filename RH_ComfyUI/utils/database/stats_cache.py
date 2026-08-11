@@ -9,11 +9,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
-from datetime import datetime
+import hashlib
 from typing import Any, Optional
+from datetime import datetime
 
 from gsuid_core.logger import logger
 
@@ -182,16 +182,18 @@ async def get_summary_cached(
         end_time=end_time,
         bot_id=bot_id,
     )
+    # TaskSummary 是 TypedDict,运行期即 dict
+    payload: dict[str, Any] = dict(summary)
     await cache_set(
         key,
         bot_id=bid,
         kind="summary",
-        payload=dict(summary),
+        payload=payload,
         start_time=start_time,
         end_time=end_time,
         days=days,
     )
-    return summary
+    return payload
 
 
 async def get_user_summaries_cached(

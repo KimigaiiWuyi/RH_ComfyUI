@@ -44,9 +44,7 @@ class SeedreamAPI:
 
     @property
     def base_url(self) -> str:
-        url = self._base_url_override or SERVICE_CONFIG.get_config(
-            "Seedance_BaseURL_ark"
-        ).data
+        url = self._base_url_override or SERVICE_CONFIG.get_config("Seedance_BaseURL_ark").data
         return (url or self.DEFAULT_BASE_URL).rstrip("/")
 
     @property
@@ -79,9 +77,7 @@ class SeedreamAPI:
     def _require_api_key(self) -> str:
         key = self.api_key
         if not key:
-            raise RuntimeError(
-                "[Seedream] 未配置火山 ARK API Key,请在 Web 控制台配置 Seedance_apikey_ark 后重试"
-            )
+            raise RuntimeError("[Seedream] 未配置火山 ARK API Key,请在 Web 控制台配置 Seedance_apikey_ark 后重试")
         return key
 
     async def _request(
@@ -103,17 +99,13 @@ class SeedreamAPI:
                         if resp.status != 200:
                             try:
                                 err_body = await resp.text()
-                                logger.warning(
-                                    f"[Seedream] 错误响应体: {err_body[:500]}"
-                                )
+                                logger.warning(f"[Seedream] 错误响应体: {err_body[:500]}")
                             except Exception:
                                 pass
                             # 429/5xx 退避重试一次
                             if resp.status in (429, 500, 502, 503, 504):
                                 if attempt < max_retries - 1:
-                                    logger.warning(
-                                        f"[Seedream] {resp.status} 退避后重试 ({attempt + 1}/{max_retries})"
-                                    )
+                                    logger.warning(f"[Seedream] {resp.status} 退避后重试 ({attempt + 1}/{max_retries})")
                                     continue
                             return resp.status
                         data = await resp.json()
@@ -134,9 +126,7 @@ class SeedreamAPI:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as resp:
                     if resp.status != 200:
-                        logger.warning(
-                            f"[Seedream] 下载图片失败,状态码: {resp.status}"
-                        )
+                        logger.warning(f"[Seedream] 下载图片失败,状态码: {resp.status}")
                         return 500
                     return Image.open(io.BytesIO(await resp.read()))
         except Exception as e:  # noqa: BLE001
@@ -197,13 +187,9 @@ class SeedreamAPI:
         first = data_list[0]
         if isinstance(first, dict) and first.get("error"):
             err = first["error"]
-            raise RuntimeError(
-                f"[Seedream] 单图错误 {err.get('code', '')}: {err.get('message', '生成失败')}"
-            )
+            raise RuntimeError(f"[Seedream] 单图错误 {err.get('code', '')}: {err.get('message', '生成失败')}")
 
-        url_or_b64 = first.get("url") or (
-            f"data:image/png;base64,{first['b64_json']}" if "b64_json" in first else None
-        )
+        url_or_b64 = first.get("url") or (f"data:image/png;base64,{first['b64_json']}" if "b64_json" in first else None)
         if not url_or_b64:
             raise RuntimeError(f"[Seedream] 响应缺少 url/b64_json: {first}")
 

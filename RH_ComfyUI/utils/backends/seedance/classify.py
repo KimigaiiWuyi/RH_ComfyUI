@@ -331,11 +331,11 @@ def _append_flat_media_not_in_ordered(
     ordered_content 里的素材,以 REFERENCE 角色追加到 media 与有序段尾部。
 
     注意:
-    - 前端 GenerationNode 在 Seedance 多参考路径会**同时**发 ordered_content(已含
-      @ + 未 @ 连线)与扁平 images(兼容备份)。旧实现只认单一 identity,url/bytes
-      不一致时会把 9 张图再追加一遍 → 18 张 → MEDIA_OVERFLOW(图≤9)。
-    - 若有序段**已有图**,跳过扁平 images(有序段已是权威图列表;扁平只服务
-      Agent/主页等未写 OC 的入口)。video/audio 仍按 identity 去重追加。
+    - 调用方可能**同时**发 ordered_content 与扁平 images(后者作兼容备份)。
+      旧实现只认单一 identity,url/bytes 不一致时会把 N 张图再追加一遍 → 2N →
+      顶破上游 ``max_images``。
+    - 若有序段**已有图**,跳过扁平 images(有序段为权威图列表;扁平留给未写
+      OC 的入口)。video/audio 仍按 identity 去重追加。
     """
     seen: set[str] = set()
     for m in media:

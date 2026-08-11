@@ -1,8 +1,8 @@
 """HappyHorse 积分计价"""
 
 from RH_ComfyUI.utils.mappers.happyhorse_billing import (
-    calculate_happyhorse_points,
     estimate_happyhorse_points,
+    calculate_happyhorse_points,
 )
 
 

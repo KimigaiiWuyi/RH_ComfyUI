@@ -21,9 +21,9 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from ..seedance.classify import classify_video_spec
-from ..seedance.spec import MediaRole, VideoGenSpec, VideoTaskShape
 from ...core.request import GenerationRequest
+from ..seedance.spec import MediaRole, VideoGenSpec, VideoTaskShape
+from ..seedance.classify import classify_video_spec
 
 # ── 供应商侧 model ID(对外统一 happyhorse1.1,内部按形态切) ──
 

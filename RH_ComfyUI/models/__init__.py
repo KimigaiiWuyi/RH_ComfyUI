@@ -12,18 +12,18 @@ from __future__ import annotations
 
 from gsuid_core.logger import logger
 
+from .asr import FishAsrModel
 from .video import Wan22VideoModel, SeedanceVideoModel, HappyHorseVideoModel
 from .speech import IndexTTS2Model
-from .asr import FishAsrModel
 
 
 def discover_builtin_models() -> int:
     """装载全部内置模型进 model_registry;返回注册数量"""
+    from .asr.defs import ALL_MODELS as ASR_MODELS
     from .image.defs import ALL_MODELS as IMAGE_MODELS
     from .music.defs import ALL_MODELS as MUSIC_MODELS
     from .video.defs import ALL_MODELS as VIDEO_MODELS
     from .speech.defs import ALL_MODELS as SPEECH_MODELS
-    from .asr.defs import ALL_MODELS as ASR_MODELS
     from ..core.routing.registry import model_registry, load_entry_point_models
 
     # NodeDef 目录(pipeline_registry)现由 model_registry 派生,无需再单独注册

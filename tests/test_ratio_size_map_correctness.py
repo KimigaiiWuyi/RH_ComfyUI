@@ -11,10 +11,9 @@ import pytest
 
 from RH_ComfyUI.utils.mappers.gpt_image2_billing import (
     _RATIO_SIZE_MAP,
-    estimate_gpt_image2_points,
     resolve_dimensions,
+    estimate_gpt_image2_points,
 )
-
 
 # ── 表结构 ──
 
@@ -36,10 +35,7 @@ def test_every_cell_is_a_valid_size():
             assert max(w, h) <= 3840, f"{ratio} {tier}={size_str}: max edge {max(w, h)} > 3840"
 
             # 3. 比例精确,且方向与 ratio 一致(landscape/portrait)
-            assert w * r_h == h * r_w, (
-                f"{ratio} {tier}={size_str}: 比例不匹配"
-                f"(期望 {r_w}:{r_h}, 实际 {w}:{h})"
-            )
+            assert w * r_h == h * r_w, f"{ratio} {tier}={size_str}: 比例不匹配(期望 {r_w}:{r_h}, 实际 {w}:{h})"
             if r_w > r_h:
                 assert w > h, f"{ratio} {tier}={size_str}: 应该是 landscape(w>h) 但 {w}<{h}"
             elif r_w < r_h:
@@ -49,9 +45,7 @@ def test_every_cell_is_a_valid_size():
 
             # 4. 像素在 [655360, 8294400]
             pixels = w * h
-            assert 655_360 <= pixels <= 8_294_400, (
-                f"{ratio} {tier}={size_str}: 像素 {pixels} 超出合法范围"
-            )
+            assert 655_360 <= pixels <= 8_294_400, f"{ratio} {tier}={size_str}: 像素 {pixels} 超出合法范围"
 
 
 # ── 单调性:每个 ratio 下 4K > 2K > 1K(同 quality) ──
@@ -62,10 +56,7 @@ def test_4k_strictly_more_expensive_than_2k(ratio):
     """核心断言:同 ratio + high quality 下,4K 积分必须 > 2K 积分。"""
     high_2k = estimate_gpt_image2_points("high", ratio, "2K")
     high_4k = estimate_gpt_image2_points("high", ratio, "4K")
-    assert high_4k > high_2k, (
-        f"{ratio}: 4K ({high_4k}) 反而 ≤ 2K ({high_2k})! "
-        f"size 表错误或公式异常。"
-    )
+    assert high_4k > high_2k, f"{ratio}: 4K ({high_4k}) 反而 ≤ 2K ({high_2k})! size 表错误或公式异常。"
 
 
 @pytest.mark.parametrize("ratio", list(_RATIO_SIZE_MAP.keys()))
@@ -75,9 +66,7 @@ def test_tier_monotonic_for_all_qualities(ratio, quality):
     pts_1k = estimate_gpt_image2_points(quality, ratio, "1K")
     pts_2k = estimate_gpt_image2_points(quality, ratio, "2K")
     pts_4k = estimate_gpt_image2_points(quality, ratio, "4K")
-    assert pts_1k < pts_2k < pts_4k, (
-        f"{ratio} {quality}: 积分不单调 1K={pts_1k} < 2K={pts_2k} < 4K={pts_4k}"
-    )
+    assert pts_1k < pts_2k < pts_4k, f"{ratio} {quality}: 积分不单调 1K={pts_1k} < 2K={pts_2k} < 4K={pts_4k}"
 
 
 # ── 用户报告的具体 case ──

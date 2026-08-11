@@ -18,8 +18,11 @@ from __future__ import annotations
 from typing import Any, Optional
 from dataclasses import field, asdict, dataclass
 
+from gsuid_core.logger import logger
+
 from ..utils.backends import backend_registry
-from ..utils.core.request import CATALOG_GROUP_DISPLAY, TASK_DISPLAY_NAME, TaskType
+from ..utils.core.types import MediaRef, MediaKind
+from ..utils.core.request import CATALOG_GROUP_DISPLAY, TaskType
 from ..utils.core.pipeline import NodeDef, pipeline_registry
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -114,12 +117,19 @@ class ModelEntry:
     point_range: dict[str, int] = field(default_factory=lambda: {"min": 0, "max": 0})
     # ── 目录分组:默认等于 task_type;专用工具为 "tool"(不进图片生成主列表) ──
     catalog_group: str = ""
+    # ── 2026-08 取消能力:进行中任务可 cancel;remote=上游 DELETE(通道级) ──
+    # 缺省 False:未知/不完整条目 fail-closed,避免误展示取消
+    supports_cancel: bool = False
+    supports_remote_cancel: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ModelEntry":
+        card_raw = data.get("card")
+        channels_raw = data.get("channels")
+        point_range_raw = data.get("point_range")
         return cls(
             name=str(data.get("name", "")),
             display_name=str(data.get("display_name", "")),
@@ -132,17 +142,149 @@ class ModelEntry:
             available=bool(data.get("available", False)),
             unavailable_reason=data.get("unavailable_reason"),
             supported_tasks=list(data.get("supported_tasks", [])),
-            input_schema=dict(data.get("input_schema", {})),
-            output_schema=dict(data.get("output_schema", {})),
-            requirements=list(data.get("requirements", [])),
-            point_range=data.get("point_range", {"min": 0, "max": 0}),
+            input_schema=dict(data.get("input_schema", {}) or {}),
+            output_schema=dict(data.get("output_schema", {}) or {}),
+            requirements=list(data.get("requirements", []) or []),
+            card=dict(card_raw) if isinstance(card_raw, dict) else {},
+            channels=list(channels_raw) if isinstance(channels_raw, list) else [],
+            execution_mode=str(data.get("execution_mode") or "sync"),
+            accepts_images=bool(data.get("accepts_images", False)),
+            max_input_images=int(data.get("max_input_images", 0) or 0),
+            point_range=(
+                dict(point_range_raw)
+                if isinstance(point_range_raw, dict)
+                else {"min": 0, "max": 0}
+            ),
             catalog_group=str(data.get("catalog_group") or data.get("task_type") or ""),
+            supports_cancel=bool(data.get("supports_cancel", False)),
+            supports_remote_cancel=bool(data.get("supports_remote_cancel", False)),
         )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 #  聚合逻辑
 # ═══════════════════════════════════════════════════════════════════════
+
+
+def _model_node_backend(model_obj: Any) -> str:
+    """读取模型 node.backend(无 node 时为空串)。"""
+    try:
+        node = model_obj.node
+    except AttributeError:
+        return ""
+    if node is None:
+        return ""
+    try:
+        backend = node.backend
+    except AttributeError:
+        return ""
+    return str(backend or "").lower()
+
+
+def _channel_supports_cancel(model_obj: Any, ch_name: str) -> bool:
+    """通道级本地取消(cancel_generation)。rh_app 一律 False(只能 resume)。
+
+    未知模型由调用方自行 fail-closed;此处假定 model_obj 已解析成功。
+    """
+    name = str(ch_name or "").strip().lower()
+    if name == "rh_app" or name.startswith("rh_app"):
+        return False
+    if _model_node_backend(model_obj) == "rh_app":
+        return False
+    return bool(model_obj.supports_cancel)
+
+
+def _aggregate_cancel_flags(
+    channels: list[dict[str, Any]],
+    *,
+    fallback_cancel: bool,
+    fallback_remote: bool,
+) -> tuple[bool, bool]:
+    """模型顶层 cancel 标志 = 各通道 OR,与 /models 通道明细一致(前端可只读顶层)。
+
+    无通道时:local 回落 ``fallback_cancel``;remote 回落 ``fallback_remote``
+    (remote 应为供应商级,无通道时通常 False)。多通道时顶层 true 表示
+    「至少一路可 cancel」;精确到通道时前端应读 ``channels[].supports_*``。
+    """
+    if not channels:
+        return fallback_cancel, fallback_remote
+    any_cancel = any(bool(c["supports_cancel"]) for c in channels if "supports_cancel" in c)
+    any_remote = any(bool(c["supports_remote_cancel"]) for c in channels if "supports_remote_cancel" in c)
+    return any_cancel, any_remote
+
+
+def _all_channels_support_cancel(channels: list[dict[str, Any]]) -> bool:
+    """多通道未解析时:仅当每一路都 supports_cancel 才允许顶层取消。"""
+    if not channels:
+        return False
+    flags: list[bool] = []
+    for c in channels:
+        if "supports_cancel" not in c:
+            return False
+        flags.append(bool(c["supports_cancel"]))
+    return bool(flags) and all(flags)
+
+
+def _channel_supports_remote_cancel(
+    model_obj: Any,
+    ch_name: str,
+    *,
+    channel: Any | None = None,
+) -> bool:
+    """供应商/通道级上游取消能力(**不读模型 ClassVar**)。
+
+    优先 ``ProviderChannel.supports_remote_cancel()``;无实例时按通道名矩阵兜底。
+    未知通道/供应商 → **False**(fail-closed)。
+
+    **必须区分 rh_app 与 comfyui**(即便共用 RH_apikey):
+    - ``rh_app``: RunningHub AI 应用,**无** cancel
+    - ``comfyui`` / Comfy 工作流 ``runninghub``: 有 cancel/interrupt
+    - Seedance ``ark``: DELETE;``runninghub`` Seedance 视频端点无 cancel
+    """
+    from ..core.channels.channel import ProviderChannel
+
+    if isinstance(channel, ProviderChannel):
+        return bool(channel.supports_remote_cancel())
+
+    name = str(ch_name or "").strip().lower()
+    if not name:
+        return False
+
+    backend = _model_node_backend(model_obj)
+    if name == "rh_app" or name.startswith("rh_app") or backend == "rh_app":
+        return False
+
+    if name in ("comfyui", "comfyui-local"):
+        return backend in ("", "comfyui")
+
+    # runninghub 同名:Comfy 工作流可 cancel;Seedance 视频 API 不可
+    if name == "runninghub":
+        return backend == "comfyui"
+
+    if name == "ark":
+        return True
+
+    if name in ("gemini", "gemini-image"):
+        return True
+
+    if name == "dashscope":
+        return True
+
+    # 聚合网关异步视频
+    if name.startswith("gateway_slot") and (
+        name.endswith("_seedance") or name.endswith("_happyhorse")
+    ):
+        return True
+
+    # 聚合网关异步生图(gpt-image / banana);seedream 同步端 → False
+    if name.startswith("gateway_slot"):
+        if "seedream" in name:
+            return False
+        if "gpt_image" in name or "gemini" in name or "flash_image" in name or "banana" in name:
+            return True
+        return False
+
+    return False
 
 
 def _port_to_schema(port_dict: dict) -> dict[str, Any]:
@@ -166,6 +308,8 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
     card: dict[str, Any] = {}
     channels: list[dict[str, Any]] = []
     execution_mode = "sync"
+    supports_cancel = False
+    supports_remote_cancel = False
 
     model_obj = model_registry.get(node.name)
     if model_obj is not None:
@@ -182,14 +326,28 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
                 reason = "无可用通道"
         card = model_obj.card.to_dict()
         execution_mode = model_obj.execution_mode
+        supports_cancel = bool(model_obj.supports_cancel)
         for b in model_obj.channel_bindings():
+            ch_name = b.channel.name
+            ch_local = _channel_supports_cancel(model_obj, ch_name)
+            ch_remote = _channel_supports_remote_cancel(
+                model_obj, ch_name, channel=b.channel
+            )
             channels.append(
                 {
-                    "name": b.channel.name,
+                    "name": ch_name,
                     "vendor_model": b.vendor_model,
                     "available": await b.channel.check_available(),
+                    "supports_cancel": ch_local,
+                    "supports_remote_cancel": ch_remote,
                 }
             )
+        # 顶层与通道明细一致(OR);remote 无通道时 False(供应商级,不读模型 ClassVar)
+        supports_cancel, supports_remote_cancel = _aggregate_cancel_flags(
+            channels,
+            fallback_cancel=supports_cancel,
+            fallback_remote=False,
+        )
     else:
         # 回退:无 ABC 模型的历史节点仍按后端 Adapter 判定
         adapter = backend_registry.get(node.backend)
@@ -205,6 +363,13 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
                     reason = await adapter.get_node_unavailable_reason(node)
                 except Exception:  # noqa: BLE001
                     reason = "后端不可用"
+        # 无 ABC 时按 backend 名给保守 cancel 能力(与 _channel_* 规则对齐)
+        if node.backend == "rh_app":
+            supports_cancel = False
+            supports_remote_cancel = False
+        elif node.backend in ("comfyui", "gemini-image"):
+            supports_cancel = True
+            supports_remote_cancel = True
 
     # 输入能力:是否可传参考图 + 上限(纯文生图 / 纯文本模型无 images 端口)
     img_port = node.inputs.get("images") or node.inputs.get("image")
@@ -241,6 +406,8 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
         max_input_images=max_input_images,
         point_range={"min": range_min, "max": range_max},
         catalog_group=_node_catalog_group(node),
+        supports_cancel=supports_cancel,
+        supports_remote_cancel=supports_remote_cancel,
     )
 
 
@@ -269,13 +436,24 @@ async def _build_entry_from_model(model) -> ModelEntry:  # noqa: ANN001
     except Exception:  # noqa: BLE001
         pass
     for b in bindings:
+        ch_name = b.channel.name
+        ch_local = _channel_supports_cancel(model, ch_name)
+        ch_remote = _channel_supports_remote_cancel(model, ch_name, channel=b.channel)
         channels.append(
             {
-                "name": b.channel.name,
+                "name": ch_name,
                 "vendor_model": b.vendor_model,
                 "available": await b.channel.check_available(),
+                "supports_cancel": ch_local,
+                "supports_remote_cancel": ch_remote,
             }
         )
+
+    supports_cancel, supports_remote_cancel = _aggregate_cancel_flags(
+        channels,
+        fallback_cancel=bool(model.supports_cancel),
+        fallback_remote=False,
+    )
 
     input_schema = model.input_schema()
     img_port = input_schema.get("images") or input_schema.get("image")
@@ -310,6 +488,8 @@ async def _build_entry_from_model(model) -> ModelEntry:  # noqa: ANN001
         max_input_images=max_input_images,
         point_range={"min": range_min, "max": range_max},
         catalog_group=modality,
+        supports_cancel=supports_cancel,
+        supports_remote_cancel=supports_remote_cancel,
     )
 
 
@@ -572,8 +752,8 @@ async def estimate_model_points(
             },
         }
     """
-    from ..core.routing.registry import model_registry
     from ..utils.core.request import TaskType, GenerationRequest
+    from ..core.routing.registry import model_registry
 
     model_obj = model_registry.get(model_name)
     if model_obj is None:
@@ -609,19 +789,19 @@ async def estimate_model_points(
     if input_video_duration is not None:
         params["input_video_duration"] = input_video_duration
 
-    # 占位 bytes:estimate_cost 只调 len() 不读内容,避免下载真实图片。
-    # 这里跟实际生成路径用的同一份 GenerationRequest,保证字段语义一致。
+    # 占位:estimate_cost 只调 len() 不读内容,避免下载真实媒体
     placeholder_images = [b""] * max(num_input_images, 0) if num_input_images > 0 else []
-    # video_refs 同理:占位对象仅供 len() 命中;真实时长靠 input_video_duration 传入
-    placeholder_video_refs = [object()] * max(num_video_refs, 0) if num_video_refs > 0 else []
+    placeholder_video_refs: list[MediaRef] = [
+        MediaRef(kind=MediaKind.VIDEO, data=b"") for _ in range(max(num_video_refs, 0))
+    ]
 
-    # ratio 顶层 + duration 顶层,因为部分模型(Seedance2Def 等)直接从 request.duration/request.ratio 读
+    # ratio/duration 顶层:Seedance 等从 request 顶层字段读
     req = GenerationRequest(
         task_type=TaskType.IMAGE,
-        prompt="",  # 估算不需要真实 prompt
+        prompt="",
         ratio=ratio,
         resolution=resolution,
-        duration=duration if duration is not None else 5,  # GenerationRequest 默认 5
+        duration=duration if duration is not None else 5,
         params=params,
         images=placeholder_images,
         video_refs=placeholder_video_refs,

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Optional
-from collections.abc import Callable
 from dataclasses import dataclass
+from collections.abc import Callable
 
 import httpx
 
@@ -18,9 +18,9 @@ from gsuid_core.logger import logger
 
 from .classify import classify_happyhorse, resolve_vendor_model
 from .provider import HappyHorseProvider, HappyHorseProviderError
-from ..seedance.provider import DryRunInterrupt
 from ...core.types import NodeOutput, ProgressEvent
 from ...core.request import GenerationRequest
+from ..seedance.provider import DryRunInterrupt
 from ....core.base.errors import ChannelError
 from ....core.channels.channel import ProviderChannel
 
@@ -100,8 +100,16 @@ class HappyHorseChannel(ProviderChannel):
         self._resolve_dry_run: DryRunResolver = dry_run_resolver or _dry_run_enabled
         self._cached: Optional[HappyHorseProvider] = None
 
+    def supports_remote_cancel(self) -> bool:
+        """DashScope / 网关 HappyHorse 均有任务 cancel/DELETE。"""
+        return True
+
     def credentials(self) -> ProviderCredentials:
         return self._resolve_creds()
+
+    def get_provider_for_resume(self) -> Optional[HappyHorseProvider]:
+        """公开:resume_poll 取 provider。"""
+        return self._get_provider()
 
     def _get_provider(self) -> Optional[HappyHorseProvider]:
         creds = self._resolve_creds()
@@ -110,11 +118,7 @@ class HappyHorseChannel(ProviderChannel):
         base_url = (creds.base_url or default_base or "").rstrip("/") or default_base
         cached = self._cached
         if cached is not None:
-            if (
-                cached.api_key != creds.api_key
-                or cached.base_url != base_url
-                or cached.dry_run != dry_run
-            ):
+            if cached.api_key != creds.api_key or cached.base_url != base_url or cached.dry_run != dry_run:
                 cached.update_credentials(
                     api_key=creds.api_key,
                     base_url=base_url or None,

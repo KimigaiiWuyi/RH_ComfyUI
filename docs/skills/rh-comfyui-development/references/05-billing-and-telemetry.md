@@ -14,6 +14,21 @@
 | 4. model.run() 取消/中断 | `BaseException`(CancelledError / DryRunInterrupt)原样抛出 | 同样退款(2026-07-10 起;此前 BaseException 绕过退款吞积分) | CancelledError→status=cancelled,其余=failed |
 | 4. model.run() 成功 | — | commit | status=ok |
 
+### 主动取消 · resume-poll · 最终 wire(2026-08)
+
+> **完整交接见 [§二十](./20-cancel-resume-and-wire-audit.md)**。下文为速查摘要。
+
+**取消**:`cancel_generation(trace_id|record_id)` → 可选上游 DELETE →
+`asyncio.Task.cancel` → status=cancelled + 退款。  
+能力:`supports_cancel` / `supports_remote_cancel`;**`rh_app` 永不 remote cancel**,
+`comfyui` 可以(勿与共用 `RH_apikey` 混谈)。
+
+**resume-poll**:`bind_vendor_cancel` 持久化 `extra_params_json.vendor_task_id`;
+宿主重启后 `resume_poll(...)`(不走 dispatch、不二次扣费)。
+
+**统计 wire**:backend POST 前 `set_wire_from_http_body`;`record_task` 终态
+`prompt` / `request_body_json` **优先最终上游载荷**,非调用方入参原文。
+
 **预扣金额 = `model.estimate_cost(request)`**(动态计费钩子,默认 = 静态
 `point_cost`):校验通过后调用一次,该值同时用于 reserve / `result.cost_points`
 / 统计表 `point_cost` 落库,三处口径一致。按参数分档计费的模型只需覆盖
@@ -54,12 +69,16 @@ refund(reservation)                        # 失败退款;必须幂等(判 reser
 1. 产物落盘 `OUTPUT_PATH`;
 2. `record_task()` 写 `RHComfyuiTaskRecord`(`utils/database/models.py`)。
 
-关键列:`user_id / bot_id / task_type / model_name / prompt /
-point_cost / status / entry_point(command|agent|http)/ channel /
-elapsed_ms / error`。
+关键列:`user_id / bot_id / task_type / task_name / prompt /
+point_cost / status / entry_point(command|agent|http) / backend_provider /
+elapsed_ms / error / request_body_json / extra_params_json`。
 
 规则:
-- 闭源通道走同一 record_dispatch,只落 `channel` 名,**不落私有 URL/参数**;
+- **`prompt` / `request_body_json` 终态以 wire 为准**(§二十 §20.4);
+  `begin_task` 仅写 running 快照,可被 UPDATE 覆盖;
+- `extra_params_json` 可含 `vendor_task_id` / `vendor_channel`(resume 用);
+- 闭源通道走同一 record_dispatch,只落 `channel` 名,**不落私有密钥**;
+  wire body 中 base64 须 `mask_body`;
 - 加统计维度:先在 `RHComfyuiTaskRecord` 加列(带默认值,依赖
   gsuid_core 的 exec_list 自动迁移),再在 recorder 补写入;
 - 既有列不改名不删(报表与账单依赖)。

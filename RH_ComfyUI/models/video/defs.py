@@ -173,9 +173,7 @@ class Seedance15ProDef(SeedanceVideoModel):
         """积分范围:最小(480p + 4s + 无声) ~ 最大(1080p + 12s + 有声 + 输入 15s)。"""
         return (
             estimate_seedance15_pro_points("480p", 4, generate_audio=False, video_refs=None),
-            estimate_seedance15_pro_points(
-                "1080p", 12, generate_audio=True, input_video_duration=15.0
-            ),
+            estimate_seedance15_pro_points("1080p", 12, generate_audio=True, input_video_duration=15.0),
         )
 
 
@@ -330,9 +328,7 @@ class Seedance2Def(SeedanceVideoModel):
         for res in ("480p", "720p", "1080p", "4k"):
             for dur in (4, 15):
                 candidates.append(estimate_seedance2_points(res, dur, video_refs=None))
-                candidates.append(
-                    estimate_seedance2_points(res, dur, input_video_duration=15.0)
-                )
+                candidates.append(estimate_seedance2_points(res, dur, input_video_duration=15.0))
         return (min(candidates), max(candidates))
 
 
@@ -407,9 +403,7 @@ class Seedance25Def(Seedance25VideoModel):
                     max_items=30,
                     item_type=PortType.IMAGE,
                     title="参考图片",
-                    description=(
-                        "参考图片(最多 30 张):0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考"
-                    ),
+                    description=("参考图片(最多 30 张):0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考"),
                 ),
                 "video_refs": PortSpec(
                     type=PortType.LIST,
@@ -473,10 +467,7 @@ class Seedance25Def(Seedance25VideoModel):
                     minimum=-1,
                     maximum=30,
                     title="时长",
-                    description=(
-                        "输出时长(秒):4~30;填 -1 表示跟随输入视频时长"
-                        "(仅 edit/extend 合法)"
-                    ),
+                    description=("输出时长(秒):4~30;填 -1 表示跟随输入视频时长(仅 edit/extend 合法)"),
                 ),
                 "seed": PortSpec(type=PortType.INTEGER, title="随机种子", description="随机种子,留空则随机"),
                 "generate_audio": PortSpec(
@@ -542,14 +533,19 @@ class Seedance25Def(Seedance25VideoModel):
 
 
 class Seedance2MiniDef(SeedanceVideoModel):
-    """Seedance 2.0 Mini — 轻量低成本档(统一对外模型;当前仅外部供应商提供通道)"""
+    """Seedance 2.0 Mini — 轻量低成本档
+
+    与 Seedance 2.0 / Fast 同一套代码路径,仅 vendor model id 与计费费率不同。
+    官方 Model ID: ``doubao-seedance-2-0-mini-260615``(仅 480p/720p)。
+    """
 
     def __init__(self) -> None:
         super().__init__(self.node_def())
 
     @staticmethod
     def node_def() -> NodeDef:
-        base = Seedance2Def.node_def()
+        # 输入面与 Fast 对齐(480p/720p;其余与 2.0 同构)
+        base = Seedance2FastDef.node_def()
         return NodeDef(
             name="seedance2_mini",
             display_name="Seedance 2.0 Mini",
@@ -560,20 +556,21 @@ class Seedance2MiniDef(SeedanceVideoModel):
             knowledge_content=(
                 "Seedance 2.0 Mini 是 Seedance 2.0 的轻量低成本版本。"
                 "\n"
-                "请求规范与 Seedance 2.0 完全一致:按输入自动切换 文生/图生/首尾帧/多模态。"
+                "请求规范与 Seedance 2.0 / Fast 一致:按输入自动切换 文生/图生/首尾帧/多模态。"
+                "\n"
+                "仅支持 480p 与 720p 分辨率(不支持 1080p)。"
                 "\n"
                 "适用场景:低成本批量生成、对画质要求不苛刻的场景。"
                 "\n"
-                "注:官方 ARK 暂无 Mini 档,通道由外部供应商插件提供;"
-                "\n"
-                "未安装/未配置外部供应商时本模型不可用。"
+                "官方 Model ID: doubao-seedance-2-0-mini-260615;复用火山方舟 Ark Key。"
                 "\n"
             ),
-            requirements=[],
-            # ark 暂无 Mini 档;不挂 runninghub(端点即 2.0 标准档)。
-            # 该通道由外部供应商插件经 channel_registry.register_binding() 注入。
-            backend_model=None,
-            backend_models={},
+            requirements=["seedance_apikey"],
+            backend_model="doubao-seedance-2-0-mini-260615",
+            backend_models={
+                "ark": "doubao-seedance-2-0-mini-260615",
+                "runninghub": "",
+            },
             mode="declarative",
             inputs=dict(base.inputs),
             outputs=dict(base.outputs),
@@ -756,8 +753,7 @@ class HappyHorse11Def(HappyHorseVideoModel):
             backend="happyhorse",
             point_cost=500,
             description=(
-                "HappyHorse 1.1 统一视频生成:按输入自动切换 "
-                "文生 / 图生(首帧) / 多图参考 / 视频编辑,无需手动选子模型"
+                "HappyHorse 1.1 统一视频生成:按输入自动切换 文生 / 图生(首帧) / 多图参考 / 视频编辑,无需手动选子模型"
             ),
             knowledge_content=(
                 "阿里云 DashScope HappyHorse 1.1 统一视频节点。"
@@ -883,11 +879,7 @@ class HappyHorse11Def(HappyHorseVideoModel):
                     default="auto",
                     values=["auto", "origin"],
                     title="声音控制",
-                    description=(
-                        "仅视频编辑模式生效:\n"
-                        "  - auto: 由模型控制\n"
-                        "  - origin: 保留输入视频原声"
-                    ),
+                    description=("仅视频编辑模式生效:\n  - auto: 由模型控制\n  - origin: 保留输入视频原声"),
                 ),
             },
             outputs={

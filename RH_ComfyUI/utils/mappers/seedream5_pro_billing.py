@@ -23,14 +23,14 @@ from typing import Optional
 INPUT_IMAGE_COST_POINTS: int = 2
 
 # 输出图:≤ 236 万像素 0.30 元 = 30 积分,> 236 万像素 0.60 元 = 60 积分
-OUTPUT_COST_LOW_POINTS: int = 30    # ≤ 236 万像素
-OUTPUT_COST_HIGH_POINTS: int = 60   # > 236 万像素
+OUTPUT_COST_LOW_POINTS: int = 30  # ≤ 236 万像素
+OUTPUT_COST_HIGH_POINTS: int = 60  # > 236 万像素
 OUTPUT_PIXEL_THRESHOLD: int = 2_360_000  # 236 万像素分界线
 
 # Pro 仅支持 1K/2K 两档,像素数由档位决定
 _SIZE_MODE_PIXELS: dict[str, int] = {
-    "1K": 1024 * 1024,    # 1_048_576 像素
-    "2K": 2048 * 2048,    # 4_194_304 像素
+    "1K": 1024 * 1024,  # 1_048_576 像素
+    "2K": 2048 * 2048,  # 4_194_304 像素
 }
 
 # image_size 参数缺失时的默认档位

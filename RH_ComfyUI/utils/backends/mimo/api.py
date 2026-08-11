@@ -234,6 +234,17 @@ class MIMOAPI:
         if voice and model == "mimo-v2.5-tts":
             request_body["audio"]["voice"] = voice
 
+        from ....core.telemetry.wire_capture import set_wire_from_http_body
+
+        # 复刻音色 data URL 脱敏后再落审计
+        audit_body = dict(request_body)
+        audio_audit = dict(request_body.get("audio") or {})
+        voice_val = audio_audit.get("voice")
+        if isinstance(voice_val, str) and voice_val.startswith("data:"):
+            audio_audit["voice"] = "[masked_data_url]"
+            audit_body["audio"] = audio_audit
+        set_wire_from_http_body(audit_body, prompt=text)
+
         # 发送请求
         resp = await self._request(json=request_body)
 

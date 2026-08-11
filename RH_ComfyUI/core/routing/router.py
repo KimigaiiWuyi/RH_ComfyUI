@@ -47,9 +47,7 @@ async def route(
         else:
             partial = request.model.lower()
             matches = [
-                m
-                for m in registry.by_modality(request.task_type)
-                if partial in m.name.lower() and m.supports(request)
+                m for m in registry.by_modality(request.task_type) if partial in m.name.lower() and m.supports(request)
             ]
             matches.sort(key=lambda m: m.priority, reverse=True)
             for m in matches:

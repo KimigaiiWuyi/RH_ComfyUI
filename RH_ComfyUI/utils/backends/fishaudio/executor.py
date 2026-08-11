@@ -55,6 +55,18 @@ class FishAudioAdapter(Adapter):
         if node.mapper_func is None:
             raise RuntimeError(f"Fish Audio 节点 {node.name} 缺少 mapper_func")
 
+        from ....core.telemetry.wire_capture import set_wire_audit
+
+        set_wire_audit(
+            prompt=request.prompt or "",
+            request={
+                "backend": "fishaudio",
+                "task": str(getattr(getattr(node, "task_type", None), "value", "") or ""),
+                "prompt": request.prompt or "",
+                "mood": request.mood,
+                "voice_id": request.voice_id,
+            },
+        )
         # 区分提示语:按 node.task_type 推断(TTS / ASR)
         if getattr(node, "task_type", None) is not None and str(node.task_type.value) == "asr":
             await _emit(on_progress, ProgressEvent(stage="running", percent=20, message="Fish Audio 识别中"))
@@ -71,14 +83,8 @@ class FishAudioAdapter(Adapter):
         if isinstance(result, bytes):
             # 默认按 bytes 处理:TTS 是 mp3,ASR 是 UTF-8 文本 —— mime 由 mapper 给
             task_type = getattr(node, "task_type", None)
-            output_type = (
-                "audio"
-                if task_type is None or str(task_type.value) == "speech"
-                else "text"
-            )
-            mime_type = (
-                "audio/mpeg" if output_type == "audio" else "text/plain; charset=utf-8"
-            )
+            output_type = "audio" if task_type is None or str(task_type.value) == "speech" else "text"
+            mime_type = "audio/mpeg" if output_type == "audio" else "text/plain; charset=utf-8"
             return NodeOutput(
                 status="ok",
                 output_type=output_type,

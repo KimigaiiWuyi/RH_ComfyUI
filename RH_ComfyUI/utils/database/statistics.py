@@ -263,6 +263,45 @@ async def begin_task(
         return None
 
 
+def _resolve_wire_for_record(
+    *,
+    request: "GenerationRequest",
+    request_body: Optional[dict[str, Any]],
+    result: Optional["GenerationResult"],
+) -> tuple[str, Any]:
+    """解析最终落库的 prompt 与 request body。
+
+    优先级:
+      1. wire_capture(ContextVar + ActiveGeneration 镜像)
+      2. result.metadata 中的 wire_prompt / wire_request
+      3. 调用方原始 request_body / request.prompt
+    """
+    from ...core.telemetry.wire_capture import get_wire_audit
+
+    wire = get_wire_audit()
+    meta: dict[str, Any] = dict(result.metadata) if result is not None else {}
+
+    wire_prompt = wire["prompt"] if "prompt" in wire else None
+    meta_prompt = meta["wire_prompt"] if "wire_prompt" in meta else None
+    if isinstance(wire_prompt, str) and wire_prompt.strip():
+        prompt = wire_prompt
+    elif isinstance(meta_prompt, str) and meta_prompt.strip():
+        prompt = meta_prompt
+    else:
+        prompt = request.prompt or ""
+
+    if "request" in wire and wire["request"] is not None:
+        body: Any = wire["request"]
+    elif "wire_request" in meta and meta["wire_request"] is not None:
+        body = meta["wire_request"]
+    elif request_body is not None:
+        body = request_body
+    else:
+        body = request
+
+    return prompt, body
+
+
 async def record_task(
     *,
     request: "GenerationRequest",
@@ -284,6 +323,8 @@ async def record_task(
 
     - ``record_id`` 有值:UPDATE 已有 running 行(创建时 begin_task 写入)
     - 否则:INSERT 终态行(兼容历史只在结束写一次的调用方;begin 失败时的回落)
+    - prompt / request_body_json 优先写 **上游最终 wire**(见 wire_capture),
+      而非调用方入参
 
     整体 try/except 兜底:写库失败仅 logger.warning,不影响主流程。
     """
@@ -307,6 +348,10 @@ async def record_task(
         provider, model_id = _resolve_provider_model(node)
         error_msg = _truncate_str(error or "", ERROR_MESSAGE_MAX_CHARS)
 
+        wire_prompt, wire_body = _resolve_wire_for_record(request=request, request_body=request_body, result=result)
+        request_body_json = dump_body(wire_body)
+        prompt_final = _truncate_str(wire_prompt or "", 4000)
+
         # 优先 UPDATE 已有 running 行
         if record_id is not None and int(record_id) > 0:
             ok = await RHComfyuiTaskRecord.update_task_record(
@@ -321,6 +366,8 @@ async def record_task(
                 backend_provider=provider[:32],
                 backend_key_prefix=backend_key_prefix[:16] if backend_key_prefix else "",
                 point_cost=cost,
+                request_body_json=request_body_json,
+                prompt=prompt_final,
             )
             if ok:
                 try:
@@ -334,9 +381,7 @@ async def record_task(
                     f"status={status} elapsed={elapsed_ms}ms"
                 )
                 return int(record_id)
-            logger.warning(
-                f"[RHComfyUI.Statistics] update id={record_id} 未找到行,回落 INSERT status={status}"
-            )
+            logger.warning(f"[RHComfyUI.Statistics] update id={record_id} 未找到行,回落 INSERT status={status}")
 
         # INSERT 终态(旧路径 / begin 失败 / update 未命中)
         kwargs = _build_common_insert_kwargs(
@@ -347,7 +392,7 @@ async def record_task(
             trace_id=trace_id or (request.trace_id or ""),
             entry_point=entry_point,
             backend_key_prefix=backend_key_prefix,
-            request_body=request_body,
+            request_body=wire_body if isinstance(wire_body, dict) else request_body,
             status=status,
             elapsed_ms=elapsed_ms,
             point_cost=cost,
@@ -355,6 +400,9 @@ async def record_task(
             raw_json=raw_json,
             saved_files_json=saved_files_json,
         )
+        # 覆盖为最终 wire prompt / body( _build 仍可能用入参 )
+        kwargs["prompt"] = prompt_final
+        kwargs["request_body_json"] = request_body_json
         new_id: int = await RHComfyuiTaskRecord.insert_task_record(**kwargs)
         try:
             from .stats_cache import invalidate_stats_cache

@@ -86,10 +86,13 @@ def test_builtin_bindings_ark_and_runninghub():
     assert bindings["runninghub"].vendor_model is None
 
 
-def test_mini_has_no_builtin_channels():
+def test_mini_has_ark_builtin_channel():
     channel_registry.clear()
-    # backend_models={} → 内置供应商都不参与;未注册外部供应商 → 无通道
-    assert Seedance2MiniDef().channel_bindings() == []
+    # Mini 已对齐官方 Model ID,内置 ark(+空 runninghub 键不挂)
+    names = [b.channel.name for b in Seedance2MiniDef().channel_bindings()]
+    assert "ark" in names
+    bindings = {b.channel.name: b for b in Seedance2MiniDef().channel_bindings()}
+    assert bindings["ark"].vendor_model == "doubao-seedance-2-0-mini-260615"
 
 
 def test_external_channel_injected_and_participates():
@@ -101,8 +104,10 @@ def test_external_channel_injected_and_participates():
     names = [b.channel.name for b in Seedance2Def().channel_bindings()]
     assert names == ["ark", "runninghub", "gateway"]
 
+    mini_names = [b.channel.name for b in Seedance2MiniDef().channel_bindings()]
+    assert "gateway" in mini_names
+    assert "ark" in mini_names
     mini = {b.channel.name: b for b in Seedance2MiniDef().channel_bindings()}
-    assert list(mini) == ["gateway"]
     assert mini["gateway"].vendor_model == "doubao-seedance-2.0-mini"
 
 
@@ -125,9 +130,7 @@ def test_pinned_provider_selects_single_channel():
 
 def _invoke(channel, model="m"):
     binding_vendor = model
-    return asyncio.run(
-        channel.invoke(request=_req(), node=None, on_progress=None, vendor_model=binding_vendor)
-    )
+    return asyncio.run(channel.invoke(request=_req(), node=None, on_progress=None, vendor_model=binding_vendor))
 
 
 def test_provider_error_retryable_propagates():

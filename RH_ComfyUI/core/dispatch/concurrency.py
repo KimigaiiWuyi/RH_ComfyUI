@@ -10,7 +10,7 @@
      上限 = min(通道基线, model.max_concurrency)
      防单一模型在单一 channel 上挤爆。
      - 5 个本地 ComfyUI 工作流声明 max_concurrency=1 → (model, channel) 闸 = 1
-     - aigc_system 的 _AIFConcurrencyMixin 模型(AIF_Max_Concurrency 默认 3)→ 3
+     - 外部插件注入的模型级 max_concurrency 同理生效
      - 其它模型(max_concurrency=0,不限)→ 退化为通道基线
 
 两层嵌套使用:`model.run()` 内先拿供应商全局闸,再拿 (model, channel) 闸。
@@ -24,11 +24,10 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 from typing import AsyncIterator
+from contextlib import asynccontextmanager
 
 from gsuid_core.logger import logger
-
 
 # 供应商全局闸(按 channel.name;RH 通道归一到共享 key)
 _channel_semaphores: dict[str, tuple[asyncio.Semaphore, int]] = {}

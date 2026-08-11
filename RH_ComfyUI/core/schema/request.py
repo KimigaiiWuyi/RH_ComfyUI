@@ -5,8 +5,8 @@ from __future__ import annotations
 from ...utils.core.request import (
     TASK_MIME_MAP,
     TASK_OUTPUT_MAP,
-    CATALOG_GROUP_DISPLAY,
     TASK_DISPLAY_NAME,
+    CATALOG_GROUP_DISPLAY,
     TaskType,
     OutputType,
     GenerationResult,

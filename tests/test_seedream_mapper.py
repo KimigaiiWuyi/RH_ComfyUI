@@ -9,22 +9,20 @@
 
 from __future__ import annotations
 
-import io
 import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
 
+from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.seedream import (
-    resolve_seedream_size,
-    seedream_mapper,
-    _is_pro_model,
     _SEEDREAM_PRO_SIZE_MAP,
     _SEEDREAM_LITE_SIZE_MAP,
+    _is_pro_model,
+    seedream_mapper,
+    resolve_seedream_size,
 )
-from RH_ComfyUI.utils.core.request import GenerationRequest, TaskType
-
 
 # ── 工具 ──
 
@@ -63,6 +61,7 @@ def _make_request(
 
 def _make_fake_api(url: str = "https://r2.example.com/out.png") -> MagicMock:
     """构造一个 fake SeedreamAPI.generate 返回结构。"""
+
     async def _fake_generate(body):
         return {
             "image": Image.new("RGB", (64, 64), color=(128, 128, 128)),
@@ -72,6 +71,7 @@ def _make_fake_api(url: str = "https://r2.example.com/out.png") -> MagicMock:
             "generated_images": 1,
             "raw": {"data": [{"url": url}]},
         }
+
     api = MagicMock()
     api.generate = _fake_generate
     return api
@@ -200,9 +200,11 @@ def test_seedream_mapper_builds_flat_body():
     )
 
     captured = {}
+
     async def _cap(body):
         captured["body"] = body
         return await _make_fake_api().generate(body)
+
     api.generate = _cap
 
     asyncio.run(seedream_mapper(req, api))
@@ -225,9 +227,11 @@ def test_seedream_mapper_default_watermark_false():
     req = _make_request(model="seedream-5.0")
 
     captured = {}
+
     async def _cap(body):
         captured["body"] = body
         return await _make_fake_api().generate(body)
+
     api.generate = _cap
 
     asyncio.run(seedream_mapper(req, api))
@@ -240,9 +244,11 @@ def test_seedream_mapper_explicit_watermark():
     req = _make_request(model="seedream-5.0", watermark=True)
 
     captured = {}
+
     async def _cap(body):
         captured["body"] = body
         return await _make_fake_api().generate(body)
+
     api.generate = _cap
 
     asyncio.run(seedream_mapper(req, api))
@@ -255,9 +261,11 @@ def test_seedream_mapper_size_mode_4k_lite():
     req = _make_request(ratio="16:9", size_mode="4K", model="seedream-5.0")
 
     captured = {}
+
     async def _cap(body):
         captured["body"] = body
         return await _make_fake_api().generate(body)
+
     api.generate = _cap
 
     asyncio.run(seedream_mapper(req, api))
@@ -278,9 +286,11 @@ def test_seedream_mapper_injects_r2_image_urls():
     req.params["_image_urls"] = ["https://r2.example.com/ref.png"]
 
     captured = {}
+
     async def _cap(body):
         captured["body"] = body
         return await _make_fake_api().generate(body)
+
     api.generate = _cap
 
     asyncio.run(seedream_mapper(req, api))
@@ -301,9 +311,11 @@ def test_seedream_mapper_multi_images_as_list():
     ]
 
     captured = {}
+
     async def _cap(body):
         captured["body"] = body
         return await _make_fake_api().generate(body)
+
     api.generate = _cap
 
     asyncio.run(seedream_mapper(req, api))
@@ -320,9 +332,11 @@ def test_seedream_mapper_no_images_no_image_field():
     req = _make_request(model="seedream-5.0")
 
     captured = {}
+
     async def _cap(body):
         captured["body"] = body
         return await _make_fake_api().generate(body)
+
     api.generate = _cap
 
     asyncio.run(seedream_mapper(req, api))

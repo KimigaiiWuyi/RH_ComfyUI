@@ -66,6 +66,18 @@ class MiniMaxAdapter(Adapter):
         if node.mapper_func is None:
             raise RuntimeError(f"MiniMax 节点 {node.name} 缺少 mapper_func")
 
+        from ....core.telemetry.wire_capture import set_wire_audit
+
+        set_wire_audit(
+            prompt=request.prompt or "",
+            request={
+                "model": node.backend_model or request.params.get("model") or "minimax",
+                "prompt": request.prompt or "",
+                "ratio": request.ratio,
+                "task_type": str(node.task_type),
+                "num_images": len(request.images or []),
+            },
+        )
         await _emit(on_progress, ProgressEvent(stage="running", percent=15, message="MiniMax 生成中"))
         result = await node.mapper_func(request, self.api)
         await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="完成"))

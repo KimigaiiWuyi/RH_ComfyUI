@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
+import asyncio
 
 import pytest
 
-from RH_ComfyUI.api import _decode_data_uri, _decode_media_bytes, _preview_media_url
+from RH_ComfyUI.api import _decode_data_uri, _preview_media_url, _decode_media_bytes
 
 
 def test_preview_media_url_redacts_data_uri():

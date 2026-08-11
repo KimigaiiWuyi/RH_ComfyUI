@@ -111,5 +111,10 @@ set_media_publisher(my_publish)
 4. 闭源专属命令 → gsuid_core 标准 SV + 构造 DispatchContext 调 dispatch;
 5. 需要开源侧新钩子时,提交的是**通用**扩展点(新的 Policy/Channel 抽象),
    另外的兼容插件生态逻辑留在闭源包 —— 不接受按来源分叉的条件式提交;
-6. **反向零依赖**:开源仓库不得 `import aigc_system` / `canvas_backend` /
-   `account_system`(含 soft-import);宿主能力一律通过扩展点注入。
+6. **反向零依赖**:开源仓库不得 import 宿主业务包(含 soft-import 任意
+   画布后端 / 聚合网关 / 账号系统等);宿主能力一律通过扩展点注入。
+7. **文档与注释中立**:示例用「宿主 / 调用方 / 外部插件」,不把具体产品
+   路径写成引擎架构前提;公开 API 对任意 bot_id / HTTP 宿主通用。
+8. **取消 / resume / wire**:闭源通道同样须在 create 后 `bind_vendor_cancel`、
+   POST 前 `set_wire_*`;目录 `supports_remote_cancel` 须诚实(无 cancel API
+   则 false)。见 [§二十](./20-cancel-resume-and-wire-audit.md)。

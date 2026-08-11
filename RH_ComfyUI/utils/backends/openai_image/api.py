@@ -178,6 +178,20 @@ async def generate_image(
 
     n_refs = len(image_list or [])
     logger.info(f"[OpenAIImage] 请求 {url} model={model} n={n} size={size or '-'} quality={quality} 参考图={n_refs}")
+    from ....core.telemetry.wire_capture import set_wire_audit
+
+    set_wire_audit(
+        prompt=prompt,
+        request={
+            "url": url,
+            "model": model,
+            "prompt": prompt,
+            "quality": quality,
+            "n": n,
+            "size": size,
+            "num_images": n_refs,
+        },
+    )
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, **request_kwargs) as resp:
             if resp.status != 200:

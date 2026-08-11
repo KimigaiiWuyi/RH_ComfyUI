@@ -84,8 +84,8 @@ def test_render_create_t2v_body():
     """Provider 文生请求体:无 media, resolution 大写 P。"""
 
     async def _run():
-        from RH_ComfyUI.utils.backends.happyhorse.provider import HappyHorseProvider
         from RH_ComfyUI.utils.backends.happyhorse.classify import classify_happyhorse
+        from RH_ComfyUI.utils.backends.happyhorse.provider import HappyHorseProvider
 
         req = GenerationRequest(
             task_type=TaskType.VIDEO,
@@ -114,8 +114,8 @@ def test_render_create_t2v_body():
 
 def test_render_create_i2v_media_type():
     async def _run():
-        from RH_ComfyUI.utils.backends.happyhorse.provider import HappyHorseProvider
         from RH_ComfyUI.utils.backends.happyhorse.classify import classify_happyhorse
+        from RH_ComfyUI.utils.backends.happyhorse.provider import HappyHorseProvider
 
         req = GenerationRequest(
             task_type=TaskType.VIDEO,
@@ -139,8 +139,8 @@ def test_render_create_i2v_media_type():
 
 def test_render_create_r2v_reference_images():
     async def _run():
-        from RH_ComfyUI.utils.backends.happyhorse.provider import HappyHorseProvider
         from RH_ComfyUI.utils.backends.happyhorse.classify import classify_happyhorse
+        from RH_ComfyUI.utils.backends.happyhorse.provider import HappyHorseProvider
 
         req = GenerationRequest(
             task_type=TaskType.VIDEO,

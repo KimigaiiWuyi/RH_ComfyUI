@@ -26,9 +26,7 @@ T = TypeVar("T", bound=AIGCGenerationBase)
 _N = TypeVar("_N")
 
 
-def match_partial_name(
-    candidates: Sequence[_N], partial: str, name_of: Callable[[_N], str]
-) -> Optional[_N]:
+def match_partial_name(candidates: Sequence[_N], partial: str, name_of: Callable[[_N], str]) -> Optional[_N]:
     """精确 → 前缀 → 包含 三级模糊匹配(ModelRegistry / PipelineRegistry 共用)"""
     for c in candidates:
         if partial == name_of(c):

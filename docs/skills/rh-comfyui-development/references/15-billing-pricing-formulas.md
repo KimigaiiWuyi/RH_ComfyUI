@@ -126,7 +126,7 @@ points = ceil(tokens × rate_yuan × 100 / 1e6)   # 1 元 = 100 积分,最小 1
 | 模型 | 后端 channel | duration | 费率(无输入/有输入 元/M) |
 |---|---|---|---|
 | seedance2 | ark / runninghub | 4~15s | 480/720:46/28;1080:51/31;4k:26/16 |
-| **seedance2.5** | **仅 ark** | **4~30s 或 -1** | **70 / 42**(仅 480p/720p) |
+| **seedance2.5** | **ark + gateway** | **4~30s 或 -1** | **70 / 42**(仅 480p/720p) |
 | seedance15_pro | ark | 4~12s | 有声 16 / 无声 8 |
 | seedance2_mini / _fast | 外部/ark | 4~15s | mini 23/14;fast 37/22 |
 

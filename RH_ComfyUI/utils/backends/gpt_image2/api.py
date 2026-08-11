@@ -34,9 +34,7 @@ class GPTImage2API:
     @property
     def base_url(self) -> str:
         if self._base_url is None:
-            self._base_url = (
-                SERVICE_CONFIG.get_config("OpenAI_Image_BaseURL").data or "https://api.openai.com/v1"
-            )
+            self._base_url = SERVICE_CONFIG.get_config("OpenAI_Image_BaseURL").data or "https://api.openai.com/v1"
         return self._base_url or "https://api.openai.com/v1"
 
     def update_urls(self) -> None:

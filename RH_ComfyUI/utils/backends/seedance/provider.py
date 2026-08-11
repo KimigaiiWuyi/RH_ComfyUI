@@ -168,9 +168,7 @@ def _is_rh_queue_full_response(resp: dict[str, Any]) -> bool:
         code = None
     if code in _RH_QUEUE_FULL_CODES:
         return True
-    blob = " ".join(
-        str(resp.get(k) or "") for k in ("msg", "errorMessage", "message", "error")
-    ).upper()
+    blob = " ".join(str(resp.get(k) or "") for k in ("msg", "errorMessage", "message", "error")).upper()
     return any(token in blob for token in _RH_QUEUE_FULL_MARKERS)
 
 
@@ -279,11 +277,7 @@ class SeedanceProvider(ABC):
             and spec.resolution not in self.supported_resolutions
         ):
             return False
-        if (
-            self.supported_ratios
-            and spec.ratio is not None
-            and spec.ratio not in self.supported_ratios
-        ):
+        if self.supported_ratios and spec.ratio is not None and spec.ratio not in self.supported_ratios:
             return False
         # duration=-1 表示「跟随输入视频」(Seedance 2.5 编辑/延长),跳过上下限
         if spec.duration != -1:
@@ -318,11 +312,7 @@ class SeedanceProvider(ABC):
                 f"供应商 {self.name or self.__class__.__name__} 不支持分辨率 {spec.resolution}",
                 code="UNSUPPORTED_RESOLUTION",
             )
-        if (
-            self.supported_ratios
-            and spec.ratio is not None
-            and spec.ratio not in self.supported_ratios
-        ):
+        if self.supported_ratios and spec.ratio is not None and spec.ratio not in self.supported_ratios:
             raise UnsupportedProviderShapeError(
                 f"供应商 {self.name or self.__class__.__name__} 不支持宽高比 {spec.ratio}",
                 code="UNSUPPORTED_RATIO",
@@ -399,12 +389,65 @@ class SeedanceProvider(ABC):
     # ── 可选钩子 ──
 
     async def delete(self, task_id: str) -> None:  # noqa: D401
-        """取消/删除任务;默认 no-op。"""
+        """取消/删除任务;默认 no-op。
+
+        支持上游取消的供应商(如火山方舟 Ark)覆盖本方法,调用
+        ``DELETE .../tasks/{id}``。cancel_generation 与 CancelledError 兜底都会走到这里。
+        """
         return None
+
+    def supports_remote_cancel(self) -> bool:
+        """是否实现了非 no-op 的 delete。子类覆盖 delete 后通常返回 True。"""
+        # 默认:只有 override 了 delete 的类才算支持(用 identity 比较方法对象)
+        return type(self).delete is not SeedanceProvider.delete
 
     def transform_prompt(self, prompt: str) -> str:
         """子类可覆盖:提示词引用语法适配(如「图片1」→「@Image 1」)。"""
         return prompt
+
+    async def _bind_active_cancel(self, task_id: str) -> None:
+        """落库 vendor_task_id;仅真正支持 delete 的 provider 才挂 remote cancel。"""
+        if not task_id:
+            return
+        try:
+            from ....core.dispatch.active_tasks import get_active_task_registry
+
+            provider = self
+            cancel_remote = None
+            if self.supports_remote_cancel():
+
+                async def _cancel_remote() -> None:
+                    await provider.delete(task_id)
+
+                cancel_remote = _cancel_remote
+
+            await get_active_task_registry().bind_vendor_task(
+                vendor_task_id=task_id,
+                cancel_remote=cancel_remote,
+                channel_name=self.name,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[Seedance:{self.name}] 绑定 vendor 任务失败(忽略): {exc}")
+
+    async def _best_effort_delete(self, task_id: str) -> None:
+        if not task_id or not self.supports_remote_cancel():
+            return
+        try:
+            from ....core.dispatch.active_tasks import remote_cancel_already_attempted
+
+            if remote_cancel_already_attempted():
+                logger.debug(
+                    f"[Seedance:{self.name}] 跳过 CancelledError 兜底 DELETE"
+                    f"(cancel_generation 已尝试上游): {task_id}"
+                )
+                return
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await self.delete(task_id)
+            logger.info(f"[Seedance:{self.name}] CancelledError 兜底已 DELETE 上游任务 {task_id}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[Seedance:{self.name}] CancelledError 兜底 DELETE 失败: {exc}")
 
     # ── 通用基础设施 ──
 
@@ -458,16 +501,19 @@ class SeedanceProvider(ABC):
                 f"  headers: {mask_headers(headers)}\n"
                 f"  body:\n{dump_body(mask_body(json))}"
             )
-            raise DryRunInterrupt(
-                f"[Seedance:{self.name}] Dry-Run 已启用,请求未发送: {method} {url}"
-            )
+            raise DryRunInterrupt(f"[Seedance:{self.name}] Dry-Run 已启用,请求未发送: {method} {url}")
 
-        # ── 请求日志(脱敏;一律 debug —— 轮询也走这里,× 并发即刷屏) ──
-        # 每单一次的 dump 见 run()(request)与 poll_until_done(终态 result)。
+        # ── 请求日志(脱敏) ──
+        # 轮询 GET 用 debug(并发会刷屏);DELETE/cancel 与失败必须 INFO 可见。
         from ._debug import dump_body, mask_body, mask_headers
 
-        logger.debug(
-            f"[Seedance:{self.name}] 请求 {method} {url}\n"
+        method_u = (method or "").upper()
+        is_cancel_req = method_u in ("DELETE", "PUT") or (
+            method_u == "POST" and "/cancel" in (url or "").lower()
+        )
+        req_emit = logger.info if is_cancel_req else logger.debug
+        req_emit(
+            f"[Seedance:{self.name}] 请求 {method_u} {url}\n"
             f"  headers: {mask_headers(headers)}\n"
             f"  body:\n{dump_body(mask_body(json))}"
         )
@@ -484,15 +530,28 @@ class SeedanceProvider(ABC):
             resp_text = dump_body(mask_body(resp_json))
         except Exception:
             resp_text = resp.text[:2000]
-        # 失败的那一条必须留在 INFO 之上:它是排障时唯一要看的原文
-        emit = logger.warning if resp.status_code >= 400 else logger.debug
-        emit(f"[Seedance:{self.name}] 响应 {resp.status_code} ({len(resp.content)} bytes)\n  body: {resp_text}")
+        # 失败 warning;cancel 路径 INFO;其它 debug
+        if resp.status_code >= 400:
+            resp_emit = logger.warning
+        elif is_cancel_req:
+            resp_emit = logger.info
+        else:
+            resp_emit = logger.debug
+        resp_emit(
+            f"[Seedance:{self.name}] 响应 {resp.status_code} ({len(resp.content)} bytes)\n"
+            f"  body: {resp_text}"
+        )
 
         if resp.status_code >= 400:
             raise self._build_http_error(resp)
+        # DELETE 取消/删除任务常返回 200/204 且无 body
+        if method.upper() == "DELETE" and not (resp.content or b"").strip():
+            return {}
         try:
             return resp.json()
         except Exception as exc:
+            if method.upper() == "DELETE":
+                return {}
             raise SeedanceProviderError(
                 f"{self.name} 返回非 JSON: {exc}; raw={resp.text[:500]}",
                 code="BAD_RESPONSE",
@@ -542,10 +601,12 @@ class SeedanceProvider(ABC):
         method, url, headers, body = await self.render_create(spec, model=model)
         # 请求原文:每单一次(逐个请求的日志压在 debug,轮询会把它放大)。
         # base64 已由 mask_body 换成占位符。
-        logger.info(
-            f"[Seedance:{self.name}] 创建任务: model={model}, endpoint={url}\n"
-            f"  request:\n{dump_body(mask_body(body))}"
-        )
+        masked = mask_body(body)
+        logger.info(f"[Seedance:{self.name}] 创建任务: model={model}, endpoint={url}\n  request:\n{dump_body(masked)}")
+        # 统计落库:记录「最终发往上游」的 body / 改写后 prompt
+        from ....core.telemetry.wire_capture import set_wire_from_http_body
+
+        set_wire_from_http_body(masked)
         resp = await self._request(method, url, headers=headers, json=body)
         task_id = self.parse_create(resp)
         if not task_id:
@@ -558,14 +619,17 @@ class SeedanceProvider(ABC):
                 retryable=True,  # 尚未产生任务,换通道重建无重复计费风险
                 provider=self.name,
                 http_status=421 if queue_full else None,
-                user_message=(
-                    "RunningHub 并发已满,请稍后重试。"
-                    if queue_full
-                    else "上游未返回任务 ID,请稍后重试。"
-                ),
+                user_message=("RunningHub 并发已满,请稍后重试。" if queue_full else "上游未返回任务 ID,请稍后重试。"),
             )
         logger.info(f"[Seedance:{self.name}] 任务已创建: task_id={task_id}")
-        return await self.poll_until_done(task_id, on_progress=on_progress)
+        # 挂上远程取消:用户 cancel 时先 DELETE 上游任务,再 cancel 本地 Task
+        await self._bind_active_cancel(task_id)
+        try:
+            return await self.poll_until_done(task_id, on_progress=on_progress)
+        except asyncio.CancelledError:
+            # 本地取消时若尚未走 cancel_generation 的远程路径,兜底再 DELETE 一次
+            await self._best_effort_delete(task_id)
+            raise
 
     async def poll_until_done(
         self,

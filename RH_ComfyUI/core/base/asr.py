@@ -55,9 +55,7 @@ class AsrGenerationBase(AIGCGenerationBase):
         lang_spec: dict[str, object] = {"required": False, "description": "语言码(ISO 639-1,如 en/zh/ja),留空自动识别"}
         if self.supported_languages:
             lang_spec["values"] = list(self.supported_languages)
-            lang_spec["description"] = (
-                f"语言码({', '.join(self.supported_languages)}),留空自动识别"
-            )
+            lang_spec["description"] = f"语言码({', '.join(self.supported_languages)}),留空自动识别"
 
         schema: dict[str, PortSpec] = {
             "audio_payload": PortSpec(
@@ -111,9 +109,7 @@ class AsrGenerationBase(AIGCGenerationBase):
         # 语言码在白名单内时校验(空字符串/None 视为自动识别,放行)
         lang = request.language_boost or ""
         if lang and self.supported_languages and lang not in self.supported_languages:
-            raise ValidationError(
-                f"{self.display_name} 不支持语言 {lang!r},可选: {self.supported_languages}"
-            )
+            raise ValidationError(f"{self.display_name} 不支持语言 {lang!r},可选: {self.supported_languages}")
 
 
 __all__ = ["AsrGenerationBase"]

@@ -27,8 +27,7 @@ async def fishaudio_tts_mapper(
         reference_id = await _get_or_create_voice(api, request.reference_audio, request.user_id or "")
         if not reference_id:
             raise RuntimeError(
-                "Fish Audio 音色克隆失败,已停止生成以避免回退随机音色;"
-                "请检查 API Key 与参考音频是否合规。"
+                "Fish Audio 音色克隆失败,已停止生成以避免回退随机音色;请检查 API Key 与参考音频是否合规。"
             )
 
     model = request.params.get("model")

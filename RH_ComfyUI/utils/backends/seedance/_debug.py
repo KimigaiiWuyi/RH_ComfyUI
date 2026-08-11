@@ -19,6 +19,7 @@ _SECRET_HEADERS: frozenset[str] = frozenset(
     }
 )
 
+
 def mask_headers(headers: dict[str, str] | None) -> dict[str, str]:
     """对敏感 header 做脱敏,其余透传。
 

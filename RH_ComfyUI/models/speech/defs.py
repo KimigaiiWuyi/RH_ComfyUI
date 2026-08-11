@@ -14,10 +14,10 @@ from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.speech import index_tts2_mapper as _index_tts2_mapper
 from ...utils.mappers.mimo_speech import mimo_tts_mapper as _mimo_tts_mapper
-from ...utils.mappers.minimax_speech import minimax_t2a_speech_mapper as _minimax_t2a_speech_mapper
-from ...utils.mappers.fishaudio_speech import fishaudio_tts_mapper as _fishaudio_tts_mapper
-from ...utils.mappers.speech_billing import estimate_fish_tts_points, estimate_index_tts2_points
 from ...utils.mappers.extra_billing import estimate_mimo_tts_points, estimate_minimax_t2a_points
+from ...utils.mappers.minimax_speech import minimax_t2a_speech_mapper as _minimax_t2a_speech_mapper
+from ...utils.mappers.speech_billing import estimate_fish_tts_points, estimate_index_tts2_points
+from ...utils.mappers.fishaudio_speech import fishaudio_tts_mapper as _fishaudio_tts_mapper
 
 
 class IndexTTS2Def(IndexTTS2Model):

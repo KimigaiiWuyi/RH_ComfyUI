@@ -13,9 +13,12 @@ from __future__ import annotations
 import uuid
 from typing import Any, Optional
 
+from gsuid_core.logger import logger
+
 from ..spec import MediaRole, VideoGenSpec, VideoTaskShape
 from ..provider import (
     NormalizedTask,
+    DryRunInterrupt,
     NormalizedStatus,
     SeedanceProvider,
     SeedanceProviderError,
@@ -307,6 +310,24 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
             error=error_obj.get("message"),
             raw=j,
         )
+
+    async def delete(self, task_id: str) -> None:
+        """取消排队中任务或删除任务记录(火山方舟 DELETE /contents/generations/tasks/{id})。
+
+        网关模式走同一相对路径 /video/generation/tasks/{id};若网关未实现 DELETE,
+        失败由上层记日志后仍取消本地 asyncio 任务。
+        """
+        if not task_id:
+            return
+        url = f"{self.base_url}{self._endpoint}/{task_id}"
+        logger.info(f"[Seedance:{self.name}] 上游 cancel DELETE task_id={task_id} url={url}")
+        # DELETE 无 body;_request 在 dry_run 下会抛 DryRunInterrupt —— 取消路径吞掉
+        try:
+            await self._request("DELETE", url, headers=self._auth_headers())
+            logger.info(f"[Seedance:{self.name}] 上游 cancel 完成 task_id={task_id}")
+        except DryRunInterrupt:
+            logger.info(f"[Seedance:{self.name}] Dry-Run 跳过 cancel task_id={task_id}")
+            return
 
 
 __all__ = ["ArkSeedanceProvider", "ContentArrayMixin"]

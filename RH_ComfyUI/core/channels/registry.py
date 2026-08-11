@@ -43,8 +43,7 @@ class ChannelExtensionRegistry:
             existing[:] = [b for b in existing if b.channel.name != channel.name]
             existing.append(binding)
         logger.info(
-            f"[ChannelRegistry] 为模型 {model_name} 追加通道 {channel.name} "
-            f"(vendor_model={vendor_model or '-'})"
+            f"[ChannelRegistry] 为模型 {model_name} 追加通道 {channel.name} (vendor_model={vendor_model or '-'})"
         )
 
     def bindings_for(self, model_name: str) -> list[ChannelBinding]:

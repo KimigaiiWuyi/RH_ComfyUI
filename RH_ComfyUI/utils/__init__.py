@@ -5,9 +5,9 @@ from .image_process import (
     resize_long_edge,
     correct_orientation,
     preprocess_for_video,
-    preprocess_for_camera_angle,
     build_process_pipeline,
     compress_to_max_pixels,
+    preprocess_for_camera_angle,
     compress_to_max_pixels_async,
 )
 

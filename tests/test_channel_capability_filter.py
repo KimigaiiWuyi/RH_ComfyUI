@@ -12,29 +12,26 @@ aifoundation,触发 ``validate_spec`` 抛 ``UNSUPPORTED_RESOLUTION`` →
 """
 
 import asyncio
-from dataclasses import replace
 from typing import Any, Optional
 
 import pytest
 
-from RH_ComfyUI.core.base.errors import ChannelError, ValidationError
+from RH_ComfyUI.core.base.errors import ValidationError
+from RH_ComfyUI.core.schema.types import PortSpec, PortType, NodeOutput
+from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
 from RH_ComfyUI.core.base.generation import AIGCGenerationBase
 from RH_ComfyUI.core.channels.channel import ChannelBinding, ProviderChannel
-from RH_ComfyUI.core.routing.balancer import BalancerConfig, LoadBalancer
-from RH_ComfyUI.core.schema.card import ModelCard
-from RH_ComfyUI.core.schema.request import GenerationRequest, TaskType
-from RH_ComfyUI.core.schema.types import NodeOutput, PortSpec, PortType
+from RH_ComfyUI.core.routing.balancer import LoadBalancer, BalancerConfig
 from RH_ComfyUI.utils.backends.seedance.channel import (
     ProviderCredentials,
     SeedanceProviderChannel,
 )
 from RH_ComfyUI.utils.backends.seedance.provider import (
-    NormalizedStatus,
     NormalizedTask,
+    NormalizedStatus,
     SeedanceProvider,
     UnsupportedProviderShapeError,
 )
-
 
 # ── Fake Provider / Channel 工具 ──
 
@@ -163,18 +160,14 @@ def _video_spec(resolution: Optional[str] = None, ratio: Optional[str] = None, d
 
 def test_can_handle_spec_resolution_in_set():
     """resolution 在 supported_resolutions 内 → True"""
-    provider = type(
-        "_P", (_FakeSeedanceProvider,), {"name": "p720", "_supported_resolutions": {"480p", "720p"}}
-    )()
+    provider = type("_P", (_FakeSeedanceProvider,), {"name": "p720", "_supported_resolutions": {"480p", "720p"}})()
     assert provider.can_handle_spec(_video_spec(resolution="720p")) is True
     assert provider.can_handle_spec(_video_spec(resolution="480p")) is True
 
 
 def test_can_handle_spec_resolution_not_in_set_returns_false():
     """resolution 不在 supported_resolutions 内 → False"""
-    provider = type(
-        "_P", (_FakeSeedanceProvider,), {"name": "p720", "_supported_resolutions": {"480p", "720p"}}
-    )()
+    provider = type("_P", (_FakeSeedanceProvider,), {"name": "p720", "_supported_resolutions": {"480p", "720p"}})()
     assert provider.can_handle_spec(_video_spec(resolution="1080p")) is False
 
 
@@ -187,6 +180,7 @@ def test_can_handle_spec_resolution_undeclared_allows_all():
 
 def test_can_handle_spec_skips_media_count_check():
     """媒体数超出 max_images 仍返回 True(用户要求:不按媒体数过滤)"""
+    from RH_ComfyUI.utils.core.types import MediaKind
     from RH_ComfyUI.utils.backends.seedance.spec import (
         MediaRef,
         MediaRole,
@@ -194,12 +188,17 @@ def test_can_handle_spec_skips_media_count_check():
         VideoGenSpec,
         VideoTaskShape,
     )
-    from RH_ComfyUI.utils.core.types import MediaKind
 
     three_images = [
-        SpecMedia(kind=MediaKind.IMAGE, role=MediaRole.REFERENCE, ref=MediaRef(kind=MediaKind.IMAGE, data=b"x"), index=0),
-        SpecMedia(kind=MediaKind.IMAGE, role=MediaRole.REFERENCE, ref=MediaRef(kind=MediaKind.IMAGE, data=b"y"), index=1),
-        SpecMedia(kind=MediaKind.IMAGE, role=MediaRole.REFERENCE, ref=MediaRef(kind=MediaKind.IMAGE, data=b"z"), index=2),
+        SpecMedia(
+            kind=MediaKind.IMAGE, role=MediaRole.REFERENCE, ref=MediaRef(kind=MediaKind.IMAGE, data=b"x"), index=0
+        ),
+        SpecMedia(
+            kind=MediaKind.IMAGE, role=MediaRole.REFERENCE, ref=MediaRef(kind=MediaKind.IMAGE, data=b"y"), index=1
+        ),
+        SpecMedia(
+            kind=MediaKind.IMAGE, role=MediaRole.REFERENCE, ref=MediaRef(kind=MediaKind.IMAGE, data=b"z"), index=2
+        ),
     ]
     spec = VideoGenSpec(
         shape=VideoTaskShape.IMAGE2VIDEO,
@@ -216,9 +215,7 @@ def test_can_handle_spec_skips_media_count_check():
 
 def test_can_handle_spec_ratio_when_declared():
     """声明 supported_ratios 后正确判定"""
-    provider = type(
-        "_P", (_FakeSeedanceProvider,), {"name": "p9x16", "_supported_ratios": {"9:16", "1:1"}}
-    )()
+    provider = type("_P", (_FakeSeedanceProvider,), {"name": "p9x16", "_supported_ratios": {"9:16", "1:1"}})()
     assert provider.can_handle_spec(_video_spec(ratio="9:16")) is True
     assert provider.can_handle_spec(_video_spec(ratio="21:9")) is False
 
@@ -254,9 +251,7 @@ def test_can_handle_spec_duration_undeclared_allows_all():
 
 def test_validate_spec_unsupported_ratio_raises():
     """UNSUPPORTED_RATIO 抛出与 code 字段"""
-    provider = type(
-        "_P", (_FakeSeedanceProvider,), {"name": "pratio", "_supported_ratios": {"9:16"}}
-    )()
+    provider = type("_P", (_FakeSeedanceProvider,), {"name": "pratio", "_supported_ratios": {"9:16"}})()
     with pytest.raises(UnsupportedProviderShapeError) as ei:
         provider.validate_spec(_video_spec(ratio="21:9"))
     assert ei.value.code == "UNSUPPORTED_RATIO"

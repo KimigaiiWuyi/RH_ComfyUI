@@ -31,6 +31,8 @@ _MODEL_ENTRY_GOLDEN: dict[str, type] = {
     "max_input_images": int,
     "point_range": dict,
     "catalog_group": str,
+    "supports_cancel": bool,
+    "supports_remote_cancel": bool,
 }
 
 
@@ -61,18 +63,33 @@ def test_model_entry_optional_fields_accept_str():
 
 
 def test_channels_item_contract():
-    # channels 列表项结构:{"name": str, "vendor_model": Optional[str], "available": bool}
-    # (rh_models/api.py 两个 _build_entry* 构造点都按此形状产出)
+    # channels 列表项: name/vendor_model/available + cancel 能力字段
     entry = ModelEntry(
         name="m",
         display_name="M",
         task_type="image",
         backend="b",
-        channels=[{"name": "ark", "vendor_model": "seedance-2", "available": True}],
+        channels=[
+            {
+                "name": "ark",
+                "vendor_model": "seedance-2",
+                "available": True,
+                "supports_cancel": True,
+                "supports_remote_cancel": True,
+            }
+        ],
     ).to_dict()
     item = entry["channels"][0]
-    assert set(item) >= {"name", "vendor_model", "available"}
+    assert set(item) >= {
+        "name",
+        "vendor_model",
+        "available",
+        "supports_cancel",
+        "supports_remote_cancel",
+    }
     assert isinstance(item["name"], str) and isinstance(item["available"], bool)
+    assert isinstance(item["supports_cancel"], bool)
+    assert isinstance(item["supports_remote_cancel"], bool)
 
 
 def test_catalog_top_level_contract():

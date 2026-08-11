@@ -9,8 +9,6 @@ estimate_cost 不读 quality —— 用户切换 quality 时积分不变,造成"
 
 from __future__ import annotations
 
-import pytest
-
 from RH_ComfyUI.models.image.defs import BananaProDef
 
 
@@ -18,8 +16,7 @@ def test_banana_pro_schema_has_no_quality():
     """banana_pro 的 input_schema 不应包含 quality"""
     inputs = BananaProDef.node_def().inputs
     assert "quality" not in inputs, (
-        f"banana_pro schema 不应暴露 quality(官方计费曲线不区分 quality)。"
-        f"实际 inputs: {list(inputs.keys())}"
+        f"banana_pro schema 不应暴露 quality(官方计费曲线不区分 quality)。实际 inputs: {list(inputs.keys())}"
     )
 
 
@@ -35,6 +32,4 @@ def test_gpt_image2_still_has_quality():
     from RH_ComfyUI.models.image.defs import GptImage2Def
 
     inputs = GptImage2Def.node_def().inputs
-    assert "quality" in inputs, (
-        "gpt-image-2 计费按 quality_factor 分档,quality 字段必须保留"
-    )
+    assert "quality" in inputs, "gpt-image-2 计费按 quality_factor 分档,quality 字段必须保留"

@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-from RH_ComfyUI.rh_models.api import estimate_model_points
 from RH_ComfyUI.models import discover_builtin_models
+from RH_ComfyUI.rh_models.api import estimate_model_points
 from RH_ComfyUI.utils.backends import init_backends
 from RH_ComfyUI.core.routing.registry import model_registry
 

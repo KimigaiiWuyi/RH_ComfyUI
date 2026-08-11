@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any
 
 import httpx
 
@@ -66,11 +66,30 @@ class RHAppAdapter(Adapter):
 
         # 3. 提交任务
         await _emit(on_progress, ProgressEvent(stage="submitting", percent=10, message="提交任务"))
+        # 统计:最终 nodeInfoList + 调用方 prompt(AI 应用侧一般不改写 prompt 文本)
+        from ....core.telemetry.wire_capture import set_wire_audit
+
+        set_wire_audit(
+            prompt=request.prompt or "",
+            request={
+                "webappId": webapp_id,
+                "nodeInfoList": node_info_list,
+            },
+        )
         submit_result = await self.api.submit_task(webapp_id, node_info_list)
         task_id = submit_result.get("taskId")
         if not task_id:
             error = submit_result.get("errorMessage", "未知错误")
             raise RuntimeError(f"[RHApp] 提交任务失败: {error}")
+
+        # 落库 vendor_task_id 供 resume;无 AI 应用 cancel API → 不挂 cancel_remote
+        from ....core.dispatch.active_tasks import get_active_task_registry
+
+        await get_active_task_registry().bind_vendor_task(
+            vendor_task_id=str(task_id),
+            channel_name="rh_app",
+            cancel_remote=None,
+        )
 
         # 预校验
         prompt_tips_str = submit_result.get("promptTips", "")
@@ -84,7 +103,7 @@ class RHAppAdapter(Adapter):
             except json.JSONDecodeError:
                 pass
 
-        # 4. 轮询
+        # 4. 轮询(rh_app 禁止 cancel;仅 resume_poll 可续查)
         await _emit(on_progress, ProgressEvent(stage="queued", percent=20, message="任务排队中"))
         results = await self.api.wait_for_result(task_id)
         await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="完成"))
@@ -98,8 +117,8 @@ class RHAppAdapter(Adapter):
         self,
         request: GenerationRequest,
         node: NodeDef,
-    ) -> List[Dict[str, Any]]:
-        node_info_list: List[Dict[str, Any]] = []
+    ) -> list[dict[str, Any]]:
+        node_info_list: list[dict[str, Any]] = []
 
         for rule in self._normalize_mappings(node.mappings):
             optional = bool(rule.get("optional", False))
@@ -135,7 +154,7 @@ class RHAppAdapter(Adapter):
                     if optional:
                         continue
                     raise RuntimeError(f"[RHApp] 映射上传图片列表需要 list[bytes] 输入: target={target}")
-                uploaded: List[str] = []
+                uploaded: list[str] = []
                 for i, item in enumerate(value):
                     if not isinstance(item, bytes):
                         raise RuntimeError(f"[RHApp] 映射图片列表包含非 bytes 元素: target={target}")
@@ -252,7 +271,7 @@ class RHAppAdapter(Adapter):
 
     async def _process_results(
         self,
-        results: List[Dict[str, Any]],
+        results: list[dict[str, Any]],
         request: GenerationRequest,
         node: NodeDef,
     ) -> NodeOutput:

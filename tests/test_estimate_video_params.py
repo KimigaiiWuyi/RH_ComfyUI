@@ -11,8 +11,8 @@ import asyncio
 
 import pytest
 
-from RH_ComfyUI.rh_models.api import estimate_model_points
 from RH_ComfyUI.models import discover_builtin_models
+from RH_ComfyUI.rh_models.api import estimate_model_points
 from RH_ComfyUI.utils.backends import init_backends
 from RH_ComfyUI.core.routing.registry import model_registry
 
@@ -56,12 +56,8 @@ def test_seedance2_video_refs_increases_cost():
 
 def test_seedance15_pro_generate_audio_changes_cost():
     """Seedance 1.5 Pro: 有声 vs 无声应不同(有声 16 元/M, 无声 8 元/M)"""
-    r_silent = asyncio.run(
-        estimate_model_points("seedance15_pro", resolution="720p", duration=5, generate_audio=False)
-    )
-    r_audio = asyncio.run(
-        estimate_model_points("seedance15_pro", resolution="720p", duration=5, generate_audio=True)
-    )
+    r_silent = asyncio.run(estimate_model_points("seedance15_pro", resolution="720p", duration=5, generate_audio=False))
+    r_audio = asyncio.run(estimate_model_points("seedance15_pro", resolution="720p", duration=5, generate_audio=True))
     assert r_audio["point_cost"] > r_silent["point_cost"], (
         f"有声应该比无声贵,但 {r_audio['point_cost']} <= {r_silent['point_cost']}"
     )
@@ -114,15 +110,17 @@ def test_image_model_ignores_video_params_gracefully():
     """图片模型收到 video 参数应忽略,不应报错"""
     r = asyncio.run(
         estimate_model_points(
-            "gpt-image-2", ratio="1:1", image_size="4K", quality="high",
-            resolution="1080p", duration=10,  # 视频参数对图片模型无意义
+            "gpt-image-2",
+            ratio="1:1",
+            image_size="4K",
+            quality="high",
+            resolution="1080p",
+            duration=10,  # 视频参数对图片模型无意义
         )
     )
     assert r["point_cost"] > 0
     # 验证图片模型只按图片参数算,不受视频参数影响
-    r_no_video = asyncio.run(
-        estimate_model_points("gpt-image-2", ratio="1:1", image_size="4K", quality="high")
-    )
+    r_no_video = asyncio.run(estimate_model_points("gpt-image-2", ratio="1:1", image_size="4K", quality="high"))
     assert r["point_cost"] == r_no_video["point_cost"]
 
 

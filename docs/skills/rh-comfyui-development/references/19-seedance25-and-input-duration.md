@@ -2,6 +2,9 @@
 
 > 2026-08 接入 Seedance 2.5,并修正 Seedance 全系列 token 计费中「输入视频时长」
 > 被写死 5 秒的问题。本章给下次查阅用:模型契约、费率、透传链、测试入口。
+>
+> **2026-08 后续修订**:聚合网关(`aigc_system`)已注册 **seedance2.5** 通道
+> (透传 V2);下文「仅 ark」已过时,见 §19.1 与 §19.9。
 
 ## 19.1 模型身份
 
@@ -11,14 +14,25 @@
 | display_name | Seedance 2.5 |
 | 类 | `Seedance25Def` → `Seedance25VideoModel` |
 | backend | `seedance` |
-| Vendor Model | `doubao-seedance-2-5-260628` |
-| 通道 | **仅 ark**(复用 `Seedance_apikey_ark` / `Seedance_Enable_ark`) |
+| **ark** Vendor Model | `doubao-seedance-2-5-260628`(方舟日期编码) |
+| **gateway** Vendor Model | **`doubao-seedance-2.5`**(点分;见 `aigc_system` `SHARED_VENDOR_MODELS`) |
+| 通道 | **ark + gateway**(网关经 `channel_registry` 注入 `gateway_slot{N}_seedance`) |
 | 与 2.0 | **类型分开**(独立 name / backend_model,不合并进 seedance2) |
+
+**⚠ 三套 id 勿混用**:
+
+| 层 | 正确 | 错误 |
+|----|------|------|
+| RH host / catalog | `seedance2.5` | `seedance25` |
+| ark body.model | `doubao-seedance-2-5-260628` | 点分 2.5 |
+| 网关 body.model | `doubao-seedance-2.5` | host 名或 ark 日期 id |
 
 文件:
 - `RH_ComfyUI/models/video/defs.py` — `Seedance25Def`
 - `RH_ComfyUI/models/video/overrides.py` — `Seedance25VideoModel`
 - `RH_ComfyUI/utils/mappers/seedance_billing.py` — `estimate_seedance25_points`
+- `aigc_system/seedance_gateway/models.py` — 网关 vendor 映射
+- `aigc_system/docs/seedance-passthrough-v2-handover-2026-08.md` — 网关透传 + 信封错误面
 
 ## 19.2 能力差异(相对 seedance2)
 
@@ -80,7 +94,10 @@ _SEEDANCE25_RATES = { "480p"/"720p": (70.00 无输入, 42.00 有输入) }
 - edit/extend 必须有参考视频
 - edit/extend/首帧·首尾帧 的 ratio 必须 adaptive
 
-## 19.5 透传链(引擎 → canvas → 前端)
+## 19.5 透传链(引擎 → 宿主 HTTP → 调用方 UI)
+
+> 本节描述**典型宿主**如何透传 `input_video_duration` 等字段;引擎本身只认
+> `GenerationRequest` / estimate 参数,不绑定具体前端产品。
 
 ### RH_ComfyUI
 
@@ -96,6 +113,9 @@ estimate_model_points(..., input_video_duration=?)
 - `rh_models/webapi.py` — Query `input_video_duration`
 - Ark provider:`duration=-1` 原样透传;`output_format=mov` 写入 body;
   媒体上限 30/10/10,max_duration=30
+- **Gateway**(`aigc_system.GatewaySeedanceProvider`):端点
+  `/video/generation/passthrough/tasks`;body.model=`doubao-seedance-2.5`;
+  `duration=-1` 同样原样透传;失败信封须抛 `user_message`(见 §19.9)
 
 ### canvas_backend
 
@@ -122,8 +142,17 @@ POST /api/canvas-backend/generate 预扣
 | `buildGenerateRequest.ts` | 无头提交路径同样写入 |
 | `HomePage.tsx` | 主页草稿同逻辑 |
 | `i18n.ts` | `'seedance2.5'` 中英文显示名 |
+| `FrameModePicker` / `ConfigPicker` | 延长/编辑下拉;UI「自动」= `adaptive`/`duration=-1` |
+| 交接 | InfiniteCanvas `docs/seedance25-modes-duration-popup-handover-2026-08.md` |
 
-参考视频 **合法输入区间仍为 2~15s**(上游参考硬限);输出最长 30s 是 2.5 的输出能力。
+参考视频合法输入区间:
+
+| 模型 | 单段参考视频 |
+|------|----------------|
+| Seedance **2.0** | **2~15s**(越界前端提示裁切) |
+| Seedance **2.5** | **2~30s**(与输出上限对齐;前端按模型切换 max) |
+
+输出最长 30s 是 2.5 的输出能力;勿再把 2.5 参考视频上限写死成 15s。
 
 ## 19.6 测试入口
 
@@ -153,5 +182,25 @@ pytest tests/test_seedance25_model.py tests/test_seedance_billing.py \
 ## 19.8 相关外部文档
 
 - InfiniteCanvas skills: `docs/skills/InfiniteCanvasDevelopment/references/15-estimate-flow-and-contract.md` §15.9
+- InfiniteCanvas UI 交接: `docs/seedance25-modes-duration-popup-handover-2026-08.md`
+- aigc 网关透传: `aigc_system/docs/seedance-passthrough-v2-handover-2026-08.md`
 - 火山方舟教程 PDF:`docs/火山方舟_Doubao Seedance 2.5 教程_1786081569.pdf`
-- Model ID 确认:`doubao-seedance-2-5-260628`
+- ark Model ID:`doubao-seedance-2-5-260628`
+- 网关 Model ID:`doubao-seedance-2.5`
+
+## 19.9 网关通道与错误面(2026-08 增补)
+
+| 项 | 说明 |
+|----|------|
+| 注册 | `aigc_system` `register_gateway` 把 seedance2.5 绑到 `gateway_slot{N}_seedance` |
+| 端点 | `/video/generation/passthrough/tasks`(非旧 tasks,非 V3 硬切) |
+| 与 ark 并存 | LoadBalancer 在 ark / gateway 间分摊(取决于配置启用与勾选) |
+| 失败信封 | 网关可能 HTTP 200 + `{code,msg,data}`;provider 必须 `user_message=msg` |
+| 用户症状 | 若只见「上游未返回任务ID」→ 查 aigc `parse_create` 信封路径,不是 RH 计费 |
+| HappyHorse | **不**共享透传 path;勿因 Seedance 改 path 误伤 |
+
+改 2.5 能力时 checklist 追加:
+
+- [ ] 网关 `SHARED_VENDOR_MODELS` 与 catalog 勾选项
+- [ ] 信封错误单测(`test_passthrough_parse_create_envelope_error_surfaces_msg`)
+- [ ] 前端 task_mode / adaptive / duration=-1 与 RH validate 一致

@@ -180,7 +180,8 @@ class _FakeServiceConfig:
 
 def _providers_config(weight: str = "3") -> GsRepeatGroupConfig:
     return GsRepeatGroupConfig(
-        "供应商", "",
+        "供应商",
+        "",
         template={},
         data=[
             {
@@ -190,7 +191,9 @@ def _providers_config(weight: str = "3") -> GsRepeatGroupConfig:
                 "api_key": GsStrConfig("key", "", "sk-secret", secret=True),
                 "weight": GsStrConfig("权重", "", weight),
                 "models": GsRepeatGroupConfig(
-                    "模型", "", template={},
+                    "模型",
+                    "",
+                    template={},
                     data=[
                         {
                             "model_real_name": GsStrConfig("内部", "", "qwen_2512"),

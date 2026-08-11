@@ -2,28 +2,27 @@
 
 import pytest
 
-from RH_ComfyUI.utils.mappers.nanobanana2_billing import (
-    POINTS_PER_MILLION_TOKENS as NB2_POINTS_PER_MILLION_TOKENS,
-    OUTPUT_TOKENS_BY_SIZE as NB2_OUTPUT_TOKENS_BY_SIZE,
-    calculate_output_points as nb2_calculate_output_points,
-    estimate_nanobanana2_points,
+from RH_ComfyUI.models.image.defs import Banana1Def, Banana2Def, BananaProDef
+from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
+from RH_ComfyUI.utils.mappers.banana_pro_billing import (
+    OUTPUT_TOKENS_BY_SIZE as BPRO_OUTPUT_TOKENS_BY_SIZE,
+    INPUT_COST_PER_IMAGE_POINTS as BPRO_INPUT_COST_PER_IMAGE_POINTS,
+    OUTPUT_POINTS_PER_MILLION_TOKENS as BPRO_OUTPUT_POINTS_PER_MILLION_TOKENS,
+    estimate_banana_pro_points,
+    calculate_banana_pro_points,
 )
 from RH_ComfyUI.utils.mappers.nanobanana1_billing import (
-    POINTS_PER_MILLION_TOKENS as NB1_POINTS_PER_MILLION_TOKENS,
     OUTPUT_TOKENS as NB1_OUTPUT_TOKENS,
+    POINTS_PER_MILLION_TOKENS as NB1_POINTS_PER_MILLION_TOKENS,
     calculate_output_points as nb1_calculate_output_points,
     estimate_nanobanana1_points,
 )
-from RH_ComfyUI.utils.mappers.banana_pro_billing import (
-    OUTPUT_POINTS_PER_MILLION_TOKENS as BPRO_OUTPUT_POINTS_PER_MILLION_TOKENS,
-    INPUT_COST_PER_IMAGE_POINTS as BPRO_INPUT_COST_PER_IMAGE_POINTS,
-    OUTPUT_TOKENS_BY_SIZE as BPRO_OUTPUT_TOKENS_BY_SIZE,
-    calculate_banana_pro_points,
-    estimate_banana_pro_points,
+from RH_ComfyUI.utils.mappers.nanobanana2_billing import (
+    OUTPUT_TOKENS_BY_SIZE as NB2_OUTPUT_TOKENS_BY_SIZE,
+    POINTS_PER_MILLION_TOKENS as NB2_POINTS_PER_MILLION_TOKENS,
+    calculate_output_points as nb2_calculate_output_points,
+    estimate_nanobanana2_points,
 )
-from RH_ComfyUI.models.image.defs import Banana2Def, Banana1Def, BananaProDef
-from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  一、Nano Banana 2 计费测试
@@ -52,10 +51,10 @@ def test_nb2_output_tokens_by_size(image_size, expected_tokens):
 @pytest.mark.parametrize(
     "image_size,expected_points",
     [
-        ("512", 5),    # 747 * 6000 / 1M = 4.482 → ceil = 5
-        ("1K", 7),     # 1120 * 6000 / 1M = 6.72 → ceil = 7
-        ("2K", 11),    # 1680 * 6000 / 1M = 10.08 → ceil = 11
-        ("4K", 16),    # 2520 * 6000 / 1M = 15.12 → ceil = 16
+        ("512", 5),  # 747 * 6000 / 1M = 4.482 → ceil = 5
+        ("1K", 7),  # 1120 * 6000 / 1M = 6.72 → ceil = 7
+        ("2K", 11),  # 1680 * 6000 / 1M = 10.08 → ceil = 11
+        ("4K", 16),  # 2520 * 6000 / 1M = 15.12 → ceil = 16
     ],
 )
 def test_nb2_calculate_output_points(image_size, expected_points):
@@ -208,13 +207,13 @@ def test_bpro_output_tokens_by_size(image_size, expected_tokens):
 @pytest.mark.parametrize(
     "num_input,image_size,expected",
     [
-        (0, "1K", 14),    # 输入 0 + 输出 1K(1120*12000/1M=13.44 → ceil=14) = 14
-        (0, "2K", 14),    # 同上
-        (0, "4K", 24),    # 输入 0 + 输出 4K(2000*12000/1M=24.0 → ceil=24) = 24
-        (1, "1K", 15),    # 输入 1(ceil(0.11)=1) + 输出 14 = 15
-        (1, "4K", 25),    # 输入 1 + 输出 24 = 25
-        (3, "2K", 15),    # 输入 3(ceil(0.33)=1) + 输出 14 = 15
-        (3, "4K", 25),    # 输入 3 + 输出 24 = 25
+        (0, "1K", 14),  # 输入 0 + 输出 1K(1120*12000/1M=13.44 → ceil=14) = 14
+        (0, "2K", 14),  # 同上
+        (0, "4K", 24),  # 输入 0 + 输出 4K(2000*12000/1M=24.0 → ceil=24) = 24
+        (1, "1K", 15),  # 输入 1(ceil(0.11)=1) + 输出 14 = 15
+        (1, "4K", 25),  # 输入 1 + 输出 24 = 25
+        (3, "2K", 15),  # 输入 3(ceil(0.33)=1) + 输出 14 = 15
+        (3, "4K", 25),  # 输入 3 + 输出 24 = 25
     ],
 )
 def test_bpro_calculate_points(num_input, image_size, expected):

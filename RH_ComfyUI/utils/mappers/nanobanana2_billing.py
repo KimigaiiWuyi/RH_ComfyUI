@@ -23,10 +23,10 @@ POINTS_PER_MILLION_TOKENS: int = 6_000
 # ── 分辨率分档 → 消耗 tokens(取自官方文档) ──
 
 OUTPUT_TOKENS_BY_SIZE: dict[str, int] = {
-    "512": 747,    # 0.5K (512px)
-    "1K": 1120,    # 1K (1024x1024px)
-    "2K": 1680,    # 2K (2048x2048px)
-    "4K": 2520,    # 4K (4096x4096px)
+    "512": 747,  # 0.5K (512px)
+    "1K": 1120,  # 1K (1024x1024px)
+    "2K": 1680,  # 2K (2048x2048px)
+    "4K": 2520,  # 4K (4096x4096px)
 }
 
 # image_size 参数缺失时的默认档位

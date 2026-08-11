@@ -117,9 +117,7 @@ class DigitalHumanSpeechBase(AIGCGenerationBase):
                 f"文本长度 {len(request.prompt)} 超过 {self.display_name} 上限 {self.max_text_length} 字"
             )
         if request.reference_audio is not None and not self.supports_voice_clone:
-            raise ValidationError(
-                f"{self.display_name} 不支持参考音频克隆;请换用支持克隆的模型"
-            )
+            raise ValidationError(f"{self.display_name} 不支持参考音频克隆;请换用支持克隆的模型")
         if (
             request.reference_audio is None
             and self.supports_voice_clone

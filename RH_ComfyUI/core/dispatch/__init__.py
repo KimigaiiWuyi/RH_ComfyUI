@@ -7,7 +7,16 @@
 均封装在 model.run() 内,dispatcher 只负责超时预算 + 流程编排。
 """
 
+from .resume import ResumeFailedError, ResumeNotSupportedError, can_resume, resume_poll
 from .context import DispatchContext
-from .dispatcher import dispatch
+from .dispatcher import dispatch, cancel_generation
 
-__all__ = ["dispatch", "DispatchContext"]
+__all__ = [
+    "dispatch",
+    "cancel_generation",
+    "resume_poll",
+    "can_resume",
+    "ResumeNotSupportedError",
+    "ResumeFailedError",
+    "DispatchContext",
+]

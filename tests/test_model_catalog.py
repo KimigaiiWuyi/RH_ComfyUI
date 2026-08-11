@@ -70,6 +70,44 @@ class _PureAbcModel(ImageGenerationBase):
         return await binding.channel.invoke(request=request)
 
 
+def test_catalog_cancel_flags_match_channels_and_rh_app():
+    """/models 取消能力:顶层 = 通道 OR;rh_app 顶层与通道均为 false(前后端契约)。"""
+    from RH_ComfyUI.models import discover_builtin_models
+    from RH_ComfyUI.utils.backends import init_backends
+
+    init_backends()
+    discover_builtin_models()
+    try:
+        catalog = asyncio.run(build_model_catalog(include_unavailable=True))
+        by_name = {m["name"]: m for m in catalog["models"]}
+
+        # rh_app:不能取消
+        for name in ("anima", "rh_camera_angle"):
+            if name not in by_name:
+                continue
+            m = by_name[name]
+            assert m["supports_cancel"] is False, name
+            assert m["supports_remote_cancel"] is False, name
+            for ch in m.get("channels") or []:
+                assert ch.get("supports_cancel") is False, (name, ch)
+                assert ch.get("supports_remote_cancel") is False, (name, ch)
+
+        # seedance:顶层与通道 OR 一致;ark 可 remote,runninghub 视频端不可
+        if "seedance2" in by_name:
+            m = by_name["seedance2"]
+            ch_map = {c["name"]: c for c in (m.get("channels") or [])}
+            any_local = any(c.get("supports_cancel") for c in ch_map.values())
+            any_remote = any(c.get("supports_remote_cancel") for c in ch_map.values())
+            assert m["supports_cancel"] is any_local
+            assert m["supports_remote_cancel"] is any_remote
+            if "ark" in ch_map:
+                assert ch_map["ark"].get("supports_remote_cancel") is True
+            if "runninghub" in ch_map:
+                assert ch_map["runninghub"].get("supports_remote_cancel") is False
+    finally:
+        model_registry.clear()
+
+
 def test_pure_abc_model_visible_in_catalog():
     # 回归:无 NodeDef 的模型(model.node is None)也必须进 HTTP 清单,
     # 否则闭源插件按 @register_model 注册的模型在画布上不可见

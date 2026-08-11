@@ -2,17 +2,16 @@
 
 import pytest
 
+from RH_ComfyUI.models.image.defs import BananaProDef, GptImage2Def
+from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.gpt_image2_billing import (
     POINTS_PER_MILLION_TOKENS,
+    resolve_dimensions,
+    resolve_size_string,
     calculate_image_points,
     calculate_image_tokens,
     estimate_gpt_image2_points,
-    resolve_dimensions,
-    resolve_size_string,
 )
-from RH_ComfyUI.models.image.defs import GptImage2Def, BananaProDef
-from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
-
 
 # ── 常量 ──
 
@@ -81,12 +80,12 @@ def test_resolve_size_string_matches_api_and_includes_1_2():
 
 def test_calculate_image_tokens_known_value():
     """手工验算 1024x1024 / medium:
-        quality_axis_factor = 48
-        long_edge = 1024, short_edge = 1024
-        short_axis_factor = (2*48*1024 + 1024) // (2*1024) = (98304+1024)//2048 = 48
-        tokens = (48 * 48 * (2_000_000 + 1_048_576) + 4_000_000 - 1) // 4_000_000
-              = (2304 * 3048576 + 3999999) // 4_000_000
-              = 7023925248 + 3999999 = 7027925247 // 4_000_000 = 1756
+    quality_axis_factor = 48
+    long_edge = 1024, short_edge = 1024
+    short_axis_factor = (2*48*1024 + 1024) // (2*1024) = (98304+1024)//2048 = 48
+    tokens = (48 * 48 * (2_000_000 + 1_048_576) + 4_000_000 - 1) // 4_000_000
+          = (2304 * 3048576 + 3999999) // 4_000_000
+          = 7023925248 + 3999999 = 7027925247 // 4_000_000 = 1756
     """
     assert calculate_image_tokens("medium", 1024, 1024) == 1756
 

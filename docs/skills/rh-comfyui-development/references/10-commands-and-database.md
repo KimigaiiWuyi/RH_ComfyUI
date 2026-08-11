@@ -52,12 +52,23 @@ Agent Mesh 的 AIGC 创作代理,import 即注册,无命令面)。管理类纯 A
 | 组 | 列 |
 |---|---|
 | 身份 | `user_id` / `bot_id` / `group_id` |
-| 任务 | `task_type` / `task_name`(=模型 name)/ `backend` / `backend_model` / `backend_provider` |
+| 任务 | `task_type` / `task_name`(=模型 name)/ `backend` / `backend_model` / `backend_provider` / `backend_key_prefix` |
 | 参数 | `duration_seconds` / `width` / `height` / `ratio` / `resolution` / `seed` / `voice_id` / `extra_params_json` / `prompt`(≤4000) |
-| 结果 | `status`(ok/failed/cancelled;cancelled=任务被 CancelledError 中断,2026-07-10 起实际写入)/ `elapsed_ms` / `point_cost` / `refunded` / `error_message`(≤2KB)/ `raw_response_json`(≤64KB) |
+| 结果 | `status`(ok/failed/cancelled/running)/ `elapsed_ms` / `point_cost` / `refunded` / `error_message`(≤2KB)/ `raw_response_json`(≤64KB) / `saved_files_json` |
+| 请求体 | `request_body_json`(终态优先**上游最终 wire**,见 §二十 §20.4) |
 | 追踪 | `trace_id` / `entry_point`(command/agent/http)/ `created_at` |
 
-规则(同 05 章):既有列不改名不删;加列必须带默认值(gsuid_core
+**2026-08 语义(交接重点)**:
+
+| 列 | 说明 |
+|----|------|
+| `prompt` | **终态** = backend 改写后实际上网文本(wire);`begin_task` 可先写入参 |
+| `request_body_json` | **终态** = 最终 HTTP body(mask 后);非仅入口 GenerationRequest |
+| `extra_params_json` | 可含 `vendor_task_id` / `vendor_channel`(bind 后写入,供 resume_poll) |
+| `status=running` | `begin_task` 预扣后立即可见进行中 |
+| `status=cancelled` | `CancelledError` / 用户 cancel |
+
+规则(同 05 / 二十章):既有列不改名不删;加列必须带默认值(gsuid_core
 `exec_list` 自动迁移);写入只在 `core/telemetry/recorder.py` 与
 `utils/database/statistics.py`,不要在别处散落 INSERT。
 

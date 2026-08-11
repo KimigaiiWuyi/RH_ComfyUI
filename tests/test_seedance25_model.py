@@ -183,9 +183,7 @@ def test_ark_render_includes_duration_minus_one_and_output_format():
     )
     spec = classify_video_spec(req)
     p = ArkSeedanceProvider(api_key="test-key")
-    method, url, headers, body = asyncio.run(
-        p.render_create(spec, model="doubao-seedance-2-5-260628")
-    )
+    method, url, headers, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2-5-260628"))
     assert method == "POST"
     assert body["model"] == "doubao-seedance-2-5-260628"
     assert body["duration"] == -1

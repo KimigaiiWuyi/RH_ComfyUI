@@ -9,12 +9,12 @@
 
 from __future__ import annotations
 
-from RH_ComfyUI.utils.core.media_labels import ensure_media_ref_labels
 from RH_ComfyUI.utils.core.types import ContentItem, ContentItemType, image_ref
-from RH_ComfyUI.utils.core.request import GenerationRequest, TaskType
+from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
+from RH_ComfyUI.utils.mappers.video import interpolate_prompt_refs
+from RH_ComfyUI.utils.core.media_labels import ensure_media_ref_labels
 from RH_ComfyUI.utils.backends.seedance.classify import classify_video_spec
 from RH_ComfyUI.utils.backends.happyhorse.classify import classify_happyhorse, rewrite_prompt_for_r2v
-from RH_ComfyUI.utils.mappers.video import interpolate_prompt_refs
 
 png_a = b"\x89PNG\r\n\x1a\n" + b"A" * 200
 png_b = b"\x89PNG\r\n\x1a\n" + b"B" * 200

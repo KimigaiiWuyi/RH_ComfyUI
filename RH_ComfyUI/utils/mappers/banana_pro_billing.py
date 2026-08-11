@@ -26,9 +26,9 @@ INPUT_COST_PER_IMAGE_POINTS: float = 0.0011 * 100  # 0.11 积分/张
 # ── 分辨率分档 → 消耗 tokens(取自官方文档) ──
 
 OUTPUT_TOKENS_BY_SIZE: dict[str, int] = {
-    "1K": 1120,    # 1024x1024px
-    "2K": 1120,    # 2048x2048px(同 1K 档 token 数)
-    "4K": 2000,    # 4096x4096px
+    "1K": 1120,  # 1024x1024px
+    "2K": 1120,  # 2048x2048px(同 1K 档 token 数)
+    "4K": 2000,  # 4096x4096px
 }
 
 # image_size 参数缺失时的默认档位

@@ -251,6 +251,12 @@ class MiniMaxAPI:
         if subject_reference:
             request_body["subject_reference"] = subject_reference
 
+        from ....core.telemetry.wire_capture import set_wire_from_http_body
+
+        # subject_reference 可能含 data URL,仅审计非敏感字段摘要
+        audit_body = {k: ("[masked]" if k == "subject_reference" else v) for k, v in request_body.items()}
+        set_wire_from_http_body(audit_body, prompt=prompt)
+
         resp = await self._request("POST", self.generation_url, headers=self._headers(), json=request_body)
 
         if isinstance(resp, int):
@@ -474,6 +480,10 @@ class MiniMaxAPI:
                 "channel": channel,
             },
         }
+
+        from ....core.telemetry.wire_capture import set_wire_from_http_body
+
+        set_wire_from_http_body(request_body, prompt=text)
 
         resp = await self._request(
             "POST",

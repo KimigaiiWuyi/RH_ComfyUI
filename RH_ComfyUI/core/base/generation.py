@@ -19,8 +19,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
+import asyncio
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar, Optional
 
@@ -69,6 +69,14 @@ class AIGCGenerationBase(ABC):
     # ── 路由 ──
     priority: int = 50  # 数字越大越优先
     execution_mode: ClassVar[str] = "sync"  # sync / async_poll
+
+    # ── 取消能力 ──
+    # supports_cancel:进行中任务可被 cancel_generation 取消(本地 asyncio.Task.cancel)。
+    # 所有经 dispatch() 的模型默认 True;rh_app 等例外覆写 False。
+    supports_cancel: ClassVar[bool] = True
+    # supports_remote_cancel:**已降级为软提示**,目录真实值以通道/供应商为准
+    # (ProviderChannel.supports_remote_cancel)。未知供应商默认 False。
+    supports_remote_cancel: ClassVar[bool] = False
 
     # ── 并发:模型级并发上限(0=不限,只受全局闸约束) ──
     max_concurrency: ClassVar[int] = 0
@@ -321,8 +329,7 @@ class AIGCGenerationBase(ABC):
                             continue
                         # 排队预算耗尽:记失败并切通道/整单失败(任务移除由 dispatcher 退款落库)
                         logger.error(
-                            f"[{self.name}] 通道 {binding.channel.name} 429/503 排队已达上限 "
-                            f"{max_wait:.0f}s,放弃该通道"
+                            f"[{self.name}] 通道 {binding.channel.name} 429/503 排队已达上限 {max_wait:.0f}s,放弃该通道"
                         )
                         last_error = ChannelError(
                             f"{binding.channel.name} 限流排队超过 {max_wait:.0f}s: {e}",
@@ -330,23 +337,16 @@ class AIGCGenerationBase(ABC):
                             transient=False,
                             channel=binding.channel.name,
                             code="TRANSIENT_QUEUE_TIMEOUT",
-                            user_message=(
-                                f"上游繁忙,排队已超过 {int(max_wait // 60)} 分钟仍未恢复,任务已取消。"
-                            ),
+                            user_message=(f"上游繁忙,排队已超过 {int(max_wait // 60)} 分钟仍未恢复,任务已取消。"),
                         )
                     self.balancer().record_failure(scope=self.name, member=binding.channel.name)
                     available_names = [n for n in available_names if n != binding.channel.name]
                     if available_names:
-                        logger.warning(
-                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),切换下一通道"
-                        )
+                        logger.warning(f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),切换下一通道")
                     else:
                         # 无更多可用通道:跳出后由 AllChannelsFailedError 收口
                         # (单通道时 last_error 即根因;多通道时 cause 保留最后一家)
-                        logger.warning(
-                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),"
-                            f"无更多可用通道"
-                        )
+                        logger.warning(f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),无更多可用通道")
                     break
             if output is None:
                 continue

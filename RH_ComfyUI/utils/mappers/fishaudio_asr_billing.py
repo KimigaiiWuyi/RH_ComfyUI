@@ -32,13 +32,14 @@ def _duration_from_mutagen(audio_bytes: bytes) -> Optional[float]:
     解析失败返回 None。
     """
     try:
-        from mutagen import File as MutagenFile
         from io import BytesIO
+
+        from mutagen import File as MutagenFile  # type: ignore[import-untyped]
 
         f = MutagenFile(BytesIO(audio_bytes))
         if f is None or f.info is None:
             return None
-        duration = getattr(f.info, "length", None)
+        duration = f.info.length if hasattr(f.info, "length") else None
         if duration and duration > 0:
             return float(duration)
     except Exception as e:  # noqa: BLE001

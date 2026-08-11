@@ -2,44 +2,41 @@
 
 import pytest
 
-from RH_ComfyUI.utils.mappers.fishaudio_asr_billing import (
-    POINTS_PER_AUDIO_HOUR,
-    POINTS_PER_AUDIO_SECOND,
-    estimate_audio_duration_seconds,
-    calculate_asr_points,
-    estimate_fish_asr_points,
+from RH_ComfyUI.models.asr.defs import FishAsrDef
+from RH_ComfyUI.models.image.defs import (
+    Qwen2511Def,
+    Qwen2512Def,
+    Seedream5Def,
+    Seedream5ProDef,
+    MinimaxImage01Def,
 )
+from RH_ComfyUI.models.music.defs import AceStep15Def
+from RH_ComfyUI.models.speech.defs import FishTtsDef, IndexTTS2Def
+from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.speech_billing import (
     FISHAUDIO_POINTS_PER_MILLION_BYTES,
     INDEX_TTS2_POINTS_PER_MILLION_BYTES,
-    calculate_fish_tts_points,
-    calculate_index_tts2_points,
     estimate_fish_tts_points,
+    calculate_fish_tts_points,
     estimate_index_tts2_points,
+    calculate_index_tts2_points,
 )
-from RH_ComfyUI.utils.mappers.seedream5_pro_billing import (
-    INPUT_IMAGE_COST_POINTS,
-    OUTPUT_COST_LOW_POINTS,
-    OUTPUT_COST_HIGH_POINTS,
-    OUTPUT_PIXEL_THRESHOLD,
-    calculate_seedream5_pro_points,
-    estimate_seedream5_pro_points,
+from RH_ComfyUI.utils.mappers.fishaudio_asr_billing import (
+    POINTS_PER_AUDIO_HOUR,
+    POINTS_PER_AUDIO_SECOND,
+    calculate_asr_points,
+    estimate_fish_asr_points,
+    estimate_audio_duration_seconds,
 )
 from RH_ComfyUI.utils.mappers.seedream5_pro_billing import (
     _SIZE_MODE_PIXELS,
+    OUTPUT_COST_LOW_POINTS,
+    OUTPUT_PIXEL_THRESHOLD,
+    INPUT_IMAGE_COST_POINTS,
+    OUTPUT_COST_HIGH_POINTS,
+    estimate_seedream5_pro_points,
+    calculate_seedream5_pro_points,
 )
-from RH_ComfyUI.models.speech.defs import IndexTTS2Def, FishTtsDef
-from RH_ComfyUI.models.asr.defs import FishAsrDef
-from RH_ComfyUI.models.music.defs import AceStep15Def
-from RH_ComfyUI.models.image.defs import (
-    Seedream5ProDef,
-    Seedream5Def,
-    Qwen2511Def,
-    Qwen2512Def,
-    MinimaxImage01Def,
-)
-from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  一、FishAudio ASR 计费测试
@@ -257,14 +254,14 @@ def test_seedream5_pro_size_mode_pixels():
 @pytest.mark.parametrize(
     "num_input,size_mode,expected",
     [
-        (0, "1K", 30),    # 0 输入 + 1K 输出(30)
-        (0, "2K", 60),    # 0 输入 + 2K 输出(60)
-        (1, "1K", 30),    # 1 输入(免费) + 1K 输出(30) = 30
-        (1, "2K", 60),    # 1 输入(免费) + 2K 输出(60) = 60
-        (2, "1K", 32),    # 2 输入(1*2=2) + 1K 输出(30) = 32
-        (2, "2K", 62),    # 2 输入(2) + 2K 输出(60) = 62
-        (5, "1K", 38),    # 5 输入(4*2=8) + 1K 输出(30) = 38
-        (10, "2K", 78),   # 10 输入(9*2=18) + 2K 输出(60) = 78
+        (0, "1K", 30),  # 0 输入 + 1K 输出(30)
+        (0, "2K", 60),  # 0 输入 + 2K 输出(60)
+        (1, "1K", 30),  # 1 输入(免费) + 1K 输出(30) = 30
+        (1, "2K", 60),  # 1 输入(免费) + 2K 输出(60) = 60
+        (2, "1K", 32),  # 2 输入(1*2=2) + 1K 输出(30) = 32
+        (2, "2K", 62),  # 2 输入(2) + 2K 输出(60) = 62
+        (5, "1K", 38),  # 5 输入(4*2=8) + 1K 输出(30) = 38
+        (10, "2K", 78),  # 10 输入(9*2=18) + 2K 输出(60) = 78
     ],
 )
 def test_seedream5_pro_calculate_points(num_input, size_mode, expected):

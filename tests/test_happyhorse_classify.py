@@ -4,14 +4,14 @@ from RH_ComfyUI.core.schema.types import MediaRef, MediaKind
 from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.backends.seedance.spec import MediaRole, VideoTaskShape
 from RH_ComfyUI.utils.backends.happyhorse.classify import (
-    VENDOR_MODEL_T2V,
     VENDOR_MODEL_I2V,
     VENDOR_MODEL_R2V,
+    VENDOR_MODEL_T2V,
     VENDOR_MODEL_EDIT,
+    to_api_resolution,
     classify_happyhorse,
     resolve_vendor_model,
     rewrite_prompt_for_r2v,
-    to_api_resolution,
 )
 
 

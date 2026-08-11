@@ -31,13 +31,15 @@ _RUNNINGHUB_WARN_AFTER = 12
 _RUNNINGHUB_FAIL_AFTER = 120
 
 # RunningHub /openapi/v2/query / 通用 REST 风格响应中的失败状态(大写比较)
-_RUNNINGHUB_FAILURE_STATUSES = frozenset({
-    "FAILED",
-    "ERROR",
-    "CANCELLED",
-    "TIMEOUT",
-    "INTERRUPTED",
-})
+_RUNNINGHUB_FAILURE_STATUSES = frozenset(
+    {
+        "FAILED",
+        "ERROR",
+        "CANCELLED",
+        "TIMEOUT",
+        "INTERRUPTED",
+    }
+)
 
 # 共享型 API 并发打满 / 独占机器不足(官方:请自行排队 / 稍后重试)
 _RUNNINGHUB_QUEUE_FULL_CODES = frozenset({415, 421})
@@ -77,14 +79,17 @@ def _write_bytes_sync(path: Path, data: bytes) -> None:
 async def _write_bytes_async(path: Path, data: bytes) -> None:
     await asyncio.to_thread(_write_bytes_sync, path, data)
 
+
 # ComfyUI /history 风格响应中嵌套 status.status_str 的失败状态(小写比较)
-_RUNNINGHUB_FAILURE_NESTED_STATUSES = frozenset({
-    "failed",
-    "error",
-    "cancelled",
-    "timeout",
-    "interrupted",
-})
+_RUNNINGHUB_FAILURE_NESTED_STATUSES = frozenset(
+    {
+        "failed",
+        "error",
+        "cancelled",
+        "timeout",
+        "interrupted",
+    }
+)
 
 
 class ComfyUIAPI:
@@ -200,6 +205,10 @@ class ComfyUIAPI:
 
         p = {"prompt": prompt, "client_id": self.client_id}
         headers = {"Content-Type": "application/json"}
+        # 统计 wire:POST 前写入,失败/取消路径也能带上最终 workflow body
+        from ....core.telemetry.wire_capture import set_wire_audit
+
+        set_wire_audit(request=p)
         # RunningHub 代理并发满(421 TASK_QUEUE_MAXED 等)时本地排队重试;
         # 主路径已有 RH 共享并发闸,此处兜底外部占用同一 key 的情况。
         max_attempts = 24 if self.is_runninghub else 1
@@ -215,6 +224,8 @@ class ComfyUIAPI:
             # raise_for_status() 抓不到;若无 prompt_id 直接抛错,避免下游
             # prompt_data["prompt_id"] 抛出难以定位的 KeyError。
             if isinstance(prompt_data, dict) and "prompt_id" in prompt_data:
+                # 创建成功即挂远程取消(本地 interrupt/queue 或 RH OpenAPI cancel)
+                await self._bind_active_cancel(str(prompt_data["prompt_id"]))
                 return prompt_data
             if self.is_runninghub and isinstance(prompt_data, dict):
                 reason = _runninghub_queue_full_reason(prompt_data)
@@ -228,6 +239,172 @@ class ComfyUIAPI:
                     continue
             break
         raise RuntimeError(f"[ComfyUI] 提交工作流失败,响应缺少 prompt_id: {last_payload}")
+
+    # ── 取消任务(本地 ComfyUI / RunningHub OpenAPI) ──
+
+    async def cancel_task(self, prompt_id: str) -> None:
+        """取消已提交的 **ComfyUI 工作流** 任务。
+
+        - RunningHub 代理模式: ``POST https://www.runninghub.cn/task/openapi/cancel``
+          body ``{apiKey, taskId}``(taskId 即代理 ``/prompt`` 返回的 prompt_id)。
+          **仅适用于 ComfyUI 工作流任务**,不是 RH AI 应用
+          (``rh_app`` / ``/openapi/v2/run/ai-app``)任务。
+        - 本地 ComfyUI: ``POST /queue`` 删除排队项 + ``POST /interrupt`` 打断执行中
+        """
+        if not prompt_id:
+            return
+        if self.is_runninghub:
+            await self._cancel_runninghub(prompt_id)
+        else:
+            await self._cancel_local(prompt_id)
+
+    async def _cancel_runninghub(self, task_id: str) -> None:
+        api_key = self.api_key
+        if not api_key:
+            raise RuntimeError("[ComfyUI] 取消失败:未配置 RH_apikey")
+        url = "https://www.runninghub.cn/task/openapi/cancel"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Host": "www.runninghub.cn",
+        }
+        payload = {"apiKey": api_key, "taskId": str(task_id)}
+        logger.info(
+            f"[ComfyUI] 上游 cancel POST {url} taskId={task_id}"
+        )
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            # 业务码:0=成功;807=任务不存在(可视为已结束,不抛)
+            try:
+                body = resp.json()
+            except Exception:
+                body = {"raw": resp.text[:500]}
+            logger.info(
+                f"[ComfyUI] 上游 cancel 响应 HTTP {resp.status_code} body={body}"
+            )
+            if resp.status_code >= 400:
+                raise RuntimeError(f"[ComfyUI] RunningHub 取消 HTTP {resp.status_code}: {body}")
+            code = body.get("code") if isinstance(body, dict) else None
+            try:
+                code_int = int(code) if code is not None else None
+            except (TypeError, ValueError):
+                code_int = None
+            if code_int in (0, None):
+                logger.info(f"[ComfyUI] RunningHub 已取消任务 taskId={task_id}")
+                return
+            if code_int == 807:
+                logger.info(f"[ComfyUI] RunningHub 取消:任务不存在(可能已结束) taskId={task_id}")
+                return
+            msg = body.get("msg") if isinstance(body, dict) else body
+            raise RuntimeError(f"[ComfyUI] RunningHub 取消失败 code={code}: {msg}")
+
+    async def _cancel_local(self, prompt_id: str) -> None:
+        """本地 ComfyUI:优先按 prompt_id 删排队;仅当它在 running 时才全局 interrupt。
+
+        Comfy 无 per-prompt interrupt API;对 running 任务 interrupt 会影响同机其它
+        任务。排队项只 DELETE 不 interrupt,降低误伤。
+        """
+        headers = {"Content-Type": "application/json"}
+        base = self.url
+        pid = str(prompt_id)
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            in_running = False
+            in_pending = False
+            try:
+                rq = await client.get(f"{base}/queue", headers=headers)
+                if rq.status_code < 400:
+                    qbody = rq.json()
+                    if isinstance(qbody, dict):
+                        in_running = self._prompt_in_comfy_queue(qbody.get("queue_running"), pid)
+                        in_pending = self._prompt_in_comfy_queue(qbody.get("queue_pending"), pid)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[ComfyUI] 本地读 queue 失败(将尽力 delete+interrupt): {exc}")
+                in_running = True  # 保守:未知时仍允许 interrupt
+
+            if in_pending or not in_running:
+                try:
+                    r1 = await client.post(
+                        f"{base}/queue",
+                        headers=headers,
+                        json={"delete": [pid]},
+                    )
+                    logger.info(
+                        f"[ComfyUI] 本地 queue delete prompt_id={pid}: HTTP {r1.status_code} "
+                        f"pending={in_pending} running={in_running}"
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"[ComfyUI] 本地 queue delete 失败: {exc}")
+
+            if in_running:
+                try:
+                    r2 = await client.post(f"{base}/interrupt", headers=headers, json={})
+                    logger.info(
+                        f"[ComfyUI] 本地 interrupt(全局,目标 running) prompt_id={pid}: "
+                        f"HTTP {r2.status_code}"
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"[ComfyUI] 本地 interrupt 失败: {exc}")
+            else:
+                logger.info(
+                    f"[ComfyUI] 跳过全局 interrupt(prompt 不在 running): prompt_id={pid}"
+                )
+
+    @staticmethod
+    def _prompt_in_comfy_queue(queue_items: Any, prompt_id: str) -> bool:
+        """Comfy /queue 项形如 [number, prompt_id, ...]。"""
+        if not isinstance(queue_items, list):
+            return False
+        for item in queue_items:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                if str(item[1]) == prompt_id:
+                    return True
+            elif isinstance(item, dict):
+                # 兼容变体
+                for key in ("prompt_id", "promptId", "id"):
+                    if key in item and str(item[key]) == prompt_id:
+                        return True
+        return False
+
+    async def _bind_active_cancel(self, prompt_id: str) -> None:
+        """落库 prompt_id 并挂 cancel_task(本地 interrupt 或 RH 工作流 cancel)。"""
+        if not prompt_id:
+            return
+        try:
+            from ....core.dispatch.active_tasks import get_active_task_registry
+
+            api = self
+            channel = "runninghub" if self.is_runninghub else "comfyui-local"
+
+            async def _cancel_remote() -> None:
+                await api.cancel_task(prompt_id)
+
+            await get_active_task_registry().bind_vendor_task(
+                vendor_task_id=prompt_id,
+                cancel_remote=_cancel_remote,
+                channel_name=channel,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[ComfyUI] 绑定 vendor 任务失败(忽略): {exc}")
+
+    async def _best_effort_cancel(self, prompt_id: str) -> None:
+        if not prompt_id:
+            return
+        try:
+            from ....core.dispatch.active_tasks import remote_cancel_already_attempted
+
+            if remote_cancel_already_attempted():
+                logger.debug(
+                    f"[ComfyUI] 跳过 CancelledError 兜底 cancel"
+                    f"(cancel_generation 已尝试上游): {prompt_id}"
+                )
+                return
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await self.cancel_task(prompt_id)
+            logger.info(f"[ComfyUI] CancelledError 兜底已取消 prompt_id={prompt_id}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[ComfyUI] CancelledError 兜底取消失败: {exc}")
 
     def save_image(self, images: List[Dict[str, Any]], output_path: Path, image_name: str) -> Optional[Image.Image]:
         """同步解码+落盘 JPEG;异步调用方请用 ``asyncio.to_thread(self.save_image, ...)``。"""
@@ -554,27 +731,36 @@ class ComfyUIAPI:
 
         本地 ComfyUI 优先使用 WebSocket 事件；RunningHub 代理的 WebSocket 可能主动返回 1011，
         因此 RunningHub 模式改为轮询 /history，避免因 WS 断开影响生成流程。
+        被 cancel 时兜底调 cancel_task(本地 interrupt 或 RH OpenAPI cancel)。
         """
-        if self.is_runninghub:
-            await self._poll_history_until_complete(prompt_id)
-            return
-
-        q = self._prompt_events[prompt_id]
         try:
-            while True:
-                message = await q.get()
-                logger.debug(f"Prompt {prompt_id} -> {message}")
+            if self.is_runninghub:
+                await self._poll_history_until_complete(prompt_id)
+                return
 
-                if message["type"] == "progress":
-                    data = message["data"]
-                    current_step = data["value"]
-                    logger.debug(f"Prompt {prompt_id} -> Step: {current_step} of: {data['max']}")
+            q = self._prompt_events[prompt_id]
+            try:
+                while True:
+                    message = await q.get()
+                    logger.debug(f"Prompt {prompt_id} -> {message}")
 
-                if message.get("type") == "executing" and message.get("data", {}).get("node") is None:
-                    logger.success(f"Prompt {prompt_id} finished.")
-                    break
-        finally:
-            del self._prompt_events[prompt_id]
+                    if message["type"] == "progress":
+                        data = message["data"]
+                        current_step = data["value"]
+                        logger.debug(f"Prompt {prompt_id} -> Step: {current_step} of: {data['max']}")
+
+                    if message.get("type") == "executing" and message.get("data", {}).get("node") is None:
+                        logger.success(f"Prompt {prompt_id} finished.")
+                        break
+            finally:
+                del self._prompt_events[prompt_id]
+        except asyncio.CancelledError:
+            await self._best_effort_cancel(prompt_id)
+            raise
+
+    async def poll_history_until_complete(self, prompt_id: str) -> None:
+        """公开:通过 /history 轮询直至产物就绪(resume_poll 入口)。"""
+        await self._poll_history_until_complete(prompt_id)
 
     async def _poll_history_until_complete(self, prompt_id: str) -> None:
         """通过 /history 轮询等待 RunningHub 代理任务完成
@@ -614,8 +800,7 @@ class ComfyUIAPI:
                     logger.info(f"[ComfyUI] 任务 {prompt_id} 已提交,等待代理返回 history")
                 elif i % 6 == 0:
                     logger.info(
-                        f"[ComfyUI] 任务 {prompt_id} 仍在生成中,"
-                        f"已轮询 {i} 次(约 {i * 5}s),empty_streak={empty_streak}"
+                        f"[ComfyUI] 任务 {prompt_id} 仍在生成中,已轮询 {i} 次(约 {i * 5}s),empty_streak={empty_streak}"
                     )
                 else:
                     logger.debug(f"[ComfyUI] 轮询任务 {prompt_id} 状态中...")
@@ -627,8 +812,7 @@ class ComfyUIAPI:
                     empty_streak += 1
                 # 持续无产物:达到告警阈值时打印 history 快照,便于排查
                 if empty_streak == _RUNNINGHUB_WARN_AFTER or (
-                    empty_streak > _RUNNINGHUB_WARN_AFTER
-                    and empty_streak % (_RUNNINGHUB_WARN_AFTER * 2) == 0
+                    empty_streak > _RUNNINGHUB_WARN_AFTER and empty_streak % (_RUNNINGHUB_WARN_AFTER * 2) == 0
                 ):
                     logger.warning(
                         f"[ComfyUI] 任务 {prompt_id} 已连续 {empty_streak} 次"
@@ -636,12 +820,8 @@ class ComfyUIAPI:
                     )
                     if prompt_id in history:
                         record = history[prompt_id]
-                        snapshot = {
-                            k: record.get(k) for k in ("status", "outputs", "messages")
-                        }
-                        logger.warning(
-                            f"[ComfyUI] 任务 {prompt_id} history 快照: {snapshot}"
-                        )
+                        snapshot = {k: record.get(k) for k in ("status", "outputs", "messages")}
+                        logger.warning(f"[ComfyUI] 任务 {prompt_id} history 快照: {snapshot}")
                 # 持续无产物达到失败阈值:主动判定失败,不再无限轮询
                 if empty_streak >= _RUNNINGHUB_FAIL_AFTER:
                     raise RuntimeError(
@@ -650,16 +830,12 @@ class ComfyUIAPI:
                         f"判定为无响应失败"
                     )
             except httpx.HTTPStatusError as e:
-                logger.warning(
-                    f"[ComfyUI] 任务 {prompt_id} history HTTP 错误: {e}"
-                )
+                logger.warning(f"[ComfyUI] 任务 {prompt_id} history HTTP 错误: {e}")
                 empty_streak += 1
             except RuntimeError:
                 raise
             except Exception as e:
-                logger.warning(
-                    f"[ComfyUI] 任务 {prompt_id} history 解析错误: {e}"
-                )
+                logger.warning(f"[ComfyUI] 任务 {prompt_id} history 解析错误: {e}")
                 empty_streak += 1
             await asyncio.sleep(5)
         raise RuntimeError(
@@ -707,9 +883,7 @@ class ComfyUIAPI:
                     raise RuntimeError(" - ".join(details))
 
                 if isinstance(error_message, str) and error_message:
-                    raise RuntimeError(
-                        f"RunningHub 任务 {prompt_id} 失败 ({normalized}) - {error_message}"
-                    )
+                    raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 ({normalized}) - {error_message}")
 
                 raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 ({normalized})")
 
@@ -722,29 +896,16 @@ class ComfyUIAPI:
         # ── 顶层 success: false ──
         success = history.get("success")
         if success is False:
-            msg = (
-                history.get("errorMessage")
-                or history.get("msg")
-                or history.get("message")
-                or "未知错误"
-            )
+            msg = history.get("errorMessage") or history.get("msg") or history.get("message") or "未知错误"
             raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 - {msg}")
 
         # ── 顶层 errorCode 非 0 / errorMessage 单独存在 ──
         error_code = history.get("errorCode")
         if error_code and error_code != 0:
             msg = history.get("errorMessage") or "未知错误"
-            raise RuntimeError(
-                f"RunningHub 任务 {prompt_id} 失败 (errorCode={error_code}) - {msg}"
-            )
-        if (
-            not status
-            and isinstance(history.get("errorMessage"), str)
-            and history["errorMessage"]
-        ):
-            raise RuntimeError(
-                f"RunningHub 任务 {prompt_id} 失败 - {history['errorMessage']}"
-            )
+            raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 (errorCode={error_code}) - {msg}")
+        if not status and isinstance(history.get("errorMessage"), str) and history["errorMessage"]:
+            raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 - {history['errorMessage']}")
 
         # ── 嵌套 status (ComfyUI /history 格式) ──
         prompt_data = history.get(prompt_id)
@@ -755,18 +916,12 @@ class ComfyUIAPI:
                 status_str = (nested_status.get("status_str") or "").strip().lower()
                 if status_str in _RUNNINGHUB_FAILURE_NESTED_STATUSES:
                     messages = nested_status.get("messages") or []
-                    error_msg = (
-                        " | ".join(str(m) for m in messages) if messages else "未知原因"
-                    )
-                    raise RuntimeError(
-                        f"RunningHub 任务 {prompt_id} 失败 ({status_str}) - {error_msg}"
-                    )
+                    error_msg = " | ".join(str(m) for m in messages) if messages else "未知原因"
+                    raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 ({status_str}) - {error_msg}")
             elif isinstance(nested_status, str):
                 normalized_nested = nested_status.strip().lower()
                 if normalized_nested in _RUNNINGHUB_FAILURE_NESTED_STATUSES:
-                    raise RuntimeError(
-                        f"RunningHub 任务 {prompt_id} 失败 ({normalized_nested})"
-                    )
+                    raise RuntimeError(f"RunningHub 任务 {prompt_id} 失败 ({normalized_nested})")
 
     async def reboot(self) -> None:
         if self.is_prompt:

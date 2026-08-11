@@ -16,8 +16,8 @@ import pytest
 
 from RH_ComfyUI.models import discover_builtin_models
 from RH_ComfyUI.utils.backends import init_backends
-from RH_ComfyUI.core.routing.registry import model_registry
 from RH_ComfyUI.utils.core.request import TaskType
+from RH_ComfyUI.core.routing.registry import model_registry
 
 
 @pytest.fixture(autouse=True)
@@ -51,9 +51,7 @@ def test_all_asr_models_have_dynamic_point_range():
     assert asr_models, "应至少有一个 ASR 模型"
     for m in asr_models:
         rmin, rmax = m.point_range()
-        assert rmin < rmax, (
-            f"{m.name} 的 point_range=({rmin}, {rmax}) min==max,前端不会调 estimate"
-        )
+        assert rmin < rmax, f"{m.name} 的 point_range=({rmin}, {rmax}) min==max,前端不会调 estimate"
 
 
 def test_index_tts2_max_uses_realistic_text_length():
@@ -71,8 +69,7 @@ def test_index_tts2_max_uses_realistic_text_length():
     assert rmin < rmax, f"IndexTTS2 应触发 estimate,实际 point_range=({rmin},{rmax})"
     assert rmin == 1, "min 应为空文本最小值"
     assert rmax >= 5, (
-        f"IndexTTS2 max={rmax} 太小,可能 max 文本长度不够。"
-        f"前端 min==max 时不调 estimate,长文本用户看到积分不变。"
+        f"IndexTTS2 max={rmax} 太小,可能 max 文本长度不够。前端 min==max 时不调 estimate,长文本用户看到积分不变。"
     )
 
 
