@@ -147,6 +147,14 @@ class ContentArrayMixin:
 _ContentArrayMixin = ContentArrayMixin
 
 
+def _is_seedance25_model(model: str | None) -> bool:
+    """识别 2.5 vendor model id(ark 日期编码 / 网关点分)。"""
+    if not model:
+        return False
+    m = model.strip().lower()
+    return "seedance-2-5" in m or "seedance-2.5" in m or m.endswith("seedance2.5")
+
+
 class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
     """火山方舟 Seedance 官方后端
 
@@ -257,7 +265,8 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
             body["generate_audio"] = True
         if not spec.watermark:
             body["watermark"] = False
-        if spec.camera_fixed:
+        # camera_fixed 仅 1.x;2.5(ark/网关 model id)写入会 400
+        if spec.camera_fixed and not _is_seedance25_model(model):
             body["camera_fixed"] = True
         if spec.return_last_frame:
             body["return_last_frame"] = True

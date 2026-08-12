@@ -342,6 +342,7 @@ class Seedance25Def(Seedance25VideoModel):
       - 多模态参考上限 50(图 30 + 视频 10 + 音频 10)
       - 支持 output_format=mp4|mov
       - task_mode 可显式选择 generate(auto)/edit/extend
+      - 不支持 camera_fixed(官方仅 Seedance 1.x)
     """
 
     def __init__(self) -> None:
@@ -377,7 +378,9 @@ class Seedance25Def(Seedance25VideoModel):
                 "\n"
                 "优势:最长 30 秒连贯直出、50 个多模态参考、mov/mp4 输出、编辑与延长。"
                 "\n"
-                "限制:仅 480p/720p;编辑/延长/首尾帧必须 ratio=adaptive,否则上游异步报错。"
+                "限制:仅 480p/720p;不支持 camera_fixed(固定镜头,官方仅 1.x);"
+                "\n"
+                "编辑/延长/首尾帧必须 ratio=adaptive,否则上游异步报错。"
                 "\n"
                 "支持时长:4~30 秒,或 -1 跟随输入视频(仅 edit/extend)。"
                 "\n"
@@ -476,9 +479,7 @@ class Seedance25Def(Seedance25VideoModel):
                 "watermark": PortSpec(
                     type=PortType.BOOLEAN, default=False, title="AI 水印", description="是否添加 AI 水印"
                 ),
-                "camera_fixed": PortSpec(
-                    type=PortType.BOOLEAN, default=False, title="固定镜头", description="摄像机是否固定"
-                ),
+                # 官方 camera_fixed 仅 1.x;2.5 强校验 400(见火山方舟创建任务 API)
                 "return_last_frame": PortSpec(
                     type=PortType.BOOLEAN, default=False, title="返回尾帧", description="是否同时返回尾帧图"
                 ),

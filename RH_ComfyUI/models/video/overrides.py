@@ -224,6 +224,7 @@ class Seedance25VideoModel(SeedanceVideoModel):
             categories=["短视频", "长镜头", "多素材合成", "视频编辑", "视频延长"],
             weaknesses=[
                 "分辨率仅 480p / 720p(无 1080p/4K)",
+                "不支持 camera_fixed(固定镜头;官方仅 Seedance 1.x)",
                 "编辑/延长/首尾帧须 ratio=adaptive,自定义比例会异步报错",
             ],
             sample_prompts=[
@@ -252,6 +253,12 @@ class Seedance25VideoModel(SeedanceVideoModel):
         from ...core.base.video import VideoGenerationBase
 
         VideoGenerationBase.validate(self, request)
+
+        # 官方仅 1.x 支持 camera_fixed;2.5 强校验会 400 InvalidParameter
+        if request.camera_fixed:
+            raise ValidationError(
+                f"{self.display_name} 不支持 camera_fixed(固定镜头);该参数仅 Seedance 1.0 / 1.5 可用,请关闭后重试"
+            )
 
         task_mode = str((request.params or {}).get("task_mode") or "auto").strip().lower()
         frame_mode = str((request.params or {}).get("frame_mode") or "auto").strip().lower()

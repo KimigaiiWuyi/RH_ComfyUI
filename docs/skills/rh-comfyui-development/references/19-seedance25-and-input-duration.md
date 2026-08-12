@@ -44,6 +44,7 @@
 | 输出格式 | mp4 | **mp4 / mov**(`output_format`) |
 | 任务类型 | 自动文生/图生/首尾帧/多模态 | 另加 **`task_mode`**: auto / edit / extend |
 | 宽高比 | 自定义 + adaptive | 编辑/延长/首帧·首尾帧 **必须 adaptive** |
+| `camera_fixed` | schema 暴露(历史兼容) | **不支持**(官方仅 1.x;schema **无**该端口) |
 | 费率 | 见 §15.2.4 | 无输入 **70** 元/M,有输入 **42** 元/M |
 
 ## 19.3 Token 公式(全 Seedance 系列)
@@ -87,12 +88,16 @@ _SEEDANCE25_RATES = { "480p"/"720p": (70.00 无输入, 42.00 有输入) }
 - `duration`: minimum **-1**, maximum **30**, default 5
 - `ratio` default **adaptive**(图生/首尾帧/编辑强制 adaptive 的校验在 override)
 - `output_format`: mp4 | mov
+- **无** `camera_fixed`(官方「创建视频生成任务」API:`camera_fixed` 仅 Seedance 1.0 / 1.5;2.5 写入会 `InvalidParameter`)
 - `backend_models={"ark": "doubao-seedance-2-5-260628"}`(不挂 runninghub)
 
 校验红线(`Seedance25VideoModel.validate`):
 - 图/视频/音频数量上限
 - edit/extend 必须有参考视频
 - edit/extend/首帧·首尾帧 的 ratio 必须 adaptive
+- `camera_fixed=true` 直接拒绝(防存量前端/透传脏参数)
+- Ark `render_create`: model 为 2.5 时**不写** body.`camera_fixed`
+- aigc `GatewaySeedanceProvider`: 同上,复用 `_is_seedance25_model`(网关点分 `doubao-seedance-2.5`)
 
 ## 19.5 透传链(引擎 → 宿主 HTTP → 调用方 UI)
 

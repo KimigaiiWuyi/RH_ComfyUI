@@ -42,6 +42,9 @@ def test_schema_ports_and_limits():
     ):
         assert port in node.inputs, f"缺少端口 {port}"
 
+    # 官方 camera_fixed 仅 1.x;2.5 暴露会让前端展示「固定镜头」并触发 400
+    assert "camera_fixed" not in node.inputs
+
     assert node.inputs["images"].max_items == 30
     assert node.inputs["video_refs"].max_items == 10
     assert node.inputs["audio_refs"].max_items == 10
@@ -142,6 +145,19 @@ def test_text2video_allows_custom_ratio():
     m.validate(req)  # 不抛
 
 
+def test_reject_camera_fixed():
+    m = Seedance25Def()
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="固定镜头",
+        duration=5,
+        ratio="adaptive",
+        camera_fixed=True,
+    )
+    with pytest.raises(ValidationError, match="camera_fixed|固定镜头"):
+        m.validate(req)
+
+
 def test_classify_task_mode_edit():
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
@@ -207,6 +223,37 @@ def test_ark_render_omits_default_mp4_output_format():
     p = ArkSeedanceProvider(api_key="test-key")
     _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2-5-260628"))
     assert "output_format" not in body
+
+
+def test_ark_render_omits_camera_fixed_for_seedance25():
+    """存量请求即使带 camera_fixed=true,2.5 请求体也不得写入(上游 400)。"""
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="文生",
+        duration=5,
+        ratio="16:9",
+        camera_fixed=True,
+    )
+    spec = classify_video_spec(req)
+    assert spec.camera_fixed is True
+    p = ArkSeedanceProvider(api_key="test-key")
+    for model in ("doubao-seedance-2-5-260628", "doubao-seedance-2.5"):
+        _m, _u, _h, body = asyncio.run(p.render_create(spec, model=model))
+        assert "camera_fixed" not in body, model
+
+
+def test_ark_render_keeps_camera_fixed_for_seedance2():
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="文生",
+        duration=5,
+        ratio="16:9",
+        camera_fixed=True,
+    )
+    spec = classify_video_spec(req)
+    p = ArkSeedanceProvider(api_key="test-key")
+    _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2-0-260128"))
+    assert body.get("camera_fixed") is True
 
 
 def test_ark_media_limits_allow_seedance25():
