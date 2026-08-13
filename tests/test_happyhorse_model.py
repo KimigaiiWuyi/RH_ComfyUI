@@ -80,6 +80,32 @@ def test_channel_bindings_has_dashscope():
     assert any(b.channel.name == "dashscope" for b in bindings)
 
 
+def test_pick_vendor_message_priority_message_msg_code_status():
+    from RH_ComfyUI.utils.backends.happyhorse.provider import _pick_vendor_message
+
+    enabled = "当前key未启用该模型:happyhorse-1.1-r2v"
+    # message 优先于 msg / code
+    assert (
+        _pick_vendor_message(
+            {"code": 500, "message": enabled, "msg": "ignored"},
+            http_status=502,
+        )
+        == enabled
+    )
+    # 无 message → msg
+    assert (
+        _pick_vendor_message(
+            {"code": 500, "msg": enabled},
+            http_status=502,
+        )
+        == enabled
+    )
+    # 无 message / msg → code
+    assert _pick_vendor_message({"code": 500}, http_status=502) == "500"
+    # 再没有 → HTTP status
+    assert _pick_vendor_message({}, http_status=502) == "502"
+
+
 def test_render_create_t2v_body():
     """Provider 文生请求体:无 media, resolution 大写 P。"""
 

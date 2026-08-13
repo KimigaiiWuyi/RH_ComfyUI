@@ -39,6 +39,41 @@ from ..seedance.provider import (
 )
 
 
+def _field_text(value: Any) -> Optional[str]:
+    """空 / null / None 视为未解到,其余原样转成字符串。"""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in ("null", "none"):
+        return None
+    return text
+
+
+def _pick_vendor_message(
+    resp_json: dict[str, Any],
+    *,
+    http_status: Optional[int] = None,
+) -> str:
+    """错误文案优先级: message → msg → code → HTTP status。"""
+    data = resp_json.get("data") if isinstance(resp_json.get("data"), dict) else {}
+    err = resp_json.get("error") if isinstance(resp_json.get("error"), dict) else {}
+    for value in (resp_json.get("message"), data.get("message"), err.get("message")):
+        text = _field_text(value)
+        if text is not None:
+            return text
+    for value in (resp_json.get("msg"), data.get("msg")):
+        text = _field_text(value)
+        if text is not None:
+            return text
+    for value in (resp_json.get("code"), data.get("code")):
+        text = _field_text(value)
+        if text is not None:
+            return text
+    if http_status is not None:
+        return str(http_status)
+    return "上游错误"
+
+
 class HappyHorseProviderError(SeedanceProviderError):
     """HappyHorse 供应商错误(复用 Seedance 错误字段语义)。"""
 
@@ -443,20 +478,8 @@ class HappyHorseProvider:
             return {}
         # DashScope 业务错误有时 200 但带 code/message
         # 取消成功通常只有 request_id,无 output.task_id;失败才有顶层 code
-        if isinstance(resp_json, dict) and resp_json.get("code") and not (resp_json.get("output") or {}).get("task_id"):
-            # 成功取消也可能无 code;有 code 且非 Success 才算业务错
-            # 忽略仅含 request_id 的成功体
-            code = str(resp_json.get("code") or "")
-            if code and code not in ("", "Success", "null"):
-                msg = resp_json.get("message") or code
-                raise HappyHorseProviderError(
-                    f"DashScope 错误 {code}: {msg}",
-                    code=code,
-                    retryable=False,
-                    provider=self.name,
-                    user_message=str(msg),
-                )
         if isinstance(resp_json, dict):
+            self._raise_if_dashscope_business_error(resp_json)
             return resp_json
         if method.upper() in ("DELETE", "POST") and not (resp.content or b"").strip():
             return {}
@@ -468,25 +491,45 @@ class HappyHorseProvider:
             user_message="上游返回格式异常,请稍后重试。",
         )
 
+    def _raise_if_dashscope_business_error(self, resp_json: dict[str, Any]) -> None:
+        """HTTP 200 + 顶层 code 且无 output.task_id → DashScope 业务错。
+
+        网关子类覆盖为空操作:其 ``{code,msg,data}`` 信封留给 parse_create/get
+        的 ``_unwrap``(否则 ``msg`` 丢失,只剩数字 ``500``)。
+        """
+        if not resp_json.get("code"):
+            return
+        if (resp_json.get("output") or {}).get("task_id"):
+            return
+        code = str(resp_json.get("code") or "")
+        if not code or code in ("", "Success", "null"):
+            return
+        msg = _pick_vendor_message(resp_json)
+        raise HappyHorseProviderError(
+            f"DashScope 错误 {code}: {msg}",
+            code=code,
+            retryable=False,
+            provider=self.name,
+            user_message=str(msg),
+        )
+
     def _build_http_error(self, resp: httpx.Response) -> HappyHorseProviderError:
         try:
             err_body: Any = resp.json()
         except Exception:
             err_body = {"raw": resp.text}
-        vendor_msg: Optional[str] = None
-        if isinstance(err_body, dict):
-            vendor_msg = err_body.get("message") or err_body.get("msg")
-            if not vendor_msg:
-                err_field = err_body.get("error")
-                if isinstance(err_field, dict):
-                    vendor_msg = err_field.get("message")
+        vendor_msg = (
+            _pick_vendor_message(err_body, http_status=resp.status_code)
+            if isinstance(err_body, dict)
+            else str(resp.status_code)
+        )
         return HappyHorseProviderError(
             f"{self.name} API 错误 {resp.status_code}: {err_body}",
             code="HTTP_ERROR",
             retryable=http_status_retryable(resp.status_code),
             provider=self.name,
             http_status=resp.status_code,
-            user_message=str(vendor_msg) if vendor_msg else "上游服务异常,请稍后重试。",
+            user_message=vendor_msg,
         )
 
     # ── 执行主干 ──
@@ -685,4 +728,5 @@ class HappyHorseProvider:
 __all__ = [
     "HappyHorseProvider",
     "HappyHorseProviderError",
+    "_pick_vendor_message",
 ]
