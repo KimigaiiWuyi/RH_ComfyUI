@@ -84,7 +84,7 @@ _SEEDANCE25_RATES = { "480p"/"720p": (70.00 无输入, 42.00 有输入) }
 ## 19.4 schema 要点(`Seedance25Def.node_def`)
 
 - `task_mode`: auto | edit | extend
-- `omni_reference_task_type`: auto | edit | extend(官方字段,与 duration 同级;编辑=edit、延长=extend、其余=auto)
+- `omni_reference_task_type`: auto | edit | extend(官方字段,与 duration 同级;**仅多模态参考**;编辑=edit、延长=extend、多参考=auto;文生/首帧/首尾帧**不写**)
 - `frame_mode`: auto | first_last | reference
 - `duration`: minimum **-1**, maximum **30**, default 5
 - `ratio` default **adaptive**(图生/首尾帧/编辑强制 adaptive 的校验在 override)
@@ -119,7 +119,7 @@ estimate_model_points(..., input_video_duration=?)
 - `rh_models/api.py` — `estimate_model_points` 入参
 - `rh_models/webapi.py` — Query `input_video_duration`
 - Ark provider:`duration=-1` 原样透传;`output_format=mov` 写入 body;
-  `omni_reference_task_type` 仅 2.5 写入(与 duration 同级);编辑=edit、延长=extend、其余=auto;
+  `omni_reference_task_type` 仅 2.5 **多模态参考**写入(与 duration 同级);编辑=edit、延长=extend、多参考=auto;文生/首帧/首尾帧禁止(否则上游 TaskTypeConstraint);
   媒体上限 30/10/10,max_duration=30
 - **Gateway**(`aigc_system.GatewaySeedanceProvider`):端点
   `/video/generation/passthrough/tasks`;body.model=`doubao-seedance-2.5`;

@@ -305,10 +305,48 @@ def test_ark_render_omni_reference_task_type_only_for_seedance25():
     assert "omni_reference_task_type" not in body20
 
 
-def test_ark_render_omni_auto_for_seedance25_generate():
+def test_ark_render_omits_omni_for_text_and_frame_shapes():
+    """文生 / 首帧 / 首尾帧不得写 omni_reference_task_type(上游 TaskTypeConstraint)。"""
+    p = ArkSeedanceProvider(api_key="test-key")
+    cases = [
+        GenerationRequest(task_type=TaskType.VIDEO, prompt="文生", duration=5, ratio="16:9"),
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="首帧",
+            images=[b"IMG"],
+            duration=5,
+        ),
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="首尾帧",
+            images=[b"A", b"B"],
+            duration=5,
+            params={"frame_mode": "first_last"},
+        ),
+    ]
+    for req in cases:
+        spec = classify_video_spec(req)
+        assert spec.shape in (
+            VideoTaskShape.TEXT2VIDEO,
+            VideoTaskShape.IMAGE2VIDEO,
+            VideoTaskShape.FIRST_LAST_FRAME,
+        )
+        _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2.5"))
+        assert "omni_reference_task_type" not in body, spec.shape
+
+
+def test_ark_render_omni_auto_for_seedance25_multimodal():
     spec = classify_video_spec(
-        GenerationRequest(task_type=TaskType.VIDEO, prompt="文生", duration=5, ratio="16:9")
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="多参考",
+            images=[b"IMG"],
+            duration=5,
+            ratio="16:9",
+            params={"frame_mode": "reference"},
+        )
     )
+    assert spec.shape == VideoTaskShape.MULTIMODAL
     p = ArkSeedanceProvider(api_key="test-key")
     _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2.5"))
     assert body["omni_reference_task_type"] == "auto"

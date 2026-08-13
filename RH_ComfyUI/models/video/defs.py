@@ -496,10 +496,11 @@ class Seedance25Def(Seedance25VideoModel):
                     values=["auto", "edit", "extend"],
                     title="任务类型引导",
                     description=(
-                        "官方 omni_reference_task_type(与 duration 同级,仅 2.5):\n"
-                        "  - auto: 由提示词推断\n"
+                        "官方 omni_reference_task_type(与 duration 同级,仅 2.5 多模态参考):\n"
+                        "  - auto: 多参考生成\n"
                         "  - edit: 视频编辑(须与 task_mode=edit 一致)\n"
-                        "  - extend: 视频延长(须与 task_mode=extend 一致)"
+                        "  - extend: 视频延长(须与 task_mode=extend 一致)\n"
+                        "文生 / 首帧 / 首尾帧不得写入(上游 TaskTypeConstraint)。"
                     ),
                 ),
             },

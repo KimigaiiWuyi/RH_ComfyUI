@@ -157,6 +157,15 @@ def _is_seedance25_model(model: str | None) -> bool:
 
 _OMNI_REF_TASK_TYPES = frozenset({"auto", "edit", "extend"})
 
+# 官方:仅多模态参考场景合法;文生 / 首帧 / 首尾帧写入会 400 TaskTypeConstraint
+_OMNI_REF_SHAPES = frozenset(
+    {
+        VideoTaskShape.MULTIMODAL,
+        VideoTaskShape.VIDEO_EDIT,
+        VideoTaskShape.VIDEO_EXTEND,
+    }
+)
+
 
 def apply_omni_reference_task_type(
     body: dict[str, Any],
@@ -165,9 +174,12 @@ def apply_omni_reference_task_type(
 ) -> None:
     """2.5 官方字段,与 duration 同级。2.0 不写(上游不认识)。
 
-    显式 spec.omni_reference_task_type 优先;否则按 shape 回填 edit/extend,其余 auto。
+    仅 MULTIMODAL / VIDEO_EDIT / VIDEO_EXTEND 写入;文生、首帧、首尾帧禁止。
+    显式 spec.omni_reference_task_type 优先;否则按 shape 回填 edit/extend/auto。
     """
     if not _is_seedance25_model(model):
+        return
+    if spec.shape not in _OMNI_REF_SHAPES:
         return
     raw = (spec.omni_reference_task_type or "").strip().lower()
     if raw not in _OMNI_REF_TASK_TYPES:
