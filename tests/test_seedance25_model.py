@@ -53,6 +53,8 @@ def test_schema_ports_and_limits():
     assert node.inputs["duration"].maximum == 30
     assert node.inputs["output_format"].values == ["mp4", "mov"]
     assert node.inputs["task_mode"].values == ["auto", "edit", "extend"]
+    assert node.inputs["omni_reference_task_type"].values == ["auto", "edit", "extend"]
+    assert node.inputs["omni_reference_task_type"].default == "auto"
     assert node.inputs["ratio"].default == "adaptive"
 
 
@@ -171,6 +173,7 @@ def test_classify_task_mode_edit():
     assert spec.shape == VideoTaskShape.VIDEO_EDIT
     assert spec.duration == -1
     assert spec.output_format == "mov"
+    assert spec.omni_reference_task_type == "edit"
 
 
 def test_classify_task_mode_extend():
@@ -185,6 +188,7 @@ def test_classify_task_mode_extend():
     spec = classify_video_spec(req)
     assert spec.shape == VideoTaskShape.VIDEO_EXTEND
     assert spec.duration == 11
+    assert spec.omni_reference_task_type == "extend"
 
 
 def test_ark_render_includes_duration_minus_one_and_output_format():
@@ -206,6 +210,7 @@ def test_ark_render_includes_duration_minus_one_and_output_format():
     assert body["ratio"] == "adaptive"
     assert body["output_format"] == "mov"
     assert body.get("generate_audio") is True
+    assert body["omni_reference_task_type"] == "edit"
     # content 含 reference_video
     roles = [c.get("role") for c in body["content"] if c.get("type") != "text"]
     assert "reference_video" in roles
@@ -254,6 +259,45 @@ def test_ark_render_keeps_camera_fixed_for_seedance2():
     p = ArkSeedanceProvider(api_key="test-key")
     _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2-0-260128"))
     assert body.get("camera_fixed") is True
+
+
+def test_classify_explicit_omni_reference_task_type_wins():
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="文生",
+        duration=5,
+        ratio="16:9",
+        params={"omni_reference_task_type": "extend"},
+    )
+    spec = classify_video_spec(req)
+    assert spec.omni_reference_task_type == "extend"
+
+
+def test_ark_render_omni_reference_task_type_only_for_seedance25():
+    spec = classify_video_spec(
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="延长视频1",
+            video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")],
+            duration=8,
+            ratio="adaptive",
+            params={"task_mode": "extend"},
+        )
+    )
+    p = ArkSeedanceProvider(api_key="test-key")
+    _m, _u, _h, body25 = asyncio.run(p.render_create(spec, model="doubao-seedance-2-5-260628"))
+    assert body25["omni_reference_task_type"] == "extend"
+    _m, _u, _h, body20 = asyncio.run(p.render_create(spec, model="doubao-seedance-2-0-260128"))
+    assert "omni_reference_task_type" not in body20
+
+
+def test_ark_render_omni_auto_for_seedance25_generate():
+    spec = classify_video_spec(
+        GenerationRequest(task_type=TaskType.VIDEO, prompt="文生", duration=5, ratio="16:9")
+    )
+    p = ArkSeedanceProvider(api_key="test-key")
+    _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2.5"))
+    assert body["omni_reference_task_type"] == "auto"
 
 
 def test_ark_media_limits_allow_seedance25():

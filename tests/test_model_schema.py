@@ -57,6 +57,7 @@ def test_seedance25_declares_task_mode_and_output_format():
     node = Seedance25Def.node_def()
     assert "task_mode" in node.inputs
     assert "output_format" in node.inputs
+    assert "omni_reference_task_type" in node.inputs
     assert node.inputs["images"].max_items == 30
     assert node.inputs["duration"].maximum == 30
 

@@ -108,3 +108,81 @@ def test_mp4_bytes_in_images_become_video_kind():
     assert len(spec.videos()) == 1
     assert len(spec.images()) == 0
     assert spec.shape == VideoTaskShape.MULTIMODAL
+
+
+def _video_item(url: str) -> ContentItem:
+    return ContentItem(
+        type=ContentItemType.VIDEO,
+        media=MediaRef(kind=MediaKind.VIDEO, url=url),
+        role="reference",
+    )
+
+
+def test_extend_prompt_without_token_gets_prefix():
+    """task_mode=extend 且全文无「延长」→ 最前补「延长该视频。」"""
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="镜头继续往前推",
+        video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")],
+        params={"task_mode": "extend"},
+    )
+    spec = classify_video_spec(req)
+    assert spec.shape == VideoTaskShape.VIDEO_EXTEND
+    assert spec.prompt.startswith("延长该视频。")
+    assert spec.prompt.endswith("镜头继续往前推")
+
+
+def test_extend_prompt_already_has_token_unchanged():
+    """前端已写「延长该视频 @x 视频。」时后端不得再叠一层。"""
+    prompt = "延长该视频 [参考视频1] 视频。镜头继续"
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt=prompt,
+        video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")],
+        params={"task_mode": "extend"},
+    )
+    spec = classify_video_spec(req)
+    assert spec.prompt == prompt
+
+
+def test_extend_ordered_content_text_gets_prefix():
+    """OC 文本段同样检查并补前缀(ark 走 ordered_segments 拼 content)。"""
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="镜头继续",
+        ordered_content=[_txt("镜头继续"), _video_item("https://ex.com/v.mp4")],
+        params={"task_mode": "extend"},
+    )
+    spec = classify_video_spec(req)
+    assert spec.prompt.startswith("延长该视频。")
+    assert spec.ordered_segments[0].kind == "text"
+    assert spec.ordered_segments[0].text == "延长该视频。镜头继续"
+
+
+def test_extend_ordered_content_media_first_inserts_text():
+    """OC 以媒体开头且无「延长」→ 在最前插入文本段。"""
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="",
+        ordered_content=[_video_item("https://ex.com/v.mp4"), _txt("继续这个镜头")],
+        params={"task_mode": "extend"},
+    )
+    spec = classify_video_spec(req)
+    # 扁平 prompt 会先被 OC 文本回填成「继续这个镜头」,再叠前缀
+    assert spec.prompt.startswith("延长该视频。")
+    assert spec.ordered_segments[0].kind == "text"
+    assert spec.ordered_segments[0].text == "延长该视频。"
+    assert spec.ordered_segments[1].kind == "media"
+
+
+def test_edit_prompt_without_token_not_prefixed():
+    """编辑任务即使没有「延长」也不得误加延长前缀。"""
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="把背景换成海边",
+        video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")],
+        params={"task_mode": "edit"},
+    )
+    spec = classify_video_spec(req)
+    assert spec.shape == VideoTaskShape.VIDEO_EDIT
+    assert spec.prompt == "把背景换成海边"

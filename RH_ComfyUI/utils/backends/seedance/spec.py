@@ -84,6 +84,8 @@ class VideoGenSpec:
     service_tier: str = "default"
     # 输出容器格式(Seedance 2.5 支持 mp4 / mov;2.0 仅 mp4 时忽略)
     output_format: Optional[str] = None
+    # 官方任务类型引导(Seedance 2.5):与 duration 同级。auto / edit / extend
+    omni_reference_task_type: Optional[str] = None
 
     # 供应商私有旁路:real_person_mode / conversion_slots / draft / callback_url / ...
     params: dict[str, Any] = field(default_factory=dict)

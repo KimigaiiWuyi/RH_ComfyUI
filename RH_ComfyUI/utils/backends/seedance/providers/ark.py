@@ -155,6 +155,31 @@ def _is_seedance25_model(model: str | None) -> bool:
     return "seedance-2-5" in m or "seedance-2.5" in m or m.endswith("seedance2.5")
 
 
+_OMNI_REF_TASK_TYPES = frozenset({"auto", "edit", "extend"})
+
+
+def apply_omni_reference_task_type(
+    body: dict[str, Any],
+    spec: VideoGenSpec,
+    model: Optional[str],
+) -> None:
+    """2.5 官方字段,与 duration 同级。2.0 不写(上游不认识)。
+
+    显式 spec.omni_reference_task_type 优先;否则按 shape 回填 edit/extend,其余 auto。
+    """
+    if not _is_seedance25_model(model):
+        return
+    raw = (spec.omni_reference_task_type or "").strip().lower()
+    if raw not in _OMNI_REF_TASK_TYPES:
+        if spec.shape == VideoTaskShape.VIDEO_EDIT:
+            raw = "edit"
+        elif spec.shape == VideoTaskShape.VIDEO_EXTEND:
+            raw = "extend"
+        else:
+            raw = "auto"
+    body["omni_reference_task_type"] = raw
+
+
 class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
     """火山方舟 Seedance 官方后端
 
@@ -276,6 +301,7 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
         out_fmt = (spec.output_format or "").strip().lower()
         if out_fmt and out_fmt != "mp4":
             body["output_format"] = out_fmt
+        apply_omni_reference_task_type(body, spec, model)
         draft = spec.params.get("draft")
         if draft is not None:
             body["draft"] = draft

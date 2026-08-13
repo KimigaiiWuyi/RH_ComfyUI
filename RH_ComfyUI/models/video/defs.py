@@ -490,6 +490,18 @@ class Seedance25Def(Seedance25VideoModel):
                     title="输出格式",
                     description="输出视频容器格式(2.5 支持 mp4 / mov)",
                 ),
+                "omni_reference_task_type": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "edit", "extend"],
+                    title="任务类型引导",
+                    description=(
+                        "官方 omni_reference_task_type(与 duration 同级,仅 2.5):\n"
+                        "  - auto: 由提示词推断\n"
+                        "  - edit: 视频编辑(须与 task_mode=edit 一致)\n"
+                        "  - extend: 视频延长(须与 task_mode=extend 一致)"
+                    ),
+                ),
             },
             outputs={
                 "video": PortSpec(type=PortType.OUTPUT_VIDEO, description="生成的视频(MP4/MOV)"),

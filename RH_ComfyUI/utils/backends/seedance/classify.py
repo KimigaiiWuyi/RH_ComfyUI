@@ -264,6 +264,9 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     else:
         output_format = None
 
+    if task_mode == "extend":
+        base_prompt, ordered_segments = _ensure_extend_prompt_prefix(base_prompt, ordered_segments)
+
     return VideoGenSpec(
         shape=shape,
         prompt=base_prompt,
@@ -279,8 +282,61 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
         return_last_frame=bool(request.return_last_frame),
         service_tier=request.service_tier or "default",
         output_format=output_format,
+        omni_reference_task_type=_resolve_omni_reference_task_type(params, task_mode),
         params=spec_params,
     )
+
+
+_OMNI_REF_TASK_TYPES = frozenset({"auto", "edit", "extend"})
+_EXTEND_TOKEN = "延长"
+_EXTEND_PREFIX = "延长该视频。"
+
+
+def _resolve_omni_reference_task_type(params: dict[str, object], task_mode: str) -> str:
+    """Seedance 2.5 官方 omni_reference_task_type:显式值优先,否则跟 task_mode。"""
+    raw = params.get("omni_reference_task_type")
+    if isinstance(raw, str):
+        v = raw.strip().lower()
+        if v in _OMNI_REF_TASK_TYPES:
+            return v
+    if task_mode in ("edit", "extend"):
+        return task_mode
+    return "auto"
+
+
+def _collect_prompt_haystack(base_prompt: str, ordered_segments: list[OrderedSegment]) -> str:
+    """整段发给上游的文案:扁平 prompt + OC 文本段。"""
+    parts: list[str] = [base_prompt or ""]
+    for seg in ordered_segments:
+        if seg.kind == "text" and seg.text:
+            parts.append(seg.text)
+    return "".join(parts)
+
+
+def _ensure_extend_prompt_prefix(
+    base_prompt: str,
+    ordered_segments: list[OrderedSegment],
+) -> tuple[str, list[OrderedSegment]]:
+    """task_mode=extend 兜底:整段 prompt/OC 文本都没有「延长」时,最前补「延长该视频。」
+
+    前端提交时会写成「延长该视频 @视频 视频。」;本函数只在调用方漏写时补短前缀,
+    避免无参考视频标题时硬编造 @。已含「延长」则原样返回,防止双写。
+    """
+    if _EXTEND_TOKEN in _collect_prompt_haystack(base_prompt, ordered_segments):
+        return base_prompt, ordered_segments
+
+    prefix = _EXTEND_PREFIX
+    new_prompt = f"{prefix}{base_prompt}" if base_prompt else prefix
+    if not ordered_segments:
+        return new_prompt, ordered_segments
+
+    segs = list(ordered_segments)
+    first = segs[0]
+    if first.kind == "text":
+        segs[0] = OrderedSegment(kind="text", text=f"{prefix}{first.text or ''}")
+    else:
+        segs.insert(0, OrderedSegment(kind="text", text=prefix))
+    return new_prompt, segs
 
 
 def _apply_default_roles(media: list[SpecMedia], shape: VideoTaskShape, frame_mode: str = "auto") -> list[SpecMedia]:
