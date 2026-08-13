@@ -205,6 +205,9 @@ class GenerationRequest:
     # ── 视频时长(秒) ──
     duration: int = 5
 
+    # ── Seedance 2.5 官方任务类型引导(与 duration 同级): auto / edit / extend ──
+    omni_reference_task_type: Optional[str] = None
+
     # ── 随机种子 ──
     seed: Optional[int] = None
 

@@ -119,7 +119,7 @@ estimate_model_points(..., input_video_duration=?)
 - `rh_models/api.py` — `estimate_model_points` 入参
 - `rh_models/webapi.py` — Query `input_video_duration`
 - Ark provider:`duration=-1` 原样透传;`output_format=mov` 写入 body;
-  `omni_reference_task_type` 仅 2.5 写入(与 duration 同级);
+  `omni_reference_task_type` 仅 2.5 写入(与 duration 同级);编辑=edit、延长=extend、其余=auto;
   媒体上限 30/10/10,max_duration=30
 - **Gateway**(`aigc_system.GatewaySeedanceProvider`):端点
   `/video/generation/passthrough/tasks`;body.model=`doubao-seedance-2.5`;

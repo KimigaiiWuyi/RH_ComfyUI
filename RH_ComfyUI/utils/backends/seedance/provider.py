@@ -25,7 +25,7 @@ import httpx
 from gsuid_core.logger import logger
 
 from .spec import VideoGenSpec, VideoTaskShape
-from ...core.types import MediaRef
+from ...core.types import MediaRef, MediaKind
 
 
 class NormalizedStatus(str, Enum):
@@ -343,7 +343,14 @@ class SeedanceProvider(ABC):
     # ── 媒体准备 ──
 
     async def materialize_media(self, ref: MediaRef) -> Optional[str]:
-        """默认实现:URL 透传 / bytes → base64 data URL。"""
+        """默认实现:URL 透传 / bytes → base64 data URL。
+
+        参考图先做 Seedance 短边放大(2.0/2.5 共用),避免 http URL 把 <300px 原图交给上游。
+        """
+        if ref.kind == MediaKind.IMAGE:
+            from ...image_process import prepare_seedance_image_ref
+
+            ref = await prepare_seedance_image_ref(ref)
         if ref.url:
             return ref.url
         if ref.data is None:

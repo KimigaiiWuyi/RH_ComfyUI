@@ -277,6 +277,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
         "ratio",
         "resolution",
         "duration",
+        "omni_reference_task_type",
         "seed",
         "generate_audio",
         "watermark",

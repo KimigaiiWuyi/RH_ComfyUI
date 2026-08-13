@@ -128,7 +128,14 @@ class RunningHubSeedanceProvider(SeedanceProvider):
         return _rewrite_refs_to_at(prompt)
 
     async def materialize_media(self, ref: MediaRef) -> Optional[str]:
-        """已是公网 http(s) URL 直接透传;否则复用 rh_app 上传,转 view URL。"""
+        """已是公网 http(s) URL 直接透传;否则复用 rh_app 上传,转 view URL。
+
+        参考图先做 Seedance 短边放大,避免透传 <300px 原图。
+        """
+        if ref.kind == MediaKind.IMAGE:
+            from ....image_process import prepare_seedance_image_ref
+
+            ref = await prepare_seedance_image_ref(ref)
         if ref.url and ref.url.lower().startswith(("http://", "https://")):
             return ref.url
         if ref.data is None:

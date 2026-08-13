@@ -38,6 +38,7 @@ def test_schema_ports_and_limits():
         "resolution",
         "duration",
         "output_format",
+        "omni_reference_task_type",
         "generate_audio",
     ):
         assert port in node.inputs, f"缺少端口 {port}"
@@ -271,6 +272,19 @@ def test_classify_explicit_omni_reference_task_type_wins():
     )
     spec = classify_video_spec(req)
     assert spec.omni_reference_task_type == "extend"
+
+
+def test_classify_top_level_omni_reference_task_type():
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="编辑",
+        video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")],
+        duration=-1,
+        ratio="adaptive",
+        omni_reference_task_type="edit",
+    )
+    spec = classify_video_spec(req)
+    assert spec.omni_reference_task_type == "edit"
 
 
 def test_ark_render_omni_reference_task_type_only_for_seedance25():

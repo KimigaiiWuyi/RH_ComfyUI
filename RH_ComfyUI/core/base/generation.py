@@ -133,10 +133,10 @@ class AIGCGenerationBase(ABC):
         return request
 
     async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
-        """异步预处理钩子(下载/重编码参考视频等 IO 操作)。
+        """异步预处理钩子(下载/重编码参考视频、放大过小参考图等 IO 操作)。
 
         在 ``normalize`` 之后、通道选择之前调用。默认原样返回。
-        Seedance 等需要钳参考视频时长的模型覆盖本方法。
+        Seedance 等需要钳参考视频时长 / 放大参考图短边的模型覆盖本方法。
         """
         return request
 

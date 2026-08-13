@@ -8,6 +8,7 @@
 
 当前内置处理:
 - resize_long_edge: 等比缩放最长边到指定阈值
+- ensure_min_edge: 等比放大使宽、高均不少于指定阈值(Seedance 参考图 ≥300)
 
 未来可扩展:
 - 格式转换 / 色彩空间归一化
@@ -20,7 +21,146 @@ from __future__ import annotations
 from io import BytesIO
 from typing import Any, Callable
 
+# Seedance 官方硬限:参考图宽、高均须 ≥ 此像素,否则上游拒收。
+SEEDANCE_IMAGE_MIN_EDGE = 300
+
 # ── 核心函数 ──────────────────────────────────────────────────────
+
+
+def _lanczos():
+    """兼容新旧 Pillow 的 LANCZOS 重采样常量。"""
+    from PIL import Image
+
+    return getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1)
+
+
+def ensure_min_edge(
+    data: bytes,
+    min_edge: int = SEEDANCE_IMAGE_MIN_EDGE,
+) -> tuple[bytes, str]:
+    """等比放大,使宽和高均不少于 ``min_edge`` 像素。
+
+    Seedance 上游要求参考图宽、高均 ≥ 300。不足时按较大缺口放大,绝不裁切。
+    色彩空间只保留 RGB / RGBA:
+    - 有透明通道 → PNG RGBA
+    - 原 JPEG 无透明 → JPEG RGB
+    - 其余无透明 → PNG RGB
+
+    已满足阈值、解码失败或 Pillow 不可用时原样返回,不中断调用方。
+
+    Returns:
+        ``(bytes, info)``: info 为空串表示未改写。
+    """
+    if not data or min_edge <= 0:
+        return data, ""
+
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return data, ""
+
+    try:
+        img = Image.open(BytesIO(data))
+        img.load()
+    except Exception:  # noqa: BLE001
+        return data, ""
+
+    orig_fmt = (img.format or "").upper()
+    try:
+        img = ImageOps.exif_transpose(img) or img
+    except Exception:  # noqa: BLE001
+        pass
+
+    width, height = img.size
+    if width >= min_edge and height >= min_edge:
+        return data, ""
+    if width < 1 or height < 1:
+        return data, ""
+
+    scale = max(min_edge / width, min_edge / height)
+    new_w = max(min_edge, int(round(width * scale)))
+    new_h = max(min_edge, int(round(height * scale)))
+
+    has_alpha = _has_transparency(img)
+    try:
+        if has_alpha:
+            img = img.convert("RGBA")
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        img = img.resize((new_w, new_h), _lanczos())
+    except Exception:  # noqa: BLE001
+        return data, ""
+
+    buf = BytesIO()
+    try:
+        if has_alpha or img.mode == "RGBA":
+            if img.mode != "RGBA":
+                img = img.convert("RGBA")
+            img.save(buf, format="PNG", optimize=True)
+            tag = "PNG/RGBA"
+        elif orig_fmt in ("JPEG", "JPG"):
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(buf, format="JPEG", quality=92, optimize=True)
+            tag = "JPEG/RGB"
+        else:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(buf, format="PNG", optimize=True)
+            tag = "PNG/RGB"
+    except Exception:  # noqa: BLE001
+        return data, ""
+
+    out = buf.getvalue()
+    if not out:
+        return data, ""
+    info = f"{width}x{height}→{new_w}x{new_h} {tag}"
+    return out, info
+
+
+def image_mime_from_bytes(data: bytes) -> str:
+    """按文件头猜 PNG / JPEG mime;其它回落 image/png。"""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    return "image/png"
+
+
+async def prepare_seedance_image_ref(ref: Any) -> Any:
+    """Seedance 参考图提交前改写:宽或高 < 300 则等比放大,并清掉旧 url。
+
+    2.0 / 2.5 / Fast / Mini 共用。``asset://``、非图片、取不到字节、已满足尺寸
+    时原样返回。调用方应在 materialize / 上传之前走本函数,避免 http URL 透传小图。
+    """
+    from .core.types import MediaKind, MediaRef
+    from .video_process import ensure_media_bytes
+
+    if not isinstance(ref, MediaRef) or ref.kind != MediaKind.IMAGE:
+        return ref
+    url = (ref.url or "").strip()
+    if url.lower().startswith("asset://"):
+        return ref
+    raw = ref.data if ref.data else await ensure_media_bytes(ref)
+    if not raw:
+        return ref
+    new_data, info = ensure_min_edge(raw)
+    if not info:
+        return ref
+    try:
+        from gsuid_core.logger import logger
+
+        logger.info(f"[seedance] 参考图等比放大: {info}")
+    except Exception:  # noqa: BLE001
+        pass
+    return MediaRef(
+        kind=MediaKind.IMAGE,
+        data=new_data,
+        url=None,
+        role=ref.role,
+        mime_type=image_mime_from_bytes(new_data),
+        filename=ref.filename,
+    )
 
 
 def resize_long_edge(data: bytes, max_long_edge: int = 800) -> bytes:
@@ -357,6 +497,10 @@ async def compress_to_max_pixels_async(
 
 
 __all__ = [
+    "SEEDANCE_IMAGE_MIN_EDGE",
+    "ensure_min_edge",
+    "image_mime_from_bytes",
+    "prepare_seedance_image_ref",
     "resize_long_edge",
     "correct_orientation",
     "build_process_pipeline",

@@ -2,6 +2,10 @@
 
 from .image_process import (
     DEFAULT_MAX_PIXELS,
+    SEEDANCE_IMAGE_MIN_EDGE,
+    ensure_min_edge,
+    image_mime_from_bytes,
+    prepare_seedance_image_ref,
     resize_long_edge,
     correct_orientation,
     preprocess_for_video,
@@ -12,6 +16,10 @@ from .image_process import (
 )
 
 __all__ = [
+    "SEEDANCE_IMAGE_MIN_EDGE",
+    "ensure_min_edge",
+    "image_mime_from_bytes",
+    "prepare_seedance_image_ref",
     "resize_long_edge",
     "correct_orientation",
     "build_process_pipeline",
