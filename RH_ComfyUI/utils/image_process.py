@@ -9,6 +9,8 @@
 当前内置处理:
 - resize_long_edge: 等比缩放最长边到指定阈值
 - ensure_min_edge: 等比放大使宽、高均不少于指定阈值(Seedance 参考图 ≥300)
+- crop_to_seedance_aspect: 居中裁切使宽高比落入官方 0.40~2.50(目标 0.41 / 2.49)
+- prepare_seedance_image_bytes: 先放大再裁切,Seedance 2.x 提交前共用
 
 未来可扩展:
 - 格式转换 / 色彩空间归一化
@@ -23,6 +25,13 @@ from typing import Any, Callable
 
 # Seedance 官方硬限:参考图宽、高均须 ≥ 此像素,否则上游拒收。
 SEEDANCE_IMAGE_MIN_EDGE = 300
+
+# 官方 image_url 宽高比硬限:0.40 ≤ w/h ≤ 2.50。裁切目标取内侧,避免整数取整后仍踩线。
+# 勿用 0.39:低于 0.40 会被上游 InvalidParameter 拒收。
+SEEDANCE_ASPECT_MIN = 0.41
+SEEDANCE_ASPECT_MAX = 2.49
+SEEDANCE_ASPECT_OFFICIAL_MIN = 0.40
+SEEDANCE_ASPECT_OFFICIAL_MAX = 2.50
 
 # ── 核心函数 ──────────────────────────────────────────────────────
 
@@ -118,6 +127,116 @@ def ensure_min_edge(
     return out, info
 
 
+def crop_to_seedance_aspect(data: bytes) -> tuple[bytes, str]:
+    """居中裁切,使宽高比落入官方 0.40~2.50(目标 0.41 或 2.49,取更近一侧)。
+
+    过宽(w/h > 2.49)裁左右;过竖(w/h < 0.41)裁上下。已在区间内、解码失败
+    或 Pillow 不可用时原样返回。只减较长边,短边不变。
+    """
+    if not data:
+        return data, ""
+
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return data, ""
+
+    try:
+        img = Image.open(BytesIO(data))
+        img.load()
+    except Exception:  # noqa: BLE001
+        return data, ""
+
+    orig_fmt = (img.format or "").upper()
+    try:
+        img = ImageOps.exif_transpose(img) or img
+    except Exception:  # noqa: BLE001
+        pass
+
+    width, height = img.size
+    if width < 1 or height < 1:
+        return data, ""
+
+    ar = width / height
+    if SEEDANCE_ASPECT_MIN <= ar <= SEEDANCE_ASPECT_MAX:
+        return data, ""
+
+    # 区间外只可能更靠近某一端:过宽 → 2.49,过竖 → 0.41。
+    if ar > SEEDANCE_ASPECT_MAX:
+        target_ar = SEEDANCE_ASPECT_MAX
+        new_w = max(1, min(width, int(height * target_ar)))
+        while new_w > 1 and new_w / height > SEEDANCE_ASPECT_MAX:
+            new_w -= 1
+        new_h = height
+        left = (width - new_w) // 2
+        box = (left, 0, left + new_w, height)
+    else:
+        target_ar = SEEDANCE_ASPECT_MIN
+        new_h = max(1, min(height, int(width / target_ar)))
+        while new_h < height and width / new_h < SEEDANCE_ASPECT_MIN:
+            new_h -= 1
+        if new_h < 1:
+            new_h = 1
+        new_w = width
+        top = (height - new_h) // 2
+        box = (0, top, width, top + new_h)
+
+    if new_w == width and new_h == height:
+        return data, ""
+
+    has_alpha = _has_transparency(img)
+    try:
+        img = img.crop(box)
+        if has_alpha:
+            img = img.convert("RGBA")
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+    except Exception:  # noqa: BLE001
+        return data, ""
+
+    buf = BytesIO()
+    try:
+        if has_alpha or img.mode == "RGBA":
+            if img.mode != "RGBA":
+                img = img.convert("RGBA")
+            img.save(buf, format="PNG", optimize=True)
+            tag = "PNG/RGBA"
+        elif orig_fmt in ("JPEG", "JPG"):
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(buf, format="JPEG", quality=92, optimize=True)
+            tag = "JPEG/RGB"
+        else:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(buf, format="PNG", optimize=True)
+            tag = "PNG/RGB"
+    except Exception:  # noqa: BLE001
+        return data, ""
+
+    out = buf.getvalue()
+    if not out:
+        return data, ""
+    cw, ch = img.size
+    info = f"aspect {width}x{height}({ar:.2f})→{cw}x{ch}({cw / ch:.2f}) {tag}"
+    return out, info
+
+
+def prepare_seedance_image_bytes(data: bytes) -> tuple[bytes, str]:
+    """Seedance 参考图提交前:先等比放大到宽高均 ≥300,再裁到合法宽高比。
+
+    任一步未改写时跳过;两步都改则拼 info。失败降级为原字节。
+    """
+    if not data:
+        return data, ""
+    out, info_scale = ensure_min_edge(data)
+    out, info_crop = crop_to_seedance_aspect(out)
+    # 裁切只减长边,短边应仍 ≥300;再跑一次防取整边缘。
+    out, info_scale2 = ensure_min_edge(out)
+    infos = [x for x in (info_scale, info_crop, info_scale2) if x]
+    return out, "; ".join(infos)
+
+
 def image_mime_from_bytes(data: bytes) -> str:
     """按文件头猜 PNG / JPEG mime;其它回落 image/png。"""
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -128,10 +247,11 @@ def image_mime_from_bytes(data: bytes) -> str:
 
 
 async def prepare_seedance_image_ref(ref: Any) -> Any:
-    """Seedance 参考图提交前改写:宽或高 < 300 则等比放大,并清掉旧 url。
+    """Seedance 参考图提交前改写:短边放大 + 宽高比裁切,并清掉旧 url。
 
-    2.0 / 2.5 / Fast / Mini 共用。``asset://``、非图片、取不到字节、已满足尺寸
-    时原样返回。调用方应在 materialize / 上传之前走本函数,避免 http URL 透传小图。
+    2.0 / 2.5 / Fast / Mini 共用。``asset://``、非图片、取不到字节、已满足
+    宽高与比例时原样返回。调用方应在 materialize / 上传之前走本函数,避免
+    http URL 把小图或超比例原图交给上游。
     """
     from .core.types import MediaKind, MediaRef
     from .video_process import ensure_media_bytes
@@ -144,13 +264,13 @@ async def prepare_seedance_image_ref(ref: Any) -> Any:
     raw = ref.data if ref.data else await ensure_media_bytes(ref)
     if not raw:
         return ref
-    new_data, info = ensure_min_edge(raw)
+    new_data, info = prepare_seedance_image_bytes(raw)
     if not info:
         return ref
     try:
         from gsuid_core.logger import logger
 
-        logger.info(f"[seedance] 参考图等比放大: {info}")
+        logger.info(f"[seedance] 参考图预处理: {info}")
     except Exception:  # noqa: BLE001
         pass
     return MediaRef(
@@ -498,7 +618,13 @@ async def compress_to_max_pixels_async(
 
 __all__ = [
     "SEEDANCE_IMAGE_MIN_EDGE",
+    "SEEDANCE_ASPECT_MIN",
+    "SEEDANCE_ASPECT_MAX",
+    "SEEDANCE_ASPECT_OFFICIAL_MIN",
+    "SEEDANCE_ASPECT_OFFICIAL_MAX",
     "ensure_min_edge",
+    "crop_to_seedance_aspect",
+    "prepare_seedance_image_bytes",
     "image_mime_from_bytes",
     "prepare_seedance_image_ref",
     "resize_long_edge",

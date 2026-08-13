@@ -345,7 +345,7 @@ class SeedanceProvider(ABC):
     async def materialize_media(self, ref: MediaRef) -> Optional[str]:
         """默认实现:URL 透传 / bytes → base64 data URL。
 
-        参考图先做 Seedance 短边放大(2.0/2.5 共用),避免 http URL 把 <300px 原图交给上游。
+        参考图先做 Seedance 短边放大 + 宽高比裁切(2.0/2.5 共用),避免 http URL 把原图交给上游。
         """
         if ref.kind == MediaKind.IMAGE:
             from ...image_process import prepare_seedance_image_ref

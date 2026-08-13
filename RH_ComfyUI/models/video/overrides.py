@@ -63,16 +63,16 @@ class SeedanceVideoModel(VideoPipelineModel):
             raise ValidationError(f"{self.display_name} 最多接受 3 段参考音频,当前 {len(request.audio_refs)} 段")
 
     async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
-        """提交前预处理:参考视频时长钳位 + 参考图短边放大。
+        """提交前预处理:参考视频时长钳位 + 参考图短边放大 / 宽高比裁切。
 
         视频:[2, 15]s;过短循环到 2.5s,过长裁到 14.5s。
-        图片:宽或高 < 300px 时等比放大,保持 RGB/RGBA(JPEG/PNG)。
+        图片:宽或高 < 300px 时等比放大;宽高比超出 0.40~2.50 时居中裁到 0.41 或 2.49。
         探测/编解码失败时放行原片,不阻断任务。
         """
         from gsuid_core.logger import logger
 
         from ...core.schema.types import MediaRef, MediaKind, ContentItem, ContentItemType
-        from ...utils.image_process import ensure_min_edge, prepare_seedance_image_ref
+        from ...utils.image_process import prepare_seedance_image_bytes, prepare_seedance_image_ref
         from ...utils.video_process import ensure_media_bytes, clamp_seedance_ref_video
 
         async def _clamp_ref(ref: MediaRef) -> MediaRef:
@@ -113,9 +113,9 @@ class SeedanceVideoModel(VideoPipelineModel):
         if request.images:
             new_images: list[bytes] = []
             for raw in request.images:
-                out, info = ensure_min_edge(raw)
+                out, info = prepare_seedance_image_bytes(raw)
                 if info:
-                    logger.info(f"[seedance] 参考图等比放大: {info}")
+                    logger.info(f"[seedance] 参考图预处理: {info}")
                 new_images.append(out)
             request.images = new_images
 

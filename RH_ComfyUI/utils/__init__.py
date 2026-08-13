@@ -2,9 +2,13 @@
 
 from .image_process import (
     DEFAULT_MAX_PIXELS,
+    SEEDANCE_ASPECT_MAX,
+    SEEDANCE_ASPECT_MIN,
     SEEDANCE_IMAGE_MIN_EDGE,
+    crop_to_seedance_aspect,
     ensure_min_edge,
     image_mime_from_bytes,
+    prepare_seedance_image_bytes,
     prepare_seedance_image_ref,
     resize_long_edge,
     correct_orientation,
@@ -17,7 +21,11 @@ from .image_process import (
 
 __all__ = [
     "SEEDANCE_IMAGE_MIN_EDGE",
+    "SEEDANCE_ASPECT_MIN",
+    "SEEDANCE_ASPECT_MAX",
     "ensure_min_edge",
+    "crop_to_seedance_aspect",
+    "prepare_seedance_image_bytes",
     "image_mime_from_bytes",
     "prepare_seedance_image_ref",
     "resize_long_edge",

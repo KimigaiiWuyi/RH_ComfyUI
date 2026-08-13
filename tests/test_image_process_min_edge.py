@@ -1,4 +1,4 @@
-"""Seedance 参考图短边放大:宽高均须 ≥300,保持 RGB/RGBA。"""
+"""Seedance 参考图短边放大 + 宽高比裁切。"""
 
 from __future__ import annotations
 
@@ -9,11 +9,17 @@ from PIL import Image
 
 from RH_ComfyUI.core.schema.request import GenerationRequest, TaskType
 from RH_ComfyUI.core.schema.types import ContentItem, ContentItemType, MediaKind, MediaRef
-from RH_ComfyUI.models.video.defs import Seedance2Def, Seedance2FastDef, Seedance2MiniDef
+from RH_ComfyUI.models.video.defs import Seedance2Def, Seedance2FastDef, Seedance2MiniDef, Seedance25Def
 from RH_ComfyUI.utils.image_process import (
+    SEEDANCE_ASPECT_MAX,
+    SEEDANCE_ASPECT_MIN,
+    SEEDANCE_ASPECT_OFFICIAL_MAX,
+    SEEDANCE_ASPECT_OFFICIAL_MIN,
     SEEDANCE_IMAGE_MIN_EDGE,
+    crop_to_seedance_aspect,
     ensure_min_edge,
     image_mime_from_bytes,
+    prepare_seedance_image_bytes,
     prepare_seedance_image_ref,
 )
 
@@ -163,3 +169,103 @@ def test_prepare_seedance_image_ref_clears_url_after_upscale():
     assert out.data is not None
     img = _open(out.data)
     assert img.size == (300, 300)
+
+
+def _assert_seedance_aspect_ok(w: int, h: int) -> None:
+    ar = w / h
+    assert SEEDANCE_ASPECT_OFFICIAL_MIN <= ar <= SEEDANCE_ASPECT_OFFICIAL_MAX
+    assert ar <= SEEDANCE_ASPECT_MAX + 1e-9
+    assert ar >= SEEDANCE_ASPECT_MIN - 1e-9
+
+
+def test_wide_jpeg_crops_to_max_aspect():
+    """复现网关 400:2.69 超 2.50,应居中裁到 2.49。"""
+    raw = _jpeg(2690, 1000)
+    out, info = crop_to_seedance_aspect(raw)
+    assert info
+    img = _open(out)
+    assert img.size[1] == 1000
+    assert img.size[0] < 2690
+    _assert_seedance_aspect_ok(*img.size)
+    assert abs(img.size[0] / img.size[1] - SEEDANCE_ASPECT_MAX) < 0.02
+
+
+def test_tall_png_crops_to_min_aspect():
+    raw = _png(1000, 2690)
+    out, info = crop_to_seedance_aspect(raw)
+    assert info
+    img = _open(out)
+    assert img.size[0] == 1000
+    assert img.size[1] < 2690
+    _assert_seedance_aspect_ok(*img.size)
+    assert abs(img.size[0] / img.size[1] - SEEDANCE_ASPECT_MIN) < 0.02
+
+
+def test_valid_aspect_returns_original():
+    raw = _jpeg(640, 480)
+    out, info = crop_to_seedance_aspect(raw)
+    assert info == ""
+    assert out is raw
+
+
+def test_small_wide_upscales_then_crops():
+    """100×50 先放大到 600×300(AR=2.00,合法),不应再裁。"""
+    raw = _jpeg(100, 50)
+    out, info = prepare_seedance_image_bytes(raw)
+    assert info
+    img = _open(out)
+    assert img.size[0] >= SEEDANCE_IMAGE_MIN_EDGE
+    assert img.size[1] >= SEEDANCE_IMAGE_MIN_EDGE
+    _assert_seedance_aspect_ok(*img.size)
+
+
+def test_small_and_too_wide_upscales_then_crops():
+    """269×100 = 2.69,放大后仍超限,再裁到 2.49。"""
+    raw = _jpeg(269, 100)
+    out, info = prepare_seedance_image_bytes(raw)
+    assert "aspect" in info
+    img = _open(out)
+    assert img.size[0] >= SEEDANCE_IMAGE_MIN_EDGE
+    assert img.size[1] >= SEEDANCE_IMAGE_MIN_EDGE
+    _assert_seedance_aspect_ok(*img.size)
+    assert abs(img.size[0] / img.size[1] - SEEDANCE_ASPECT_MAX) < 0.02
+
+
+def test_prepare_request_crops_wide_flat_and_ordered():
+    wide = _jpeg(2690, 1000)
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="跑起来",
+        images=[wide],
+        ordered_content=[
+            ContentItem(
+                type=ContentItemType.IMAGE,
+                media=MediaRef(kind=MediaKind.IMAGE, data=wide, url="https://cdn.example.com/wide.jpg"),
+            ),
+        ],
+    )
+    out = asyncio.run(Seedance2Def().prepare_request(req))
+    flat = _open(out.images[0])
+    _assert_seedance_aspect_ok(*flat.size)
+    oc_img = next(i for i in out.ordered_content if i.type == ContentItemType.IMAGE)
+    assert oc_img.media is not None
+    assert oc_img.media.url is None
+    assert oc_img.media.data is not None
+    _assert_seedance_aspect_ok(*_open(oc_img.media.data).size)
+
+
+def test_prepare_request_crops_on_seedance25():
+    wide = _jpeg(2690, 1000)
+    req = GenerationRequest(task_type=TaskType.VIDEO, prompt="动起来", images=[wide])
+    out = asyncio.run(Seedance25Def().prepare_request(req))
+    img = _open(out.images[0])
+    _assert_seedance_aspect_ok(*img.size)
+
+
+def test_prepare_seedance_image_ref_clears_url_after_crop():
+    wide = _png(2690, 1000)
+    ref = MediaRef(kind=MediaKind.IMAGE, data=wide, url="https://cdn.example.com/wide.png")
+    out = asyncio.run(prepare_seedance_image_ref(ref))
+    assert out.url is None
+    assert out.data is not None
+    _assert_seedance_aspect_ok(*_open(out.data).size)
