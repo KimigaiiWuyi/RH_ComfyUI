@@ -469,8 +469,8 @@ class HappyHorseVideoModel(VideoPipelineModel):
     对外模型名固定 ``happyhorse1.1``;内部按输入自动映射:
     - 0 图 → happyhorse-1.1-t2v
     - 1 图 → happyhorse-1.1-i2v(首帧)
-    - 2~9 图 / frame_mode=reference → happyhorse-1.1-r2v
-    - 有输入视频 → happyhorse-1.0-video-edit
+    - 2~9 图 / frame_mode=reference / 视频作参考 → happyhorse-1.1-r2v
+    - 显式 task_mode=edit → happyhorse-1.1-video-edit
     """
 
     supports_remote_cancel = True  # DashScope POST /tasks/{id}/cancel(仅 PENDING)
@@ -512,7 +512,7 @@ class HappyHorseVideoModel(VideoPipelineModel):
                 "参考图可用 [Image N] 在 prompt 中引用",
             ],
             categories=["短视频", "电商广告", "角色一致性", "视频编辑"],
-            weaknesses=["无首尾帧专用端点(多图走参考生)", "不支持参考音频", "视频编辑仅 1.0 档"],
+            weaknesses=["无首尾帧专用端点(多图走参考生)", "不支持参考音频", "视频编辑须显式选择编辑模式"],
             sample_prompts=[
                 "一只猫在草地上奔跑",
                 "[Image 1]中的女性优雅转身,展开[Image 2]中的折扇",
@@ -528,8 +528,18 @@ class HappyHorseVideoModel(VideoPipelineModel):
             raise ValidationError(f"{self.display_name} 最多 1 段输入视频,当前 {len(request.video_refs)} 段")
         if len(request.images) > self.MAX_IMAGES:
             raise ValidationError(f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,当前 {len(request.images)} 张")
-        # 视频编辑:分辨率仅 720p/1080p
-        if request.video_refs:
+        task_mode = str((request.params or {}).get("task_mode") or "auto").strip().lower()
+        frame_mode = str((request.params or {}).get("frame_mode") or "auto").strip().lower()
+        is_edit = task_mode == "edit" or frame_mode == "edit"
+        if is_edit:
+            from ...core.schema.types import MediaKind, ContentItemType
+
+            oc_has_video = any(
+                item.type == ContentItemType.VIDEO or (item.media is not None and item.media.kind == MediaKind.VIDEO)
+                for item in (request.ordered_content or [])
+            )
+            if not request.video_refs and not oc_has_video:
+                raise ValidationError(f"{self.display_name} 的视频编辑模式需要 1 段输入视频")
             res = request.resolution or request.params.get("resolution") or "1080p"
             if str(res).lower() in ("480p", "4k"):
                 raise ValidationError(f"{self.display_name} 视频编辑仅支持 720p / 1080p,当前 {res}")

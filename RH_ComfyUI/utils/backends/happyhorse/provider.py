@@ -23,7 +23,7 @@ from .classify import (
     to_api_resolution,
     rewrite_prompt_for_r2v,
 )
-from ...core.types import MediaRef
+from ...core.types import MediaRef, MediaKind
 from ..seedance.spec import MediaRole, VideoGenSpec, VideoTaskShape
 from ...core.safe_json import dump_body, mask_body
 
@@ -227,12 +227,12 @@ class HappyHorseProvider:
                     user_message="图生视频需要上传 1 张首帧图片。",
                 )
         elif spec.shape in (VideoTaskShape.MULTIMODAL, VideoTaskShape.FIRST_LAST_FRAME):
-            if n_img < 1:
+            if n_img < 1 and n_vid < 1:
                 raise HappyHorseProviderError(
-                    "参考生视频需要 1~9 张参考图",
+                    "参考生视频需要至少 1 张参考图或 1 段参考视频",
                     code="MISSING_IMAGE",
                     provider=self.name,
-                    user_message="参考生视频需要至少 1 张参考图片。",
+                    user_message="参考生视频需要至少 1 张参考图或 1 段参考视频。",
                 )
             if not (spec.prompt or "").strip():
                 raise HappyHorseProviderError(
@@ -372,9 +372,15 @@ class HappyHorseProvider:
             return items
 
         if spec.shape in (VideoTaskShape.MULTIMODAL, VideoTaskShape.FIRST_LAST_FRAME):
-            urls = await self.materialize_all([m.ref for m in spec.images()])
-            for url in urls:
-                if url:
+            # 按 spec.media 原序:图=reference_image,视频=video(r2v 参考,非编辑)
+            refs = list(spec.media) if spec.media else list(spec.images()) + list(spec.videos())
+            urls = await self.materialize_all([m.ref for m in refs])
+            for media, url in zip(refs, urls, strict=False):
+                if not url:
+                    continue
+                if media.kind == MediaKind.VIDEO:
+                    items.append({"type": "video", "url": url})
+                else:
                     items.append({"type": "reference_image", "url": url})
             return items
 

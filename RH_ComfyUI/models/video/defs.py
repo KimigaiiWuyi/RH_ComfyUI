@@ -751,8 +751,8 @@ class HappyHorse11Def(HappyHorseVideoModel):
     内部按 input_schema 自动适配供应商 model:
       0 图 → happyhorse-1.1-t2v
       1 图 → happyhorse-1.1-i2v
-      2~9 图 / frame_mode=reference → happyhorse-1.1-r2v
-      有 video_refs → happyhorse-1.0-video-edit
+      2~9 图 / frame_mode=reference / 视频作参考 → happyhorse-1.1-r2v
+      显式 task_mode=edit → happyhorse-1.1-video-edit
     """
 
     def __init__(self) -> None:
@@ -781,7 +781,9 @@ class HappyHorse11Def(HappyHorseVideoModel):
                 "  - 传 2~9 张图       → 参考生视频 (happyhorse-1.1-r2v);"
                 "prompt 中用 [Image 1]/[Image 2] 引用"
                 "\n"
-                "  - 传输入视频(+可选参考图) → 视频编辑 (happyhorse-1.0-video-edit)"
+                "  - 传输入视频且未选编辑 → 参考生(r2v),视频当参考素材"
+                "\n"
+                "  - 显式 task_mode=edit → 视频编辑 (happyhorse-1.1-video-edit)"
                 "\n"
                 "frame_mode=reference 时,即使只有 1 张图也走参考生而非首帧。"
                 "\n"
@@ -828,9 +830,10 @@ class HappyHorse11Def(HappyHorseVideoModel):
                     item_type=PortType.VIDEO,
                     title="输入视频",
                     description=(
-                        "传入 1 段视频时切换为视频编辑模式"
+                        "参考视频:默认作为 r2v 多参考素材,不会自动切到编辑。"
+                        "仅当 task_mode=edit 时才走视频编辑"
                         "(可附 0~5 张参考图做风格/局部替换)。"
-                        "输入时长 3~60 秒,输出上限 15 秒。"
+                        "编辑模式输入时长 3~60 秒,输出上限 15 秒。"
                     ),
                 ),
                 "frame_mode": PortSpec(
@@ -842,7 +845,18 @@ class HappyHorse11Def(HappyHorseVideoModel):
                         "图片角色判定:\n"
                         "  - auto: 1 图=首帧图生, ≥2 图=参考生\n"
                         "  - first_frame: 强制图生视频(仅用第 1 张作首帧)\n"
-                        "  - reference: 全部图片作参考素材(r2v)"
+                        "  - reference: 全部图片/视频作参考素材(r2v)"
+                    ),
+                ),
+                "task_mode": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "edit"],
+                    title="任务模式",
+                    description=(
+                        "任务形态:\n"
+                        "  - auto: 按输入自动(文生/图生/多参考);有视频也走 r2v 参考\n"
+                        "  - edit: 视频编辑(必须提供 1 段输入视频)"
                     ),
                 ),
                 "ratio": PortSpec(

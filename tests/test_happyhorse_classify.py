@@ -54,15 +54,47 @@ def test_frame_mode_first_frame():
     assert spec.images()[0].role == MediaRole.FIRST_FRAME
 
 
-def test_video_edit():
+def test_video_without_edit_is_r2v():
+    """有视频但未显式 edit → r2v 参考,不再自动切编辑。"""
     spec = classify_happyhorse(
         _req(
             images=[b"REF"],
             video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")],
         )
     )
+    assert spec.shape == VideoTaskShape.MULTIMODAL
+    assert resolve_vendor_model(spec.shape) == VENDOR_MODEL_R2V
+
+
+def test_video_only_without_edit_is_r2v():
+    spec = classify_happyhorse(
+        _req(video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")])
+    )
+    assert spec.shape == VideoTaskShape.MULTIMODAL
+    assert resolve_vendor_model(spec.shape) == VENDOR_MODEL_R2V
+
+
+def test_video_edit_requires_explicit_task_mode():
+    spec = classify_happyhorse(
+        _req(
+            images=[b"REF"],
+            video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")],
+            params={"task_mode": "edit"},
+        )
+    )
     assert spec.shape == VideoTaskShape.VIDEO_EDIT
     assert resolve_vendor_model(spec.shape) == VENDOR_MODEL_EDIT
+    assert VENDOR_MODEL_EDIT == "happyhorse-1.1-video-edit"
+
+
+def test_frame_mode_edit_is_video_edit():
+    spec = classify_happyhorse(
+        _req(
+            video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")],
+            params={"frame_mode": "edit"},
+        )
+    )
+    assert spec.shape == VideoTaskShape.VIDEO_EDIT
 
 
 def test_rewrite_prompt_image_refs():

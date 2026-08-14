@@ -19,6 +19,9 @@ def test_node_name_and_schema():
     assert "frame_mode" in schema
     assert "auto" in (schema["frame_mode"].values or [])
     assert "reference" in (schema["frame_mode"].values or [])
+    assert "task_mode" in schema
+    assert "edit" in (schema["task_mode"].values or [])
+    assert "extend" not in (schema["task_mode"].values or [])
     assert "480p" in (schema["resolution"].values or [])
     # 不暴露 generate_audio / audio_refs
     assert "generate_audio" not in schema
@@ -184,5 +187,34 @@ def test_render_create_r2v_reference_images():
         assert len(body["input"]["media"]) == 2
         assert all(x["type"] == "reference_image" for x in body["input"]["media"])
         assert body["parameters"]["ratio"] == "9:16"
+
+    asyncio.run(_run())
+
+
+def test_render_create_r2v_includes_reference_video():
+    """多参考模式下视频当参考素材,不走 video-edit。"""
+
+    async def _run():
+        from RH_ComfyUI.core.schema.types import MediaRef, MediaKind
+        from RH_ComfyUI.utils.backends.happyhorse.classify import classify_happyhorse
+        from RH_ComfyUI.utils.backends.happyhorse.provider import HappyHorseProvider
+
+        req = GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="参考这段视频的运镜",
+            images=[b"A"],
+            video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/ref.mp4")],
+            resolution="720p",
+            duration=5,
+            params={"frame_mode": "reference"},
+        )
+        spec = classify_happyhorse(req)
+        p = HappyHorseProvider(api_key="test")
+        _m, _u, _h, body = await p.render_create(spec, model="happyhorse-1.1-r2v")
+        assert spec.shape.value == "multimodal"
+        types = [x["type"] for x in body["input"]["media"]]
+        assert "video" in types
+        assert "reference_image" in types
+        assert body["parameters"]["duration"] == 5
 
     asyncio.run(_run())

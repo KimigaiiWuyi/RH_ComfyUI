@@ -3,17 +3,19 @@
 与 Seedance 差异:
 - 无首尾帧专用端点:2 张及以上图一律走 r2v(参考生视频)
 - 1 张图默认 i2v(first_frame);frame_mode=reference 时走 r2v
-- 有输入视频 → video_edit(仅 happyhorse-1.0-video-edit)
+- 视频编辑必须显式 task_mode/frame_mode=edit → happyhorse-1.1-video-edit
+- 仅有视频、未选编辑 → r2v 多参考(视频当参考素材)
 - 不支持参考音频
 
 判定顺序:
   1. params["shape"] 显式覆盖
-  2. 含视频参考 → VIDEO_EDIT
-  3. frame_mode=reference 且有图 → MULTIMODAL(r2v)
-  4. frame_mode=first_frame 且有图 → IMAGE2VIDEO
+  2. task_mode/frame_mode=edit → VIDEO_EDIT
+  3. frame_mode=reference 且有图或视频 → MULTIMODAL(r2v)
+  4. frame_mode=first_frame/first_last 且有图 → IMAGE2VIDEO
   5. 图片数 == 1 → IMAGE2VIDEO
   6. 图片数 >= 2 → MULTIMODAL(r2v)
-  7. 其余 → TEXT2VIDEO
+  7. 仅有视频 → MULTIMODAL(r2v)
+  8. 其余 → TEXT2VIDEO
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from ..seedance.classify import classify_video_spec
 VENDOR_MODEL_T2V = "happyhorse-1.1-t2v"
 VENDOR_MODEL_I2V = "happyhorse-1.1-i2v"
 VENDOR_MODEL_R2V = "happyhorse-1.1-r2v"
-VENDOR_MODEL_EDIT = "happyhorse-1.0-video-edit"
+VENDOR_MODEL_EDIT = "happyhorse-1.1-video-edit"
 
 _SHAPE_TO_VENDOR: dict[VideoTaskShape, str] = {
     VideoTaskShape.TEXT2VIDEO: VENDOR_MODEL_T2V,
@@ -88,6 +90,8 @@ def classify_happyhorse(request: GenerationRequest) -> VideoGenSpec:
     n_img = len(spec.images())
     n_vid = len(spec.videos())
     frame_mode = str(spec.params.get("frame_mode") or "auto").strip().lower()
+    task_mode = str(spec.params.get("task_mode") or "auto").strip().lower()
+    explicit_edit = task_mode == "edit" or frame_mode == "edit"
 
     # 显式 shape 覆盖
     shape_raw = spec.params.get("shape")
@@ -100,13 +104,16 @@ def classify_happyhorse(request: GenerationRequest) -> VideoGenSpec:
 
     if shape_override is not None:
         shape = shape_override
-    elif n_vid > 0:
+    elif explicit_edit:
         shape = VideoTaskShape.VIDEO_EDIT
-    elif frame_mode in ("reference",) and n_img >= 1:
+    elif frame_mode in ("reference",) and (n_img >= 1 or n_vid >= 1):
         shape = VideoTaskShape.MULTIMODAL
     elif frame_mode in ("first_frame", "first_last") and n_img >= 1:
         # first_last 无对应端点:仅第 1 张作首帧,其余丢弃提示在 validate
         shape = VideoTaskShape.IMAGE2VIDEO
+    elif n_vid >= 1:
+        # 有视频且未选编辑/首帧:当参考素材走 r2v(1 图+视频也不再误判 i2v)
+        shape = VideoTaskShape.MULTIMODAL
     elif n_img >= 2:
         shape = VideoTaskShape.MULTIMODAL
     elif n_img == 1:

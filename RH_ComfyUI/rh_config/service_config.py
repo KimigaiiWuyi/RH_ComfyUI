@@ -280,7 +280,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     "divider_happyhorse": GsDivider(
         "HappyHorse 视频生成(DashScope)",
         "阿里云 DashScope HappyHorse 1.1 视频生成服务配置。"
-        "对外模型名 happyhorse1.1,内部按输入自动路由 t2v / i2v / r2v / video-edit。",
+        "对外模型名 happyhorse1.1,内部按输入自动路由 t2v / i2v / r2v;显式 edit 走 1.1-video-edit。",
         "HappyHorse DashScope 服务配置",
     ),
     "HappyHorse_apikey_dashscope": GsStrConfig(
