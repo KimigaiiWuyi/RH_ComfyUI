@@ -531,13 +531,18 @@ class HappyHorseVideoModel(VideoPipelineModel):
         task_mode = str((request.params or {}).get("task_mode") or "auto").strip().lower()
         frame_mode = str((request.params or {}).get("frame_mode") or "auto").strip().lower()
         is_edit = task_mode == "edit" or frame_mode == "edit"
-        if is_edit:
-            from ...core.schema.types import MediaKind, ContentItemType
+        from ...core.schema.types import MediaKind, ContentItemType
 
-            oc_has_video = any(
-                item.type == ContentItemType.VIDEO or (item.media is not None and item.media.kind == MediaKind.VIDEO)
-                for item in (request.ordered_content or [])
+        oc_has_video = any(
+            item.type == ContentItemType.VIDEO or (item.media is not None and item.media.kind == MediaKind.VIDEO)
+            for item in (request.ordered_content or [])
+        )
+        if not is_edit and (request.video_refs or oc_has_video):
+            raise ValidationError(
+                f"{self.display_name} 仅在「视频编辑」模式下接受输入视频;"
+                "多参考 / 首尾帧请移除视频,或切换到视频编辑"
             )
+        if is_edit:
             if not request.video_refs and not oc_has_video:
                 raise ValidationError(f"{self.display_name} 的视频编辑模式需要 1 段输入视频")
             res = request.resolution or request.params.get("resolution") or "1080p"

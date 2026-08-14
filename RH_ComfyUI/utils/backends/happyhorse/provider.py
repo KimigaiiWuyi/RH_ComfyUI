@@ -23,7 +23,7 @@ from .classify import (
     to_api_resolution,
     rewrite_prompt_for_r2v,
 )
-from ...core.types import MediaRef, MediaKind
+from ...core.types import MediaRef
 from ..seedance.spec import MediaRole, VideoGenSpec, VideoTaskShape
 from ...core.safe_json import dump_body, mask_body
 
@@ -227,12 +227,19 @@ class HappyHorseProvider:
                     user_message="图生视频需要上传 1 张首帧图片。",
                 )
         elif spec.shape in (VideoTaskShape.MULTIMODAL, VideoTaskShape.FIRST_LAST_FRAME):
-            if n_img < 1 and n_vid < 1:
+            if n_vid > 0:
                 raise HappyHorseProviderError(
-                    "参考生视频需要至少 1 张参考图或 1 段参考视频",
+                    "参考生视频不接受输入视频,请改用视频编辑模式",
+                    code="UNSUPPORTED_VIDEO",
+                    provider=self.name,
+                    user_message="HappyHorse 多参考模式不接受视频,请切换到视频编辑或移除视频。",
+                )
+            if n_img < 1:
+                raise HappyHorseProviderError(
+                    "参考生视频需要 1~9 张参考图",
                     code="MISSING_IMAGE",
                     provider=self.name,
-                    user_message="参考生视频需要至少 1 张参考图或 1 段参考视频。",
+                    user_message="参考生视频需要至少 1 张参考图片。",
                 )
             if not (spec.prompt or "").strip():
                 raise HappyHorseProviderError(
@@ -372,15 +379,10 @@ class HappyHorseProvider:
             return items
 
         if spec.shape in (VideoTaskShape.MULTIMODAL, VideoTaskShape.FIRST_LAST_FRAME):
-            # 按 spec.media 原序:图=reference_image,视频=video(r2v 参考,非编辑)
-            refs = list(spec.media) if spec.media else list(spec.images()) + list(spec.videos())
-            urls = await self.materialize_all([m.ref for m in refs])
-            for media, url in zip(refs, urls, strict=False):
-                if not url:
-                    continue
-                if media.kind == MediaKind.VIDEO:
-                    items.append({"type": "video", "url": url})
-                else:
+            # r2v 官方只收 reference_image;视频只能走 VIDEO_EDIT
+            urls = await self.materialize_all([m.ref for m in spec.images()])
+            for url in urls:
+                if url:
                     items.append({"type": "reference_image", "url": url})
             return items
 

@@ -10,12 +10,12 @@
 判定顺序:
   1. params["shape"] 显式覆盖
   2. task_mode/frame_mode=edit → VIDEO_EDIT
-  3. frame_mode=reference 且有图或视频 → MULTIMODAL(r2v)
+  3. frame_mode=reference 且有图 → MULTIMODAL(r2v)
   4. frame_mode=first_frame/first_last 且有图 → IMAGE2VIDEO
   5. 图片数 == 1 → IMAGE2VIDEO
   6. 图片数 >= 2 → MULTIMODAL(r2v)
-  7. 仅有视频 → MULTIMODAL(r2v)
-  8. 其余 → TEXT2VIDEO
+  7. 其余 → TEXT2VIDEO
+  非编辑模式的视频不参与形态判定(r2v 只收 reference_image)。
 """
 
 from __future__ import annotations
@@ -88,7 +88,6 @@ def classify_happyhorse(request: GenerationRequest) -> VideoGenSpec:
     spec.params = dict(request.params or {})
 
     n_img = len(spec.images())
-    n_vid = len(spec.videos())
     frame_mode = str(spec.params.get("frame_mode") or "auto").strip().lower()
     task_mode = str(spec.params.get("task_mode") or "auto").strip().lower()
     explicit_edit = task_mode == "edit" or frame_mode == "edit"
@@ -106,14 +105,11 @@ def classify_happyhorse(request: GenerationRequest) -> VideoGenSpec:
         shape = shape_override
     elif explicit_edit:
         shape = VideoTaskShape.VIDEO_EDIT
-    elif frame_mode in ("reference",) and (n_img >= 1 or n_vid >= 1):
+    elif frame_mode in ("reference",) and n_img >= 1:
         shape = VideoTaskShape.MULTIMODAL
     elif frame_mode in ("first_frame", "first_last") and n_img >= 1:
         # first_last 无对应端点:仅第 1 张作首帧,其余丢弃提示在 validate
         shape = VideoTaskShape.IMAGE2VIDEO
-    elif n_vid >= 1:
-        # 有视频且未选编辑/首帧:当参考素材走 r2v(1 图+视频也不再误判 i2v)
-        shape = VideoTaskShape.MULTIMODAL
     elif n_img >= 2:
         shape = VideoTaskShape.MULTIMODAL
     elif n_img == 1:

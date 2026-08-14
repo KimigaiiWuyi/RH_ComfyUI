@@ -191,8 +191,28 @@ def test_render_create_r2v_reference_images():
     asyncio.run(_run())
 
 
-def test_render_create_r2v_includes_reference_video():
-    """多参考模式下视频当参考素材,不走 video-edit。"""
+def test_validate_rejects_video_outside_edit():
+    from RH_ComfyUI.core.base.errors import ValidationError
+    from RH_ComfyUI.core.schema.types import MediaRef, MediaKind
+
+    m = HappyHorse11Def()
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="参考这段视频",
+        images=[b"A"],
+        video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/ref.mp4")],
+        generate_audio=True,
+        params={"frame_mode": "reference"},
+    )
+    try:
+        m.validate(req)
+        raise AssertionError("expected ValidationError")
+    except ValidationError as e:
+        assert "视频编辑" in str(e)
+
+
+def test_render_create_r2v_never_emits_video_type():
+    """多参考即使 request 里挂了视频,出站 media 也只能是 reference_image。"""
 
     async def _run():
         from RH_ComfyUI.core.schema.types import MediaRef, MediaKind
@@ -201,7 +221,7 @@ def test_render_create_r2v_includes_reference_video():
 
         req = GenerationRequest(
             task_type=TaskType.VIDEO,
-            prompt="参考这段视频的运镜",
+            prompt="图片1中的角色奔跑",
             images=[b"A"],
             video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/ref.mp4")],
             resolution="720p",
@@ -211,10 +231,7 @@ def test_render_create_r2v_includes_reference_video():
         spec = classify_happyhorse(req)
         p = HappyHorseProvider(api_key="test")
         _m, _u, _h, body = await p.render_create(spec, model="happyhorse-1.1-r2v")
-        assert spec.shape.value == "multimodal"
         types = [x["type"] for x in body["input"]["media"]]
-        assert "video" in types
-        assert "reference_image" in types
-        assert body["parameters"]["duration"] == 5
+        assert types == ["reference_image"]
 
     asyncio.run(_run())

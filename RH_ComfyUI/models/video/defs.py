@@ -781,9 +781,9 @@ class HappyHorse11Def(HappyHorseVideoModel):
                 "  - 传 2~9 张图       → 参考生视频 (happyhorse-1.1-r2v);"
                 "prompt 中用 [Image 1]/[Image 2] 引用"
                 "\n"
-                "  - 传输入视频且未选编辑 → 参考生(r2v),视频当参考素材"
+                "  - 显式 task_mode=edit + 输入视频 → 视频编辑 (happyhorse-1.1-video-edit)"
                 "\n"
-                "  - 显式 task_mode=edit → 视频编辑 (happyhorse-1.1-video-edit)"
+                "  - 非编辑模式禁止传视频(r2v 只收 reference_image)"
                 "\n"
                 "frame_mode=reference 时,即使只有 1 张图也走参考生而非首帧。"
                 "\n"
@@ -830,10 +830,9 @@ class HappyHorse11Def(HappyHorseVideoModel):
                     item_type=PortType.VIDEO,
                     title="输入视频",
                     description=(
-                        "参考视频:默认作为 r2v 多参考素材,不会自动切到编辑。"
-                        "仅当 task_mode=edit 时才走视频编辑"
-                        "(可附 0~5 张参考图做风格/局部替换)。"
-                        "编辑模式输入时长 3~60 秒,输出上限 15 秒。"
+                        "仅视频编辑(task_mode=edit)可传入 1 段视频;"
+                        "多参考 / 首尾帧模式禁止传视频。"
+                        "编辑时可附 0~5 张参考图。输入时长 3~60 秒,输出上限 15 秒。"
                     ),
                 ),
                 "frame_mode": PortSpec(

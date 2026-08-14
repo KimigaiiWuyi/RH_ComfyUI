@@ -54,24 +54,23 @@ def test_frame_mode_first_frame():
     assert spec.images()[0].role == MediaRole.FIRST_FRAME
 
 
-def test_video_without_edit_is_r2v():
-    """有视频但未显式 edit → r2v 参考,不再自动切编辑。"""
+def test_video_without_edit_does_not_change_shape():
+    """有视频但未显式 edit:形态仍按图判定,不自动切编辑。"""
     spec = classify_happyhorse(
         _req(
             images=[b"REF"],
             video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")],
         )
     )
-    assert spec.shape == VideoTaskShape.MULTIMODAL
-    assert resolve_vendor_model(spec.shape) == VENDOR_MODEL_R2V
+    assert spec.shape == VideoTaskShape.IMAGE2VIDEO
+    assert resolve_vendor_model(spec.shape) == VENDOR_MODEL_I2V
 
 
-def test_video_only_without_edit_is_r2v():
+def test_video_only_without_edit_is_t2v():
     spec = classify_happyhorse(
         _req(video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")])
     )
-    assert spec.shape == VideoTaskShape.MULTIMODAL
-    assert resolve_vendor_model(spec.shape) == VENDOR_MODEL_R2V
+    assert spec.shape == VideoTaskShape.TEXT2VIDEO
 
 
 def test_video_edit_requires_explicit_task_mode():
