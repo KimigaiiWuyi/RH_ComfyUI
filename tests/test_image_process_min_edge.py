@@ -269,3 +269,64 @@ def test_prepare_seedance_image_ref_clears_url_after_crop():
     assert out.url is None
     assert out.data is not None
     _assert_seedance_aspect_ok(*_open(out.data).size)
+
+
+def test_prepare_request_clamps_audio_and_inlines(monkeypatch):
+    raw_audio = b"FAKEAUDIO" * 32
+    trimmed = b"TRIMMEDAUDIO" * 16
+
+    async def _fake_audio(data, **kwargs):
+        assert data == raw_audio
+        return trimmed, 15.0, "trim"
+
+    monkeypatch.setattr(
+        "RH_ComfyUI.models.video.overrides.clamp_seedance_ref_audio",
+        _fake_audio,
+        raising=False,
+    )
+    # 函数是 prepare_request 内 import 的,补 patch 模块路径
+    import RH_ComfyUI.utils.audio_process as audio_mod
+
+    monkeypatch.setattr(audio_mod, "clamp_seedance_ref_audio", _fake_audio)
+
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="配乐",
+        audio_refs=[MediaRef(kind=MediaKind.AUDIO, data=raw_audio, url="https://cdn.example.com/long.m4a")],
+        ordered_content=[
+            ContentItem(
+                type=ContentItemType.AUDIO,
+                media=MediaRef(kind=MediaKind.AUDIO, data=raw_audio, url="https://cdn.example.com/long.m4a"),
+            ),
+        ],
+    )
+    out = asyncio.run(Seedance2Def().prepare_request(req))
+    assert out.audio_refs[0].data == trimmed
+    assert out.audio_refs[0].url is None
+    oc = out.ordered_content[0]
+    assert oc.media is not None
+    assert oc.media.data == trimmed
+    assert oc.media.url is None
+
+
+def test_prepare_request_seedance25_video_uses_30s_max(monkeypatch):
+    seen: dict[str, float] = {}
+
+    async def _fake_video(data, **kwargs):
+        seen["max_s"] = kwargs.get("max_s", 0)
+        seen["min_pixels"] = kwargs.get("min_pixels", 0)
+        return data, 18.0, None
+
+    import RH_ComfyUI.utils.video_process as video_mod
+
+    monkeypatch.setattr(video_mod, "prepare_seedance_ref_video", _fake_video)
+
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="长镜头",
+        video_refs=[MediaRef(kind=MediaKind.VIDEO, data=b"VID" * 16)],
+    )
+    asyncio.run(Seedance25Def().prepare_request(req))
+    assert seen["max_s"] == 30.0
+    assert seen["min_pixels"] == 407696
+
