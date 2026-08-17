@@ -382,7 +382,7 @@ class Seedance25Def(Seedance25VideoModel):
                 "\n"
                 "编辑/延长/首尾帧必须 ratio=adaptive,否则上游异步报错。"
                 "\n"
-                "支持时长:4~30 秒,或 -1 跟随输入视频(仅 edit/extend)。"
+                "支持时长:4~30 秒,或 -1 自动(所有 task_mode / frame_mode 均可)。"
                 "\n"
             ),
             requirements=["seedance_apikey"],
@@ -470,7 +470,7 @@ class Seedance25Def(Seedance25VideoModel):
                     minimum=-1,
                     maximum=30,
                     title="时长",
-                    description=("输出时长(秒):4~30;填 -1 表示跟随输入视频时长(仅 edit/extend 合法)"),
+                    description=("输出时长(秒):4~30;填 -1 表示自动(所有模式均可,有参考视频时跟随输入)"),
                 ),
                 "seed": PortSpec(type=PortType.INTEGER, title="随机种子", description="随机种子,留空则随机"),
                 "generate_audio": PortSpec(

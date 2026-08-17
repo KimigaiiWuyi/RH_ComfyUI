@@ -291,7 +291,7 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
             body["model"] = model
         if spec.ratio is not None:
             body["ratio"] = spec.ratio
-        # duration=-1 必须原样透传(2.5 编辑/延长「跟随输入」);0/None 不写
+        # duration=-1 必须原样透传(2.5 自动时长);0/None 不写
         if spec.duration is not None and int(spec.duration) != 0:
             body["duration"] = int(spec.duration)
         if spec.resolution is not None:

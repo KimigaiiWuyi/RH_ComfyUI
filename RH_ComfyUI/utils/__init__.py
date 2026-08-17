@@ -16,7 +16,12 @@ from .image_process import (
     build_process_pipeline,
     compress_to_max_pixels,
     preprocess_for_camera_angle,
+    preprocess_for_outpaint,
+    plan_outpaint_scale,
+    bump_zero_outpaint_pads,
     compress_to_max_pixels_async,
+    OUTPAINT_MAX_SIDE,
+    OUTPAINT_WORKFLOW_MIN_PAD,
 )
 
 __all__ = [
@@ -33,6 +38,11 @@ __all__ = [
     "build_process_pipeline",
     "preprocess_for_video",
     "preprocess_for_camera_angle",
+    "preprocess_for_outpaint",
+    "plan_outpaint_scale",
+    "bump_zero_outpaint_pads",
+    "OUTPAINT_MAX_SIDE",
+    "OUTPAINT_WORKFLOW_MIN_PAD",
     "compress_to_max_pixels",
     "compress_to_max_pixels_async",
     "DEFAULT_MAX_PIXELS",

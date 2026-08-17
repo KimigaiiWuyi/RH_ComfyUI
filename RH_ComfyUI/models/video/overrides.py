@@ -372,15 +372,9 @@ class Seedance25VideoModel(SeedanceVideoModel):
         n_img = len(request.images)
         has_av = bool(request.video_refs or request.audio_refs)
 
-        # duration=-1 仅编辑/延长合法;其余形态要求 4~30
-        if duration == -1:
-            if task_mode not in ("edit", "extend") and not request.video_refs:
-                raise ValidationError(
-                    f"{self.display_name} 的 duration=-1 仅用于视频编辑/延长"
-                    "(请设 task_mode=edit 或 extend,并提供参考视频)"
-                )
-        elif duration is not None and duration != 0 and not (4 <= int(duration) <= 30):
-            raise ValidationError(f"{self.display_name} 时长须为 4~30 秒或 -1(跟随输入),当前 {duration}")
+        # duration=-1 = 自动时长,文生 / 多参考 / 首尾帧 / 编辑 / 延长均合法
+        if duration is not None and duration != 0 and duration != -1 and not (4 <= int(duration) <= 30):
+            raise ValidationError(f"{self.display_name} 时长须为 4~30 秒或 -1(自动),当前 {duration}")
 
         # 官方约束:视频编辑 / 延长 / 首帧·首尾帧 必须 ratio=adaptive,自定义比例会异步报错
         # 多模态参考(带视频/音频,或 frame_mode=reference)与纯文生可用自定义比例

@@ -148,6 +148,53 @@ def test_text2video_allows_custom_ratio():
     m.validate(req)  # 不抛
 
 
+def test_duration_minus_one_allowed_in_all_modes():
+    """duration=-1 是自动时长,文生 / 多参考 / 首尾帧 / 编辑 / 延长均合法。"""
+    m = Seedance25Def()
+    cases = [
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="文生自动时长",
+            duration=-1,
+            ratio="16:9",
+        ),
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="多参考自动时长",
+            images=[b"\x89PNG\r\n\x1a\n" + b"\x00" * 16],
+            duration=-1,
+            ratio="16:9",
+            params={"frame_mode": "reference", "task_mode": "auto"},
+        ),
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="首尾帧自动时长",
+            images=[b"A", b"B"],
+            duration=-1,
+            ratio="adaptive",
+            params={"frame_mode": "first_last"},
+        ),
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="延长",
+            video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")],
+            duration=-1,
+            ratio="adaptive",
+            params={"task_mode": "extend"},
+        ),
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="编辑",
+            video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")],
+            duration=-1,
+            ratio="adaptive",
+            params={"task_mode": "edit"},
+        ),
+    ]
+    for req in cases:
+        m.validate(req)
+
+
 def test_reject_camera_fixed():
     m = Seedance25Def()
     req = GenerationRequest(

@@ -483,6 +483,409 @@ def preprocess_for_camera_angle(data: bytes, max_long_edge: int = 1080) -> bytes
     return buf.getvalue()
 
 
+# ── 扩图(outpaint)尺寸规划 ─────────────────────────────────────
+# RunningHub 该应用输出最长边上限 1280。原图过大或目标画布过大时,
+# 先按目标画布等比缩小原图与四向 padding,生成后再由调用方按 intended 尺寸展示。
+
+OUTPAINT_MAX_SIDE: int = 1280
+
+# 上游工作流四向都不能为 0；为 0 的边先抬到此值，调用方回图后再裁掉。
+OUTPAINT_WORKFLOW_MIN_PAD: int = 100
+
+# 腾讯云混元 ImageOutpainting 官方 Ratio,且不得与原图宽高比相同。
+TX_OUTPAINT_RATIOS: tuple[str, ...] = ("1:1", "4:3", "3:4", "16:9", "9:16")
+TX_OUTPAINT_RATIO_EPS: float = 0.03
+
+
+def _as_nonneg_int(value: object, default: int = 0) -> int:
+    try:
+        n = int(round(float(value)))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return max(0, n)
+
+
+def parse_ratio_label(label: object) -> float | None:
+    """把 ``16:9`` 解析成宽/高;非法返回 None。"""
+    text = str(label or "").strip()
+    parts = text.split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        w = float(parts[0])
+        h = float(parts[1])
+    except (TypeError, ValueError):
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    return w / h
+
+
+def source_matches_tx_ratio(
+    src_w: int,
+    src_h: int,
+    ratio: str,
+    *,
+    eps: float = TX_OUTPAINT_RATIO_EPS,
+) -> bool:
+    """原图宽高比是否已经等于腾讯 Ratio(相等时上游会拒收)。"""
+    target = parse_ratio_label(ratio)
+    if target is None:
+        return False
+    w = max(1, int(src_w))
+    h = max(1, int(src_h))
+    return abs((w / h) - target) / target < eps
+
+
+def pick_tx_outpaint_ratio(
+    src_w: int,
+    src_h: int,
+    preferred: str | None = None,
+    intended_w: int | None = None,
+    intended_h: int | None = None,
+    *,
+    eps: float = TX_OUTPAINT_RATIO_EPS,
+) -> str | None:
+    """选出合法且不等于原图比例的腾讯 Ratio。
+
+    优先用 ``preferred``;否则按 intended 画布找最接近的官方比例。
+    原图已经是该比例、或 intended 仍是原图比例时返回 None(调用方应拒收)。
+    """
+    pref = str(preferred or "").strip()
+    if pref in TX_OUTPAINT_RATIOS and not source_matches_tx_ratio(src_w, src_h, pref, eps=eps):
+        return pref
+
+    iw = int(intended_w or 0)
+    ih = int(intended_h or 0)
+    if iw >= 2 and ih >= 2:
+        intended_ar = iw / float(ih)
+        src_ar = max(1, int(src_w)) / float(max(1, int(src_h)))
+        if abs(intended_ar - src_ar) / max(src_ar, 1e-6) < eps:
+            return None
+        best: str | None = None
+        best_score = 1e18
+        for label in TX_OUTPAINT_RATIOS:
+            if source_matches_tx_ratio(src_w, src_h, label, eps=eps):
+                continue
+            ar = parse_ratio_label(label)
+            if ar is None:
+                continue
+            score = abs(ar - intended_ar) / intended_ar
+            if score < best_score:
+                best_score = score
+                best = label
+        return best
+    return None
+
+
+def expand_pads_to_aspect(
+    src_w: int,
+    src_h: int,
+    top: int,
+    left: int,
+    right: int,
+    bottom: int,
+    target_ar: float,
+) -> tuple[int, int, int, int]:
+    """抬升 0 边后若画布比例偏离目标,在已扩展方向补 pad,让送出画布回到目标比例。"""
+    w = max(1, int(src_w))
+    h = max(1, int(src_h))
+    t, l, r, b = (max(0, int(top)), max(0, int(left)), max(0, int(right)), max(0, int(bottom)))
+    if not (target_ar > 0):
+        return t, l, r, b
+    send_w = w + l + r
+    send_h = h + t + b
+    send_ar = send_w / float(send_h)
+    if abs(send_ar - target_ar) / target_ar < 0.01:
+        return t, l, r, b
+    if send_ar < target_ar:
+        extra = max(0.0, send_h * target_ar - send_w)
+        sl = l + r
+        dl = extra * (l / sl) if sl > 0 else extra / 2.0
+        dr = extra - dl
+        return t, int(round(l + dl)), int(round(r + dr)), b
+    extra = max(0.0, send_w / target_ar - send_h)
+    st = t + b
+    dt = extra * (t / st) if st > 0 else extra / 2.0
+    db = extra - dt
+    return int(round(t + dt)), l, r, int(round(b + db))
+
+
+def bump_zero_outpaint_pads(
+    top: object = 0,
+    left: object = 0,
+    right: object = 0,
+    bottom: object = 0,
+    *,
+    min_pad: int = OUTPAINT_WORKFLOW_MIN_PAD,
+) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int]]:
+    """把为 0 的边抬到 min_pad。返回 (send, crop)，均为 (top, left, right, bottom)。"""
+    floor = max(1, int(min_pad))
+    user = (
+        _as_nonneg_int(top),
+        _as_nonneg_int(left),
+        _as_nonneg_int(right),
+        _as_nonneg_int(bottom),
+    )
+    send: list[int] = []
+    crop: list[int] = []
+    for value in user:
+        if value <= 0:
+            send.append(floor)
+            crop.append(floor)
+        else:
+            send.append(value)
+            crop.append(0)
+    return (send[0], send[1], send[2], send[3]), (crop[0], crop[1], crop[2], crop[3])
+
+
+def plan_outpaint_scale(
+    src_w: int,
+    src_h: int,
+    top: object = 0,
+    left: object = 0,
+    right: object = 0,
+    bottom: object = 0,
+    *,
+    max_side: int = OUTPAINT_MAX_SIDE,
+) -> dict[str, int | float]:
+    """按原图像素与四向扩展量规划「送给上游的图 / padding」和「intended 展示尺寸」。
+
+    输入 top/left/right/bottom 一律按**原图像素空间**理解。
+    若 (src + pad) 任一边超过 max_side,则等比缩小原图与 pad,使输出落在上限内。
+
+    Returns:
+        scale, send_w/send_h(送给上游的原图尺寸), top/left/right/bottom(送给上游的 pad),
+        out_w/out_h(上游实际输出), intended_w/intended_h(调用方应展示的目标尺寸)。
+    """
+    src_w = max(1, int(src_w))
+    src_h = max(1, int(src_h))
+    cap = max(1, int(max_side))
+    pad_t = _as_nonneg_int(top)
+    pad_l = _as_nonneg_int(left)
+    pad_r = _as_nonneg_int(right)
+    pad_b = _as_nonneg_int(bottom)
+
+    intended_w = src_w + pad_l + pad_r
+    intended_h = src_h + pad_t + pad_b
+    scale = min(1.0, cap / float(intended_w), cap / float(intended_h))
+
+    if scale >= 1.0:
+        return {
+            "scale": 1.0,
+            "send_w": src_w,
+            "send_h": src_h,
+            "top": pad_t,
+            "left": pad_l,
+            "right": pad_r,
+            "bottom": pad_b,
+            "out_w": intended_w,
+            "out_h": intended_h,
+            "intended_w": intended_w,
+            "intended_h": intended_h,
+        }
+
+    send_w = max(1, int(round(src_w * scale)))
+    send_h = max(1, int(round(src_h * scale)))
+    send_t = max(1, int(round(pad_t * scale))) if pad_t > 0 else 0
+    send_l = max(1, int(round(pad_l * scale))) if pad_l > 0 else 0
+    send_r = max(1, int(round(pad_r * scale))) if pad_r > 0 else 0
+    send_b = max(1, int(round(pad_b * scale))) if pad_b > 0 else 0
+
+    def _fit(src: int, a: int, b: int) -> tuple[int, int, int]:
+        while src + a + b > cap:
+            if a >= b and a > 0:
+                a -= 1
+            elif b > 0:
+                b -= 1
+            elif src > 1:
+                src -= 1
+            else:
+                break
+        return src, a, b
+
+    send_w, send_l, send_r = _fit(send_w, send_l, send_r)
+    send_h, send_t, send_b = _fit(send_h, send_t, send_b)
+
+    return {
+        "scale": scale,
+        "send_w": send_w,
+        "send_h": send_h,
+        "top": send_t,
+        "left": send_l,
+        "right": send_r,
+        "bottom": send_b,
+        "out_w": send_w + send_l + send_r,
+        "out_h": send_h + send_t + send_b,
+        "intended_w": intended_w,
+        "intended_h": intended_h,
+    }
+
+
+def scale_and_crop_outpaint(
+    data: bytes,
+    intended_w: int,
+    intended_h: int,
+    *,
+    pre_w: int = 0,
+    pre_h: int = 0,
+    crop_top: int | None = None,
+    crop_left: int | None = None,
+    crop_right: int | None = None,
+    crop_bottom: int | None = None,
+    user_top: int = 0,
+    user_left: int = 0,
+    user_right: int = 0,
+    user_bottom: int = 0,
+) -> tuple[bytes, tuple[int, int, int, int]]:
+    """回图当作含四向扩展的规划画布:只裁抬升边占比,再等比缩到 intended。
+
+    返回 (png 字节, (sx, sy, sw, sh)),坐标在回图像素空间。
+    """
+    iw = max(2, int(intended_w))
+    ih = max(2, int(intended_h))
+    floor = OUTPAINT_WORKFLOW_MIN_PAD
+
+    def _crop(explicit: int | None, user_pad: int) -> int:
+        if explicit is None:
+            return floor if int(user_pad) <= 0 else 0
+        return max(0, int(explicit))
+
+    ct = _crop(crop_top, user_top)
+    cl = _crop(crop_left, user_left)
+    cr = _crop(crop_right, user_right)
+    cb = _crop(crop_bottom, user_bottom)
+    pw = max(1, int(pre_w) if pre_w else iw + cl + cr)
+    ph = max(1, int(pre_h) if pre_h else ih + ct + cb)
+
+    try:
+        from PIL import Image
+    except ImportError:
+        return data, (0, 0, 0, 0)
+
+    try:
+        img = Image.open(BytesIO(data))
+        img.load()
+    except Exception:  # noqa: BLE001
+        return data, (0, 0, 0, 0)
+
+    aw, ah = img.size
+    if aw < 2 or ah < 2:
+        return data, (0, 0, aw, ah)
+
+    # 先不缩放：在回图里切最大 intended 比例，再等比缩到 intended。
+    # 1600x1400 + 16:9 → 窗 1600x900，再缩到 intended。
+    target_ar = iw / float(ih)
+    actual_ar = aw / float(ah)
+    sx, sy, sw, sh = 0.0, 0.0, float(aw), float(ah)
+
+    def _split(extra: float, pad_a: int, pad_b: int) -> float:
+        if extra <= 0:
+            return 0.0
+        a_zero = pad_a <= 0
+        b_zero = pad_b <= 0
+        if a_zero and not b_zero:
+            return extra
+        if not a_zero and b_zero:
+            return 0.0
+        return extra / 2.0
+
+    if actual_ar > target_ar + 1e-6:
+        sw = ah * target_ar
+        sx = _split(aw - sw, int(user_left), int(user_right))
+    elif actual_ar < target_ar - 1e-6:
+        sh = aw / target_ar
+        sy = _split(ah - sh, int(user_top), int(user_bottom))
+
+    x1 = max(0, min(aw - 1, int(round(sx))))
+    y1 = max(0, min(ah - 1, int(round(sy))))
+    x2 = max(x1 + 1, min(aw, int(round(sx + sw))))
+    y2 = max(y1 + 1, min(ah, int(round(sy + sh))))
+    cropped = img.crop((x1, y1, x2, y2))
+    cw, ch = cropped.size
+    if cw < 2 or ch < 2:
+        return data, (x1, y1, x2 - x1, y2 - y1)
+    scale = min(iw / float(cw), ih / float(ch))
+    dw = max(2, int(round(cw * scale)))
+    dh = max(2, int(round(ch * scale)))
+    if (cw, ch) != (dw, dh):
+        resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1)
+        cropped = cropped.resize((dw, dh), resampling)
+    buf = BytesIO()
+    cropped.save(buf, format="PNG")
+    return buf.getvalue(), (x1, y1, x2 - x1, y2 - y1)
+
+
+def crop_image_to_aspect(
+    data: bytes,
+    intended_w: int,
+    intended_h: int,
+    *,
+    user_top: int = 0,
+    user_left: int = 0,
+    user_right: int = 0,
+    user_bottom: int = 0,
+    min_pad: int = OUTPAINT_WORKFLOW_MIN_PAD,
+) -> tuple[bytes, tuple[int, int, int, int]]:
+    """兼容入口:按抬升边占比裁,再等比缩。"""
+    floor = max(1, int(min_pad))
+    ct = floor if int(user_top) <= 0 else 0
+    cl = floor if int(user_left) <= 0 else 0
+    cr = floor if int(user_right) <= 0 else 0
+    cb = floor if int(user_bottom) <= 0 else 0
+    return scale_and_crop_outpaint(
+        data,
+        intended_w,
+        intended_h,
+        pre_w=int(intended_w) + cl + cr,
+        pre_h=int(intended_h) + ct + cb,
+        crop_top=ct,
+        crop_left=cl,
+        crop_right=cr,
+        crop_bottom=cb,
+    )
+
+
+def preprocess_for_outpaint(
+    data: bytes,
+    top: object = 0,
+    left: object = 0,
+    right: object = 0,
+    bottom: object = 0,
+    *,
+    max_side: int = OUTPAINT_MAX_SIDE,
+) -> tuple[bytes, dict[str, int | float]]:
+    """扩图预处理:读原图尺寸,按 max_side 规划后必要时缩小原图。
+
+    异常或缺少 Pillow 时返回原始字节 + 未缩放 plan(调用方仍可按原 pad 提交)。
+    输出统一 PNG,绝不放大原图。
+    """
+    fallback = plan_outpaint_scale(1, 1, top, left, right, bottom, max_side=max_side)
+    try:
+        from PIL import Image
+    except ImportError:
+        return data, fallback
+
+    try:
+        img = Image.open(BytesIO(data))
+        img.load()
+    except Exception:  # noqa: BLE001
+        return data, fallback
+
+    w, h = img.size
+    plan = plan_outpaint_scale(w, h, top, left, right, bottom, max_side=max_side)
+    send_w = int(plan["send_w"])
+    send_h = int(plan["send_h"])
+    if send_w == w and send_h == h:
+        return data, plan
+
+    resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1)
+    resized = img.resize((send_w, send_h), resampling)
+    buf = BytesIO()
+    resized.save(buf, format="PNG")
+    return buf.getvalue(), plan
+
+
 # ── 像素量压缩(上传/传输前瘦身) ─────────────────────────────────
 
 # 默认 1080P 像素量阈值(1920×1080 ≈ 207 万像素)。
@@ -632,6 +1035,19 @@ __all__ = [
     "build_process_pipeline",
     "preprocess_for_video",
     "preprocess_for_camera_angle",
+    "preprocess_for_outpaint",
+    "plan_outpaint_scale",
+    "bump_zero_outpaint_pads",
+    "expand_pads_to_aspect",
+    "crop_image_to_aspect",
+    "scale_and_crop_outpaint",
+    "OUTPAINT_MAX_SIDE",
+    "OUTPAINT_WORKFLOW_MIN_PAD",
+    "TX_OUTPAINT_RATIOS",
+    "TX_OUTPAINT_RATIO_EPS",
+    "parse_ratio_label",
+    "source_matches_tx_ratio",
+    "pick_tx_outpaint_ratio",
     "compress_to_max_pixels",
     "compress_to_max_pixels_async",
     "DEFAULT_MAX_PIXELS",

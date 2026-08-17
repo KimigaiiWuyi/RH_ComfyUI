@@ -19,6 +19,7 @@
 | `rh_app` | `rh_app/` | RunningHub **AI 应用** | webapp id=`workflow_file`;与 comfyui **不同 API**;**无** remote cancel;可 query resume |
 | `minimax` | `minimax/` | MiniMax | 图片 + 语音(T2A) |
 | `mimo` | `mimo/` | MiMo TTS | 语音 |
+| `tx_aiart` | `tx_aiart/` | 腾讯云混元 AI 艺术 | ImageOutpainting 扩图;TC3-HMAC,不依赖官方 SDK;凭证 `TX_AIArt_secret_id` / `TX_AIArt_secret_key` |
 
 > **Seedance 不在此表**:它不再是 Adapter。每家供应商(ark/runninghub/网关)
 > = 一个 `SeedanceProviderChannel`(`seedance/channel.py`),由通用 `LoadBalancer`
@@ -94,6 +95,7 @@ PortSpec。两者必须同步(mapper 消费的字段要在 inputs 里声明)。
 | `Seedance_Dry_Run` | Seedance 干跑(拦截出站请求 + 打印;抛 `DryRunInterrupt` 终止,积分自动退款) |
 | `OpenAI_Image_Providers` | OpenAI 兼容供应商池(重复组,每行一家,含 `weight` 负载权重;见 13 章;增删/改映射/改权重后需 `rh 刷新供应商`) |
 | `Load_Balance_Mode` / `Failure_Threshold` | 全模态通用的负载均衡策略 / 熔断阈值(每次决策实时读取,改完即生效;旧 `Seedance_Load_Balance` / `Seedance_Failure_Threshold` 已迁移至此) |
+| `TX_AIArt_secret_id` / `TX_AIArt_secret_key` / `TX_AIArt_region` | 腾讯云混元扩图(`tx_aiart`);region 默认 `ap-guangzhou` |
 
 **PLUGIN_CONFIG(plugin_config.py)— 插件行为**
 
@@ -128,6 +130,7 @@ header value b'Bearer '` 或旧 URL 持续报错。
 | `seedance` | `Seedance_apikey_*` + `Seedance_BaseURL_*` | provider 用 `update_credentials()` | ✅ `SeedanceProviderChannel._get_provider` 每次比对新旧值再热更新 |
 | `openai_image` 供应商池 | `OpenAI_Image_Providers` 行内 key/url | `credentials_resolver` 每请求实时解析 | ✅ 凭证即时;增删供应商/改映射需 `rh 刷新供应商` |
 | `gemini_image` | `Gemini_Image_*` | 全 `@property` 直读 | ✅ 每次请求即时 |
+| `tx_aiart` | `TX_AIArt_secret_id` / `TX_AIArt_secret_key` / `TX_AIArt_region` | `@property` 直读 | ✅ 每次请求即时 |
 | 负载均衡器 | `Load_Balance_Mode` / `Failure_Threshold` | `config_resolver` 每次决策实时读 | ✅ 改完即生效(2026-07-10 起) |
 
 ### 红线:不要在 `__init__` 里把 `api_key` 存成实例属性

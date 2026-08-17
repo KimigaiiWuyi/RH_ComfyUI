@@ -26,7 +26,7 @@
   doubao-seedance-2.5 (仅 480p/720p,时长 4~30s 或 -1):
     无输入视频 70 元/M tokens,有输入视频 42 元/M tokens
     例:720p 16:9 5s 无输入 → 108000 tokens × 70 元/M = 7.56 元 = 756 积分
-    duration=-1(跟随输入)时:输出时长优先取输入视频总时长,否则 15s。
+    duration=-1(自动)时:输出时长优先取输入视频总时长,否则 15s。
 
 point_cost 仅作兜底。
 """
@@ -313,7 +313,7 @@ def estimate_seedance25_points(
 ) -> int:
     """Seedance 2.5 估算积分(仅 480p/720p;时长 4~30 或 -1)。
 
-    duration=-1 时:输出时长 = 输入视频总时长(若 >0),否则 15s。
+    duration=-1(自动)时:输出时长 = 输入视频总时长(若 >0),否则 15s。
     """
     in_dur = resolve_input_video_duration(video_refs, input_video_duration=input_video_duration)
     has_input = in_dur > 0 or _has_input_video(video_refs)

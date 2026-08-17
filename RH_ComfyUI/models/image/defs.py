@@ -375,6 +375,487 @@ class ImageUpscaleDef(ImagePipelineModel):
             raise ValidationError(f"{self.display_name}:必须提供 1 张待放大原图")
 
 
+class ImageOutpaintDef(ImagePipelineModel):
+    """RH 扩图 — RunningHub AI App 2089261625797861377
+
+    单张输入图 + 四向扩展像素 + 可选提示词 → 扩图画布。
+    走 rh_app OpenAPI v2(nodeInfoList),凭证复用 RH_apikey。
+    上游输出最长边上限 1280:normalize() 会按目标画布等比缩小原图与 padding。
+    固定积分 point_cost(无动态计费)。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="rh_image_outpaint",
+            display_name="RH 扩图",
+            task_type=TaskType("image"),
+            catalog_group="tool",
+            backend="rh_app",
+            point_cost=2,
+            description="基于 RunningHub AI 应用的图片扩图,按四向扩展像素向外补全画面",
+            knowledge_content=(
+                "RH 扩图基于 RunningHub AI App 2089261625797861377 实现四向扩图。"
+                "\n"
+                "优势:在原图四周按指定像素向外延展画面,可配合简短提示词引导补全内容。"
+                "\n"
+                "输入:必传 1 张参考图;params.top/left/right/bottom 为原图像素空间的扩展量,"
+                "至少一侧 > 0;prompt 可选。"
+                "\n"
+                "限制:上游工作流四向都不能为 0,提交前会把 0 边抬到 100;"
+                "调用方应按用户本意在回图后裁掉抬升量。"
+                "上游输出最长边不超过 1280。原图或目标画布过大时会先等比缩小再扩图。"
+                "\n"
+                "凭证:复用 RH_apikey(RunningHub 通用 key)。"
+                "\n"
+            ),
+            requirements=["rh_apikey"],
+            workflow_file="2089261625797861377",
+            mode="declarative",
+            mappings=[
+                {
+                    "source": "images.0",
+                    "target": "141.image",
+                    "type": "upload_image",
+                    "description": "image",
+                },
+                {
+                    "source": "params.top",
+                    "target": "237.top",
+                    "description": "top",
+                },
+                {
+                    "source": "params.left",
+                    "target": "237.left",
+                    "description": "left",
+                },
+                {
+                    "source": "params.right",
+                    "target": "237.right",
+                    "description": "right",
+                },
+                {
+                    "source": "params.bottom",
+                    "target": "237.bottom",
+                    "description": "bottom",
+                },
+                {
+                    "source": "prompt",
+                    "target": "142.text",
+                    "description": "text",
+                },
+            ],
+            inputs={
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    required=True,
+                    min_items=1,
+                    max_items=1,
+                    item_type=PortType.IMAGE,
+                    title="参考图",
+                    description="待扩图原图(必传 1 张)",
+                ),
+                "top": PortSpec(
+                    type=PortType.INTEGER,
+                    default=0,
+                    minimum=0,
+                    title="上扩展",
+                    description="原图像素空间的上方扩展量",
+                ),
+                "left": PortSpec(
+                    type=PortType.INTEGER,
+                    default=0,
+                    minimum=0,
+                    title="左扩展",
+                    description="原图像素空间的左侧扩展量",
+                ),
+                "right": PortSpec(
+                    type=PortType.INTEGER,
+                    default=0,
+                    minimum=0,
+                    title="右扩展",
+                    description="原图像素空间的右侧扩展量",
+                ),
+                "bottom": PortSpec(
+                    type=PortType.INTEGER,
+                    default=0,
+                    minimum=0,
+                    title="下扩展",
+                    description="原图像素空间的下方扩展量",
+                ),
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=False,
+                    default="",
+                    title="提示词",
+                    description="可选,描述希望如何补全扩展区域",
+                ),
+            },
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="扩图后的图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="async_poll",
+                priority=55,
+            ),
+        )
+
+    @staticmethod
+    def _read_pad(params: dict, key: str) -> int:
+        raw = params.get(key, 0)
+        try:
+            n = int(round(float(raw)))
+        except (TypeError, ValueError):
+            return 0
+        return max(0, n)
+
+    def validate(self, request: GenerationRequest) -> None:
+        super().validate(request)
+        if not request.images:
+            raise ValidationError(f"{self.display_name}:必须提供 1 张待扩图原图")
+        params = request.params or {}
+        top = self._read_pad(params, "top")
+        left = self._read_pad(params, "left")
+        right = self._read_pad(params, "right")
+        bottom = self._read_pad(params, "bottom")
+        if top + left + right + bottom <= 0:
+            raise ValidationError(f"{self.display_name}:至少需要一侧扩展量大于 0")
+
+    def normalize(self, request: GenerationRequest) -> GenerationRequest:
+        """0 边抬到 100 并补回目标比例;pad 用原图像素传给上游。"""
+        params = dict(request.params or {})
+        top = self._read_pad(params, "top")
+        left = self._read_pad(params, "left")
+        right = self._read_pad(params, "right")
+        bottom = self._read_pad(params, "bottom")
+        keep_iw = params.get("intended_width")
+        keep_ih = params.get("intended_height")
+        if request.images:
+            from ...utils.image_process import bump_zero_outpaint_pads
+
+            send, _crop = bump_zero_outpaint_pads(top, left, right, bottom)
+            from io import BytesIO
+
+            from PIL import Image
+
+            from ...utils.image_process import expand_pads_to_aspect
+
+            raw = request.images[0]
+            sw, sh = 1, 1
+            try:
+                src_im = Image.open(BytesIO(raw))
+                src_im.load()
+                sw, sh = src_im.size
+            except Exception:  # noqa: BLE001
+                src_im = None
+            try:
+                iw = float(keep_iw) if keep_iw is not None else 0.0
+                ih = float(keep_ih) if keep_ih is not None else 0.0
+            except (TypeError, ValueError):
+                iw, ih = 0.0, 0.0
+            if iw > 1 and ih > 1 and sw > 1 and sh > 1:
+                send = expand_pads_to_aspect(sw, sh, send[0], send[1], send[2], send[3], iw / ih)
+            params["top"] = max(1, int(send[0]))
+            params["left"] = max(1, int(send[1]))
+            params["right"] = max(1, int(send[2]))
+            params["bottom"] = max(1, int(send[3]))
+            if keep_iw is not None:
+                params["intended_width"] = keep_iw
+            else:
+                params["intended_width"] = max(1, sw + send[1] + send[2] - _crop[1] - _crop[2])
+            if keep_ih is not None:
+                params["intended_height"] = keep_ih
+            else:
+                params["intended_height"] = max(1, sh + send[0] + send[3] - _crop[0] - _crop[3])
+            params.setdefault("user_top", top)
+            params.setdefault("user_left", left)
+            params.setdefault("user_right", right)
+            params.setdefault("user_bottom", bottom)
+            request.params = params
+        return super().normalize(request)
+
+    async def run(self, request: GenerationRequest, *, on_progress=None):
+        output = await super().run(request, on_progress=on_progress)
+        return self._crop_output(output, request)
+
+    def _crop_output(self, output, request: GenerationRequest):
+        """回图等比铺满 intended,再裁到规划像素。"""
+        data = getattr(output, "data", None)
+        if not data or getattr(output, "status", "ok") != "ok":
+            return output
+        params = request.params or {}
+        from ...utils.image_process import scale_and_crop_outpaint
+
+        try:
+            iw = int(round(float(params.get("intended_width") or 0)))
+            ih = int(round(float(params.get("intended_height") or 0)))
+        except (TypeError, ValueError):
+            return output
+        if iw < 2 or ih < 2:
+            return output
+
+        def _opt(key: str, fallback: int) -> int:
+            if key not in params or params.get(key) is None:
+                return fallback
+            return self._read_pad(params, key)
+
+        def _opt_or_none(key: str) -> int | None:
+            if key not in params or params.get(key) is None:
+                return None
+            return self._read_pad(params, key)
+
+        cropped, box = scale_and_crop_outpaint(
+            data,
+            iw,
+            ih,
+            pre_w=_opt("pre_width", 0),
+            pre_h=_opt("pre_height", 0),
+            crop_top=_opt_or_none("crop_top"),
+            crop_left=_opt_or_none("crop_left"),
+            crop_right=_opt_or_none("crop_right"),
+            crop_bottom=_opt_or_none("crop_bottom"),
+            user_top=_opt("user_top", 0),
+            user_left=_opt("user_left", 0),
+            user_right=_opt("user_right", 0),
+            user_bottom=_opt("user_bottom", 0),
+        )
+        if not cropped or cropped is data:
+            return output
+        output.data = cropped
+        output.mime_type = "image/png"
+        outs = getattr(output, "outputs", None)
+        if isinstance(outs, dict):
+            if "image" in outs:
+                outs["image"] = cropped
+            if "main" in outs:
+                outs["main"] = cropped
+        meta = getattr(output, "metadata", None)
+        if isinstance(meta, dict):
+            meta["outpaint_crop"] = {"box": box, "intended": [iw, ih]}
+        return output
+
+
+def _apply_outpaint_intended_crop(output, request: GenerationRequest, read_pad):
+    """回图按 intended 等比裁切;RH / 腾讯扩图共用。"""
+    data = getattr(output, "data", None)
+    if not data or getattr(output, "status", "ok") != "ok":
+        return output
+    params = request.params or {}
+    from ...utils.image_process import scale_and_crop_outpaint
+
+    try:
+        iw = int(round(float(params.get("intended_width") or 0)))
+        ih = int(round(float(params.get("intended_height") or 0)))
+    except (TypeError, ValueError):
+        return output
+    if iw < 2 or ih < 2:
+        return output
+
+    def _opt(key: str, fallback: int) -> int:
+        if key not in params or params.get(key) is None:
+            return fallback
+        return read_pad(params, key)
+
+    def _opt_or_none(key: str):
+        if key not in params or params.get(key) is None:
+            return None
+        return read_pad(params, key)
+
+    cropped, box = scale_and_crop_outpaint(
+        data,
+        iw,
+        ih,
+        pre_w=_opt("pre_width", 0),
+        pre_h=_opt("pre_height", 0),
+        crop_top=_opt_or_none("crop_top"),
+        crop_left=_opt_or_none("crop_left"),
+        crop_right=_opt_or_none("crop_right"),
+        crop_bottom=_opt_or_none("crop_bottom"),
+        user_top=_opt("user_top", 0),
+        user_left=_opt("user_left", 0),
+        user_right=_opt("user_right", 0),
+        user_bottom=_opt("user_bottom", 0),
+    )
+    if not cropped or cropped is data:
+        return output
+    output.data = cropped
+    output.mime_type = "image/png"
+    outs = getattr(output, "outputs", None)
+    if isinstance(outs, dict):
+        if "image" in outs:
+            outs["image"] = cropped
+        if "main" in outs:
+            outs["main"] = cropped
+    meta = getattr(output, "metadata", None)
+    if isinstance(meta, dict):
+        meta["outpaint_crop"] = {"box": box, "intended": [iw, ih]}
+    return output
+
+
+class TxImageOutpaintDef(ImagePipelineModel):
+    """腾讯云混元扩图 — ImageOutpainting
+
+    单张输入图 + 官方 Ratio(1:1 / 4:3 / 3:4 / 16:9 / 9:16) → 扩图。
+    Ratio 不得与原图宽高比相同。凭证:TX_AIArt_secret_id / TX_AIArt_secret_key。
+    固定积分 point_cost(无动态计费)。
+    """
+
+    required_config = ["TX_AIArt_secret_id", "TX_AIArt_secret_key"]
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        from ...utils.image_process import TX_OUTPAINT_RATIOS
+
+        return NodeDef(
+            name="tx_image_outpaint",
+            display_name="腾讯云扩图",
+            task_type=TaskType("image"),
+            catalog_group="tool",
+            backend="tx_aiart",
+            point_cost=2,
+            description="基于腾讯云混元 ImageOutpainting 的图片扩图,按官方画幅比例向外补全画面",
+            knowledge_content=(
+                "腾讯云混元扩图走 ImageOutpainting(aiart.tencentcloudapi.com)。"
+                "\n"
+                "优势:按官方比例(1:1 / 4:3 / 3:4 / 16:9 / 9:16)向外延展画面,无需四向 padding。"
+                "\n"
+                "输入:必传 1 张参考图;params.ratio 或顶层 ratio 为官方比例,且不能与原图宽高比相同。"
+                "\n"
+                "限制:不支持保持原图比例扩边;原图已是目标比例时会被拒绝。"
+                "\n"
+                "凭证:TX_AIArt_secret_id + TX_AIArt_secret_key(可选 TX_AIArt_region,默认 ap-guangzhou)。"
+                "\n"
+            ),
+            requirements=["TX_AIArt_secret_id", "TX_AIArt_secret_key"],
+            mode="programmatic",
+            inputs={
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    required=True,
+                    min_items=1,
+                    max_items=1,
+                    item_type=PortType.IMAGE,
+                    title="参考图",
+                    description="待扩图原图(必传 1 张)",
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    required=False,
+                    values=list(TX_OUTPAINT_RATIOS),
+                    title="画幅比例",
+                    description="官方 Ratio,不能与原图宽高比相同",
+                ),
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=False,
+                    default="",
+                    title="提示词",
+                    description="可选;本接口不消费提示词,仅透传记录",
+                ),
+            },
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="扩图后的图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="sync",
+                priority=60,
+            ),
+        )
+
+    @staticmethod
+    def _read_pad(params: dict, key: str) -> int:
+        raw = params.get(key, 0)
+        try:
+            n = int(round(float(raw)))
+        except (TypeError, ValueError):
+            return 0
+        return max(0, n)
+
+    @staticmethod
+    def _image_size(raw: bytes) -> tuple[int, int]:
+        from io import BytesIO
+
+        from PIL import Image
+
+        try:
+            im = Image.open(BytesIO(raw))
+            im.load()
+            return im.size
+        except Exception:  # noqa: BLE001
+            return 1, 1
+
+    def validate(self, request: GenerationRequest) -> None:
+        super().validate(request)
+        if not request.images:
+            raise ValidationError(f"{self.display_name}:必须提供 1 张待扩图原图")
+        params = request.params or {}
+        preferred = str(params.get("ratio") or request.ratio or "").strip()
+        if preferred:
+            from ...utils.image_process import TX_OUTPAINT_RATIOS, source_matches_tx_ratio
+
+            if preferred not in TX_OUTPAINT_RATIOS:
+                raise ValidationError(
+                    f"{self.display_name}:ratio 必须是 {', '.join(TX_OUTPAINT_RATIOS)}"
+                )
+            sw, sh = self._image_size(request.images[0])
+            if source_matches_tx_ratio(sw, sh, preferred):
+                raise ValidationError(
+                    f"{self.display_name}:目标比例 {preferred} 与原图相同,请换一个画幅"
+                )
+
+    def normalize(self, request: GenerationRequest) -> GenerationRequest:
+        params = dict(request.params or {})
+        preferred = str(params.get("ratio") or request.ratio or "").strip() or None
+        keep_iw = params.get("intended_width")
+        keep_ih = params.get("intended_height")
+        try:
+            iw = int(round(float(keep_iw))) if keep_iw is not None else 0
+        except (TypeError, ValueError):
+            iw = 0
+        try:
+            ih = int(round(float(keep_ih))) if keep_ih is not None else 0
+        except (TypeError, ValueError):
+            ih = 0
+        sw, sh = (1, 1)
+        if request.images:
+            sw, sh = self._image_size(request.images[0])
+        if iw < 2 or ih < 2:
+            top = self._read_pad(params, "top")
+            left = self._read_pad(params, "left")
+            right = self._read_pad(params, "right")
+            bottom = self._read_pad(params, "bottom")
+            if top + left + right + bottom > 0:
+                iw = sw + left + right
+                ih = sh + top + bottom
+        from ...utils.image_process import pick_tx_outpaint_ratio
+
+        ratio = pick_tx_outpaint_ratio(sw, sh, preferred, iw or None, ih or None)
+        if not ratio:
+            raise ValidationError(
+                f"{self.display_name}:无法确定合法画幅比例(不能与原图相同,且须为 1:1/4:3/3:4/16:9/9:16)"
+            )
+        params["ratio"] = ratio
+        request.ratio = ratio
+        if iw > 1:
+            params["intended_width"] = iw
+        if ih > 1:
+            params["intended_height"] = ih
+        request.params = params
+        return super().normalize(request)
+
+    async def run(self, request: GenerationRequest, *, on_progress=None):
+        output = await super().run(request, on_progress=on_progress)
+        return _apply_outpaint_intended_crop(output, request, self._read_pad)
+
+
 class Banana2Def(ImagePipelineModel):
     """Nano Banana 2 — 走原生 Gemini Interactions API(非 OpenAI 兼容网关)
 
@@ -1231,6 +1712,8 @@ ALL_MODELS = [
     CameraAngleDef,
     ImageMattingDef,
     ImageUpscaleDef,
+    ImageOutpaintDef,
+    TxImageOutpaintDef,
     GptImage2Def,
     MinimaxImage01Def,
     Qwen2511Def,

@@ -251,7 +251,7 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     if not request.ordered_content:
         media = _apply_default_roles(media, shape, frame_mode)
 
-    # duration=-1 是 Seedance 2.5 编辑/延长的「跟随输入」语义,必须透传,不能被 or 吃掉
+    # duration=-1 是 Seedance 2.5「自动时长」语义,必须透传,不能被 or 吃掉
     raw_duration = request.duration
     if raw_duration is None:
         duration = 5

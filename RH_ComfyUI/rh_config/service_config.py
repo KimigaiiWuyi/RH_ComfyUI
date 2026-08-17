@@ -307,4 +307,28 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "开启后,HappyHorse 出站请求会被拦截并打印完整请求体,不会真正调用上游。",
         False,
     ),
+    "divider_tx_aiart": GsDivider(
+        "腾讯云混元扩图",
+        "腾讯云混元 ImageOutpainting(aiart.tencentcloudapi.com)。"
+        "在控制台填写 SecretId / SecretKey 后,tx_image_outpaint 可用。",
+        "腾讯云混元扩图",
+    ),
+    "TX_AIArt_secret_id": GsStrConfig(
+        "腾讯云 SecretId",
+        "腾讯云 API 密钥 SecretId(用于混元 ImageOutpainting 扩图)。",
+        "",
+        secret=True,
+    ),
+    "TX_AIArt_secret_key": GsStrConfig(
+        "腾讯云 SecretKey",
+        "腾讯云 API 密钥 SecretKey(用于混元 ImageOutpainting 扩图)。",
+        "",
+        secret=True,
+    ),
+    "TX_AIArt_region": GsStrConfig(
+        "腾讯云地域",
+        "混元 AI 艺术接口地域,一般保持默认即可。",
+        "ap-guangzhou",
+        options=["ap-guangzhou", "ap-beijing", "ap-shanghai"],
+    ),
 }

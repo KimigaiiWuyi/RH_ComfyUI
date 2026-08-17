@@ -279,7 +279,7 @@ class SeedanceProvider(ABC):
             return False
         if self.supported_ratios and spec.ratio is not None and spec.ratio not in self.supported_ratios:
             return False
-        # duration=-1 表示「跟随输入视频」(Seedance 2.5 编辑/延长),跳过上下限
+        # duration=-1 表示「自动时长」(Seedance 2.5 全模式),跳过上下限
         if spec.duration != -1:
             if self.min_duration and spec.duration and spec.duration < self.min_duration:
                 return False

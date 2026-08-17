@@ -24,7 +24,8 @@ backends/
 │   └── executor.py      # RHAppAdapter 执行器
 ├── minimax/             # MiniMax 文生图 / 图生图 / T2A 语音后端
 ├── mimo/                # MiMo TTS 后端
-└── seedance/            # Seedance 视频生成后端
+├── seedance/            # Seedance 视频生成后端
+└── tx_aiart/            # 腾讯云混元 AI 艺术(ImageOutpainting 扩图)
 ```
 
 ## 核心组件
@@ -64,6 +65,7 @@ backend_registry.register(GPTImage2Adapter())
 backend_registry.register(RHAppAdapter())
 backend_registry.register(MiniMaxAdapter())
 backend_registry.register(MIMOAdapter())
+backend_registry.register(TxAiartAdapter())
 ```
 
 > Seedance 不再是 Adapter：每家供应商(ark/runninghub/网关)= 一个
