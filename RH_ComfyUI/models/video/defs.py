@@ -494,15 +494,15 @@ class Seedance25Def(Seedance25VideoModel):
                 ),
                 "omni_reference_task_type": PortSpec(
                     type=PortType.ENUM,
-                    default="auto",
-                    values=["auto", "edit", "extend"],
+                    default="reference",
+                    values=["reference", "edit", "extend"],
                     title="任务类型引导",
                     description=(
                         "官方 omni_reference_task_type(与 duration 同级,仅 2.5 多模态参考):\n"
-                        "  - auto: 多参考生成\n"
+                        "  - reference: 多参考生成(同步校验;默认)\n"
                         "  - edit: 视频编辑(须与 task_mode=edit 一致)\n"
                         "  - extend: 视频延长(须与 task_mode=extend 一致)\n"
-                        "文生 / 首帧 / 首尾帧不得写入(上游 TaskTypeConstraint)。"
+                        "不传 auto。文生 / 首帧 / 首尾帧不得写入(上游 TaskTypeConstraint)。"
                     ),
                 ),
             },

@@ -282,12 +282,22 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
         return_last_frame=bool(request.return_last_frame),
         service_tier=request.service_tier or "default",
         output_format=output_format,
-        omni_reference_task_type=_resolve_omni_reference_task_type(request, params, task_mode),
+        omni_reference_task_type=_resolve_omni_reference_task_type(
+            request, params, task_mode, shape, frame_mode
+        ),
         params=spec_params,
     )
 
 
-_OMNI_REF_TASK_TYPES = frozenset({"auto", "edit", "extend"})
+# 画布侧永不向官方传 auto(异步校验易 TaskTypeConstraint);auto 当未指定处理
+_OMNI_REF_TASK_TYPES = frozenset({"reference", "edit", "extend"})
+_OMNI_REF_SHAPES = frozenset(
+    {
+        VideoTaskShape.MULTIMODAL,
+        VideoTaskShape.VIDEO_EDIT,
+        VideoTaskShape.VIDEO_EXTEND,
+    }
+)
 _EXTEND_TOKEN = "延长"
 _EXTEND_PREFIX = "延长该视频。"
 
@@ -296,8 +306,16 @@ def _resolve_omni_reference_task_type(
     request: GenerationRequest,
     params: dict[str, object],
     task_mode: str,
-) -> str:
-    """Seedance 2.5 官方 omni_reference_task_type:显式值优先,否则跟 task_mode。"""
+    shape: VideoTaskShape,
+    frame_mode: str,
+) -> Optional[str]:
+    """Seedance 2.5 官方 omni_reference_task_type:显式值优先。
+
+    仅多模态参考 / 编辑 / 延长可写;文生 / 首帧 / 首尾帧必须为 None
+    (上游带上会 400 TaskTypeConstraint)。多参考缺省 reference,不再回落 auto。
+    """
+    if frame_mode == "first_last" or shape not in _OMNI_REF_SHAPES:
+        return None
     raw = request.omni_reference_task_type or params.get("omni_reference_task_type")
     if isinstance(raw, str):
         v = raw.strip().lower()
@@ -305,7 +323,11 @@ def _resolve_omni_reference_task_type(
             return v
     if task_mode in ("edit", "extend"):
         return task_mode
-    return "auto"
+    if shape == VideoTaskShape.VIDEO_EDIT:
+        return "edit"
+    if shape == VideoTaskShape.VIDEO_EXTEND:
+        return "extend"
+    return "reference"
 
 
 def _collect_prompt_haystack(base_prompt: str, ordered_segments: list[OrderedSegment]) -> str:

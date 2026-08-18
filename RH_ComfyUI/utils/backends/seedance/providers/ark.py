@@ -155,7 +155,8 @@ def _is_seedance25_model(model: str | None) -> bool:
     return "seedance-2-5" in m or "seedance-2.5" in m or m.endswith("seedance2.5")
 
 
-_OMNI_REF_TASK_TYPES = frozenset({"auto", "edit", "extend"})
+# 不把 auto 写入官方 body;auto 视同未指定,走下方回填或省略
+_OMNI_REF_TASK_TYPES = frozenset({"reference", "edit", "extend"})
 
 # 官方:仅多模态参考场景合法;文生 / 首帧 / 首尾帧写入会 400 TaskTypeConstraint
 _OMNI_REF_SHAPES = frozenset(
@@ -175,20 +176,24 @@ def apply_omni_reference_task_type(
     """2.5 官方字段,与 duration 同级。2.0 不写(上游不认识)。
 
     仅 MULTIMODAL / VIDEO_EDIT / VIDEO_EXTEND 写入;文生、首帧、首尾帧禁止。
-    显式 spec.omni_reference_task_type 优先;否则按 shape 回填 edit/extend/auto。
+    显式 spec.omni_reference_task_type 优先;否则按 shape 回填 edit/extend/reference。
     """
     if not _is_seedance25_model(model):
         return
     if spec.shape not in _OMNI_REF_SHAPES:
         return
     raw = (spec.omni_reference_task_type or "").strip().lower()
+    if raw == "auto":
+        raw = ""
     if raw not in _OMNI_REF_TASK_TYPES:
         if spec.shape == VideoTaskShape.VIDEO_EDIT:
             raw = "edit"
         elif spec.shape == VideoTaskShape.VIDEO_EXTEND:
             raw = "extend"
         else:
-            raw = "auto"
+            # 多参考须由 classify / 调用方显式给 reference;空值不回填 auto
+            # (首尾帧+音视频会被判成 MULTIMODAL,回填会把不该出现的 key 写进上游)
+            return
     body["omni_reference_task_type"] = raw
 
 

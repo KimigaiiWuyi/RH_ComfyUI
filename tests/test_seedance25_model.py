@@ -54,8 +54,8 @@ def test_schema_ports_and_limits():
     assert node.inputs["duration"].maximum == 30
     assert node.inputs["output_format"].values == ["mp4", "mov"]
     assert node.inputs["task_mode"].values == ["auto", "edit", "extend"]
-    assert node.inputs["omni_reference_task_type"].values == ["auto", "edit", "extend"]
-    assert node.inputs["omni_reference_task_type"].default == "auto"
+    assert node.inputs["omni_reference_task_type"].values == ["reference", "edit", "extend"]
+    assert node.inputs["omni_reference_task_type"].default == "reference"
     assert node.inputs["ratio"].default == "adaptive"
 
 
@@ -312,12 +312,14 @@ def test_ark_render_keeps_camera_fixed_for_seedance2():
 def test_classify_explicit_omni_reference_task_type_wins():
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
-        prompt="文生",
+        prompt="多参考",
+        images=[b"IMG"],
         duration=5,
         ratio="16:9",
-        params={"omni_reference_task_type": "extend"},
+        params={"frame_mode": "reference", "omni_reference_task_type": "extend"},
     )
     spec = classify_video_spec(req)
+    assert spec.shape == VideoTaskShape.MULTIMODAL
     assert spec.omni_reference_task_type == "extend"
 
 
@@ -382,7 +384,7 @@ def test_ark_render_omits_omni_for_text_and_frame_shapes():
         assert "omni_reference_task_type" not in body, spec.shape
 
 
-def test_ark_render_omni_auto_for_seedance25_multimodal():
+def test_ark_render_omni_reference_for_seedance25_multimodal():
     spec = classify_video_spec(
         GenerationRequest(
             task_type=TaskType.VIDEO,
@@ -394,9 +396,48 @@ def test_ark_render_omni_auto_for_seedance25_multimodal():
         )
     )
     assert spec.shape == VideoTaskShape.MULTIMODAL
+    assert spec.omni_reference_task_type == "reference"
     p = ArkSeedanceProvider(api_key="test-key")
     _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2.5"))
-    assert body["omni_reference_task_type"] == "auto"
+    assert body["omni_reference_task_type"] == "reference"
+
+
+def test_ark_render_omits_omni_for_first_last_even_if_auto_sent():
+    spec = classify_video_spec(
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="首尾帧",
+            images=[b"A", b"B"],
+            duration=5,
+            ratio="adaptive",
+            omni_reference_task_type="auto",
+            params={"frame_mode": "first_last"},
+        )
+    )
+    assert spec.shape == VideoTaskShape.FIRST_LAST_FRAME
+    assert spec.omni_reference_task_type is None
+    p = ArkSeedanceProvider(api_key="test-key")
+    _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2.5"))
+    assert "omni_reference_task_type" not in body
+
+
+def test_classify_auto_remapped_to_reference_for_multimodal():
+    spec = classify_video_spec(
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="多参考",
+            images=[b"IMG"],
+            duration=5,
+            ratio="16:9",
+            omni_reference_task_type="auto",
+            params={"frame_mode": "reference"},
+        )
+    )
+    assert spec.shape == VideoTaskShape.MULTIMODAL
+    assert spec.omni_reference_task_type == "reference"
+    p = ArkSeedanceProvider(api_key="test-key")
+    _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2.5"))
+    assert body["omni_reference_task_type"] == "reference"
 
 
 def test_ark_media_limits_allow_seedance25():
