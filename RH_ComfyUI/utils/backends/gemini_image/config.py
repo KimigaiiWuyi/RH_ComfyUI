@@ -41,7 +41,16 @@ def gemini_enabled_models() -> list[str]:
     return out
 
 
+def is_gemini_vendor_enabled() -> bool:
+    raw = _cfg("Gemini_Enable")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return True
+    return bool(raw)
+
+
 def is_gemini_model_enabled(name: str) -> bool:
+    if not is_gemini_vendor_enabled():
+        return False
     target = (name or "").strip()
     if not target:
         return False
@@ -49,6 +58,8 @@ def is_gemini_model_enabled(name: str) -> bool:
 
 
 def gemini_disabled_reason(name: str, display_name: str) -> str | None:
+    if not is_gemini_vendor_enabled():
+        return f"{display_name} 未启用:请在 Web 控制台打开「启用 Gemini 供应商」"
     if is_gemini_model_enabled(name):
         return None
     return (
@@ -63,6 +74,7 @@ __all__ = [
     "GEMINI_MODEL_BANANA_PRO",
     "GEMINI_MODEL_OPTIONS",
     "gemini_enabled_models",
+    "is_gemini_vendor_enabled",
     "is_gemini_model_enabled",
     "gemini_disabled_reason",
 ]

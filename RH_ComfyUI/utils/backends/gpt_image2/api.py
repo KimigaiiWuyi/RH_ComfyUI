@@ -28,13 +28,21 @@ class GPTImage2API:
     @property
     def api_key(self) -> str:
         if self._api_key is None:
-            self._api_key = SERVICE_CONFIG.get_config("OpenAI_Image_apikey").data or ""
+            try:
+                self._api_key = SERVICE_CONFIG.get_config("OpenAI_Image_apikey").data or ""
+            except Exception:
+                self._api_key = ""
         return self._api_key or ""
 
     @property
     def base_url(self) -> str:
         if self._base_url is None:
-            self._base_url = SERVICE_CONFIG.get_config("OpenAI_Image_BaseURL").data or "https://api.openai.com/v1"
+            try:
+                self._base_url = SERVICE_CONFIG.get_config("OpenAI_Image_BaseURL").data or ""
+            except Exception:
+                self._base_url = ""
+            if not self._base_url:
+                self._base_url = "https://api.openai.com/v1"
         return self._base_url or "https://api.openai.com/v1"
 
     def update_urls(self) -> None:

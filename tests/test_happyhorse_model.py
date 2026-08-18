@@ -83,6 +83,15 @@ def test_channel_bindings_has_dashscope():
     assert any(b.channel.name == "dashscope" for b in bindings)
 
 
+def test_enabled_list_can_disable_happyhorse(monkeypatch):
+    import RH_ComfyUI.utils.backends.dashscope.config as dcfg
+    from RH_ComfyUI.utils.backends.dashscope.config import is_dashscope_model_enabled
+
+    monkeypatch.setattr(dcfg, "_cfg", lambda key: ["wan3.0"] if key == "DashScope_Enabled_Models" else None)
+    assert is_dashscope_model_enabled("happyhorse1.1") is False
+    assert is_dashscope_model_enabled("wan3.0") is True
+
+
 def test_pick_vendor_message_priority_message_msg_code_status():
     from RH_ComfyUI.utils.backends.happyhorse.provider import _pick_vendor_message
 

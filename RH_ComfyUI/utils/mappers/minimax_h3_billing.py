@@ -1,9 +1,11 @@
 """MiniMax H3 视频生成动态积分计价
 
-官方按量(人民币,2026-08 文档):
+官方按量(人民币):
   - 768P:0.50 元 / 秒
   - 2K:  0.80 元 / 秒
-  计量秒数 = 输出秒数 + 输入参考视频秒数。
+  计量秒数 = 输出秒数 + 输入参考视频秒数
+  (例:768P 输入 10s + 输出 10s = 20s × 0.5 = 10 元)。
+  输入图:前 5 张免费,超出每张 0.2 元。
 
 1 元 = 100 积分;向上取整,最小 1。
 point_cost 仅作兜底(≈ 2K × 5s = 400)。
@@ -25,6 +27,10 @@ _DEFAULT_RESOLUTION = "2k"
 _DEFAULT_DURATION = 5
 _MIN_DURATION = 4
 _MAX_DURATION = 15
+
+# 输入图:前 N 张免费,超出每张元
+_FREE_INPUT_IMAGES: int = 5
+_INPUT_IMAGE_YUAN: float = 0.20
 
 
 def _norm_resolution(resolution: Optional[str]) -> str:
@@ -49,13 +55,22 @@ def _clamp_duration(duration: Optional[float]) -> float:
     return max(_MIN_DURATION, min(_MAX_DURATION, dur))
 
 
+def _extra_image_count(num_input_images: Optional[int]) -> int:
+    try:
+        n = int(num_input_images or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return max(n - _FREE_INPUT_IMAGES, 0)
+
+
 def calculate_minimax_h3_points(
     resolution: Optional[str] = None,
     duration: Optional[float] = None,
     *,
     input_video_duration: Optional[float] = None,
+    num_input_images: int = 0,
 ) -> int:
-    """纯函数: (输出秒 + 输入参考视频秒) × 档位单价。"""
+    """纯函数: (输出秒 + 输入视频秒) × 档位单价 + 超出免费额度的输入图。"""
     res = _norm_resolution(resolution)
     rate = _RATES_YUAN_PER_SEC.get(res, _RATES_YUAN_PER_SEC[_DEFAULT_RESOLUTION])
     out_s = _clamp_duration(duration)
@@ -64,7 +79,8 @@ def calculate_minimax_h3_points(
     except (TypeError, ValueError):
         in_s = 0.0
     in_s = max(0.0, in_s)
-    yuan = rate * (out_s + in_s)
+    extra_imgs = _extra_image_count(num_input_images)
+    yuan = rate * (out_s + in_s) + extra_imgs * _INPUT_IMAGE_YUAN
     points = yuan * _YUAN_TO_POINTS
     return max(int(points) + (1 if points > int(points) else 0), 1)
 
@@ -75,15 +91,21 @@ def estimate_minimax_h3_points(
     *,
     video_refs: Optional[list[Any]] = None,
     input_video_duration: Optional[float] = None,
+    num_input_images: Optional[int] = None,
+    images: Optional[list[Any]] = None,
 ) -> int:
     """薄壳:优先显式 input_video_duration,否则按参考视频段数 × 5s 估。"""
     inp = input_video_duration
     if inp is None and video_refs:
         inp = 5.0 * len(video_refs)
+    n_img = num_input_images
+    if n_img is None:
+        n_img = len(images) if images else 0
     return calculate_minimax_h3_points(
         resolution,
         duration,
         input_video_duration=inp,
+        num_input_images=n_img,
     )
 
 

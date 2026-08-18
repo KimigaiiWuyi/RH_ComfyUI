@@ -43,7 +43,7 @@ def test_point_range_dynamic():
     lo, hi = m.point_range()
     assert lo < hi
     assert lo == estimate_minimax_h3_points("768p", 4)
-    assert hi == estimate_minimax_h3_points("2k", 15, input_video_duration=15.0)
+    assert hi == estimate_minimax_h3_points("2k", 15, input_video_duration=15.0, num_input_images=9)
 
 
 def test_estimate_cost_reads_resolution_duration():
@@ -56,6 +56,30 @@ def test_estimate_cost_reads_resolution_duration():
         params={"resolution": "768p", "duration": 8},
     )
     assert m.estimate_cost(req) == estimate_minimax_h3_points("768p", 8)
+
+
+def test_estimate_cost_charges_images_over_five():
+    m = MiniMaxH3Def()
+    req5 = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="跑",
+        resolution="2k",
+        duration=5,
+        images=[b"x"] * 5,
+        params={"resolution": "2k", "duration": 5},
+        generate_audio=True,
+    )
+    req6 = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="跑",
+        resolution="2k",
+        duration=5,
+        images=[b"x"] * 6,
+        params={"resolution": "2k", "duration": 5},
+        generate_audio=True,
+    )
+    assert m.estimate_cost(req5) == estimate_minimax_h3_points("2k", 5, num_input_images=5)
+    assert m.estimate_cost(req6) - m.estimate_cost(req5) == 20
 
 
 def test_validate_t2v_rejects_adaptive():

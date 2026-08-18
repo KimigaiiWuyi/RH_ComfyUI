@@ -12,6 +12,7 @@ from RH_ComfyUI.models.image.defs import (
     MinimaxImage01Def,
 )
 from RH_ComfyUI.models.video.defs import (
+    Wan30Def,
     MiniMaxH3Def,
     Seedance25Def,
     Seedance2FastDef,
@@ -52,6 +53,19 @@ def test_seedance_variants_declare_media_ports(cls):
     node = cls.node_def()
     for port in ("images", "video_refs", "audio_refs", "frame_mode"):
         assert port in node.inputs, f"{cls.__name__} 缺少 {port} 端口"
+
+
+def test_wan30_declares_seedance2_like_ports_plus_file():
+    node = Wan30Def.node_def()
+    for port in ("images", "video_refs", "audio_refs", "frame_mode", "file_url", "link_url"):
+        assert port in node.inputs, f"wan3.0 缺少 {port} 端口"
+    assert node.inputs["images"].max_items == 10
+    assert node.inputs["video_refs"].max_items == 5
+    assert node.inputs["audio_refs"].max_items == 5
+    assert node.inputs["duration"].minimum == -1
+    assert node.inputs["duration"].maximum == 30
+    assert node.inputs["resolution"].values == ["480p", "720p", "1080p"]
+    assert node.backend_models["dashscope"] == "wan3.0-video"
 
 
 def test_minimax_h3_declares_media_ports():

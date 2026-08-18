@@ -19,8 +19,7 @@ from gsuid_core.utils.plugins_config.models import (
     GsRepeatGroupConfig,
 )
 
-# model_real_name 下拉项: 现有图片模型名(与 models/image/defs.py::ALL_MODELS 对齐)。
-# 用静态常量避免在配置模块加载期 import defs 触发循环导入; 新增模型时同步此表即可。
+# 下拉项用静态常量,避免配置模块加载期 import defs 触发循环导入;新增模型时同步此表。
 _IMAGE_MODEL_REAL_NAMES = [
     "anima",
     "banana1",
@@ -33,16 +32,67 @@ _IMAGE_MODEL_REAL_NAMES = [
     "seedream5",
     "seedream5_pro",
 ]
+_COMFYUI_WORKFLOW_NAMES = [
+    "qwen_2511",
+    "qwen_2512",
+    "wan2.2_videogen",
+    "IndexTTS2",
+    "ace_step1.5",
+]
+_RH_APP_NAMES = [
+    "anima",
+    "rh_camera_angle",
+    "rh_image_matting",
+    "rh_image_upscale",
+    "rh_image_outpaint",
+]
+_GEMINI_MODEL_NAMES = ["banana1", "banana2", "banana_pro"]
+_MINIMAX_MODEL_NAMES = ["minimax_t2a_speech", "minimax_image01", "minimax_h3"]
+_MIMO_MODEL_NAMES = ["mimo_tts"]
+_FISH_MODEL_NAMES = ["fish_tts", "fish_asr"]
+_SEEDANCE_ARK_MODEL_NAMES = [
+    "seedance15_pro",
+    "seedance2",
+    "seedance2.5",
+    "seedance2_mini",
+    "seedance2_fast",
+    "seedream5",
+    "seedream5_pro",
+]
+_SEEDANCE_RH_MODEL_NAMES = [
+    "seedance15_pro",
+    "seedance2",
+    "seedance2_mini",
+    "seedance2_fast",
+]
+_DASHSCOPE_MODEL_NAMES = ["happyhorse1.1", "wan3.0"]
+_TX_AIART_MODEL_NAMES = ["tx_image_outpaint"]
 
 # ── ComfyUI 服务 ────────────────────────────────────────────────
 SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     "divider_comfyui": GsDivider(
         "ComfyUI / RunningHub AI 应用",
         "本地/远程 ComfyUI 与 RunningHub AI 应用。"
-        "ComfyUI 须在「启用的 ComfyUI 工作流」勾选后才分发;"
-        "RH AI 应用默认全开,可在「启用的 RunningHub AI 应用」里关掉。"
+        "须在上方启用列表勾选后才分发。留空则全部不启用。"
         "增删列表即时生效。",
         "ComfyUI 服务配置",
+    ),
+    "ComfyUI_Enabled_Workflows": GsListStrConfig(
+        "启用的 ComfyUI 工作流",
+        "从列表勾选要启用的 ComfyUI 工作流;可自由添加内部模型名或 json 文件名。"
+        "留空则全部不启用。改完即时生效,无需重启。"
+        "可选:qwen_2511 / qwen_2512 / wan2.2_videogen / IndexTTS2 / ace_step1.5。",
+        list(_COMFYUI_WORKFLOW_NAMES),
+        options=list(_COMFYUI_WORKFLOW_NAMES),
+    ),
+    "RH_App_Enabled_Apps": GsListStrConfig(
+        "启用的 RunningHub AI 应用",
+        "从列表勾选要启用的 RH AI 应用;可自由添加内部模型名或 webappId。"
+        "默认全部启用。留空则全部不启用。改完即时生效,无需重启。"
+        "可选:anima / rh_camera_angle / rh_image_matting / "
+        "rh_image_upscale / rh_image_outpaint。",
+        list(_RH_APP_NAMES),
+        options=list(_RH_APP_NAMES),
     ),
     "ComfyUI_BaseURL": GsStrConfig(
         "ComfyUI 服务地址",
@@ -58,68 +108,26 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "用于设置 RunningHub API Key 的配置",
         "",
     ),
-    "RH_App_Enabled_Apps": GsListStrConfig(
-        "启用的 RunningHub AI 应用",
-        "从列表勾选要启用的 RH AI 应用;可自由添加内部模型名或 webappId。"
-        "默认全部启用。留空则全部不启用。改完即时生效,无需重启。"
-        "可选:anima / rh_camera_angle / rh_image_matting / "
-        "rh_image_upscale / rh_image_outpaint。",
-        [
-            "anima",
-            "rh_camera_angle",
-            "rh_image_matting",
-            "rh_image_upscale",
-            "rh_image_outpaint",
-        ],
-        options=[
-            "anima",
-            "rh_camera_angle",
-            "rh_image_matting",
-            "rh_image_upscale",
-            "rh_image_outpaint",
-        ],
-    ),
-    "ComfyUI_Enabled_Workflows": GsListStrConfig(
-        "启用的 ComfyUI 工作流",
-        "从列表勾选要启用的 ComfyUI 工作流;可自由添加内部模型名或 json 文件名。"
-        "留空则全部不启用。改完即时生效,无需重启。"
-        "可选:qwen_2511 / qwen_2512 / wan2.2_videogen / IndexTTS2 / ace_step1.5。",
-        [],
-        options=[
-            "qwen_2511",
-            "qwen_2512",
-            "wan2.2_videogen",
-            "IndexTTS2",
-            "ace_step1.5",
-        ],
-    ),
-    "divider_openai_image": GsDivider(
-        "OpenAI 兼容生图（文生图 / 图生图 / 编辑）",
-        "OpenAI 兼容协议生图服务配置（支持任意 OpenAI 兼容服务，包括 OpenAI 官方 / "
-        "OneAPI / NewAPI / OpenRouter / SiliconFlow 等）",
-        "OpenAI 兼容生图服务配置",
-    ),
-    "OpenAI_Image_apikey": GsStrConfig(
-        "OpenAI 兼容生图 API Key",
-        "用于设置 OpenAI 兼容生图接口的 API Key（适用于所有 OpenAI 兼容服务，"
-        "包括 OpenAI / OneAPI / NewAPI / OpenRouter 等）",
-        "",
-    ),
-    "OpenAI_Image_BaseURL": GsStrConfig(
-        "OpenAI 兼容生图 Base URL",
-        "用于设置 OpenAI 兼容生图接口的 Base URL（可填任意 OpenAI 兼容服务的地址，"
-        "包括 OpenAI 官方 / OneAPI / NewAPI / OpenRouter 等）",
-        "https://api.openai.com/v1",
-        options=[
-            "https://api.openai.com/v1",
-        ],
-    ),
     "divider_gemini_image": GsDivider(
         "Gemini 生图(Interactions API,走 google-genai SDK)",
         "Gemini 生图(banana1 / banana2 / banana_pro 的 Gemini 通道)。"
         "默认 AI Studio(API Key);打开 VertexAI 走组织版。"
-        "须在下方「启用的 Gemini 模型」勾选后才走 Gemini 通道。",
+        "须打开「启用 Gemini 供应商」,并在模型列表勾选后才走 Gemini 通道。",
         "Gemini 生图服务配置",
+    ),
+    "Gemini_Enable": GsBoolConfig(
+        "启用 Gemini 供应商",
+        "是否启用 Gemini 生图通道。关闭后 banana1 / banana2 / banana_pro 均不走 Gemini。",
+        True,
+    ),
+    "Gemini_Enabled_Models": GsListStrConfig(
+        "启用的 Gemini 模型",
+        "从列表勾选要走 Gemini 通道的内部模型;可自由添加内部模型名。"
+        "留空则全部不走 Gemini。共用下方 Gemini 凭证。"
+        "可选:banana1 / banana2 / banana_pro。"
+        "banana_pro 未勾选时仍可通过 OpenAI 兼容供应商池使用。",
+        list(_GEMINI_MODEL_NAMES),
+        options=list(_GEMINI_MODEL_NAMES),
     ),
     "Gemini_Image_apikey": GsStrConfig(
         "Gemini API Key(AI Studio)",
@@ -157,37 +165,46 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "(GOOGLE_APPLICATION_CREDENTIALS / gcloud auth application-default login)。",
         "",
     ),
-    "Gemini_Enabled_Models": GsListStrConfig(
-        "启用的 Gemini 模型",
-        "从列表勾选要走 Gemini 通道的内部模型;可自由添加内部模型名。"
-        "留空则全部不走 Gemini。共用上方 Gemini 凭证。"
-        "可选:banana1 / banana2 / banana_pro。"
-        "banana_pro 未勾选时仍可通过 OpenAI 兼容通道使用。",
-        [],
-        options=["banana1", "banana2", "banana_pro"],
-    ),
     "divider_minimax": GsDivider(
         "MiniMax（文生图 / 图生图 / T2A 语音 / H3 视频）",
         "MiniMax 文生图 / 图生图 / T2A 语音合成 / H3 视频生成服务连接配置",
         "MiniMax 文生图 / 图生图 / T2A 语音合成服务连接配置",
+    ),
+    "MiniMax_Enable": GsBoolConfig(
+        "启用 MiniMax 供应商",
+        "是否启用 MiniMax。关闭后文生图 / T2A / H3 均不可用。",
+        True,
+    ),
+    "MiniMax_Enabled_Models": GsListStrConfig(
+        "启用的 MiniMax 模型",
+        "从列表勾选要启用的 MiniMax 模型;可自由添加内部模型名。"
+        "留空则全部不启用。共用下方 MiniMax API Key。"
+        "可选:minimax_t2a_speech / minimax_image01 / minimax_h3。",
+        list(_MINIMAX_MODEL_NAMES),
+        options=list(_MINIMAX_MODEL_NAMES),
     ),
     "MiniMax_apikey": GsStrConfig(
         "MiniMax API Key",
         "用于设置 MiniMax API 的 Key（文生图 / 图生图 / T2A 语音合成 / H3 视频生成共用）",
         "",
     ),
-    "MiniMax_Enabled_Models": GsListStrConfig(
-        "启用的 MiniMax 模型",
-        "从列表勾选要启用的 MiniMax 模型;可自由添加内部模型名。"
-        "留空则全部不启用。共用上方 MiniMax API Key。"
-        "可选:minimax_t2a_speech / minimax_image01 / minimax_h3。",
-        [],
-        options=["minimax_t2a_speech", "minimax_image01", "minimax_h3"],
-    ),
     "divider_mimo": GsDivider(
         "MiMo TTS（小米语音合成）",
         "MiMo 语音合成服务连接配置",
         "MiMo 语音合成服务连接配置",
+    ),
+    "MIMO_Enable": GsBoolConfig(
+        "启用 MiMo 供应商",
+        "是否启用 MiMo TTS。关闭后 mimo_tts 不可用。",
+        True,
+    ),
+    "MIMO_Enabled_Models": GsListStrConfig(
+        "启用的 MiMo 模型",
+        "从列表勾选要启用的 MiMo 模型;可自由添加内部模型名。"
+        "留空则全部不启用。共用下方 MiMo API Key。"
+        "可选:mimo_tts。",
+        list(_MIMO_MODEL_NAMES),
+        options=list(_MIMO_MODEL_NAMES),
     ),
     "MIMO_apikey": GsStrConfig(
         "MiMo API Key",
@@ -198,6 +215,19 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "Fish Audio 语音合成",
         "Fish Audio S2 系列 TTS 与自动音色克隆服务连接配置",
         "Fish Audio S2 系列 TTS 服务连接配置",
+    ),
+    "FishAudio_Enable": GsBoolConfig(
+        "启用 Fish Audio 供应商",
+        "是否启用 Fish Audio。关闭后 fish_tts / fish_asr 均不可用。",
+        True,
+    ),
+    "FishAudio_Enabled_Models": GsListStrConfig(
+        "启用的 Fish Audio 模型",
+        "从列表勾选要启用的 Fish Audio 模型;可自由添加内部模型名。"
+        "留空则全部不启用。共用下方 Fish Audio API Key。"
+        "可选:fish_tts / fish_asr。",
+        list(_FISH_MODEL_NAMES),
+        options=list(_FISH_MODEL_NAMES),
     ),
     "FishAudio_apikey": GsStrConfig(
         "Fish Audio API Key",
@@ -218,6 +248,20 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "每个供应商可独立启用/禁用,并配置独立的 API Key 和 Base URL。",
         "火山官方 Seedance / Seedream 服务配置",
     ),
+    "Seedance_Enable_ark": GsBoolConfig(
+        "启用 ARK 供应商",
+        "是否启用火山方舟官方供应商。禁用后,Seedance 视频与 Seedream 5.0 图片均不会通过该供应商分发(同源开关)。",
+        True,
+    ),
+    "Seedance_Enabled_Models": GsListStrConfig(
+        "启用的 ARK 模型",
+        "从列表勾选要走火山方舟 ARK 的内部模型;可自由添加内部模型名。"
+        "留空则全部不走 ARK。须同时打开上方「启用 ARK 供应商」。"
+        "可选:seedance15_pro / seedance2 / seedance2.5 / seedance2_mini / "
+        "seedance2_fast / seedream5 / seedream5_pro。",
+        list(_SEEDANCE_ARK_MODEL_NAMES),
+        options=list(_SEEDANCE_ARK_MODEL_NAMES),
+    ),
     "Seedance_apikey_ark": GsStrConfig(
         "ARK API Key",
         "火山方舟 ARK API Key。"
@@ -233,15 +277,23 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
             "https://ark.cn-beijing.volces.com/api/v3",
         ],
     ),
-    "Seedance_Enable_ark": GsBoolConfig(
-        "启用 ARK 供应商",
-        "是否启用火山方舟官方供应商。禁用后,Seedance 视频与 Seedream 5.0 图片均不会通过该供应商分发(同源开关)。",
-        True,
-    ),
     "divider_seedance_runninghub": GsDivider(
         "Seedance RunningHub",
         "RunningHub 平台的 Seedance 服务配置。",
         "RunningHub Seedance 服务配置",
+    ),
+    "Seedance_Enable_runninghub": GsBoolConfig(
+        "启用 RunningHub 供应商",
+        "是否启用 RunningHub 供应商。禁用后,该供应商不会参与任务分发。",
+        False,
+    ),
+    "Seedance_Enabled_Models_runninghub": GsListStrConfig(
+        "启用的 RunningHub Seedance 模型",
+        "从列表勾选要走 RunningHub Seedance 的内部模型;可自由添加内部模型名。"
+        "留空则全部不走该供应商。须同时打开上方「启用 RunningHub 供应商」。"
+        "可选:seedance15_pro / seedance2 / seedance2_mini / seedance2_fast。",
+        list(_SEEDANCE_RH_MODEL_NAMES),
+        options=list(_SEEDANCE_RH_MODEL_NAMES),
     ),
     "Seedance_apikey_runninghub": GsStrConfig(
         "RunningHub API Key",
@@ -256,16 +308,17 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
             "https://www.runninghub.cn",
         ],
     ),
-    "Seedance_Enable_runninghub": GsBoolConfig(
-        "启用 RunningHub 供应商",
-        "是否启用 RunningHub 供应商。禁用后,该供应商不会参与任务分发。",
-        False,
-    ),
     "divider_openai_image_pool": GsDivider(
         "OpenAI 兼容生图供应商池",
-        "为现有模型追加任意数量的 OpenAI 兼容生图供应商(如百度千帆)。同一内部模型可挂多家,"
-        "自动参与负载均衡与熔断;调用方只看到一个模型,后端按供应商分发并入库(含 Key 前缀)。",
+        "为现有图片模型追加任意数量的 OpenAI 兼容生图供应商(官方 / OneAPI / NewAPI / 千帆等)。"
+        "在下方为每家供应商填写 Key 与模型映射;同一内部模型可挂多家,自动负载均衡。"
+        "关闭「启用 OpenAI 兼容生图」后整池不分发。原独立 Key/URL 已并入本池。",
         "OpenAI 兼容生图供应商池",
+    ),
+    "OpenAI_Image_Enable": GsBoolConfig(
+        "启用 OpenAI 兼容生图",
+        "是否启用供应商池。关闭后池内所有供应商都不分发。",
+        True,
     ),
     # 供应商池配置键按「协议_模态_Providers」命名:图片=OpenAI_Image_Providers;
     # 未来扩展语音/视频池时新增 OpenAI_Speech_Providers / OpenAI_Video_Providers,
@@ -310,14 +363,28 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         },
     ),
     "divider_happyhorse": GsDivider(
-        "HappyHorse 视频生成(DashScope)",
-        "阿里云 DashScope HappyHorse 1.1 视频生成服务配置。"
-        "对外模型名 happyhorse1.1,内部按输入自动路由 t2v / i2v / r2v;显式 edit 走 1.1-video-edit。",
-        "HappyHorse DashScope 服务配置",
+        "DashScope 视频生成(HappyHorse / 万相 3.0)",
+        "阿里云 DashScope / 千问AI 视频:HappyHorse 1.1 与万相 3.0 共用下方 API Key。"
+        "须在上方启用列表勾选后才分发;供应商总开关关闭则全部不可用。"
+        "改完即时生效。",
+        "DashScope 视频服务配置",
+    ),
+    "HappyHorse_Enable_dashscope": GsBoolConfig(
+        "启用 DashScope 供应商",
+        "是否启用 DashScope 通道。禁用后 happyhorse1.1 与 wan3.0 均不可用。",
+        True,
+    ),
+    "DashScope_Enabled_Models": GsListStrConfig(
+        "启用的 DashScope 模型",
+        "从列表勾选要启用的 DashScope 模型;可自由添加内部模型名。"
+        "留空则全部不启用。共用下方 DashScope API Key。"
+        "可选:happyhorse1.1 / wan3.0。",
+        list(_DASHSCOPE_MODEL_NAMES),
+        options=list(_DASHSCOPE_MODEL_NAMES),
     ),
     "HappyHorse_apikey_dashscope": GsStrConfig(
         "DashScope API Key",
-        "阿里云 DashScope / 千问AI 平台 API Key,用于 HappyHorse 1.1 视频生成。",
+        "阿里云 DashScope / 千问AI 平台 API Key,HappyHorse 1.1 与万相 3.0 共用。",
         "",
     ),
     "HappyHorse_BaseURL_dashscope": GsStrConfig(
@@ -329,16 +396,24 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
             "https://dashscope-intl.aliyuncs.com/api/v1",
         ],
     ),
-    "HappyHorse_Enable_dashscope": GsBoolConfig(
-        "启用 DashScope 供应商",
-        "是否启用 DashScope HappyHorse 通道。禁用后 happyhorse1.1 不可用。",
-        True,
-    ),
     "divider_tx_aiart": GsDivider(
         "腾讯云混元扩图",
         "腾讯云混元 ImageOutpainting(aiart.tencentcloudapi.com)。"
-        "在控制台填写 SecretId / SecretKey 后,tx_image_outpaint 可用。",
+        "须打开「启用腾讯云混元」,勾选模型,并填写 SecretId / SecretKey 后可用。",
         "腾讯云混元扩图",
+    ),
+    "TX_AIArt_Enable": GsBoolConfig(
+        "启用腾讯云混元",
+        "是否启用腾讯云混元扩图。关闭后 tx_image_outpaint 不可用。",
+        True,
+    ),
+    "TX_AIArt_Enabled_Models": GsListStrConfig(
+        "启用的腾讯云混元模型",
+        "从列表勾选要启用的混元扩图模型;可自由添加内部模型名。"
+        "留空则全部不启用。共用下方腾讯云凭证。"
+        "可选:tx_image_outpaint。",
+        list(_TX_AIART_MODEL_NAMES),
+        options=list(_TX_AIART_MODEL_NAMES),
     ),
     "TX_AIArt_secret_id": GsStrConfig(
         "腾讯云 SecretId",

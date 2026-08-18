@@ -3,6 +3,7 @@
 from .defs import ALL_MODELS
 from .overrides import (
     Wan22VideoModel,
+    Wan30VideoModel,
     SeedanceVideoModel,
     MiniMaxH3VideoModel,
     HappyHorseVideoModel,
@@ -14,6 +15,7 @@ __all__ = [
     "SeedanceVideoModel",
     "Seedance25VideoModel",
     "Wan22VideoModel",
+    "Wan30VideoModel",
     "HappyHorseVideoModel",
     "MiniMaxH3VideoModel",
 ]

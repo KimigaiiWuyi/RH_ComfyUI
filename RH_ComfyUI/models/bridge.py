@@ -78,7 +78,37 @@ class AdapterChannel(ProviderChannel):
             if is_rh_app_enabled(model_name, workflow_file):
                 return None
             return rh_app_disabled_reason(model_name or workflow_file, model_name or workflow_file)
-        return None
+        from ..utils.backends.enabled_list import (
+            disabled_reason,
+            is_model_enabled,
+            is_vendor_enabled,
+            vendor_disabled_reason,
+        )
+
+        adapter_vendors = {
+            "mimo": ("MIMO_Enable", "MiMo 栏"),
+            "fishaudio": ("FishAudio_Enable", "Fish Audio 栏"),
+            "tx_aiart": ("TX_AIArt_Enable", "腾讯云混元栏"),
+        }
+        vendor = adapter_vendors.get(self.name)
+        if vendor is not None:
+            vkey, vpanel = vendor
+            if not is_vendor_enabled(vkey):
+                return vendor_disabled_reason(model_name or workflow_file, vpanel)
+
+        adapter_lists = {
+            "mimo": ("MIMO_Enabled_Models", "MiMo 栏"),
+            "fishaudio": ("FishAudio_Enabled_Models", "Fish Audio 栏"),
+            "tx_aiart": ("TX_AIArt_Enabled_Models", "腾讯云混元栏"),
+            "seedream": ("Seedance_Enabled_Models", "火山官方 Seedance / Seedream 栏"),
+        }
+        spec = adapter_lists.get(self.name)
+        if spec is None:
+            return None
+        key, panel = spec
+        if is_model_enabled(key, model_name):
+            return None
+        return disabled_reason(key, model_name or workflow_file, model_name or workflow_file, panel)
 
     async def check_available(self) -> bool:
         if self._enable_gate() is not None:

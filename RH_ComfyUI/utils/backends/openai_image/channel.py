@@ -43,10 +43,19 @@ class OpenAIImageChannel(ProviderChannel):
         self._resolve = credentials_resolver
 
     async def check_available(self) -> bool:
+        from .config import is_openai_image_pool_enabled
+
+        if not is_openai_image_pool_enabled():
+            return False
         creds = self._resolve()
         return bool(creds.enabled and creds.api_key and creds.base_url)
 
     async def unavailable_reason(self) -> str:
+        from .config import openai_image_pool_disabled_reason
+
+        pool_off = openai_image_pool_disabled_reason()
+        if pool_off is not None:
+            return pool_off
         return f"供应商 {self.name} 未配置(需启用 + API Key + Base URL)"
 
     def audit_key_prefix(self) -> str:

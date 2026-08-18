@@ -47,8 +47,17 @@ def minimax_enabled_models() -> list[str]:
     return out
 
 
+def is_minimax_vendor_enabled() -> bool:
+    raw = _cfg("MiniMax_Enable")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return True
+    return bool(raw)
+
+
 def is_minimax_model_enabled(name: str) -> bool:
-    """``name`` 是否出现在启用列表中。列表为空则全部关闭。"""
+    """供应商总开关打开且 ``name`` 在启用列表中。列表为空则全部关闭。"""
+    if not is_minimax_vendor_enabled():
+        return False
     target = (name or "").strip()
     if not target:
         return False
@@ -57,6 +66,8 @@ def is_minimax_model_enabled(name: str) -> bool:
 
 def minimax_disabled_reason(name: str, display_name: str) -> str | None:
     """未勾选时返回人话原因;已启用返回 None。"""
+    if not is_minimax_vendor_enabled():
+        return f"{display_name} 未启用:请在 Web 控制台打开「启用 MiniMax 供应商」"
     if is_minimax_model_enabled(name):
         return None
     return (
@@ -78,6 +89,7 @@ __all__ = [
     "MINIMAX_MODEL_OPTIONS",
     "minimax_api_key",
     "minimax_enabled_models",
+    "is_minimax_vendor_enabled",
     "is_minimax_model_enabled",
     "minimax_disabled_reason",
     "minimax_dry_run",

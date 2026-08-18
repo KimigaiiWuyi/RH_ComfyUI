@@ -1,8 +1,7 @@
-"""HappyHorseChannel — DashScope HappyHorse → 通用 ProviderChannel
+"""Wan30Channel — DashScope 万相 3.0 → 通用 ProviderChannel
 
-内置供应商 dashscope:凭证读 SERVICE_CONFIG 的 HappyHorse_* 键。
-外部插件可通过构造 ``HappyHorseChannel(provider_cls=..., credentials_resolver=...)``
-再 ``channel_registry.register_binding("happyhorse1.1", ch)`` 注入。
+凭证复用 HappyHorse_*_dashscope;可用性还要求
+DashScope_Enabled_Models 勾选了 wan3.0。
 """
 
 from __future__ import annotations
@@ -15,12 +14,12 @@ import httpx
 
 from gsuid_core.logger import logger
 
-from .classify import classify_happyhorse, resolve_vendor_model
-from .provider import HappyHorseProvider, HappyHorseProviderError
-from ...core.types import NodeOutput, ProgressEvent
+from .classify import VENDOR_MODEL, classify_wan30
+from .provider import Wan30Provider, Wan30ProviderError
+from ...core.types import NodeOutput
 from ...core.request import GenerationRequest
 from ..dashscope.config import (
-    DASHSCOPE_MODEL_HAPPYHORSE,
+    DASHSCOPE_MODEL_WAN30,
     ProviderCredentials,
     dashscope_credentials,
     dashscope_disabled_reason,
@@ -28,35 +27,15 @@ from ..dashscope.config import (
 )
 from ..seedance.provider import DryRunInterrupt
 from ....core.base.errors import ChannelError
+from ..happyhorse.channel import _evt, _download, _safe_emit, _dry_run_enabled
 from ....core.channels.channel import ProviderChannel
 
 ConfigResolver = Callable[[], ProviderCredentials]
 DryRunResolver = Callable[[], bool]
 
 
-def service_config_credentials() -> ProviderCredentials:
-    """读 RH_ComfyUI SERVICE_CONFIG 的 HappyHorse_* 键(与万相 3.0 共用)。"""
-    return dashscope_credentials()
-
-
-def _dry_run_enabled() -> bool:
-    from ....rh_config.comfyui_config import plugin_dry_run
-
-    return plugin_dry_run()
-
-
-class HappyHorseChannel(ProviderChannel):
-    """HappyHorse 通道:包装任意 ``HappyHorseProvider`` 子类。
-
-    Args:
-        provider_cls: 供应商实现类(默认官方 DashScope ``HappyHorseProvider``;
-            外部聚合网关可注入自己的子类)。
-        weight: 负载均衡权重。
-        credentials_resolver: 凭证回调;默认读宿主 ``HappyHorse_*`` 配置。
-        name: 通道名;默认取 ``provider_cls.name``。
-        dry_run_resolver: Dry-Run 开关;默认读 ``PLUGIN_CONFIG.Dry_Run``。
-            外部插件可注入自己的 resolver。
-    """
+class Wan30Channel(ProviderChannel):
+    """万相 3.0 通道,与 HappyHorse 共用 dashscope 通道名与凭证。"""
 
     name = "dashscope"
     weight = 1
@@ -64,7 +43,7 @@ class HappyHorseChannel(ProviderChannel):
 
     def __init__(
         self,
-        provider_cls: type[HappyHorseProvider] = HappyHorseProvider,
+        provider_cls: type[Wan30Provider] = Wan30Provider,
         *,
         weight: int = 1,
         credentials_resolver: Optional[ConfigResolver] = None,
@@ -76,22 +55,20 @@ class HappyHorseChannel(ProviderChannel):
         self._provider_cls = provider_cls
         self.name = name or provider_cls.name
         self.weight = weight
-        self._resolve_creds: ConfigResolver = credentials_resolver or service_config_credentials
+        self._resolve_creds: ConfigResolver = credentials_resolver or dashscope_credentials
         self._resolve_dry_run: DryRunResolver = dry_run_resolver or _dry_run_enabled
-        self._cached: Optional[HappyHorseProvider] = None
+        self._cached: Optional[Wan30Provider] = None
 
     def supports_remote_cancel(self) -> bool:
-        """DashScope / 网关 HappyHorse 均有任务 cancel/DELETE。"""
         return True
 
     def credentials(self) -> ProviderCredentials:
         return self._resolve_creds()
 
-    def get_provider_for_resume(self) -> Optional[HappyHorseProvider]:
-        """公开:resume_poll 取 provider。"""
+    def get_provider_for_resume(self) -> Optional[Wan30Provider]:
         return self._get_provider()
 
-    def _get_provider(self) -> Optional[HappyHorseProvider]:
+    def _get_provider(self) -> Optional[Wan30Provider]:
         creds = self._resolve_creds()
         dry_run = bool(self._resolve_dry_run())
         default_base = self._provider_cls.DEFAULT_BASE_URL or ""
@@ -104,7 +81,7 @@ class HappyHorseChannel(ProviderChannel):
                     base_url=base_url or None,
                     dry_run=dry_run,
                 )
-                logger.info(f"[HappyHorse] 供应商 {self.name} 凭证已热更新")
+                logger.info(f"[Wan30] 供应商 {self.name} 凭证已热更新")
             return cached
 
         provider = self._provider_cls(
@@ -113,7 +90,7 @@ class HappyHorseChannel(ProviderChannel):
             dry_run=dry_run,
         )
         if not creds.api_key:
-            logger.warning(f"[HappyHorse] 供应商 {self.name} API Key 为空")
+            logger.warning(f"[Wan30] 供应商 {self.name} API Key 为空")
         self._cached = provider
         return provider
 
@@ -123,11 +100,11 @@ class HappyHorseChannel(ProviderChannel):
             creds.enabled
             and creds.api_key
             and creds.base_url
-            and is_dashscope_model_enabled(DASHSCOPE_MODEL_HAPPYHORSE)
+            and is_dashscope_model_enabled(DASHSCOPE_MODEL_WAN30)
         )
 
     async def unavailable_reason(self) -> str:
-        disabled = dashscope_disabled_reason(DASHSCOPE_MODEL_HAPPYHORSE, "HappyHorse 1.1")
+        disabled = dashscope_disabled_reason(DASHSCOPE_MODEL_WAN30, "万相 3.0")
         if disabled is not None:
             return disabled
         return f"供应商 {self.name} 未配置(需要启用开关 + API Key + Base URL)"
@@ -140,7 +117,7 @@ class HappyHorseChannel(ProviderChannel):
             provider = self._get_provider()
             if provider is None:
                 return True
-            spec = classify_happyhorse(request)
+            spec = classify_wan30(request)
             return provider.can_handle_spec(spec)
         except Exception:
             return True
@@ -148,9 +125,9 @@ class HappyHorseChannel(ProviderChannel):
     async def invoke(self, **kwargs: Any) -> NodeOutput:
         request: GenerationRequest = kwargs["request"]
         on_progress = kwargs.get("on_progress")
-        vendor_model: Optional[str] = kwargs.get("vendor_model")
+        vendor_model: Optional[str] = kwargs.get("vendor_model") or VENDOR_MODEL
 
-        disabled = dashscope_disabled_reason(DASHSCOPE_MODEL_HAPPYHORSE, "HappyHorse 1.1")
+        disabled = dashscope_disabled_reason(DASHSCOPE_MODEL_WAN30, "万相 3.0")
         if disabled is not None:
             raise ChannelError(
                 disabled,
@@ -168,17 +145,15 @@ class HappyHorseChannel(ProviderChannel):
                 user_message="该供应商未配置 API Key。",
             )
 
-        spec = classify_happyhorse(request)
-        # 未显式注入 vendor_model 时按形态自动解析
-        model_id = resolve_vendor_model(spec.shape, override=vendor_model or None)
-        # 节点级 backend_model 若是逻辑名 happyhorse1.1,忽略,仍走自动解析
-        if model_id in ("happyhorse1.1", "happyhorse", "happyhorse1", ""):
-            model_id = resolve_vendor_model(spec.shape)
+        spec = classify_wan30(request)
+        model_id = (vendor_model or "").strip() or VENDOR_MODEL
+        if model_id in ("wan3.0", "wan30", "wan3", ""):
+            model_id = VENDOR_MODEL
 
         if on_progress is not None:
             await _safe_emit(
                 on_progress,
-                _evt("submitting", 5, f"提交 HappyHorse({self.name}/{model_id})"),
+                _evt("submitting", 5, f"提交万相 3.0({self.name}/{model_id})"),
             )
 
         try:
@@ -189,7 +164,7 @@ class HappyHorseChannel(ProviderChannel):
             )
         except DryRunInterrupt:
             raise
-        except HappyHorseProviderError as exc:
+        except Wan30ProviderError as exc:
             raise ChannelError(
                 str(exc),
                 retryable=exc.retryable,
@@ -234,7 +209,7 @@ class HappyHorseChannel(ProviderChannel):
         usage["model"] = model_id
 
         if on_progress is not None:
-            await _safe_emit(on_progress, _evt("done", 100, "HappyHorse 完成"))
+            await _safe_emit(on_progress, _evt("done", 100, "万相 3.0 完成"))
 
         return NodeOutput(
             status="ok",
@@ -252,14 +227,14 @@ class HappyHorseChannel(ProviderChannel):
         )
 
 
-_BUILTIN_CHANNELS: Optional[dict[str, HappyHorseChannel]] = None
+_BUILTIN_CHANNELS: Optional[dict[str, Wan30Channel]] = None
 
 
-def builtin_happyhorse_channels() -> dict[str, HappyHorseChannel]:
+def builtin_wan30_channels() -> dict[str, Wan30Channel]:
     global _BUILTIN_CHANNELS
     if _BUILTIN_CHANNELS is None:
         _BUILTIN_CHANNELS = {
-            "dashscope": HappyHorseChannel(weight=1),
+            "dashscope": Wan30Channel(weight=1),
         }
     return _BUILTIN_CHANNELS
 
@@ -270,62 +245,14 @@ def _make_progress_cb(on_progress: Optional[Any], provider_name: Optional[str] =
             return
         status = getattr(getattr(task, "status", None), "value", None) or ""
         if status == "queued":
-            await _safe_emit(on_progress, _evt("queued", 25, f"排队中({provider_name or 'hh'})"))
+            await _safe_emit(on_progress, _evt("queued", 25, f"排队中({provider_name or 'wan30'})"))
         elif status == "running":
-            await _safe_emit(on_progress, _evt("running", 55, f"HappyHorse 生成中({provider_name or 'hh'})"))
+            await _safe_emit(on_progress, _evt("running", 55, f"万相 3.0 生成中({provider_name or 'wan30'})"))
 
     return _on_progress
 
 
-async def _download(
-    url: str,
-    *,
-    timeout: float = 300.0,
-    max_retries: int = 3,
-    initial_backoff: float = 1.0,
-) -> bytes:
-    last_exc: Optional[BaseException] = None
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        for attempt in range(max_retries):
-            try:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                return resp.content
-            except httpx.HTTPStatusError as exc:
-                if 400 <= exc.response.status_code < 500:
-                    raise
-                last_exc = exc
-            except (httpx.HTTPError, asyncio.TimeoutError, OSError) as exc:
-                last_exc = exc
-            if attempt < max_retries - 1:
-                backoff = initial_backoff * (2**attempt)
-                logger.warning(
-                    f"[HappyHorse] 下载失败({type(last_exc).__name__}: {last_exc}),"
-                    f" {attempt + 1}/{max_retries} 次重试,等待 {backoff:.1f}s"
-                )
-                await asyncio.sleep(backoff)
-    assert last_exc is not None
-    raise last_exc
-
-
-def _evt(stage: str, percent: float, message: str) -> ProgressEvent:
-    return ProgressEvent(stage=stage, percent=percent, message=message)
-
-
-async def _safe_emit(cb: Optional[Any], event: ProgressEvent) -> None:
-    if cb is None:
-        return
-    try:
-        result = cb(event)
-        if asyncio.iscoroutine(result):
-            await result
-    except Exception:  # noqa: BLE001
-        pass
-
-
 __all__ = [
-    "ProviderCredentials",
-    "HappyHorseChannel",
-    "service_config_credentials",
-    "builtin_happyhorse_channels",
+    "Wan30Channel",
+    "builtin_wan30_channels",
 ]

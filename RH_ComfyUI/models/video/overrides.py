@@ -4,6 +4,7 @@
 - Seedance 2.0:多参考(≤12 素材)/首尾帧/单图/纯文本;480p~4k;有声开关
 - Seedance 2.5:多参考(≤50=图30+视频10+音频10)/编辑/延长/首尾帧;仅 480p~720p;
   时长 4~30s 或 -1;output_format mp4/mov;复用火山方舟 Key
+- Wan 3.0:对齐 Seedance 2.0 + PDF/网页参考文件;480p~1080p;2~30s 或 -1;复用 DashScope Key
 - Wan 2.2:仅首尾帧/首帧/纯文本;≤720p(像素积约束);任意宽高比;无有声
 
 执行链仍复用桥接层(NodeDef + Adapter),差异全部体现在能力声明与
@@ -23,9 +24,15 @@ from ...core.schema.request import GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...core.channels.channel import ChannelBinding
 from ...core.channels.registry import channel_registry
+from ...utils.backends.wan30.channel import builtin_wan30_channels
 from ...utils.backends.minimax.config import (
     minimax_disabled_reason,
     is_minimax_model_enabled,
+)
+from ...utils.backends.seedance.config import is_seedance_model_enabled_on
+from ...utils.backends.dashscope.config import (
+    dashscope_disabled_reason,
+    is_dashscope_model_enabled,
 )
 from ...utils.backends.seedance.channel import builtin_seedance_channels
 from ...utils.backends.happyhorse.channel import builtin_happyhorse_channels
@@ -257,6 +264,8 @@ class SeedanceVideoModel(VideoPipelineModel):
 
         # 节点级固定供应商 → 只走该供应商的通道
         if node.provider:
+            if not is_seedance_model_enabled_on(node.name, node.provider):
+                return []
             ch = builtins.get(node.provider)
             if ch is not None:
                 return [ChannelBinding(ch, vendor_model=self._vendor_model_for(node.provider))]
@@ -264,6 +273,8 @@ class SeedanceVideoModel(VideoPipelineModel):
 
         bindings: list[ChannelBinding] = []
         for name, ch in builtins.items():
+            if not is_seedance_model_enabled_on(node.name, name):
+                continue
             if self._serves(name, ch):
                 bindings.append(ChannelBinding(ch, vendor_model=self._vendor_model_for(name)))
         bindings.extend(external)
@@ -285,8 +296,9 @@ class SeedanceVideoModel(VideoPipelineModel):
 
     async def unavailable_reason(self) -> str:
         return (
-            f"{self.display_name} 无可用供应商:请在 Web 控制台配置 "
-            "Seedance_apikey_ark / _runninghub(或安装并配置外部供应商插件)"
+            f"{self.display_name} 无可用供应商:请在 Web 控制台启用 ARK/RunningHub,"
+            f"在对应「启用的模型」列表中添加 {self.name},"
+            "并配置 Seedance_apikey_ark / _runninghub"
         )
 
 
@@ -580,10 +592,19 @@ class HappyHorseVideoModel(VideoPipelineModel):
             vendor_model=binding.vendor_model,
         )
 
+    async def check_available(self) -> bool:
+        if not is_dashscope_model_enabled(self.name):
+            return False
+        return await super().check_available()
+
     async def unavailable_reason(self) -> str:
+        disabled = dashscope_disabled_reason(self.name, self.display_name)
+        if disabled is not None:
+            return disabled
         return (
             f"{self.display_name} 无可用供应商:请在 Web 控制台配置 "
-            "HappyHorse_apikey_dashscope 并启用 HappyHorse_Enable_dashscope"
+            "HappyHorse_apikey_dashscope 并启用 HappyHorse_Enable_dashscope,"
+            "同时在「启用的 DashScope 模型」中添加 happyhorse1.1"
         )
 
 
@@ -944,11 +965,160 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
         )
 
 
+class Wan30VideoModel(VideoPipelineModel):
+    """万相 3.0:对齐 Seedance 2.0 的文生 / 首帧 / 首尾帧 / 多参考,另加参考文件
+
+    官方 media:first_frame / last_frame 与 reference_* / file / link 互斥。
+    DashScope POST /tasks/{id}/cancel(仅 PENDING)。
+    """
+
+    supports_remote_cancel = True
+
+    MAX_IMAGES = 10
+    MAX_VIDEOS = 5
+    MAX_AUDIOS = 5
+    MAX_PROMPT_CHARS = 20000
+    ref_video_min_s = 1.0
+    ref_video_max_s = 15.0
+    ref_video_loop_target_s = 2.5
+    ref_video_trim_target_s = 14.5
+    ref_video_min_pixels = 407696
+    ref_audio_max_s = 15.0
+    ref_audio_trim_target_s = 14.5
+
+    def __init__(self, node: NodeDef) -> None:
+        super().__init__(node)
+        self.supported_shapes = {
+            VideoTaskShape.TEXT2VIDEO,
+            VideoTaskShape.IMAGE2VIDEO,
+            VideoTaskShape.FIRST_LAST_FRAME,
+            VideoTaskShape.MULTIMODAL,
+        }
+        self.supported_resolutions = ["480p", "720p", "1080p"]
+        self.supported_ratios = ["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16"]
+        self.supports_generate_audio = True
+        self.max_reference_total = self.MAX_IMAGES + self.MAX_VIDEOS + self.MAX_AUDIOS
+        self.card = ModelCard(
+            description=node.description
+            or "万相 3.0 统一视频生成:文生/首帧/首尾帧/多参考,另支持 PDF 等参考文件",
+            strengths=[
+                "文生 / 首帧 / 首尾帧 / 图+视频+音频多参考",
+                "参考 PDF/PPT/文档 或网页生视频",
+                "最高 1080P、最长 30 秒",
+                "复用 DashScope API Key",
+            ],
+            categories=["短视频", "多素材合成", "文档生视频", "音画同步"],
+            weaknesses=["邀测中", "首尾帧不能与参考音视频/文件混用", "参考视频/音频合计各不超过 15 秒"],
+            sample_prompts=[
+                "图片1为主角,音频1为配乐,他在海边迎风奔跑",
+                "根据这份产品手册做一支极简科技广告",
+            ],
+            languages=["zh", "en"],
+            speed_hint="slow",
+        )
+
+    def shape_of(self, request: GenerationRequest) -> VideoTaskShape:
+        from ...utils.backends.wan30.classify import classify_wan30
+
+        return classify_wan30(request).shape
+
+    def validate(self, request: GenerationRequest) -> None:
+        from ...utils.backends.wan30.classify import file_url_of, link_url_of, classify_wan30
+
+        file_url = file_url_of(request.params or {})
+        link_url = link_url_of(request.params or {})
+        if file_url and link_url:
+            raise ValidationError(f"{self.display_name} 的参考文件与网页链接不能同时使用,请只保留一项")
+
+        spec = classify_wan30(request)
+        n_img = len(spec.images())
+        n_vid = len(spec.videos())
+        n_aud = len(spec.audios())
+        if n_img > self.MAX_IMAGES:
+            raise ValidationError(f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,当前 {n_img} 张")
+        if n_vid > self.MAX_VIDEOS:
+            raise ValidationError(f"{self.display_name} 最多 {self.MAX_VIDEOS} 段参考视频,当前 {n_vid} 段")
+        if n_aud > self.MAX_AUDIOS:
+            raise ValidationError(f"{self.display_name} 最多 {self.MAX_AUDIOS} 段参考音频,当前 {n_aud} 段")
+
+        prompt = (request.prompt or "").strip()
+        if len(prompt) > self.MAX_PROMPT_CHARS:
+            raise ValidationError(
+                f"{self.display_name} 提示词最长 {self.MAX_PROMPT_CHARS} 字符,当前 {len(prompt)}"
+            )
+
+        duration = request.duration
+        if duration is not None and duration != 0 and duration != -1 and not (2 <= int(duration) <= 30):
+            raise ValidationError(f"{self.display_name} 时长须为 2~30 秒或 -1(智能时长),当前 {duration}")
+
+        frame_like = spec.shape in (VideoTaskShape.IMAGE2VIDEO, VideoTaskShape.FIRST_LAST_FRAME)
+        if frame_like and (n_vid or n_aud or file_url or link_url):
+            raise ValidationError(
+                f"{self.display_name} 的首帧/首尾帧不能同时传参考视频、音频、文件或网页;"
+                "请改用 frame_mode=reference,或移除这些素材"
+            )
+        has_media = bool(n_img or n_vid or n_aud or file_url or link_url)
+        if spec.shape == VideoTaskShape.TEXT2VIDEO and not prompt:
+            raise ValidationError(f"{self.display_name} 文生视频需要填写提示词")
+        if not prompt and not has_media:
+            raise ValidationError(f"{self.display_name} 需要提示词或至少 1 个参考素材(图/视频/音频/文件/网页)")
+
+        super().validate(request)
+
+    async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
+        return await SeedanceVideoModel.prepare_request(self, request)
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        node = self.node
+        builtins = builtin_wan30_channels()
+        external = channel_registry.bindings_for(node.name)
+        if node.provider:
+            ch = builtins.get(node.provider)
+            if ch is not None:
+                return [ChannelBinding(ch, vendor_model="wan3.0-video")]
+            return [b for b in external if b.channel.name == node.provider]
+        bindings: list[ChannelBinding] = [
+            ChannelBinding(ch, vendor_model="wan3.0-video") for ch in builtins.values()
+        ]
+        bindings.extend(external)
+        return bindings
+
+    async def execute_on_channel(
+        self,
+        request: GenerationRequest,
+        binding: ChannelBinding,
+        *,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> NodeOutput:
+        return await binding.channel.invoke(
+            request=request,
+            node=self.node,
+            on_progress=on_progress,
+            vendor_model=binding.vendor_model,
+        )
+
+    async def check_available(self) -> bool:
+        if not is_dashscope_model_enabled(self.name):
+            return False
+        return await super().check_available()
+
+    async def unavailable_reason(self) -> str:
+        disabled = dashscope_disabled_reason(self.name, self.display_name)
+        if disabled is not None:
+            return disabled
+        return (
+            f"{self.display_name} 无可用供应商:请在 Web 控制台配置 "
+            "HappyHorse_apikey_dashscope 并启用 HappyHorse_Enable_dashscope,"
+            "同时在「启用的 DashScope 模型」中添加 wan3.0"
+        )
+
+
 __all__ = [
     "SeedanceVideoModel",
     "Seedance25VideoModel",
     "Wan22VideoModel",
     "HappyHorseVideoModel",
     "MiniMaxH3VideoModel",
+    "Wan30VideoModel",
 ]
 

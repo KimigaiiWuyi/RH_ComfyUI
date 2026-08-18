@@ -275,7 +275,10 @@ def _channel_supports_remote_cancel(
 
     # 聚合网关异步视频
     if name.startswith("gateway_slot") and (
-        name.endswith("_seedance") or name.endswith("_happyhorse") or name.endswith("_minimax_h3")
+        name.endswith("_seedance")
+        or name.endswith("_happyhorse")
+        or name.endswith("_wan30")
+        or name.endswith("_minimax_h3")
     ):
         return True
 

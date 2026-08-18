@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .overrides import (
     Wan22VideoModel,
+    Wan30VideoModel,
     SeedanceVideoModel,
     MiniMaxH3VideoModel,
     HappyHorseVideoModel,
@@ -19,6 +20,7 @@ from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.video import wan_videogen_mapper as _wan_videogen_mapper
 from ...utils.mappers.extra_billing import estimate_wan22_points
+from ...utils.mappers.wan30_billing import estimate_wan30_points
 from ...utils.mappers.seedance_billing import (
     estimate_seedance2_points,
     estimate_seedance25_points,
@@ -1036,6 +1038,181 @@ class Wan22VideogenDef(Wan22VideoModel):
         )
 
 
+class Wan30Def(Wan30VideoModel):
+    """万相 3.0 — DashScope wan3.0-video,能力对齐 Seedance 2.0 + 参考文件
+
+    凭证复用 HappyHorse_apikey_dashscope;须在 DashScope_Enabled_Models 勾选 wan3.0。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="wan3.0",
+            display_name="万相 3.0",
+            task_type=TaskType("video"),
+            backend="wan30",
+            point_cost=600,
+            description=(
+                "万相 3.0 统一视频生成:按输入自动切换 文生/首帧/首尾帧/多参考,"
+                "另支持 PDF 等参考文件或网页生视频;复用 DashScope Key"
+            ),
+            knowledge_content=(
+                "阿里云 DashScope 万相 3.0(model: wan3.0-video)。"
+                "\n"
+                "能力对齐 Seedance 2.0,由输入自动决定形态:"
+                "\n"
+                "  - 不传图       → 文生视频"
+                "\n"
+                "  - 传 1 张图     → 图生视频(该图作为首帧)"
+                "\n"
+                "  - 传 2 张图     → 首尾帧生视频(图1=首帧, 图2=尾帧)"
+                "\n"
+                "  - 传图+音/视频  → 全能参考生视频(prompt 中用 图1/视频1/音频1 引用)"
+                "\n"
+                "  - 传 file_url   → 参考文件生视频(PDF/PPT/Word 等,最多 1 个)"
+                "\n"
+                "  - 传 link_url   → 参考网页生视频(公开网页,与 file_url 互斥)"
+                "\n"
+                "多图想全部作参考(而非首尾帧)时,传 frame_mode=reference。"
+                "\n"
+                "首帧/首尾帧不能与参考视频、音频、文件或网页混用。"
+                "\n"
+                "分辨率 480p/720p/1080p,默认 1080p;时长 2~30 秒或 -1 智能时长;"
+                "\n"
+                "宽高比 adaptive / 16:9 / 4:3 / 1:1 / 3:4 / 9:16。"
+                "\n"
+                "原生有声,generate_audio=false 可关(价格相同)。"
+                "\n"
+                "凭证复用 HappyHorse_apikey_dashscope,须在「启用的 DashScope 模型」勾选 wan3.0。"
+                "\n"
+            ),
+            requirements=["HappyHorse_apikey_dashscope"],
+            backend_model="wan3.0-video",
+            backend_models={"dashscope": "wan3.0-video"},
+            mode="declarative",
+            inputs={
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=True,
+                    title="提示词",
+                    description=(
+                        "视频生成提示词。全能参考可用「图1」「视频1」「音频1」指代素材;"
+                        "与 media 必填其一。"
+                    ),
+                ),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=10,
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description="参考图片:0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多或带音视频=参考",
+                ),
+                "video_refs": PortSpec(
+                    type=PortType.LIST,
+                    max_items=5,
+                    item_type=PortType.VIDEO,
+                    title="参考视频",
+                    description='参考视频(最多 5 段,合计不超过 15 秒),prompt 中用 "视频1" 引用',
+                ),
+                "audio_refs": PortSpec(
+                    type=PortType.LIST,
+                    max_items=5,
+                    item_type=PortType.AUDIO,
+                    title="参考音频",
+                    description='参考音频(最多 5 段,合计不超过 15 秒),prompt 中用 "音频1" 引用',
+                ),
+                "file_url": PortSpec(
+                    type=PortType.STRING,
+                    title="参考文件",
+                    description=(
+                        "参考文件公网 URL(PDF/PPT/Word/Excel/TXT/MD 等,最多 1 个,≤100MB/50 页)。"
+                        "与网页链接互斥,且不能与首帧/首尾帧混用。"
+                    ),
+                ),
+                "link_url": PortSpec(
+                    type=PortType.STRING,
+                    title="参考网页",
+                    description="公开网页 URL(无需登录)。与参考文件互斥,且不能与首帧/首尾帧混用。",
+                ),
+                "frame_mode": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "first_last", "reference"],
+                    title="多图角色",
+                    description=(
+                        "多图时图片角色:\n"
+                        "  - auto: 2 张图默认首尾帧\n"
+                        "  - first_last: 强制首尾帧,图1=首帧, 图2=尾帧\n"
+                        "  - reference: 全部图片仅作参考素材"
+                    ),
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="adaptive",
+                    values=["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16"],
+                    title="宽高比",
+                    description="视频宽高比;adaptive 根据输入媒体自动推荐",
+                ),
+                "resolution": PortSpec(
+                    type=PortType.ENUM,
+                    default="1080p",
+                    values=["480p", "720p", "1080p"],
+                    title="分辨率",
+                    description="视频分辨率",
+                ),
+                "duration": PortSpec(
+                    type=PortType.INTEGER,
+                    default=5,
+                    minimum=-1,
+                    maximum=30,
+                    title="时长",
+                    description="输出时长(秒):2~30;填 -1 为智能时长。有参考视频时输入+输出不超过 30 秒。",
+                ),
+                "seed": PortSpec(type=PortType.INTEGER, title="随机种子", description="随机种子,留空则随机"),
+                "generate_audio": PortSpec(
+                    type=PortType.BOOLEAN,
+                    default=True,
+                    title="同步音频",
+                    description="输出是否包含音轨;开关价格相同",
+                ),
+                "watermark": PortSpec(
+                    type=PortType.BOOLEAN, default=False, title="AI 水印", description="是否添加水印"
+                ),
+            },
+            outputs={
+                "video": PortSpec(type=PortType.OUTPUT_VIDEO, description="生成的视频(MP4)"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["video"],
+                mode="async_poll",
+                priority=89,
+            ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:分辨率档位 × 输出秒数;duration=-1 按 15s 预留。"""
+        resolution = request.params.get("resolution") or request.resolution or "1080p"
+        duration = request.duration
+        if duration is None:
+            duration = request.params.get("duration", 5)
+        try:
+            duration_f = float(duration)
+        except (TypeError, ValueError):
+            duration_f = 5.0
+        return estimate_wan30_points(str(resolution), duration_f)
+
+    def point_range(self) -> tuple[int, int]:
+        """最小 480p×2s;最大 1080p×30s。"""
+        return (
+            estimate_wan30_points("480p", 2),
+            estimate_wan30_points("1080p", 30),
+        )
+
+
 class MiniMaxH3Def(MiniMaxH3VideoModel):
     """MiniMax H3 — 官方 MiniMax-H3,复用 MiniMax_apikey,需在启用列表勾选"""
 
@@ -1074,6 +1251,10 @@ class MiniMaxH3Def(MiniMaxH3VideoModel):
                 "图生/首尾帧与参考音视频互斥,不可混用。"
                 "\n"
                 "分辨率 768P / 2K;时长 4~15 秒整数;原生输出立体声音轨。"
+                "\n"
+                "计费:768P 0.5 元/秒、2K 0.8 元/秒;秒数=输出+输入视频。"
+                "\n"
+                "输入图前 5 张免费,超出每张 0.2 元。"
                 "\n"
                 "凭证复用 MiniMax_apikey;须在「启用的 MiniMax 模型」中勾选 minimax_h3。"
                 "\n"
@@ -1202,18 +1383,30 @@ class MiniMaxH3Def(MiniMaxH3VideoModel):
             duration_f = float(duration)
         except (TypeError, ValueError):
             duration_f = 5.0
+        n_img = len(request.images or [])
+        if request.ordered_content:
+            from ...core.schema.types import MediaKind, ContentItemType
+
+            n_oc = sum(
+                1
+                for item in request.ordered_content
+                if item.type == ContentItemType.IMAGE
+                or (item.media is not None and item.media.kind == MediaKind.IMAGE)
+            )
+            n_img = max(n_img, n_oc)
         return estimate_minimax_h3_points(
             str(resolution),
             duration_f,
             video_refs=request.video_refs,
             input_video_duration=input_video_duration_from_params(request.params),
+            num_input_images=n_img,
         )
 
     def point_range(self) -> tuple[int, int]:
-        """最小 768P×4s;最大 2K×15s + 输入 15s。"""
+        """最小 768P×4s;最大 2K×15s + 输入视频 15s + 9 张图(超出 5 张收费)。"""
         return (
             estimate_minimax_h3_points("768p", 4),
-            estimate_minimax_h3_points("2k", 15, input_video_duration=15.0),
+            estimate_minimax_h3_points("2k", 15, input_video_duration=15.0, num_input_images=9),
         )
 
 
@@ -1224,6 +1417,7 @@ ALL_MODELS = [
     Seedance2MiniDef,
     Seedance2FastDef,
     HappyHorse11Def,
+    Wan30Def,
     MiniMaxH3Def,
     Wan22VideogenDef,
 ]

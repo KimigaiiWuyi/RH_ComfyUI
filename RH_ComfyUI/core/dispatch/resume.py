@@ -154,7 +154,7 @@ def _channel_implies_backend(channel: str) -> str:
         return ""
     if ch in ("ark",) or ch.startswith("seedance"):
         return "seedance"
-    if ch in ("dashscope",) or "happyhorse" in ch:
+    if ch in ("dashscope",) or "happyhorse" in ch or "wan30" in ch or "wan3" in ch:
         return "happyhorse"
     if ch in ("minimax-h3",) or ch.startswith("minimax-h3"):
         return "minimax-h3"
@@ -189,11 +189,15 @@ def _infer_backend(*, backend: str, model: str, channel: str) -> str:
         # 原生 gpt-image-2 多为同步 OpenAI 兼容;无 vendor_task_id 语义,禁止走 Gemini resume
         if b == "gpt-image-2":
             return "gpt-image-2"
+        if b == "wan30":
+            return "happyhorse"
         return b
 
     if "seedance" in m:
         return "seedance"
     if "happyhorse" in m:
+        return "happyhorse"
+    if "wan3" in m:
         return "happyhorse"
     if "minimax_h3" in m or m == "minimax_h3":
         return "minimax-h3"
@@ -214,6 +218,8 @@ def _infer_backend(*, backend: str, model: str, channel: str) -> str:
             nb = _node_backend(mo)
             if nb == "gpt-image-2":
                 return "gpt-image-2"
+            if nb == "wan30":
+                return "happyhorse"
             if nb:
                 return nb
     except Exception:  # noqa: BLE001
@@ -232,9 +238,10 @@ def _kind_for_model(model: str, backend: str) -> str:
         pass
     m = (model or "").lower()
     if (
-        backend in ("seedance", "happyhorse", "minimax-h3")
+        backend in ("seedance", "happyhorse", "minimax-h3", "wan30")
         or "seedance" in m
         or "happyhorse" in m
+        or "wan3" in m
         or "minimax_h3" in m
     ):
         return "video"

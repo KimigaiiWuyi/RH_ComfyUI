@@ -127,8 +127,15 @@ _POOLS: List[tuple[str, Callable[[str, ProviderEntry], ProviderChannel]]] = [
 def sync_openai_image_providers() -> None:
     """按当前配置差量重挂供应商池:只对增删/改映射的绑定动手,无变化不打 info。"""
     global _REGISTERED
+    from .config import is_openai_image_pool_enabled
+
     desired: list[tuple[str, ProviderChannel, str | None]] = []
     enabled_total = 0
+    if not is_openai_image_pool_enabled():
+        _REGISTERED, diff = sync_owned_bindings(_REGISTERED, desired)
+        if diff.has_changes():
+            log_binding_diff("[OpenAIImage] 供应商池已关闭", diff, 0)
+        return
     for config_key, make_channel in _POOLS:
         pool_seen: set[str] = set()
         for entry in resolve_provider_entries(config_key):

@@ -128,3 +128,28 @@ def test_wan22_videogen_accepts_video_params():
     """wan2.2_videogen 也必须支持 resolution+duration"""
     r = asyncio.run(estimate_model_points("wan2.2_videogen", resolution="720p", duration=5))
     assert r["point_cost"] > 0
+
+
+def test_minimax_h3_images_and_input_video_change_cost():
+    """H3:前 5 张图免费;第 6 张起加价;输入视频秒数与输出同档计费。"""
+    r5 = asyncio.run(estimate_model_points("minimax_h3", resolution="2k", duration=5, num_input_images=5))
+    r6 = asyncio.run(estimate_model_points("minimax_h3", resolution="2k", duration=5, num_input_images=6))
+    assert r6["point_cost"] - r5["point_cost"] == 20
+    r_in = asyncio.run(
+        estimate_model_points(
+            "minimax_h3",
+            resolution="768p",
+            duration=10,
+            num_video_refs=1,
+            input_video_duration=10.0,
+        )
+    )
+    assert r_in["point_cost"] == 1000
+
+
+def test_wan30_accepts_resolution_and_duration():
+    r_low = asyncio.run(estimate_model_points("wan3.0", resolution="480p", duration=2))
+    r_high = asyncio.run(estimate_model_points("wan3.0", resolution="1080p", duration=30))
+    assert r_low["point_cost"] == 60
+    assert r_high["point_cost"] == 3600
+    assert r_high["point_cost"] > r_low["point_cost"]
