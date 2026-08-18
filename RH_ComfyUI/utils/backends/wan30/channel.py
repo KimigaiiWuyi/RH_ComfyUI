@@ -15,7 +15,7 @@ import httpx
 from gsuid_core.logger import logger
 
 from .classify import VENDOR_MODEL, classify_wan30
-from .provider import Wan30Provider, Wan30ProviderError
+from .provider import Wan30Provider
 from ...core.types import NodeOutput
 from ...core.request import GenerationRequest
 from ..dashscope.config import (
@@ -28,6 +28,7 @@ from ..dashscope.config import (
 from ..seedance.provider import DryRunInterrupt
 from ....core.base.errors import ChannelError
 from ..happyhorse.channel import _evt, _download, _safe_emit, _dry_run_enabled
+from ..happyhorse.provider import HappyHorseProviderError
 from ....core.channels.channel import ProviderChannel
 
 ConfigResolver = Callable[[], ProviderCredentials]
@@ -164,7 +165,9 @@ class Wan30Channel(ProviderChannel):
             )
         except DryRunInterrupt:
             raise
-        except Wan30ProviderError as exc:
+        except HappyHorseProviderError as exc:
+            # HTTP 层(_build_http_error)抛的是父类 HappyHorseProviderError,
+            # 不是 Wan30ProviderError;只捕子类会让 401/403 穿出,dispatch 无法切网关。
             raise ChannelError(
                 str(exc),
                 retryable=exc.retryable,

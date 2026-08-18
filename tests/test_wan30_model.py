@@ -229,3 +229,116 @@ def test_model_check_available_respects_list(monkeypatch):
     # 这里只断言列表开启后会继续问通道(返回 False 也行,只要不是列表短路的文案)
     reason = asyncio.run(Wan30Def().unavailable_reason())
     assert "启用的 DashScope 模型" not in reason or "wan3.0" in reason
+
+
+def test_channel_translates_happyhorse_403_to_retryable_channel_error(monkeypatch):
+    """HTTP 403 抛的是父类 HappyHorseProviderError,必须翻成可切通道的 ChannelError。"""
+    import pytest
+
+    from RH_ComfyUI.core.base.errors import ChannelError
+    from RH_ComfyUI.utils.backends.wan30.channel import Wan30Channel
+    from RH_ComfyUI.utils.backends.wan30.provider import Wan30Provider
+    from RH_ComfyUI.utils.backends.happyhorse.provider import HappyHorseProviderError
+
+    monkeypatch.setattr(
+        "RH_ComfyUI.utils.backends.wan30.channel.dashscope_disabled_reason",
+        lambda *_a, **_k: None,
+    )
+
+    class _P(Wan30Provider):
+        name = "dashscope"
+
+    ch = Wan30Channel(_P, dry_run_resolver=lambda: False)
+
+    async def _boom(spec, *, model=None, on_progress=None):
+        raise HappyHorseProviderError(
+            "dashscope API 错误 403: AccessDenied",
+            code="HTTP_ERROR",
+            retryable=True,
+            provider="dashscope",
+            http_status=403,
+            user_message="Access denied.",
+        )
+
+    ch._get_provider = lambda: type("Prov", (), {"api_key": "k", "run": staticmethod(_boom)})()
+
+    with pytest.raises(ChannelError) as ei:
+        asyncio.run(
+            ch.invoke(
+                request=GenerationRequest(task_type=TaskType.VIDEO, prompt="一只猫"),
+                vendor_model="wan3.0-video",
+            )
+        )
+    assert ei.value.retryable is True
+    assert ei.value.channel == "dashscope"
+    assert "Access denied" in (ei.value.user_message or "")
+
+
+def test_run_failovers_to_next_channel_after_dashscope_403(monkeypatch):
+    """官方 dashscope 403 后应切到下一绑定(网关),而不是整单失败。"""
+    from RH_ComfyUI.core.base.errors import ChannelError
+    from RH_ComfyUI.core.schema.types import NodeOutput
+    from RH_ComfyUI.core.channels.channel import ChannelBinding, ProviderChannel
+    from RH_ComfyUI.utils.backends.wan30.channel import Wan30Channel
+    from RH_ComfyUI.utils.backends.wan30.provider import Wan30Provider
+    from RH_ComfyUI.utils.backends.happyhorse.provider import HappyHorseProviderError
+
+    monkeypatch.setattr(
+        "RH_ComfyUI.utils.backends.wan30.channel.dashscope_disabled_reason",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "RH_ComfyUI.rh_config.comfyui_config.plugin_dry_run",
+        lambda: False,
+    )
+
+    class _P(Wan30Provider):
+        name = "dashscope"
+
+    dash = Wan30Channel(_P, dry_run_resolver=lambda: False)
+
+    async def _boom(spec, *, model=None, on_progress=None):
+        raise HappyHorseProviderError(
+            "dashscope API 错误 403: AccessDenied",
+            code="HTTP_ERROR",
+            retryable=True,
+            provider="dashscope",
+            http_status=403,
+            user_message="Access denied.",
+        )
+
+    dash._get_provider = lambda: type("Prov", (), {"api_key": "k", "run": staticmethod(_boom)})()
+
+    async def _dash_ok() -> bool:
+        return True
+
+    dash.check_available = _dash_ok  # type: ignore[method-assign]
+
+    class _Gateway(ProviderChannel):
+        name = "gateway_slot1_wan30"
+
+        async def check_available(self) -> bool:
+            return True
+
+        async def invoke(self, **kwargs):
+            return NodeOutput(status="ok", output_type="video", data=b"from-gateway")
+
+    class _Model(Wan30Def):
+        def channel_bindings(self) -> list[ChannelBinding]:
+            return [
+                ChannelBinding(dash, vendor_model="wan3.0-video"),
+                ChannelBinding(_Gateway(), vendor_model="wan3.0-video"),
+            ]
+
+        def validate(self, request: GenerationRequest) -> None:
+            return None
+
+        async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
+            return request
+
+    out = asyncio.run(
+        _Model().run(GenerationRequest(task_type=TaskType.VIDEO, prompt="一只猫"))
+    )
+    assert out.data == b"from-gateway"
+    # 确认不是 ChannelError 直接穿出
+    assert not isinstance(out, ChannelError)

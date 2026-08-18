@@ -1098,10 +1098,7 @@ class Wan30Def(Wan30VideoModel):
                     type=PortType.TEXT,
                     required=True,
                     title="提示词",
-                    description=(
-                        "视频生成提示词。全能参考可用「图1」「视频1」「音频1」指代素材;"
-                        "与 media 必填其一。"
-                    ),
+                    description=("视频生成提示词。全能参考可用「图1」「视频1」「音频1」指代素材;与 media 必填其一。"),
                 ),
                 "images": PortSpec(
                     type=PortType.LIST,
@@ -1270,10 +1267,7 @@ class MiniMaxH3Def(MiniMaxH3VideoModel):
                     type=PortType.TEXT,
                     required=True,
                     title="提示词",
-                    description=(
-                        "视频描述(必填,最长 7000 字符)。"
-                        "多模态可用「图片1」「视频1」「音频1」引用下方素材。"
-                    ),
+                    description=("视频描述(必填,最长 7000 字符)。多模态可用「图片1」「视频1」「音频1」引用下方素材。"),
                 ),
                 "images": PortSpec(
                     type=PortType.LIST,
@@ -1390,8 +1384,7 @@ class MiniMaxH3Def(MiniMaxH3VideoModel):
             n_oc = sum(
                 1
                 for item in request.ordered_content
-                if item.type == ContentItemType.IMAGE
-                or (item.media is not None and item.media.kind == MediaKind.IMAGE)
+                if item.type == ContentItemType.IMAGE or (item.media is not None and item.media.kind == MediaKind.IMAGE)
             )
             n_img = max(n_img, n_oc)
         return estimate_minimax_h3_points(
