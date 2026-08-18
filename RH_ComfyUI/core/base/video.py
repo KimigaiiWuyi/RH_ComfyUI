@@ -87,15 +87,15 @@ class VideoGenerationBase(AIGCGenerationBase):
         prompt 带结构化代号也不冲突。
 
         images 与 ordered_content 里的图片项统一走 preprocess_for_video
-        (等比缩放最长边 ≤ 800px);入口层(api.submit / bot 命令)不再各自
-        预处理,run() 是唯一执行路径所以此处天然覆盖三入口。
+        (等比缩放最长边 ≤ 800px),再收成标准 JPEG(透明铺灰底);入口层
+        (api.submit / bot 命令)不再各自预处理,run() 是唯一执行路径。
         """
         from ...utils.core.media_labels import ensure_media_ref_labels
 
         request = ensure_media_ref_labels(request)
         if request.resolution:
             request.resolution = request.resolution.lower()
-        from ...utils.image_process import preprocess_for_video
+        from ...utils.image_process import preprocess_for_video, standardize_generation_images
 
         if request.images:
             request.images = [preprocess_for_video(img) for img in request.images]
@@ -117,7 +117,7 @@ class VideoGenerationBase(AIGCGenerationBase):
                         role=item.role,
                         text=item.text,
                     )
-        return request
+        return standardize_generation_images(request)
 
     # ── 端口构造器:子类拼 input_schema 的积木 ──
 

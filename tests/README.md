@@ -15,6 +15,8 @@ python -m pytest tests/ -q      # 在插件根目录执行
 | `test_seedance_channel.py` | SeedanceProviderChannel 凭证热更新、异常翻译、Dry-Run 透传 |
 | `test_gemini_image.py` | Gemini 双模判定、steps 图片提取、banana2 接线 |
 | `test_openai_image.py` | 供应商池配置解析(含 weight)、sync/resync、/images/edits 端点分流 |
+| `test_channel_resync.py` | 通道重绑钩子、`set_config` 监视、失败隔离 |
+| `test_ensure_standard_image.py` | 参考图一律 JPEG 归一、透明铺灰底、Gemini mime |
 | `test_model_catalog.py` | /models 可用性以通道为准、纯 ABC 模型进清单 |
 | `test_model_schema.py` | 各模型 input_schema 与能力声明一致性 |
 | `test_http_contract.py` | HTTP 契约快照(golden test),字段只增不改的 CI 强制 |

@@ -30,13 +30,42 @@ class FakeModel(AIGCGenerationBase):
         return NodeOutput(output_type="image", data=b"png")
 
 
+class OtherFakeModel(FakeModel):
+    pass
+
+
 def test_register_get_and_override():
     reg = ModelRegistry()
-    reg.register(FakeModel("m1"))
+    assert reg.register(FakeModel("m1")) is True
     assert reg.get("m1") is not None
     m1b = FakeModel("m1")
-    reg.register(m1b)  # 覆盖(打 warning)
+    assert reg.register(m1b) is False  # 同实现静默覆盖实例
     assert reg.get("m1") is m1b
+
+
+def test_same_impl_reregister_is_silent(caplog):
+    import logging
+
+    reg = ModelRegistry()
+    reg.register(FakeModel("m1"))
+    caplog.set_level(logging.INFO)
+    caplog.clear()
+    reg.register(FakeModel("m1"))
+    text = caplog.text
+    assert "重复注册" not in text
+    assert "注册模型" not in text
+
+
+def test_different_impl_reregister_warns(caplog):
+    import logging
+
+    reg = ModelRegistry()
+    reg.register(FakeModel("m1"))
+    caplog.set_level(logging.WARNING)
+    caplog.clear()
+    reg.register(OtherFakeModel("m1"))
+    assert "重复注册" in caplog.text
+    assert isinstance(reg.get("m1"), OtherFakeModel)
 
 
 def test_partial_name_and_modality():

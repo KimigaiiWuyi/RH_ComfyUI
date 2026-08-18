@@ -34,17 +34,30 @@ class ChannelExtensionRegistry:
         channel: ProviderChannel,
         *,
         vendor_model: Optional[str] = None,
-    ) -> None:
-        """为 ``model_name`` 追加一个通道绑定(同名通道后注册者覆盖)。"""
+    ) -> bool:
+        """为 ``model_name`` 追加一个通道绑定(同名通道后注册者覆盖)。
+
+        已有同名通道且 vendor_model / weight 相同 → 不替换、不打 info。
+        返回是否发生了新增或覆盖。
+        """
         binding = ChannelBinding(channel=channel, vendor_model=vendor_model)
         with self._lock:
             existing = self._bindings.setdefault(model_name, [])
-            # 同名通道去重:后注册覆盖(便于外部插件热替换自己的通道)
-            existing[:] = [b for b in existing if b.channel.name != channel.name]
+            for i, old in enumerate(existing):
+                if old.channel.name != channel.name:
+                    continue
+                if old.vendor_model == vendor_model and old.channel.weight == channel.weight:
+                    return False
+                existing[i] = binding
+                logger.debug(
+                    f"[ChannelRegistry] 覆盖 {model_name}/{channel.name} vendor={vendor_model or '-'}"
+                )
+                return True
             existing.append(binding)
-        logger.info(
-            f"[ChannelRegistry] 为模型 {model_name} 追加通道 {channel.name} (vendor_model={vendor_model or '-'})"
+        logger.debug(
+            f"[ChannelRegistry] 追加 {model_name}/{channel.name} vendor={vendor_model or '-'}"
         )
+        return True
 
     def bindings_for(self, model_name: str) -> list[ChannelBinding]:
         """返回 ``model_name`` 上已注册的外部通道绑定(只读快照)。"""

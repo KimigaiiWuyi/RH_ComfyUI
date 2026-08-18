@@ -154,6 +154,7 @@ def test_can_resume_requires_vendor_task_id():
     assert can_resume(backend="seedance", vendor_task_id="tid-1") is True
     assert can_resume(backend="rh_app", vendor_task_id="tid-1") is True
     assert can_resume(backend="comfyui", vendor_task_id="pid") is True
+    assert can_resume(backend="minimax-h3", vendor_task_id="tid-1") is True
     assert can_resume(backend="seedance", vendor_task_id="") is False
 
 
@@ -247,6 +248,10 @@ def test_infer_backend_channel_over_node_backend():
         _infer_backend(backend="", model="seedance2", channel="gateway_slot1_seedance")
         == "seedance"
     )
+    assert _infer_backend(backend="", model="minimax_h3", channel="") == "minimax-h3"
+    assert (
+        _infer_backend(backend="", model="minimax_h3", channel="minimax-h3") == "minimax-h3"
+    )
 
 
 def test_resolve_seedance_channel_hard_fail_on_missing():
@@ -332,7 +337,7 @@ def test_seedance_models_declare_remote_cancel():
 
 
 def test_comfyui_and_gemini_models_declare_remote_cancel():
-    """comfyui / gemini-image 声明 supports_remote_cancel;rh_app 不声明(无 AI 应用 cancel)。"""
+    """comfyui 声明 remote cancel;gemini 生图改为 generate_content 后无远程 cancel;rh_app 也不声明。"""
     from RH_ComfyUI.models.image.defs import (
         AnimaDef,
         Banana2Def,
@@ -343,10 +348,14 @@ def test_comfyui_and_gemini_models_declare_remote_cancel():
     from RH_ComfyUI.models.video.defs import Wan22VideogenDef
     from RH_ComfyUI.models.speech.defs import IndexTTS2Def
 
-    for cls in (Qwen2512Def, Wan22VideogenDef, IndexTTS2Def, AceStep15Def, Banana2Def):
+    for cls in (Qwen2512Def, Wan22VideogenDef, IndexTTS2Def, AceStep15Def):
         m = cls()
         assert m.supports_cancel is True, m.name
         assert m.supports_remote_cancel is True, f"{m.name} backend={m.node.backend}"
+
+    banana2 = Banana2Def()
+    assert banana2.supports_cancel is True
+    assert banana2.supports_remote_cancel is False
 
     # rh_app:禁止取消(本地/远程),只能 resume 继续轮询
     for cls in (AnimaDef, CameraAngleDef):
@@ -367,56 +376,38 @@ def test_comfyui_api_has_cancel_paths():
     assert not hasattr(rh_api.RHAppAPI, "cancel_task")
 
 
-def test_gemini_background_create_poll_and_bind_cancel(monkeypatch):
-    """Gemini:background=True → get 轮询 → bind cancel → cancel 走 interactions.cancel。"""
-    import base64
-
+def test_gemini_generate_content_uses_canonical_model(monkeypatch):
+    """生图走 generate_content,并把误带的 -agent 后缀剥掉。"""
     import RH_ComfyUI.utils.backends.gemini_image.api as gapi
 
-    class _Img:
-        type = "image"
-        data = base64.b64encode(b"\x89PNG")
-        uri = None
+    seen: dict[str, object] = {}
 
-    class _Ix:
-        def __init__(self, iid: str, status: str, outputs=None):
-            self.id = iid
-            self.status = status
-            self.outputs = outputs or []
+    class _Part:
+        def __init__(self) -> None:
+            self.inline_data = type("D", (), {"data": b"\x89PNG", "uri": None})()
+            self.file_data = None
+            self.text = None
 
-    states = [
-        _Ix("ix-1", "in_progress"),
-        _Ix("ix-1", "completed", outputs=[_Img()]),
-    ]
-    calls: list[str] = []
-
-    class _AioIx:
-        async def create(self, **kwargs):
-            assert kwargs.get("background") is True
-            calls.append("create")
-            return states[0]
-
-        async def get(self, iid: str):
-            calls.append(f"get:{iid}")
-            return states[1]
-
-        async def cancel(self, iid: str):
-            calls.append(f"cancel:{iid}")
-            return _Ix(iid, "cancelled")
+    class _AioModels:
+        async def generate_content(self, **kwargs):
+            seen.update(kwargs)
+            return type(
+                "R",
+                (),
+                {"candidates": [type("C", (), {"content": type("K", (), {"parts": [_Part()]})()})()]},
+            )()
 
     class _Aio:
-        interactions = _AioIx()
+        models = _AioModels()
 
     class _Client:
         aio = _Aio()
 
     monkeypatch.setattr(gapi.GeminiImageAPI, "_build_client", lambda self: _Client())
-
     api = gapi.GeminiImageAPI()
-    data = asyncio.run(api.generate(model="gemini-test", prompt="cat", background=True, poll_interval=0.01, max_wait=5))
-    assert data  # decoded PNG payload
-    assert "create" in calls
-    assert any(c.startswith("get:") for c in calls)
+    data = asyncio.run(api.generate(model="gemini-3.1-flash-image-preview-agent", prompt="cat"))
+    assert data == b"\x89PNG"
+    assert seen["model"] == "gemini-3.1-flash-image-preview"
 
 
 def test_happyhorse_cancel_uses_dashscope_post_cancel():

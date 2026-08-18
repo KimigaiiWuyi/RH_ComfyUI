@@ -70,6 +70,7 @@ description: >
 | 接一个全新上游 API | backends 新 Adapter(或 ProviderChannel)+ 配置键 | 九、四 |
 | 加/改一个图片供应商(如 Gemini)/ 给模型加第二家供应商 | ProviderChannel + `channel_registry.register_binding` | 十二、四 |
 | 给图片模型挂一家 OpenAI 兼容供应商(如千帆,零代码) | 网页控制台 `OpenAI_Image_Providers` + `rh 刷新供应商` | 十三 |
+| 开关通道/改 Slot 模型勾选后 registry 没跟上 | 网页 `set_config` 自动重绑;外部插件 `register_resync_hook` | 七、十三 |
 | 加一个语音/TTS 模型 / 改某模型情绪风格(内联/枚举/自然语言) | overrides 声明 `emotion_style`,基类 `normalize()` 统一整形 | 十四 |
 | 参考音频自动克隆 / 克隆结果持久复用去重 | mapper 复用 `RHVoiceCloneCache`(按内容哈希全局去重) | 十四 |
 | 改模型能不能传参考图 / 参考图上限 | defs 的 `images` 端口(有无 + `max_items`),需与 `supported_shapes`/`supports_edit` 同步 | 十二、三 |

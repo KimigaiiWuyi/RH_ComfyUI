@@ -50,13 +50,16 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
 - `backend_key_prefix` = key 前 6 位,来自 `ProviderChannel.audit_key_prefix()`
   (run() 落 metadata,recorder 透传,DB 列已加)。含密钥的通道要记前缀就覆盖
   `audit_key_prefix`。
-- 负载均衡策略/阈值键:`Load_Balance_Mode` / `Failure_Threshold`(SERVICE_CONFIG,
-  旧 `Seedance_Load_Balance` / `Seedance_Failure_Threshold` 已迁移)。
+- 负载均衡策略/阈值键:`Load_Balance_Mode` / `Failure_Threshold`(`PLUGIN_CONFIG`,
+  全局一条,改完即生效)。
+- **Dry-Run** 只有 `PLUGIN_CONFIG.Dry_Run` 一把开关,开启后 `run()` 拦截全部模型。
 
 ## 3. Gemini 生图(banana2 = 原生 Nano Banana 2)
 
-- **走官方 `google-genai` SDK 的 `client.aio.interactions.create`**,不要手拼
-  REST/URL/鉴权(手拼反复 404:global 主机、Vertex 路径、Bearer 都易错)。
+- **走官方 `google-genai` SDK 的 `client.aio.models.generate_content`**,不要手拼
+  REST/URL/鉴权,也**不要**走 `interactions.create`。Interactions 会把
+  `gemini-3.1-flash-image-preview` 改写成 `…-preview-agent`,该变体
+  报 `Image input modality is not enabled`(参考图 400)。正式 ID 没有 `-agent`。
 - **双模互斥(SDK 硬约束)**:`Client(vertexai=True, project=…, api_key=…)` 会抛
   "Project/location and API key are mutually exclusive"。故用**显式开关**
   `Gemini_Image_Use_Vertex`:
@@ -79,6 +82,9 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
   uri**)。`usage.output_tokens_by_modality` 里有 image 即已出图。`steps` 是 SDK
   未声明的 extra 字段,取值要 `getattr` + `model_extra` 兜底,内层是原始 dict。
   提取器见 `gemini_image/api.py::_find_image`(先 outputs 再 steps,兼容 data/uri)。
+- **`Gemini_Enabled_Models`**:与 MiniMax 同构的 GsListStrConfig,默认空。banana1 / banana2 /
+  banana_pro 的 Gemini 通道仅在列表勾选后才 `check_available`。banana_pro 的
+  gpt-image-2 / 外部通道不受此列表影响。
 - **banana2 独立于 gpt-image-2**:`banana2.backend="gemini-image"`,
   `Banana2Def.channel_bindings()` 只挂 `GeminiImageChannel`;请求 Nano Banana 2
   **不经过** gpt-image-2(OpenAI 兼容)后端。日志里 `[GPT-Image2]` 是**后端名**
@@ -86,6 +92,7 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
 - **schema 用 ratio + image_size,不用宽高**:Gemini 只吃 `aspect_ratio`(枚举)+
   `image_size`(512/1K/2K/4K),不吃像素宽高。banana2 的 input 端口是 `ratio` /
   `image_size`(`image_size` 走 params 透传给 mapper)。
+  `generate_content` 的 aspect_ratio **没有 8:5**;mapper 把 8:5 就近折成 3:2。
 
 ## 4. input_schema 必须与模型能力一致(agent / 调用方据此判参数)
 

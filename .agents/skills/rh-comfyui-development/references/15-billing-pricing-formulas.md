@@ -132,6 +132,20 @@ points = ceil(tokens × rate_yuan × 100 / 1e6)   # 1 元 = 100 积分,最小 1
 
 **2.5 官方例**:720p 5s 无输入 = 108000 tokens × 70 元/M = **7.56 元 = 756 积分**。
 
+### 15.2.4b 视频 — 按秒计价(MiniMax H3)
+
+**代表模型**:`minimax_h3`
+
+**公式**(官方按量人民币):
+
+```
+seconds = 输出秒数 + 输入参考视频秒数
+rate    = 768P → 0.50 元/秒; 2K → 0.80 元/秒
+points  = ceil(seconds × rate × 100)   # 1 元 = 100 积分,最小 1
+```
+
+时长 4~15 秒。须在 `MiniMax_Enabled_Models` 勾选 `minimax_h3`。
+
 ### 15.2.5 视频 — 按输出时长(Wan2.2)
 
 **公式**:`points = max(int(duration * 60), 1)` —— 0.6 元/秒 = 60 积分/秒。

@@ -11,11 +11,7 @@
 - ensure_min_edge: 等比放大使宽、高均不少于指定阈值(Seedance 参考图 ≥300)
 - crop_to_seedance_aspect: 居中裁切使宽高比落入官方 0.40~2.50(目标 0.41 / 2.49)
 - prepare_seedance_image_bytes: 先放大再裁切,Seedance 2.x 提交前共用
-
-未来可扩展:
-- 格式转换 / 色彩空间归一化
-- 水印 / 去噪 / 超分
-- EXIF 方向校正
+- ensure_standard_image: 上传前一律收成标准 JPEG(透明通道铺中性灰底)
 """
 
 from __future__ import annotations
@@ -233,17 +229,124 @@ def prepare_seedance_image_bytes(data: bytes) -> tuple[bytes, str]:
     out, info_crop = crop_to_seedance_aspect(out)
     # 裁切只减长边,短边应仍 ≥300;再跑一次防取整边缘。
     out, info_scale2 = ensure_min_edge(out)
-    infos = [x for x in (info_scale, info_crop, info_scale2) if x]
+    out, mime = ensure_standard_image(out)
+    fmt = "" if data.startswith(_JPEG_MAGIC) else (mime.split("/")[-1] if mime else "")
+    infos = [x for x in (info_scale, info_crop, info_scale2, fmt) if x]
     return out, "; ".join(infos)
+
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_JPEG_MAGIC = b"\xff\xd8\xff"
 
 
 def image_mime_from_bytes(data: bytes) -> str:
     """按文件头猜 PNG / JPEG mime;其它回落 image/png。"""
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+    if data.startswith(_PNG_MAGIC):
         return "image/png"
-    if data.startswith(b"\xff\xd8\xff"):
+    if data.startswith(_JPEG_MAGIC):
         return "image/jpeg"
     return "image/png"
+
+
+def is_standard_jpeg(data: bytes) -> bool:
+    """字节是否已是标准 JPEG 文件头。"""
+    return data.startswith(_JPEG_MAGIC)
+
+
+def is_standard_jpeg_or_png(data: bytes) -> bool:
+    """字节是否已是标准 JPEG / PNG 文件头。"""
+    return data.startswith(_PNG_MAGIC) or data.startswith(_JPEG_MAGIC)
+
+
+# 透明像素铺底用的中性灰,避免白底/黑底抢主体。
+_FLAT_GRAY_RGB: tuple[int, int, int] = (128, 128, 128)
+
+
+def _flatten_on_gray(img: Any) -> Any:
+    """把带透明通道的图合成到纯灰底,返回 RGB 图。"""
+    from PIL import Image
+
+    rgba = img.convert("RGBA")
+    background = Image.new("RGBA", rgba.size, (*_FLAT_GRAY_RGB, 255))
+    background.alpha_composite(rgba)
+    return background.convert("RGB")
+
+
+def ensure_standard_image(data: bytes) -> tuple[bytes, str]:
+    """把参考图收成标准 JPEG,供所有生图/生视频通道上传。
+
+    - 已是标准 JPEG → 原样返回(不重编码);
+    - 有有效透明通道 → 铺中性灰底再编 JPEG;
+    - PNG / WebP / HEIC / GIF 等一律转 JPEG。
+    解码失败或未装 Pillow → 原字节 + 按文件头猜测的 mime,不中断主路。
+    """
+    if not data:
+        return data, ""
+    if data.startswith(_JPEG_MAGIC):
+        return data, "image/jpeg"
+
+    try:
+        from PIL import Image
+    except ImportError:
+        return data, image_mime_from_bytes(data)
+
+    try:
+        img = Image.open(BytesIO(data))
+        img.load()
+    except Exception:  # noqa: BLE001 — 损坏/未知格式,交给上游或后续校验
+        return data, image_mime_from_bytes(data)
+
+    if getattr(img, "n_frames", 1) > 1:
+        img.seek(0)
+
+    buf = BytesIO()
+    try:
+        if _has_transparency(img):
+            img = _flatten_on_gray(img)
+        elif img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        img.save(buf, format="JPEG", quality=_JPEG_QUALITY, optimize=True)
+    except Exception:  # noqa: BLE001
+        return data, image_mime_from_bytes(data)
+    return buf.getvalue(), "image/jpeg"
+
+
+def standardize_generation_images(request: Any) -> Any:
+    """就地改写 ``request.images`` 与 ``ordered_content`` 图片项为标准 JPEG。"""
+    if request.images:
+        request.images = [ensure_standard_image(img)[0] for img in request.images]
+    if not request.ordered_content:
+        return request
+
+    from .core.types import MediaRef, ContentItem, ContentItemType
+
+    rewritten: list[Any] = []
+    for item in request.ordered_content:
+        media = item.media
+        if item.type != ContentItemType.IMAGE or media is None or not media.data:
+            rewritten.append(item)
+            continue
+        data, mime = ensure_standard_image(media.data)
+        if data == media.data and (not mime or mime == media.mime_type):
+            rewritten.append(item)
+            continue
+        rewritten.append(
+            ContentItem(
+                type=item.type,
+                media=MediaRef(
+                    kind=media.kind,
+                    data=data,
+                    url=media.url,
+                    role=media.role,
+                    mime_type=mime or media.mime_type,
+                    filename=media.filename,
+                ),
+                role=item.role,
+                text=item.text,
+            )
+        )
+    request.ordered_content = rewritten
+    return request
 
 
 async def prepare_seedance_image_ref(ref: Any) -> Any:
@@ -1029,6 +1132,10 @@ __all__ = [
     "crop_to_seedance_aspect",
     "prepare_seedance_image_bytes",
     "image_mime_from_bytes",
+    "is_standard_jpeg",
+    "is_standard_jpeg_or_png",
+    "ensure_standard_image",
+    "standardize_generation_images",
     "prepare_seedance_image_ref",
     "resize_long_edge",
     "correct_orientation",

@@ -19,8 +19,8 @@ from gsuid_core.logger import logger
 from gsuid_core.utils.plugins_config.models import GsStrConfig, GsBoolConfig, GsRepeatGroupConfig
 
 from .channel import OpenAIImageChannel, OpenAIImageCredentials
+from ....core.channels.resync import log_binding_diff, sync_owned_bindings
 from ....core.channels.channel import ProviderChannel
-from ....core.channels.registry import channel_registry
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 _PROVIDERS_KEY = "OpenAI_Image_Providers"
@@ -125,29 +125,30 @@ _POOLS: List[tuple[str, Callable[[str, ProviderEntry], ProviderChannel]]] = [
 
 
 def sync_openai_image_providers() -> None:
-    """按当前配置重挂全部供应商池: 先清除本层历史注入, 再按启用项 register_binding。"""
-    for model_name, channel_name in _REGISTERED:
-        channel_registry.unregister(model_name, channel_name)
-    _REGISTERED.clear()
-
-    total = 0
+    """按当前配置差量重挂供应商池:只对增删/改映射的绑定动手,无变化不打 info。"""
+    global _REGISTERED
+    desired: list[tuple[str, ProviderChannel, str | None]] = []
     enabled_total = 0
     for config_key, make_channel in _POOLS:
-        seen_names: set[str] = set()
+        pool_seen: set[str] = set()
         for entry in resolve_provider_entries(config_key):
             if not entry.enable:
                 continue
-            if entry.name in seen_names:
+            if entry.name in pool_seen:
                 logger.warning(f"[OpenAIImage] 供应商名重复, 已跳过后者: {entry.name}")
                 continue
-            seen_names.add(entry.name)
+            pool_seen.add(entry.name)
             channel = make_channel(config_key, entry)
             for b in entry.models:
-                channel_registry.register_binding(b.model_real_name, channel, vendor_model=b.model_id)
-                _REGISTERED.append((b.model_real_name, entry.name))
-                total += 1
-        enabled_total += len(seen_names)
-    logger.info(f"[OpenAIImage] 供应商池已同步: {enabled_total} 家启用, {total} 条模型绑定")
+                desired.append((b.model_real_name, channel, b.model_id))
+        enabled_total += len(pool_seen)
+    _REGISTERED, diff = sync_owned_bindings(_REGISTERED, desired)
+    if diff.has_changes():
+        log_binding_diff(
+            f"[OpenAIImage] 供应商池 {enabled_total} 家启用",
+            diff,
+            len(_REGISTERED),
+        )
 
 
 __all__ = ["sync_openai_image_providers", "resolve_provider_entries", "ProviderEntry"]

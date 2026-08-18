@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from .api import gemini_image_api
+from .config import gemini_disabled_reason, is_gemini_model_enabled
 from ...core.types import NodeOutput
 from ....core.base.errors import ChannelError
 from ...mappers.gemini_image import gemini_flash_image_mapper
@@ -40,17 +41,24 @@ class GeminiImageChannel(ProviderChannel):
     name = "gemini"
     weight = 2
 
-    def __init__(self) -> None:
+    def __init__(self, logical_model: str = "") -> None:
         self._api = gemini_image_api
+        self._logical_model = logical_model
 
     def supports_remote_cancel(self) -> bool:
-        """background interactions 支持 cancel(尽力)。"""
-        return True
+        """generate_content 是单次请求,没有可 DELETE 的上游 task。"""
+        return False
 
     async def check_available(self) -> bool:
+        if self._logical_model and not is_gemini_model_enabled(self._logical_model):
+            return False
         return self._api.is_configured()
 
     async def unavailable_reason(self) -> str:
+        if self._logical_model:
+            disabled = gemini_disabled_reason(self._logical_model, self._logical_model)
+            if disabled is not None:
+                return disabled
         return "未配置 Gemini(AI Studio 需 Gemini_Image_apikey;Vertex 需 Gemini_Image_Project_ID)"
 
     def audit_key_prefix(self) -> str:
@@ -60,6 +68,15 @@ class GeminiImageChannel(ProviderChannel):
     async def invoke(self, **kwargs: Any) -> NodeOutput:
         request = kwargs["request"]
         vendor_model: Optional[str] = kwargs.get("vendor_model")
+        if self._logical_model:
+            disabled = gemini_disabled_reason(self._logical_model, self._logical_model)
+            if disabled is not None:
+                raise ChannelError(
+                    disabled,
+                    retryable=True,
+                    channel=self.name,
+                    user_message=disabled,
+                )
         # Vertex 模式合法地没有 api_key(走 ADC / 服务账号),守卫必须与
         # check_available 同源用 is_configured(),否则 Vertex 永远打不通
         if not self._api.is_configured():

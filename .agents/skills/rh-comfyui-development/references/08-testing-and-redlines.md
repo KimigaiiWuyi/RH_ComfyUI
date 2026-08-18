@@ -16,8 +16,13 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 | `test_dispatcher_billing.py` | 成功 commit / 校验失败不扣费 / 失败退款幂等 / BaseException(取消/Dry-Run)退款与 status=cancelled / estimate_cost 动态计费 / Dispatch_Timeout 超时退款 |
 | `test_channel_failover.py` | Adapter 错误翻译、多通道故障切换、非重试错误不计熔断不切换、transient(429/503)原通道退避重试一次 |
 | `test_seedance_channel.py` | SeedanceProviderChannel 凭证热更新、异常翻译、Dry-Run 透传 |
-| `test_gemini_image.py` | Gemini 双模判定、steps 图片提取、banana2 接线、Vertex 无 key invoke |
+| `test_minimax_h3_model.py` / `test_minimax_h3_billing.py` | MiniMax H3 schema/分类/渲染/启用列表/按秒计费 |
+| `test_gemini_image.py` | Gemini 双模判定、steps 图片提取、banana2 接线、Vertex 无 key invoke、`Gemini_Enabled_Models` 闸门 |
+| `test_comfyui_enabled_workflows.py` | `ComfyUI_Enabled_Workflows` 默认空 / json 别名 / 热读增删 / AdapterChannel 闸门 |
+| `test_rh_app_enabled_apps.py` | `RH_App_Enabled_Apps` 默认全开 / webappId 别名 / 热读增删 / AdapterChannel 闸门 |
 | `test_openai_image.py` | 供应商池配置解析(含 weight)、sync/resync、通道凭证热更新、/images/edits 端点分流与 multipart 字段形状 |
+| `test_channel_resync.py` | 外部重绑钩子登记/覆盖/失败隔离、`set_config` 监视键、重入保护 |
+| `test_ensure_standard_image.py` | 参考图上传前一律 JPEG、透明铺灰底、Gemini mime 跟字节头 |
 | `test_model_catalog.py` | /models 可用性以通道为准、纯 ABC 模型进清单 |
 | `test_model_schema.py` | 各模型 input_schema 与能力声明一致性 |
 | `test_http_contract.py` | ★ HTTP 契约快照(golden test):ModelEntry / 目录顶层 / channels 项的字段名与类型冻结,红线 4 的 CI 强制 |
@@ -76,7 +81,7 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 - [ ] 异步模型:进行中 cancel 一次(status=cancelled、消费记录合理);
 - [ ] 异步模型:查一条 ok 记录的 `prompt`/`request_body_json` 是否为最终上游形态;
 - [ ] 文档同步:模型能力变化 → `knowledge_content` + 相关 README;
-      架构变化 → 本 SKILL(`docs/skills/rh-comfyui-development/`)对应章节(含 §二十)。
+      架构变化 → 本 SKILL(`.agents/skills/rh-comfyui-development/`)对应章节(含 §二十)。
 
 ## 8.4 常见故障定位
 

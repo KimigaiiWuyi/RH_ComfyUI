@@ -15,5 +15,5 @@
 - 凭证改动即时生效;**供应商增删 / 模型映射 / 权重变动**需重跑 sync(命令 `rh 刷新供应商`);
 - `model_real_name` 下拉项来自 `rh_config/service_config.py::_IMAGE_MODEL_REAL_NAMES`,
   新增图片模型时同步该表;
-- 详细文档见 `docs/skills/rh-comfyui-development/references/13-openai-provider-pool.md`;
+- 详细文档见 `.agents/skills/rh-comfyui-development/references/13-openai-provider-pool.md`;
 - 测试:`tests/test_openai_image.py`。

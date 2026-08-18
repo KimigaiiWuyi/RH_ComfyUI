@@ -1,17 +1,16 @@
-"""Gemini 生图客户端 — 走官方 google-genai SDK 的 Interactions API
+"""Gemini 生图客户端 — 走官方 google-genai SDK 的 generate_content
 
 不再手拼 REST/URL:由 SDK 处理端点与鉴权。
 - AI Studio(个人版):``Client(api_key=...)``,只需 API Key;
 - VertexAI(组织版):``Client(vertexai=True, project=..., location=...)``,鉴权走
   ADC 或服务账号 JSON(SDK 限制:project 与 api_key 互斥,Vertex 不能用 API Key)。
 
-默认 **background 异步**:
-  ``interactions.create(..., background=True)`` → 轮询 ``interactions.get(id)``
-  → 可 ``interactions.cancel(id)``(POST /v1beta/interactions/{id}/cancel)。
-  仅仍在运行的 background interaction 可取消。
+生图必须走 ``models.generate_content``。``interactions.create`` 会把
+``gemini-3.1-flash-image-preview`` 改写成 ``…-preview-agent``,该变体
+**不接受参考图**(Image input modality is not enabled)。
 
-图像输出:response_modalities=["image"], generation_config.image_config;
-结果在 interaction.outputs / steps 里 type=="image" 的块。
+进程重启后若统计里还留着旧 interaction id,``resume_interaction`` /
+``cancel_interaction`` 仍走 Interactions,仅用于历史任务。
 """
 
 from __future__ import annotations
@@ -36,6 +35,25 @@ _TERMINAL_STATUSES = frozenset(
         "incomplete",
     }
 )
+
+
+def _inline_image_part(img: bytes) -> dict[str, Any]:
+    """调试/单测用:图片块 mime 必须与字节头一致,不能一律标 png。"""
+    from ...image_process import image_mime_from_bytes
+
+    return {
+        "type": "image",
+        "mime_type": image_mime_from_bytes(img),
+        "data": base64.b64encode(img).decode(),
+    }
+
+
+def _canonical_image_model(model: str) -> str:
+    """Interactions 会给生图模型加 ``-agent`` 后缀;正式 ID 没有这个尾巴。"""
+    name = (model or "").strip()
+    if name.endswith("-agent"):
+        return name[: -len("-agent")]
+    return name
 
 
 class GeminiImageAPI:
@@ -121,42 +139,44 @@ class GeminiImageAPI:
         image_size=None 时整个字段不发(一代 gemini-2.5-flash-image 不支持
         image_config.image_size,发了会被上游拒)。
 
-        默认 ``background=True``:创建后轮询,支持
-        ``POST /v1beta/interactions/{id}/cancel`` 取消进行中任务。
+        ``background`` / ``poll_*`` 仅兼容旧调用方,生图已改为单次
+        ``generate_content``,不再创建 interaction。
         """
+        from google.genai import types
+
+        from ...image_process import image_mime_from_bytes
+
+        _ = (background, poll_interval, max_wait)
         client = self._build_client()
+        model = _canonical_image_model(model)
 
         if images:
-            parts: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+            parts: list[Any] = [types.Part.from_text(text=prompt)]
             for img in images:
-                parts.append({"type": "image", "mime_type": "image/png", "data": base64.b64encode(img).decode()})
-            model_input: Any = parts
+                parts.append(types.Part.from_bytes(data=img, mime_type=image_mime_from_bytes(img)))
+            contents: Any = [types.Content(role="user", parts=parts)]
         else:
-            model_input = prompt
+            contents = prompt
 
         img_sizes = ", ".join(f"{len(b)}B" for b in (images or [])) or "无"
-        # 直连不通时最常见的问题就是"到底走没走中转",所以把端点打进日志
         endpoint = self.base_url if (self.base_url and not self.is_vertex) else "官方"
         logger.info(
-            f"[Gemini-Image] interactions.create model={model} vertex={self.is_vertex} endpoint={endpoint} "
-            f"background={background} ratio={aspect_ratio} size={image_size or '-'} "
-            f"参考图={len(images or [])} 张"
+            f"[Gemini-Image] generate_content model={model} vertex={self.is_vertex} endpoint={endpoint} "
+            f"ratio={aspect_ratio} size={image_size or '-'} 参考图={len(images or [])} 张"
         )
-        logger.debug(f"[Gemini-Image] 请求 prompt={prompt[:120]!r} 参考图=[{img_sizes}] modalities=['image']")
-        image_config: dict[str, Any] = {"aspect_ratio": aspect_ratio}
+        logger.debug(f"[Gemini-Image] 请求 prompt={prompt[:120]!r} 参考图=[{img_sizes}] modalities=['IMAGE']")
+
+        from ...mappers.gemini_image import snap_gemini_aspect_ratio
+
+        aspect_ratio = snap_gemini_aspect_ratio(aspect_ratio)
+        image_config_kw: dict[str, Any] = {"aspect_ratio": aspect_ratio}
         if image_size:
-            image_config["image_size"] = image_size
+            image_config_kw["image_size"] = image_size
+        config = types.GenerateContentConfig(
+            response_modalities=["IMAGE"],
+            image_config=types.ImageConfig(**image_config_kw),
+        )
 
-        create_kwargs: dict[str, Any] = {
-            "model": model,
-            "input": model_input,
-            "response_modalities": ["image"],
-            "generation_config": {"image_config": image_config},
-        }
-        if background:
-            create_kwargs["background"] = True
-
-        # 统计:最终 create 参数(不落 base64,只记元信息)
         from ....core.telemetry.wire_capture import set_wire_audit
 
         set_wire_audit(
@@ -166,44 +186,27 @@ class GeminiImageAPI:
                 "prompt": prompt,
                 "aspect_ratio": aspect_ratio,
                 "image_size": image_size,
-                "background": background,
                 "num_images": len(images or []),
-                "response_modalities": ["image"],
+                "response_modalities": ["IMAGE"],
+                "api": "generate_content",
             },
         )
 
-        interaction = await client.aio.interactions.create(**create_kwargs)
-        interaction_id = str(getattr(interaction, "id", None) or "")
-        if background and interaction_id:
-            await self._bind_active_cancel(client, interaction_id)
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config,
+        )
+        logger.info(f"[Gemini-Image] 完成 model={model} {_summarize_generate(response)}")
+        logger.debug(f"[Gemini-Image] 原始响应: {_safe_dump(response)}")
 
-        try:
-            if background:
-                interaction = await self._poll_until_done(
-                    client,
-                    interaction,
-                    interval=poll_interval,
-                    max_wait=max_wait,
-                )
-        except asyncio.CancelledError:
-            if background and interaction_id:
-                await self._best_effort_cancel(client, interaction_id)
-            raise
-
-        status = getattr(interaction, "status", None)
-        logger.info(f"[Gemini-Image] 完成 status={status} {_summarize(interaction)}")
-        logger.debug(f"[Gemini-Image] 原始响应: {_safe_dump(interaction)}")
-
-        if str(status or "").lower() in {"failed", "cancelled", "canceled"}:
-            raise RuntimeError(f"Gemini interaction 失败: status={status}, {_safe_dump(interaction)}")
-
-        data, uri = _find_image(interaction)
+        data, uri = _find_generate_image(response)
         if data is not None:
             return data
         if uri:
             logger.info(f"[Gemini-Image] 图片为外链,下载: {uri}")
             return await _download(uri)
-        raise RuntimeError(f"Gemini 响应未包含图片: status={status}, {_summarize(interaction)}")
+        raise RuntimeError(f"Gemini 响应未包含图片: {_summarize_generate(response)}")
 
     async def cancel_interaction(self, interaction_id: str) -> None:
         """取消 background interaction: ``POST .../interactions/{id}/cancel``。"""
@@ -329,6 +332,50 @@ def _block_image(block: Any) -> tuple[Optional[bytes], Optional[str]]:
         return (raw if isinstance(raw, bytes) else base64.b64decode(raw)), None
     uri = _get(block, "uri")
     return (None, str(uri)) if uri else (None, None)
+
+
+def _iter_generate_parts(response: Any) -> list[Any]:
+    parts = getattr(response, "parts", None)
+    if parts:
+        return list(parts)
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return []
+    content = getattr(candidates[0], "content", None)
+    return list(getattr(content, "parts", None) or []) if content is not None else []
+
+
+def _find_generate_image(response: Any) -> tuple[Optional[bytes], Optional[str]]:
+    """从 generate_content 响应里取第一张图(inline_data 或 file_data.uri)。"""
+    for part in _iter_generate_parts(response):
+        inline = getattr(part, "inline_data", None)
+        if inline is not None:
+            raw = getattr(inline, "data", None)
+            if raw:
+                return (raw if isinstance(raw, bytes) else base64.b64decode(raw)), None
+            uri = getattr(inline, "uri", None)
+            if uri:
+                return None, str(uri)
+        file_data = getattr(part, "file_data", None)
+        if file_data is not None:
+            uri = getattr(file_data, "file_uri", None) or getattr(file_data, "uri", None)
+            if uri:
+                return None, str(uri)
+    return None, None
+
+
+def _summarize_generate(response: Any) -> str:
+    kinds: list[str] = []
+    for part in _iter_generate_parts(response):
+        if getattr(part, "inline_data", None) is not None:
+            kinds.append("inline_image")
+        elif getattr(part, "file_data", None) is not None:
+            kinds.append("file_image")
+        elif getattr(part, "text", None):
+            kinds.append("text")
+        else:
+            kinds.append("?")
+    return "parts=[" + ", ".join(kinds) + "]" if kinds else "parts=(空)"
 
 
 def _find_image(interaction: Any) -> tuple[Optional[bytes], Optional[str]]:

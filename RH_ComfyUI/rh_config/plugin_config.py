@@ -14,6 +14,7 @@ from gsuid_core.utils.plugins_config.models import (
     GsDivider,
     GsIntConfig,
     GsStrConfig,
+    GsBoolConfig,
 )
 
 PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
@@ -44,6 +45,26 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
         "防止卡死的上游长期占用并发闸。0=不限制。改动即刻生效",
         1800,
         options=[0, 600, 1200, 1800, 3600],
+    ),
+    "Dry_Run": GsBoolConfig(
+        "Dry-Run(拦截全部请求)",
+        "开启后,所有模型的出站请求都会被拦截,抛 DryRunInterrupt 直接终止"
+        "(不触发熔断/通道切换,已预扣积分自动退款);不会真正调用上游。"
+        "改动即刻生效。",
+        False,
+    ),
+    "Load_Balance_Mode": GsStrConfig(
+        "负载均衡策略",
+        "round_robin=轮询分发; weighted=加权随机(官方直连权重高); least_failures=优先选连续失败最少的。"
+        "仅同一模型有多个通道同时可用时生效。改动即刻生效。",
+        "round_robin",
+        options=["round_robin", "weighted", "least_failures"],
+    ),
+    "Failure_Threshold": GsStrConfig(
+        "熔断阈值",
+        "通道连续失败多少次后暂时跳过(冷却期内排到末尾)。0=不熔断。改动即刻生效。",
+        "3",
+        options=["1", "3", "5", "0"],
     ),
     "_divider_point": GsDivider(
         "积分规则",

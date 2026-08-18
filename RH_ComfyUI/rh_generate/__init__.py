@@ -17,7 +17,6 @@ from ..utils.core.types import audio_ref
 from ..utils.core.parser import parse_mood_from_prompt, parse_model_from_prompt
 from ..utils.core.request import TaskType, GenerationResult, GenerationRequest
 from ..core.billing.policy import BillingContext
-from ..utils.image_process import flatten_transparent_to_white
 from ..core.base.generation import AIGCGenerationBase
 from ..core.dispatch.context import DispatchContext
 from ..core.routing.registry import model_registry
@@ -138,7 +137,7 @@ async def generate_image(bot: Bot, ev: Event) -> None:
         from gsuid_core.utils.resource_manager import RM
 
         image_bytes = await RM.get(ev.image_id)
-        request.images = [flatten_transparent_to_white(image_bytes)]
+        request.images = [image_bytes]
 
     # 执行生成
     result = await _do_generate(request, ev, bot)
@@ -185,7 +184,7 @@ async def edit_image(bot: Bot, ev: Event) -> None:
 
     from gsuid_core.utils.resource_manager import RM
 
-    images = [flatten_transparent_to_white(await RM.get(img_id)) for img_id in image_id_list]
+    images = [await RM.get(img_id) for img_id in image_id_list]
 
     request = GenerationRequest(
         task_type=TaskType.IMAGE,

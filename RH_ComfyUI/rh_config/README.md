@@ -23,6 +23,7 @@ rh_config/
 |--------|------|--------|------|
 | `Max_Concurrency` | `GsIntConfig` | `1` | 全局最大并发数，限制所有后端同时执行的任务数 |
 | `ComfyUI_BaseURL` | `GsStrConfig` | `"127.0.0.1:8188"` | ComfyUI 服务地址 |
+| `ComfyUI_Enabled_Workflows` | `GsListStrConfig` | `[]` | 启用的 ComfyUI 工作流(模型名或 json;默认空;热读) |
 | `RH_apikey` | `GsStrConfig` | `""` | RunningHub API Key |
 | `Default_Point` | `GsIntConfig` | `20` | 新用户默认初始积分 |
 | `OpenAI_Image_apikey` | `GsStrConfig` | `""` | OpenAI 兼容生图接口的 API Key |
@@ -63,6 +64,7 @@ RHCOMFYUI_CONFIG.set_config("Max_Concurrency", 3)
 ```
 Max_Concurrency    ──→ utils/core/executor.py（全局 Semaphore 并发控制）
 ComfyUI_BaseURL    ──→ utils/backends/comfyui/api.py（WebSocket/HTTP 连接地址）
+ComfyUI_Enabled_Workflows ──→ backends/comfyui/config.py + AdapterChannel（工作流启用闸,热读）
 RH_apikey          ──→ utils/backends/comfyui/api.py + rh_app/api.py（API 认证）
 OpenAI_Image_apikey  ──→ utils/backends/gpt_image2/api.py（API 认证）
 OpenAI_Image_BaseURL ──→ utils/backends/gpt_image2/api.py（API 端点）

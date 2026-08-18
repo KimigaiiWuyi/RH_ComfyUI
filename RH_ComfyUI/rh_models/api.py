@@ -270,9 +270,12 @@ def _channel_supports_remote_cancel(
     if name == "dashscope":
         return True
 
+    if name in ("minimax-h3",):
+        return True
+
     # 聚合网关异步视频
     if name.startswith("gateway_slot") and (
-        name.endswith("_seedance") or name.endswith("_happyhorse")
+        name.endswith("_seedance") or name.endswith("_happyhorse") or name.endswith("_minimax_h3")
     ):
         return True
 

@@ -43,14 +43,17 @@ resync 全部复用。
   每次 `check_available()` / `invoke()` 实时重读 SERVICE_CONFIG —— **改 key 即时生效,
   无需任何操作**(与 §11 热更新红线一致)。
 - **供应商增删 / 模型映射 / 权重变动**:绑定关系是 `sync_openai_image_providers()` 注入
-  channel_registry 的快照(权重在构造通道时固化),改完需要重挂 —— 两个时机:
+  channel_registry 的快照(权重在构造通道时固化),改完需要重挂 —— 三个时机:
   1. 启动时 `RH_ComfyUI/__init__.py::init_pipeline_system`(在
      `discover_builtin_models()` **之后**调用,因为要挂到已注册模型上);
-  2. 运行期管理员命令 **`rh 刷新供应商`**(`rh_admin/__init__.py`,别名
-     `刷新供应商池` / `同步供应商`),回执启用家数与绑定条数。
-- resync 逻辑:模块级 `_REGISTERED` 记录本层注入的 (model, channel) 对,
-  先 `channel_registry.unregister()` 清历史再按当前配置重挂;同名供应商去重
-  (后者跳过并 warning)。
+  2. 网页控制台改 `OpenAI_Image_Providers`(`SERVICE_CONFIG.set_config`)自动重绑;
+  3. 运行期管理员命令 **`rh 刷新供应商`**(`rh_admin/__init__.py`,别名
+     `刷新供应商池` / `同步供应商`):跑全部 `register_resync_hook`(OpenAI 池 +
+     外部插件注入的通道),回执池启用家数与钩子名。
+- resync 逻辑:`sync_owned_bindings` 按差量卸/挂,vendor/权重未变则保留旧通道。
+  无变化不打 info;有增删改只打一条 `+model/ch,-model/ch,~model/ch`。
+  同实现再 `model_registry.register` 不打「重复注册」。外部插件同一套路,
+  见 [§七 7.6](./07-closed-source-extension.md)。
 
 ## 13.4 执行链(channel.py / api.py)
 

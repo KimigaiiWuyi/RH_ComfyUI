@@ -51,6 +51,28 @@ def test_all_broken_still_returns_candidates():
     assert len(ordered) == 2  # 全灭兜底:不剔除
 
 
+def test_default_balancer_reads_plugin_config(monkeypatch):
+    import RH_ComfyUI.core.routing.balancer as bal
+    import RH_ComfyUI.rh_config.comfyui_config as cfgmod
+
+    class _Item:
+        def __init__(self, data: object) -> None:
+            self.data = data
+
+    class _Plugin:
+        def get_config(self, key: str) -> _Item:
+            if key == "Load_Balance_Mode":
+                return _Item("least_failures")
+            if key == "Failure_Threshold":
+                return _Item("5")
+            raise KeyError(key)
+
+    monkeypatch.setattr(cfgmod, "PLUGIN_CONFIG", _Plugin())
+    cfg = bal._resolve_plugin_config()
+    assert cfg.mode == "least_failures"
+    assert cfg.failure_threshold == 5
+
+
 def test_scope_isolation():
     lb = LoadBalancer(BalancerConfig(failure_threshold=1, circuit_breaker_seconds=999))
     lb.record_failure(scope="m1", member="a")

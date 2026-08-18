@@ -674,6 +674,10 @@ ZZZeroUID/tools/INTEND_RES_PATH
 
 .claude
 .roo
+.zcode
+.ruff_cache
+.crush
 
 plans
 火山方舟_*
+models_docs

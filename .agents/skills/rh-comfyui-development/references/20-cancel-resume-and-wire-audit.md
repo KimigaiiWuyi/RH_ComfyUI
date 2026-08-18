@@ -61,7 +61,8 @@ cancel_generation(trace_id | record_id)
 | Seedance `ark` | 方舟 generations tasks | ✅ `DELETE .../tasks/{id}` | ✅ poll |
 | Seedance 通道名 `runninghub` | Seedance RH 视频端点(**不是** Comfy 工作流 cancel 那条) | 跟模型 flag | ✅ poll |
 | HappyHorse `dashscope` | DashScope async | ✅ `POST .../tasks/{id}/cancel`(**仅 PENDING**) | ✅ poll |
-| Gemini background | interactions | ✅ `POST .../interactions/{id}/cancel`(尽力) | ✅ get+poll |
+| MiniMax H3 `minimax-h3` | `DELETE /v2/video_generation/{id}` | ✅ **仅 queued** 可取消;running 上游拒绝,本地仍停轮询 | ✅ `GET /v2/query/video_generation/{id}`(7 天) |
+| Gemini 生图 | `generate_content` 单次请求 | ❌ 无上游 task(本地仍可打断) | 仅历史 interaction id |
 
 桥接模型(`models/bridge.py`):仅 `node.backend in ("comfyui", "gemini-image")`
 时默认 `supports_remote_cancel=True`;**`rh_app` 保持 False**。
@@ -157,7 +158,7 @@ result = await resume_poll(
 
 ### 支持矩阵(与 §20.2 表一致)
 
-- seedance / happyhorse / rh_app / comfyui / gemini-image(及同类)
+- seedance / happyhorse / minimax-h3 / rh_app / comfyui / gemini-image(及同类)
 - **不支持**:纯 sync、无 task_id、未知 backend → 宿主应 fail+退款,勿半吊子 poll
 
 ### 异常
@@ -225,6 +226,7 @@ dispatch finally → clear_wire_audit()
 |---------|--------|
 | Seedance | `provider.run` 在 `_request` 前 `set_wire_from_http_body(masked)` |
 | HappyHorse | 同上 |
+| MiniMax H3 | `h3_provider.run` 在 `_request` 前 `set_wire_from_http_body(masked)` |
 | rh_app | submit 前 `webappId` + `nodeInfoList` + 入参 prompt |
 | ComfyUI | `/prompt` 成功后 `request=p`(workflow 图) |
 
@@ -245,6 +247,7 @@ RH_ComfyUI 是**开源独立插件**:
 3. 宿主能力一律扩展点注入:
    - `set_media_publisher` — bytes → 公网 URL
    - `channel_registry.register_binding` — 外挂通道
+   - `register_resync_hook` / `bind_config_resync` — 配置改完重挂绑定
    - `BillingPolicy` 子类 — 独立钱包
    - `model_registry` / entry points — 闭源模型
 4. 公开 API 用中性词:**调用方 / 宿主 / 外部插件**,不用具体产品名当架构前提
@@ -294,6 +297,7 @@ RH_ComfyUI/
   models/bridge.py                # comfyui/gemini-image remote cancel 默认
   utils/backends/seedance/provider.py   # wire + bind cancel
   utils/backends/happyhorse/provider.py
+  utils/backends/minimax/h3_provider.py # H3 create/poll/DELETE + wire + bind cancel
   utils/backends/rh_app/executor.py     # 无 remote cancel 注释
   utils/backends/comfyui/api.py         # cancel_task + wire workflow
   api.py                          # cancel_generation / resume_poll 公开 API

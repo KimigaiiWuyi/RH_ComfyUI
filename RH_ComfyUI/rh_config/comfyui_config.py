@@ -30,3 +30,8 @@ PLUGIN_CONFIG = StringConfig(
     PLUGIN_CONFIG_PATH,
     PLUGIN_CONFIG_DEFAULT,
 )
+
+
+def plugin_dry_run() -> bool:
+    """全局 Dry-Run:每次热读 PLUGIN_CONFIG,开启后拦截全部出站生成。"""
+    return bool(PLUGIN_CONFIG.get_config("Dry_Run").data)

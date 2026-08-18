@@ -32,18 +32,22 @@ sv_user = SV("用户积分")
 
 @sv_admin.on_command(("刷新供应商", "刷新供应商池", "同步供应商"), block=True)
 async def refresh_providers(bot: Bot, ev: Event) -> None:
-    """按当前配置重新挂载 OpenAI 兼容供应商池(增删供应商/改模型映射后调用)。
+    """按当前配置重挂全部 channel_registry 绑定(OpenAI 池 + 外部插件钩子)。
 
-    凭证(key/base_url)本身每请求实时读,无需刷新;仅供应商增删或模型映射变动需要。
+    凭证(key/base_url/Enable)本身每请求实时读,无需刷新;
+    供应商增删、模型勾选、槽位开关改完也会经 set_config 自动重绑。
     """
-    from ..utils.backends.openai_image import sync_openai_image_providers
+    from ..core import resync_channel_bindings
     from ..utils.backends.openai_image.providers import resolve_provider_entries
 
-    sync_openai_image_providers()
+    ran = resync_channel_bindings()
     entries = resolve_provider_entries()
     enabled = [e for e in entries if e.enable]
     bindings = sum(len(e.models) for e in enabled)
-    await bot.send(f"✅ 供应商池已刷新: {len(enabled)} 家启用, {bindings} 条模型绑定")
+    hooks = ", ".join(ran) if ran else "(无)"
+    await bot.send(
+        f"✅ 通道绑定已刷新: {len(enabled)} 家 OpenAI 供应商 / {bindings} 条池绑定; 钩子 {hooks}"
+    )
 
 
 @sv_admin.on_command(("供应商统计", "供应商对账"), block=True)

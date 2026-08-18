@@ -154,3 +154,50 @@ def test_wan22_validate_rejects_video_audio_refs():
     with pytest.raises(ValidationError) as ei:
         model.validate(req)
     assert "视频/音频参考" in str(ei.value)
+
+
+def test_minimax_h3_validate_t2v_and_mix_conflict():
+    from RH_ComfyUI.models.video.defs import MiniMaxH3Def
+
+    model = MiniMaxH3Def()
+    model.validate(
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="一只猫在草地上奔跑",
+            ratio="16:9",
+            resolution="2k",
+            duration=5,
+        )
+    )
+    with pytest.raises(ValidationError) as ei:
+        model.validate(
+            GenerationRequest(
+                task_type=TaskType.VIDEO,
+                prompt="x",
+                ratio="adaptive",
+                resolution="2k",
+                duration=5,
+            )
+        )
+    assert "adaptive" in str(ei.value)
+    with pytest.raises(ValidationError) as ei2:
+        model.validate(
+            GenerationRequest(
+                task_type=TaskType.VIDEO,
+                prompt="x",
+                images=[b"a", b"b"],
+                video_refs=[video_ref(url="https://ex.com/v.mp4")],
+                params={"frame_mode": "first_last"},
+            )
+        )
+    assert "图生" in str(ei2.value) or "首尾帧" in str(ei2.value)
+    model.validate(
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="人物参考视频1的动作",
+            images=[b"a"],
+            video_refs=[video_ref(url="https://ex.com/v.mp4")],
+            params={"task_mode": "reference"},
+            generate_audio=True,
+        )
+    )

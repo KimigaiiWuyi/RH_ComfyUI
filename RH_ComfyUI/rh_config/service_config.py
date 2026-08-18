@@ -15,6 +15,7 @@ from gsuid_core.utils.plugins_config.models import (
     GsDivider,
     GsStrConfig,
     GsBoolConfig,
+    GsListStrConfig,
     GsRepeatGroupConfig,
 )
 
@@ -36,9 +37,12 @@ _IMAGE_MODEL_REAL_NAMES = [
 # ── ComfyUI 服务 ────────────────────────────────────────────────
 SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     "divider_comfyui": GsDivider(
-        "ComfyUI 配置",
-        "ComfyUI 配置",
-        "ComfyUI 配置",
+        "ComfyUI / RunningHub AI 应用",
+        "本地/远程 ComfyUI 与 RunningHub AI 应用。"
+        "ComfyUI 须在「启用的 ComfyUI 工作流」勾选后才分发;"
+        "RH AI 应用默认全开,可在「启用的 RunningHub AI 应用」里关掉。"
+        "增删列表即时生效。",
+        "ComfyUI 服务配置",
     ),
     "ComfyUI_BaseURL": GsStrConfig(
         "ComfyUI 服务地址",
@@ -53,6 +57,41 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "RunningHub API Key",
         "用于设置 RunningHub API Key 的配置",
         "",
+    ),
+    "RH_App_Enabled_Apps": GsListStrConfig(
+        "启用的 RunningHub AI 应用",
+        "从列表勾选要启用的 RH AI 应用;可自由添加内部模型名或 webappId。"
+        "默认全部启用。留空则全部不启用。改完即时生效,无需重启。"
+        "可选:anima / rh_camera_angle / rh_image_matting / "
+        "rh_image_upscale / rh_image_outpaint。",
+        [
+            "anima",
+            "rh_camera_angle",
+            "rh_image_matting",
+            "rh_image_upscale",
+            "rh_image_outpaint",
+        ],
+        options=[
+            "anima",
+            "rh_camera_angle",
+            "rh_image_matting",
+            "rh_image_upscale",
+            "rh_image_outpaint",
+        ],
+    ),
+    "ComfyUI_Enabled_Workflows": GsListStrConfig(
+        "启用的 ComfyUI 工作流",
+        "从列表勾选要启用的 ComfyUI 工作流;可自由添加内部模型名或 json 文件名。"
+        "留空则全部不启用。改完即时生效,无需重启。"
+        "可选:qwen_2511 / qwen_2512 / wan2.2_videogen / IndexTTS2 / ace_step1.5。",
+        [],
+        options=[
+            "qwen_2511",
+            "qwen_2512",
+            "wan2.2_videogen",
+            "IndexTTS2",
+            "ace_step1.5",
+        ],
     ),
     "divider_openai_image": GsDivider(
         "OpenAI 兼容生图（文生图 / 图生图 / 编辑）",
@@ -77,8 +116,9 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "divider_gemini_image": GsDivider(
         "Gemini 生图(Interactions API,走 google-genai SDK)",
-        "Gemini 3.1 Flash Image。默认走 AI Studio 个人版(只需 API Key);打开"
-        "「使用 VertexAI」开关才走组织版(需 project + ADC/服务账号,不用 API Key)。",
+        "Gemini 生图(banana1 / banana2 / banana_pro 的 Gemini 通道)。"
+        "默认 AI Studio(API Key);打开 VertexAI 走组织版。"
+        "须在下方「启用的 Gemini 模型」勾选后才走 Gemini 通道。",
         "Gemini 生图服务配置",
     ),
     "Gemini_Image_apikey": GsStrConfig(
@@ -117,15 +157,32 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "(GOOGLE_APPLICATION_CREDENTIALS / gcloud auth application-default login)。",
         "",
     ),
+    "Gemini_Enabled_Models": GsListStrConfig(
+        "启用的 Gemini 模型",
+        "从列表勾选要走 Gemini 通道的内部模型;可自由添加内部模型名。"
+        "留空则全部不走 Gemini。共用上方 Gemini 凭证。"
+        "可选:banana1 / banana2 / banana_pro。"
+        "banana_pro 未勾选时仍可通过 OpenAI 兼容通道使用。",
+        [],
+        options=["banana1", "banana2", "banana_pro"],
+    ),
     "divider_minimax": GsDivider(
-        "MiniMax（文生图 / 图生图 / T2A 语音）",
-        "MiniMax 文生图 / 图生图 / T2A 语音合成服务连接配置",
+        "MiniMax（文生图 / 图生图 / T2A 语音 / H3 视频）",
+        "MiniMax 文生图 / 图生图 / T2A 语音合成 / H3 视频生成服务连接配置",
         "MiniMax 文生图 / 图生图 / T2A 语音合成服务连接配置",
     ),
     "MiniMax_apikey": GsStrConfig(
         "MiniMax API Key",
-        "用于设置 MiniMax API 的 Key（文生图 / 图生图 / T2A 语音合成）",
+        "用于设置 MiniMax API 的 Key（文生图 / 图生图 / T2A 语音合成 / H3 视频生成共用）",
         "",
+    ),
+    "MiniMax_Enabled_Models": GsListStrConfig(
+        "启用的 MiniMax 模型",
+        "从列表勾选要启用的 MiniMax 模型;可自由添加内部模型名。"
+        "留空则全部不启用。共用上方 MiniMax API Key。"
+        "可选:minimax_t2a_speech / minimax_image01 / minimax_h3。",
+        [],
+        options=["minimax_t2a_speech", "minimax_image01", "minimax_h3"],
     ),
     "divider_mimo": GsDivider(
         "MiMo TTS（小米语音合成）",
@@ -252,31 +309,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
             ),
         },
     ),
-    "divider_load_balance": GsDivider(
-        "负载均衡",
-        "多通道模型(同一模型由多家供应商提供)时的负载均衡与熔断策略,全模态通用。",
-        "负载均衡",
-    ),
-    "Load_Balance_Mode": GsStrConfig(
-        "负载均衡策略",
-        "round_robin=轮询分发; weighted=加权随机(官方直连权重高); least_failures=优先选连续失败最少的。"
-        "仅同一模型有多个通道同时可用时生效。",
-        "round_robin",
-        options=["round_robin", "weighted", "least_failures"],
-    ),
-    "Failure_Threshold": GsStrConfig(
-        "熔断阈值",
-        "通道连续失败多少次后暂时跳过(冷却期内排到末尾)。0=不熔断。",
-        "3",
-        options=["1", "3", "5", "0"],
-    ),
-    "Seedance_Dry_Run": GsBoolConfig(
-        "Dry-Run(拦截请求 + 打印)",
-        "开启后,所有 Seedance 出站请求会被拦截,抛 DryRunInterrupt 直接终止(不触发熔断/通道切换,"
-        "已预扣的积分自动退款);同时通过 logger.info 打印被拦截请求的完整内容"
-        "(method/url/headers[脱敏]/body[全量 JSON])。不会真正发送请求,不会消耗配额。",
-        False,
-    ),
     "divider_happyhorse": GsDivider(
         "HappyHorse 视频生成(DashScope)",
         "阿里云 DashScope HappyHorse 1.1 视频生成服务配置。"
@@ -301,11 +333,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "启用 DashScope 供应商",
         "是否启用 DashScope HappyHorse 通道。禁用后 happyhorse1.1 不可用。",
         True,
-    ),
-    "HappyHorse_Dry_Run": GsBoolConfig(
-        "HappyHorse Dry-Run(拦截请求 + 打印)",
-        "开启后,HappyHorse 出站请求会被拦截并打印完整请求体,不会真正调用上游。",
-        False,
     ),
     "divider_tx_aiart": GsDivider(
         "腾讯云混元扩图",

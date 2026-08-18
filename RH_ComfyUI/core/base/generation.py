@@ -5,8 +5,9 @@
     run(request)
       ├─ 1. validate(request)            # schema 通用校验 + 子类跨字段校验
       ├─ 2. normalize(request)           # 默认值填充 / 单位归一化(可覆盖)
-      ├─ 3. balancer.order_candidates()  # 负载均衡选通道(多通道时)
-      ├─ 4. execute_on_channel(...)      # ★ 子类核心:组装请求并执行
+      ├─ 3. plugin_dry_run() 则抛 DryRunInterrupt
+      ├─ 4. balancer.order_candidates()  # 负载均衡选通道(多通道时)
+      ├─ 5. execute_on_channel(...)      # ★ 子类核心:组装请求并执行
       │     ├─ 瞬时失败(transient,如 429/503)→ 原通道指数退避排队
       │     │   (最长 transient_retry_max_wait=1h;超时放弃该通道)
       │     └─ 失败且可重试 → 记熔断 → 换下一个通道
@@ -26,7 +27,7 @@ from typing import TYPE_CHECKING, ClassVar, Optional
 
 from gsuid_core.logger import logger
 
-from .errors import ChannelError, AllChannelsFailedError
+from .errors import ChannelError, DryRunInterrupt, AllChannelsFailedError
 from ..schema.card import ModelCard
 from ..schema.types import PortSpec, PortType, NodeOutput, ProgressCallback
 from ..schema.request import TaskType, GenerationRequest
@@ -223,6 +224,14 @@ class AIGCGenerationBase(ABC):
         """
         self.validate(request)
         request = self.normalize(request)
+        from ...rh_config.comfyui_config import plugin_dry_run
+
+        if plugin_dry_run():
+            logger.info(
+                f"[Dry-Run] 拦截 {self.name} ({self.display_name}) "
+                f"prompt={(request.prompt or '')[:80]!r}"
+            )
+            raise DryRunInterrupt(f"[Dry-Run] 已启用,未发送上游请求: {self.name}")
         request = await self.prepare_request(request)
 
         bindings = self.channel_bindings()
@@ -261,22 +270,23 @@ class AIGCGenerationBase(ABC):
                 ordered = free + [b for b in ordered if b not in free]
 
         last_error: Optional[Exception] = None
-        # 预统计 available 候选,避免「len(ordered)>1 但其余 check_available=False」
-        # 时误打「切换下一通道」后立刻 AllChannelsFailed。
-        available_names: list[str] = []
+        # 按 binding 身份记可用候选,不能用 channel.name:同名两路(内置 gemini +
+        # 外部也叫 gemini)失败一路会把另一路从集合里一起删掉,再也切不过去。
+        available: list[ChannelBinding] = []
+        skipped_notes: list[str] = []
         for b in ordered:
             if await b.channel.check_available():
-                available_names.append(b.channel.name)
+                available.append(b)
+            else:
+                reason = await b.channel.unavailable_reason()
+                skipped_notes.append(f"{b.channel.name}({reason})")
+                logger.info(f"[{self.name}] 跳过不可用通道 {b.channel.name}: {reason}")
 
         for binding in ordered:
-            if binding.channel.name not in available_names:
-                # 与上面预检一致;运行中凭证被关掉时再读一次以跳过
+            if not any(b is binding for b in available):
                 if not await binding.channel.check_available():
-                    logger.debug(
-                        f"[{self.name}] 跳过不可用通道 {binding.channel.name}: "
-                        f"{await binding.channel.unavailable_reason()}"
-                    )
                     continue
+                available.append(binding)
             output = None
             # 本通道 429/503 排队窗口:从首次 transient 起算,超时放弃该通道
             transient_started_at: Optional[float] = None
@@ -340,13 +350,19 @@ class AIGCGenerationBase(ABC):
                             user_message=(f"上游繁忙,排队已超过 {int(max_wait // 60)} 分钟仍未恢复,任务已取消。"),
                         )
                     self.balancer().record_failure(scope=self.name, member=binding.channel.name)
-                    available_names = [n for n in available_names if n != binding.channel.name]
-                    if available_names:
-                        logger.warning(f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),切换下一通道")
+                    available = [b for b in available if b is not binding]
+                    remain = ", ".join(b.channel.name for b in available)
+                    if available:
+                        logger.warning(
+                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),"
+                            f"切换下一通道(剩余 {remain})"
+                        )
                     else:
-                        # 无更多可用通道:跳出后由 AllChannelsFailedError 收口
-                        # (单通道时 last_error 即根因;多通道时 cause 保留最后一家)
-                        logger.warning(f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),无更多可用通道")
+                        skipped = f"; 未尝试: {', '.join(skipped_notes)}" if skipped_notes else ""
+                        logger.warning(
+                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),"
+                            f"无更多可用通道{skipped}"
+                        )
                     break
             if output is None:
                 continue
@@ -356,7 +372,11 @@ class AIGCGenerationBase(ABC):
             output.metadata.setdefault("key_prefix", binding.channel.audit_key_prefix())
             return self.postprocess(output)
 
-        raise AllChannelsFailedError(f"{self.display_name} 所有通道均失败", cause=last_error)
+        skipped = f"; 未尝试: {', '.join(skipped_notes)}" if skipped_notes else ""
+        raise AllChannelsFailedError(
+            f"{self.display_name} 所有通道均失败{skipped}",
+            cause=last_error,
+        )
 
     async def _emit_transient_progress(
         self,

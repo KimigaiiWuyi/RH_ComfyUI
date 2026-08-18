@@ -57,7 +57,7 @@
 | `RH_ComfyUI/api.py` | 外部插件 调用的编程接口(submit 等) | 改调用方对接时 |
 | `RH_ComfyUI/utils/database/` | RHComfyuiTaskRecord 统计表 | 加统计维度时 |
 | `tests/` | 内核单测(全离线) | 每次改 core/models |
-| `docs/skills/rh-comfyui-development/` | 本 SKILL(架构事实来源) | 架构级变更时同步 |
+| `.agents/skills/rh-comfyui-development/` | 本 SKILL(架构事实来源) | 架构级变更时同步 |
 
 ## 1.4 一次生成的完整数据流(调用方参考音频为例)
 

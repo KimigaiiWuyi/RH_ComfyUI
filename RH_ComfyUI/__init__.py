@@ -50,9 +50,12 @@ async def init_pipeline_system() -> None:
     model_count = discover_builtin_models()
 
     # 2.5 同步 OpenAI 兼容供应商池: 按配置把各家供应商挂到现有模型(需在模型注册后)
+    from .core import bind_config_resync, register_resync_hook
     from .utils.backends.openai_image import sync_openai_image_providers
 
     sync_openai_image_providers()
+    register_resync_hook("openai_image", sync_openai_image_providers)
+    bind_config_resync(SERVICE_CONFIG, frozenset({"OpenAI_Image_Providers"}))
 
     # 3. 注册 AI 知识库
     from .rh_generate._knowledge import register_pipeline_knowledge

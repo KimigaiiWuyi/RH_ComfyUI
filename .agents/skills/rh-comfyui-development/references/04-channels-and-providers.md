@@ -90,10 +90,8 @@ channel_registry.register_binding("gpt-image-2", MyAzureChannel())
 - `order_candidates()` 按策略(优先级/权重/随机)排序候选;
 - `record_failure()` 达到阈值触发熔断,冷却期内该通道被排到最后/跳过;
   `record_success()` 恢复;
-- 策略与阈值读 SERVICE_CONFIG 通用键 `Load_Balance_Mode` / `Failure_Threshold`
-  (旧 `Seedance_Load_Balance` / `Seedance_Failure_Threshold` 已迁移至此);
-  全局单例经 `config_resolver` **每次决策实时读取**,网页控制台改完即生效
-  (2026-07-10 起;此前冻结在首次调用);
+- 策略与阈值读 PLUGIN_CONFIG 通用键 `Load_Balance_Mode` / `Failure_Threshold`;
+  全局单例经 `config_resolver` **每次决策实时读取**,网页控制台改完即生效;
 - 熔断只由 `ChannelError(retryable=True)` 触发,业务校验错误不影响通道健康度
   —— `run()` 对 `retryable=False` 的失败**不记 record_failure、不切通道**,
   直接抛给用户(2026-07-10 修正,此前非重试错误也误计入熔断计数)。

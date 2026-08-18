@@ -17,6 +17,10 @@ from ...core.channels.channel import ChannelBinding
 from ...utils.mappers.seedream import seedream_mapper as _seedream_mapper
 from ...utils.mappers.gpt_image2 import gpt_image2_mapper as _gpt_image2_mapper
 from ...utils.mappers.image_edit import qwen_edit_mapper as _qwen_edit_mapper
+from ...utils.backends.minimax.config import (
+    minimax_disabled_reason,
+    is_minimax_model_enabled,
+)
 from ...utils.mappers.banana_pro_billing import estimate_banana_pro_points
 from ...utils.mappers.gpt_image2_billing import ratio_enum_values as _gpt_image2_ratio_values
 from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minimax_image01_mapper
@@ -857,7 +861,7 @@ class TxImageOutpaintDef(ImagePipelineModel):
 
 
 class Banana2Def(ImagePipelineModel):
-    """Nano Banana 2 — 走原生 Gemini Interactions API(非 OpenAI 兼容网关)
+    """Nano Banana 2 — 走原生 Gemini generate_content(非 OpenAI 兼容网关)
 
     独立于 gpt-image-2:唯一通道是 GeminiImageChannel(填 Project ID 走 VertexAI,
     留空走 AI Studio)。请求 Nano Banana 2 不会经过 gpt-image-2 后端。
@@ -874,9 +878,9 @@ class Banana2Def(ImagePipelineModel):
             task_type=TaskType("image"),
             backend="gemini-image",
             point_cost=2,
-            description="Gemini 3.1 Flash 图像生成/编辑模型(原生 Interactions API),速度快",
+            description="Gemini 3.1 Flash 图像生成/编辑模型(原生 generate_content),速度快",
             knowledge_content=(
-                "Nano Banana 2 图像生成/编辑模型(Gemini 3.1 Flash,原生 Interactions API)。"
+                "Nano Banana 2 图像生成/编辑模型(Gemini 3.1 Flash,原生 generate_content)。"
                 "\n"
                 "优势:生成速度快,质量稳定,支持图片编辑(传入 1~N 张参考图自动进入编辑)。"
                 "\n"
@@ -884,7 +888,8 @@ class Banana2Def(ImagePipelineModel):
                 "\n"
                 "不适用场景:需要极高细节的专业商业图(建议用 banana_pro)。"
                 "\n"
-                "凭证:VertexAI(填 Project ID,key 作 Bearer)或 AI Studio(仅需 key)。"
+                "凭证:须在「启用的 Gemini 模型」勾选 banana2;"
+                "VertexAI(填 Project ID)或 AI Studio(仅需 key)。"
                 "\n"
             ),
             requirements=["gemini_image_apikey"],
@@ -903,7 +908,9 @@ class Banana2Def(ImagePipelineModel):
                 "ratio": PortSpec(
                     type=PortType.ENUM,
                     default="9:16",
-                    values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    values=["1:1", "16:9", "8:5", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    # 8:5 是产品面(图片包 640×400);Gemini generate_content 不认,
+                    # mapper 会就近折成 3:2 再发给上游。
                     title="宽高比",
                     description="宽高比",
                 ),
@@ -920,8 +927,7 @@ class Banana2Def(ImagePipelineModel):
             },
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
-                # Gemini background interactions + cancel(见 gemini_image/api.py)
-                mode="async_poll",
+                mode="sync",
                 priority=70,
             ),
         )
@@ -930,12 +936,24 @@ class Banana2Def(ImagePipelineModel):
         from ...core.channels.registry import channel_registry
         from ...utils.backends.gemini_image.channel import GeminiImageChannel
 
-        bindings = [ChannelBinding(GeminiImageChannel(), vendor_model=self.node.backend_model)]
+        bindings = [
+            ChannelBinding(
+                GeminiImageChannel(logical_model=self.name),
+                vendor_model=self.node.backend_model,
+            )
+        ]
         bindings.extend(channel_registry.bindings_for(self.name))
         return bindings
 
     async def unavailable_reason(self) -> str:
-        return "Nano Banana 2 未配置 Gemini API Key(Gemini_Image_apikey)"
+        notes: list[str] = []
+        for binding in self.channel_bindings():
+            if await binding.channel.check_available():
+                continue
+            notes.append(f"{binding.channel.name}: {await binding.channel.unavailable_reason()}")
+        if notes:
+            return f"{self.display_name} 无可用供应商({'; '.join(notes)})"
+        return f"{self.display_name} 无可用供应商:请配置 Gemini 或外部供应商插件"
 
     def estimate_cost(self, request: GenerationRequest) -> int:
         """动态计费:按输出分辨率分档计费(60 美元/1M tokens)。
@@ -982,7 +1000,8 @@ class Banana1Def(ImagePipelineModel):
                 "\n"
                 "不适用场景:高分辨率/高细节输出(无尺寸档位,建议用 banana2 / banana_pro)。"
                 "\n"
-                "凭证:与 banana2 共用 Gemini 配置(VertexAI 或 AI Studio)。"
+                "凭证:须在「启用的 Gemini 模型」勾选 banana1;"
+                "与 banana2 共用 Gemini 配置(VertexAI 或 AI Studio)。"
                 "\n"
             ),
             requirements=["gemini_image_apikey"],
@@ -1011,7 +1030,7 @@ class Banana1Def(ImagePipelineModel):
             },
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
-                mode="async_poll",  # Gemini background + cancel
+                mode="sync",
                 priority=55,
             ),
         )
@@ -1020,12 +1039,24 @@ class Banana1Def(ImagePipelineModel):
         from ...core.channels.registry import channel_registry
         from ...utils.backends.gemini_image.channel import GeminiImageChannel
 
-        bindings = [ChannelBinding(GeminiImageChannel(), vendor_model=self.node.backend_model)]
+        bindings = [
+            ChannelBinding(
+                GeminiImageChannel(logical_model=self.name),
+                vendor_model=self.node.backend_model,
+            )
+        ]
         bindings.extend(channel_registry.bindings_for(self.name))
         return bindings
 
     async def unavailable_reason(self) -> str:
-        return "Nano Banana 1 无可用供应商:配置 Gemini(Gemini_Image_apikey)或外部供应商插件"
+        notes: list[str] = []
+        for binding in self.channel_bindings():
+            if await binding.channel.check_available():
+                continue
+            notes.append(f"{binding.channel.name}: {await binding.channel.unavailable_reason()}")
+        if notes:
+            return f"{self.display_name} 无可用供应商({'; '.join(notes)})"
+        return f"{self.display_name} 无可用供应商:请配置 Gemini 或外部供应商插件"
 
     def estimate_cost(self, request: GenerationRequest) -> int:
         """动态计费:一代模型无尺寸档位,固定 1290 tokens(30 美元/1M tokens)。"""
@@ -1075,8 +1106,9 @@ class BananaProDef(ImagePipelineModel):
                 "\n"
                 "同时支持图片编辑(传入 1~N 张参考图时自动进入编辑模式)。"
                 "\n"
-                "内置供应商:Gemini 3 Pro Image(gemini-3-pro-image-preview,与 banana1/2 共用"
-                "Gemini 配置)+ OpenAI 兼容 gpt-image-2 通道;外部插件可追加更多供应商。"
+                "内置供应商:Gemini 3 Pro Image(须在「启用的 Gemini 模型」勾选 banana_pro,"
+                "与 banana1/2 共用 Gemini 配置)+ OpenAI 兼容 gpt-image-2 通道;"
+                "未勾选时仍可走兼容通道。外部插件可追加更多供应商。"
                 "\n"
                 "适用场景:需要最终输出的高质量图像,专业创作场景,商业项目,精细细节的画面,精细图片编辑。"
                 "\n"
@@ -1120,8 +1152,7 @@ class BananaProDef(ImagePipelineModel):
             },
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
-                # 主路径 Gemini background;备援 gpt-image-2 仍可能同步
-                mode="async_poll",
+                mode="sync",
                 priority=60,
             ),
         )
@@ -1132,7 +1163,10 @@ class BananaProDef(ImagePipelineModel):
         from ...utils.backends.gemini_image.channel import GeminiImageChannel
 
         bindings = [
-            ChannelBinding(GeminiImageChannel(), vendor_model=self.GEMINI_VENDOR_MODEL),
+            ChannelBinding(
+                GeminiImageChannel(logical_model=self.name),
+                vendor_model=self.GEMINI_VENDOR_MODEL,
+            ),
             ChannelBinding(channel=self._channel, vendor_model=self.node.backend_model),
         ]
         bindings.extend(channel_registry.bindings_for(self.name))
@@ -1285,6 +1319,17 @@ class MinimaxImage01Def(ImagePipelineModel):
 
     def __init__(self) -> None:
         super().__init__(self.node_def())
+
+    async def check_available(self) -> bool:
+        if not is_minimax_model_enabled(self.name):
+            return False
+        return await super().check_available()
+
+    async def unavailable_reason(self) -> str:
+        disabled = minimax_disabled_reason(self.name, self.display_name)
+        if disabled is not None:
+            return disabled
+        return await super().unavailable_reason()
 
     @staticmethod
     def node_def() -> NodeDef:

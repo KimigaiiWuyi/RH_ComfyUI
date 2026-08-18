@@ -7,6 +7,7 @@
 from .base import (
     ChannelError,
     VideoTaskShape,
+    DryRunInterrupt,
     GenerationError,
     ValidationError,
     AsrGenerationBase,
@@ -51,6 +52,11 @@ from .channels import (
     ChannelBinding,
     ProviderChannel,
     channel_registry,
+    log_binding_diff,
+    bind_config_resync,
+    sync_owned_bindings,
+    register_resync_hook,
+    resync_channel_bindings,
 )
 from .dispatch import DispatchContext, dispatch, cancel_generation
 from .media_host import (
@@ -93,6 +99,11 @@ __all__ = [
     "ChannelBinding",
     "LocalChannel",
     "channel_registry",
+    "register_resync_hook",
+    "resync_channel_bindings",
+    "bind_config_resync",
+    "sync_owned_bindings",
+    "log_binding_diff",
     "ProviderCredentials",
     "SeedanceProviderChannel",
     # 媒体外链化扩展点(闭源/宿主注册 R2 等 publisher;开源零感知)
@@ -124,4 +135,5 @@ __all__ = [
     "ChannelError",
     "AllChannelsFailedError",
     "BillingDeniedError",
+    "DryRunInterrupt",
 ]

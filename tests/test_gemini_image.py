@@ -117,6 +117,41 @@ def test_find_image_in_steps():
     assert gapi._find_image(interaction) == (b"IMG", None)
 
 
+def test_snap_gemini_aspect_ratio_keeps_whitelist_and_folds_8_5():
+    from RH_ComfyUI.utils.mappers.gemini_image import snap_gemini_aspect_ratio
+
+    assert snap_gemini_aspect_ratio("16:9") == "16:9"
+    assert snap_gemini_aspect_ratio("auto") == "1:1"
+    assert snap_gemini_aspect_ratio("") == "1:1"
+    # 8:5=1.6,白名单里最近是 3:2=1.5(16:9=1.778 更远)
+    assert snap_gemini_aspect_ratio("8:5") == "3:2"
+
+
+def test_mapper_snaps_8_5_before_generate(monkeypatch):
+    import RH_ComfyUI.utils.mappers.gemini_image as gmapper
+    from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
+
+    seen: list[str] = []
+
+    class _FakeApi:
+        async def generate(self, **kwargs):
+            seen.append(str(kwargs.get("aspect_ratio")))
+            return b"IMG"
+
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", ratio="8:5")
+    asyncio.run(gmapper.gemini_flash_image_mapper(req, _FakeApi()))
+    assert seen == ["3:2"]
+
+
+def test_canonical_image_model_strips_agent_suffix():
+    assert gapi._canonical_image_model("gemini-3.1-flash-image-preview-agent") == (
+        "gemini-3.1-flash-image-preview"
+    )
+    assert gapi._canonical_image_model("gemini-3.1-flash-image-preview") == (
+        "gemini-3.1-flash-image-preview"
+    )
+
+
 def test_banana2_served_by_gemini_only():
     # Nano Banana 2 走原生 Gemini,不再经过 gpt-image-2 后端。
     channel_registry.clear()
@@ -127,6 +162,7 @@ def test_banana2_served_by_gemini_only():
     assert "gpt-image-2" not in names
     assert banana2.channel_bindings()[0].vendor_model == "gemini-3.1-flash-image-preview"
     assert banana2.node.backend == "gemini-image"
+    assert banana2.execution_mode == "sync"
     # 面向前端的 schema:ratio + image_size(Gemini 实际参数),不再是宽高
     schema = banana2.input_schema()
     assert "ratio" in schema and "image_size" in schema
@@ -143,6 +179,7 @@ def test_banana1_served_by_gemini_first_gen():
     names = [b.channel.name for b in banana1.channel_bindings()]
     assert names == ["gemini"]
     assert banana1.channel_bindings()[0].vendor_model == "gemini-2.5-flash-image"
+    assert banana1.execution_mode == "sync"
     schema = banana1.input_schema()
     # 一代不支持尺寸档:schema 只有 ratio,无 image_size
     assert "ratio" in schema and "image_size" not in schema
@@ -160,6 +197,7 @@ def test_banana_pro_includes_gemini_pro_image():
     assert bindings[0].vendor_model == "gemini-3-pro-image-preview"
     assert "gpt-image-2" in names
     assert pro.GEMINI_VENDOR_MODEL == "gemini-3-pro-image-preview"
+    assert pro.execution_mode == "sync"
 
 
 def test_gemini_channel_marks_429_as_transient():
@@ -251,3 +289,49 @@ def test_gemini_channel_availability(monkeypatch):
     )
     assert asyncio.run(ch.check_available()) is True
     assert ch.audit_key_prefix() == "projxy"
+
+
+def test_gemini_enabled_list_gates_named_channel(monkeypatch):
+    import RH_ComfyUI.utils.backends.gemini_image.config as gcfg
+
+    monkeypatch.setattr(gapi, "SERVICE_CONFIG", _FakeConfig({"Gemini_Image_apikey": "AIzaKEY"}))
+    monkeypatch.setattr(gcfg, "_cfg", lambda key: [] if key == "Gemini_Enabled_Models" else None)
+    ch = GeminiImageChannel(logical_model="banana2")
+    assert asyncio.run(ch.check_available()) is False
+    reason = asyncio.run(ch.unavailable_reason())
+    assert "banana2" in reason
+
+    monkeypatch.setattr(gcfg, "_cfg", lambda key: ["banana2"] if key == "Gemini_Enabled_Models" else None)
+    assert asyncio.run(ch.check_available()) is True
+
+
+def test_gemini_invoke_refuses_when_disabled(monkeypatch):
+    import RH_ComfyUI.utils.backends.gemini_image.config as gcfg
+    from RH_ComfyUI.core.base.errors import ChannelError
+    from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
+
+    monkeypatch.setattr(gapi, "SERVICE_CONFIG", _FakeConfig({"Gemini_Image_apikey": "AIzaKEY"}))
+    monkeypatch.setattr(gcfg, "_cfg", lambda key: [] if key == "Gemini_Enabled_Models" else None)
+    ch = GeminiImageChannel(logical_model="banana2")
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    try:
+        asyncio.run(ch.invoke(request=req))
+    except ChannelError as exc:
+        assert exc.retryable is True
+        assert "banana2" in str(exc)
+    else:
+        raise AssertionError("disabled Gemini channel must refuse invoke")
+
+
+def test_banana_pro_keeps_compat_channel_when_gemini_disabled(monkeypatch):
+    import RH_ComfyUI.utils.backends.gemini_image.config as gcfg
+    from RH_ComfyUI.models.image.defs import BananaProDef
+
+    monkeypatch.setattr(gcfg, "_cfg", lambda key: [] if key == "Gemini_Enabled_Models" else None)
+    channel_registry.clear()
+    pro = BananaProDef()
+    names = [b.channel.name for b in pro.channel_bindings()]
+    assert "gemini" in names
+    assert "gpt-image-2" in names
+    gemini = next(b.channel for b in pro.channel_bindings() if b.channel.name == "gemini")
+    assert asyncio.run(gemini.check_available()) is False

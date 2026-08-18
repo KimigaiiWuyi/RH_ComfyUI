@@ -66,6 +66,14 @@ class BillingDeniedError(GenerationError):
     """计费拒绝(积分不足 / 账户异常)"""
 
 
+class DryRunInterrupt(BaseException):
+    """全局 Dry-Run 中断信号。
+
+    继承 BaseException,避免被 ``except Exception`` 当成通道失败去熔断/切换。
+    dispatcher 按 BaseException 兜底:落统计(failed)+ 退款后原样抛出。
+    """
+
+
 def _next_cause(exc: BaseException) -> Optional[BaseException]:
     """成因链的下一环:引擎自持的 cause 优先,再退标准 __cause__ / __context__
 

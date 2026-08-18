@@ -6,6 +6,7 @@
 |---|---|
 | `SeedanceVideoModel` | 多参考(图/视频/音频合计 ≤12)/首尾帧/单图/纯文本;480P~4K;16:9 等固定比例;有声开关 |
 | `Wan22VideoModel` | 仅首尾帧/首帧/纯文本(**无多参考**);≤720P(像素积约束);任意宽高比;无有声配置 |
+| `MiniMaxH3VideoModel` | 四种模式:文生 / 图生(首或尾帧) / 首尾帧 / 全能参考;768P/2K;4~15s;原生有声;task_mode 与 Seedance 同构 |
 
 执行链复用桥接层(NodeDef + Adapter,零改动);差异全部体现在能力声明
 (`supported_shapes` / `supported_resolutions` / `supported_ratios` /

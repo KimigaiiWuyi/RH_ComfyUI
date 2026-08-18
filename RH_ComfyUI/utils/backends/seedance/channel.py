@@ -76,12 +76,9 @@ def service_config_credentials(name: str, default_base_url: str) -> ProviderCred
 
 
 def _dry_run_enabled() -> bool:
-    from ....rh_config.comfyui_config import SERVICE_CONFIG
+    from ....rh_config.comfyui_config import plugin_dry_run
 
-    try:
-        return bool(SERVICE_CONFIG.get_config("Seedance_Dry_Run").data)
-    except Exception:
-        return False
+    return plugin_dry_run()
 
 
 # ── 通道 ──

@@ -77,6 +77,13 @@ class ComfyUIAdapter(Adapter):
         *,
         on_progress=None,
     ) -> NodeOutput:
+        from .config import comfyui_disabled_reason, is_comfyui_workflow_enabled
+
+        wf = node.workflow_file or ""
+        if not is_comfyui_workflow_enabled(node.name, wf):
+            reason = comfyui_disabled_reason(node.name, node.display_name or node.name)
+            raise RuntimeError(reason or f"{node.name} 未启用")
+
         # 1. 加载工作流 JSON
         if node.workflow_file is None:
             raise RuntimeError(f"ComfyUI 节点 {node.name} 缺少 workflow_file")

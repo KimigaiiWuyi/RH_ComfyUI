@@ -6,6 +6,7 @@ RHComfyuiTaskRecord 终态。
 支持后端(有 vendor_task_id 时):
   - seedance (ark / runninghub / 网关通道)
   - happyhorse (dashscope 等)
+  - minimax-h3 (官方 MiniMax H3 视频)
   - rh_app (AI 应用 query — **可 resume,但无 remote cancel**)
   - comfyui (local history / RH 工作流代理 history)
   - gemini-image (background interactions)
@@ -133,6 +134,8 @@ def _channel_implies_backend(channel: str) -> str:
             return "seedance"
         if "happyhorse" in ch:
             return "happyhorse"
+        if "minimax_h3" in ch or "minimax-h3" in ch:
+            return "minimax-h3"
         if "seedream" in ch:
             return ""  # 同步端,不可 resume
         if any(
@@ -153,6 +156,8 @@ def _channel_implies_backend(channel: str) -> str:
         return "seedance"
     if ch in ("dashscope",) or "happyhorse" in ch:
         return "happyhorse"
+    if ch in ("minimax-h3",) or ch.startswith("minimax-h3"):
+        return "minimax-h3"
     if ch == "rh_app" or ch.startswith("rh_app"):
         return "rh_app"
     if ch in ("comfyui", "comfyui-local"):
@@ -190,6 +195,8 @@ def _infer_backend(*, backend: str, model: str, channel: str) -> str:
         return "seedance"
     if "happyhorse" in m:
         return "happyhorse"
+    if "minimax_h3" in m or m == "minimax_h3":
+        return "minimax-h3"
     # runninghub 无 model/backend 时 fail-closed 空串,避免误走 comfy/seedance
     if ch == "runninghub":
         if "seedance" in m:
@@ -224,7 +231,12 @@ def _kind_for_model(model: str, backend: str) -> str:
     except Exception:  # noqa: BLE001
         pass
     m = (model or "").lower()
-    if backend in ("seedance", "happyhorse") or "seedance" in m or "happyhorse" in m:
+    if (
+        backend in ("seedance", "happyhorse", "minimax-h3")
+        or "seedance" in m
+        or "happyhorse" in m
+        or "minimax_h3" in m
+    ):
         return "video"
     if backend in ("mimo", "minimax", "fishaudio") or "tts" in m or "speech" in m:
         return "speech"
@@ -902,6 +914,15 @@ async def resume_poll(
                 trace_id=trace_id,
                 record_id=record_id,
             )
+        elif backend == "minimax-h3":
+            result = await _resume_minimax_h3_with_cancel(
+                vendor_task_id=vendor_task_id,
+                channel=channel,
+                model=model,
+                on_progress=on_progress,
+                trace_id=trace_id,
+                record_id=record_id,
+            )
         elif backend == "rh_app":
             # 仅 resume 继续轮询;禁止 cancel(allow_cancel=False)
             from .active_tasks import get_active_task_registry
@@ -1090,6 +1111,113 @@ async def _resume_happyhorse_with_cancel(**kwargs: Any) -> GenerationResult:
         await reg.unregister(ag)
 
 
+def _resolve_minimax_h3_channel(channel: str, model: str) -> tuple[Any, str]:
+    from ..channels.registry import channel_registry
+    from ...utils.backends.minimax.h3_channel import MiniMaxH3Channel
+
+    requested = (channel or "").strip()
+    ch_map: dict[str, Any] = {"minimax-h3": MiniMaxH3Channel()}
+    try:
+        for b in channel_registry.bindings_for(model):
+            ch_map[b.channel.name] = b.channel
+    except Exception:  # noqa: BLE001
+        pass
+    if requested:
+        ch = ch_map.get(requested)
+        if ch is None:
+            raise ResumeNotSupportedError(
+                f"MiniMax H3 通道不存在: {requested!r}(可用: {sorted(ch_map.keys())})"
+            )
+        return ch, requested
+    return ch_map["minimax-h3"], "minimax-h3"
+
+
+async def _resume_minimax_h3(
+    *,
+    vendor_task_id: str,
+    channel: str,
+    model: str,
+    on_progress: Optional[ProgressCallback],
+) -> GenerationResult:
+    from ...utils.backends.seedance.channel import _download
+    from ...utils.backends.seedance.provider import NormalizedStatus
+    from ...utils.backends.minimax.h3_provider import live_minimax_h3_provider
+
+    ch, ch_name = _resolve_minimax_h3_channel(channel, model)
+    try:
+        provider: Any = _provider_from_channel(ch, ch_name)
+    except ResumeNotSupportedError:
+        provider = None
+    if not _provider_has_api_key(provider):
+        provider = live_minimax_h3_provider()
+    if not _provider_has_api_key(provider):
+        raise ResumeNotSupportedError("MiniMax H3 凭证不可用")
+
+    await _emit(on_progress, "resuming", 10, f"恢复 MiniMax H3 轮询({ch_name})")
+    final = await provider.poll_until_done(vendor_task_id, on_progress=None)
+    if final.status == NormalizedStatus.FAILED:
+        raise ResumeFailedError(f"MiniMax H3 任务失败: {final.error or final.raw}")
+    if final.status == NormalizedStatus.CANCELLED:
+        raise ResumeCancelledError("MiniMax H3 任务已取消")
+    if not final.video_url:
+        raise ResumeFailedError(f"MiniMax H3 成功但无 video url: {final.raw}")
+
+    await _emit(on_progress, "downloading", 90, "下载视频")
+    video = await _download(final.video_url)
+    return GenerationResult(
+        kind="video",
+        model=model,
+        backend="minimax-h3",
+        data=video,
+        mime_type="video/mp4",
+        usage=dict(final.usage or {}, task_id=final.id, provider=ch_name),
+        raw=final.raw,
+        metadata={"task_id": final.id, "channel": ch_name, "resumed": True},
+    )
+
+
+async def _resume_minimax_h3_with_cancel(**kwargs: Any) -> GenerationResult:
+    from .active_tasks import get_active_task_registry
+
+    model = kwargs["model"]
+    vendor_task_id = kwargs["vendor_task_id"]
+    channel = kwargs.get("channel") or ""
+    ch, ch_name = _resolve_minimax_h3_channel(channel, model)
+    try:
+        provider = _provider_from_channel(ch, ch_name)
+    except ResumeNotSupportedError:
+        provider = None
+    reg = get_active_task_registry()
+    ag = await reg.register(
+        model_name=model,
+        trace_id=kwargs.get("trace_id") or "",
+        record_id=kwargs.get("record_id"),
+    )
+    cancel_remote = None
+    if isinstance(provider, _HasDelete) and _provider_supports_remote_cancel(provider):
+        p = provider
+
+        async def _cancel() -> None:
+            await p.delete(vendor_task_id)
+
+        cancel_remote = _cancel
+    await reg.bind_vendor_task(
+        vendor_task_id=vendor_task_id,
+        cancel_remote=cancel_remote,
+        channel_name=ch_name,
+        ag=ag,
+    )
+    try:
+        return await _resume_minimax_h3(
+            vendor_task_id=vendor_task_id,
+            channel=ch_name,
+            model=model,
+            on_progress=kwargs.get("on_progress"),
+        )
+    finally:
+        await reg.unregister(ag)
+
+
 async def _resume_comfyui_with_cancel(**kwargs: Any) -> GenerationResult:
     from .active_tasks import get_active_task_registry
     from ...utils.backends import backend_registry
@@ -1237,6 +1365,7 @@ def can_resume(*, backend: str = "", model: str = "", channel: str = "", vendor_
     return b in {
         "seedance",
         "happyhorse",
+        "minimax-h3",
         "rh_app",
         "comfyui",
         "gemini-image",

@@ -3,7 +3,7 @@
 全模态统一的通道级负载均衡:
 - 状态按 (scope, member) 二级 key 记在 LoadBalancer 实例属性上;
   scope=模型名,member=通道名;同一模型的多个通道共享一套熔断计数;
-- 策略与阈值读 SERVICE_CONFIG 通用键 Load_Balance_Mode / Failure_Threshold。
+- 策略与阈值读 PLUGIN_CONFIG 通用键 Load_Balance_Mode / Failure_Threshold。
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class LoadBalancer:
     """按 scope 隔离的负载均衡器;线程安全
 
     config_resolver(可选)在每次决策时被调用以获取最新配置 ——
-    全局单例用它对接 SERVICE_CONFIG,保证网页控制台改
+    全局单例用它对接 PLUGIN_CONFIG,保证网页控制台改
     Load_Balance_Mode / Failure_Threshold 后不重启即生效。
     """
 
@@ -131,16 +131,16 @@ class LoadBalancer:
 _default_balancer: Optional[LoadBalancer] = None
 
 
-def _resolve_service_config() -> BalancerConfig:
-    """每次决策时从 SERVICE_CONFIG 读最新策略/阈值(网页控制台改完即生效)"""
+def _resolve_plugin_config() -> BalancerConfig:
+    """每次决策时从 PLUGIN_CONFIG 读最新策略/阈值(网页控制台改完即生效)"""
     mode = "round_robin"
     threshold = 3
-    from ...rh_config.comfyui_config import SERVICE_CONFIG
+    from ...rh_config.comfyui_config import PLUGIN_CONFIG
 
-    raw_mode = SERVICE_CONFIG.get_config("Load_Balance_Mode").data
+    raw_mode = PLUGIN_CONFIG.get_config("Load_Balance_Mode").data
     if isinstance(raw_mode, str) and raw_mode:
         mode = raw_mode
-    raw_threshold = SERVICE_CONFIG.get_config("Failure_Threshold").data
+    raw_threshold = PLUGIN_CONFIG.get_config("Failure_Threshold").data
     if raw_threshold is not None:
         try:
             threshold = int(raw_threshold)
@@ -150,11 +150,11 @@ def _resolve_service_config() -> BalancerConfig:
 
 
 def get_default_balancer() -> LoadBalancer:
-    """全局单例;策略/阈值经 config_resolver 每次实时读 SERVICE_CONFIG
+    """全局单例;策略/阈值经 config_resolver 每次实时读 PLUGIN_CONFIG
     (配置键不存在时——如测试环境——resolver 抛 KeyError 回落内置默认)"""
     global _default_balancer
     if _default_balancer is None:
-        _default_balancer = LoadBalancer(config_resolver=_resolve_service_config)
+        _default_balancer = LoadBalancer(config_resolver=_resolve_plugin_config)
     return _default_balancer
 
 

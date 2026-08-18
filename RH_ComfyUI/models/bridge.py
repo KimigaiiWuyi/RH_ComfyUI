@@ -30,8 +30,15 @@ from ..core.channels.registry import channel_registry
 class AdapterChannel(ProviderChannel):
     """把旧 Adapter(utils/backends)适配为 ProviderChannel"""
 
-    def __init__(self, backend_name: str) -> None:
+    def __init__(
+        self,
+        backend_name: str,
+        model_name: str = "",
+        workflow_file: str = "",
+    ) -> None:
         self.name = backend_name
+        self._model_name = model_name
+        self._workflow_file = workflow_file
 
     def _adapter(self) -> Any:
         from ..utils.backends import backend_registry
@@ -39,23 +46,66 @@ class AdapterChannel(ProviderChannel):
         return backend_registry.get(self.name)
 
     def supports_remote_cancel(self) -> bool:
-        # comfyui: local interrupt / RH 工作流 cancel;gemini-image: interactions cancel
-        # rh_app: AI 应用无 cancel API
-        return self.name in ("comfyui", "gemini-image")
+        # comfyui: local interrupt / RH 工作流 cancel
+        # rh_app / gemini-image: 无远程 cancel API
+        return self.name == "comfyui"
+
+    def _enable_gate(self, node: Any = None) -> str | None:
+        from ..utils.core.pipeline import NodeDef
+
+        model_name = self._model_name
+        workflow_file = self._workflow_file
+        if isinstance(node, NodeDef):
+            model_name = node.name or model_name
+            workflow_file = node.workflow_file or workflow_file
+        if not model_name and not workflow_file:
+            return None
+        if self.name == "comfyui":
+            from ..utils.backends.comfyui.config import (
+                comfyui_disabled_reason,
+                is_comfyui_workflow_enabled,
+            )
+
+            if is_comfyui_workflow_enabled(model_name, workflow_file):
+                return None
+            return comfyui_disabled_reason(model_name or workflow_file, model_name or workflow_file)
+        if self.name == "rh_app":
+            from ..utils.backends.rh_app.config import (
+                is_rh_app_enabled,
+                rh_app_disabled_reason,
+            )
+
+            if is_rh_app_enabled(model_name, workflow_file):
+                return None
+            return rh_app_disabled_reason(model_name or workflow_file, model_name or workflow_file)
+        return None
 
     async def check_available(self) -> bool:
+        if self._enable_gate() is not None:
+            return False
         adapter = self._adapter()
         if adapter is None:
             return False
         return await adapter.check_available()
 
     async def unavailable_reason(self) -> str:
+        disabled = self._enable_gate()
+        if disabled is not None:
+            return disabled
         adapter = self._adapter()
         if adapter is None:
             return f"后端 {self.name} 未注册"
         return await adapter.get_unavailable_reason()
 
     async def invoke(self, **kwargs: Any) -> NodeOutput:
+        disabled = self._enable_gate(kwargs.get("node"))
+        if disabled is not None:
+            raise ChannelError(
+                disabled,
+                retryable=True,
+                channel=self.name,
+                user_message=disabled,
+            )
         adapter = self._adapter()
         if adapter is None:
             raise ChannelError(f"后端 {self.name} 未注册", retryable=False)
@@ -96,15 +146,19 @@ class _PipelineBackedMixin:
         # max_concurrency property(它无 setter,无条件赋值直接 AttributeError)。
         if node.capabilities.max_concurrency > 0:
             self.max_concurrency = node.capabilities.max_concurrency
-        # 上游可取消:ComfyUI 本地 interrupt 或 RH ComfyUI 工作流 cancel;
-        # Gemini 生图走 background interactions + cancel(见 gemini_image)。
+        # 上游可取消:ComfyUI 本地 interrupt 或 RH ComfyUI 工作流 cancel。
+        # Gemini 生图走 generate_content(单次请求,无远程 cancel)。
         # rh_app(AI 应用):无 cancel API,也禁止本地打断 —— 只能 resume 继续轮询。
-        if node.backend in ("comfyui", "gemini-image"):
+        if node.backend == "comfyui":
             self.supports_remote_cancel = True
         if node.backend == "rh_app":
             self.supports_cancel = False
             self.supports_remote_cancel = False
-        self._channel = AdapterChannel(node.backend)
+        self._channel = AdapterChannel(
+            node.backend,
+            model_name=node.name,
+            workflow_file=node.workflow_file or "",
+        )
 
     def input_schema(self) -> dict[str, PortSpec]:
         return dict(self.node.inputs)

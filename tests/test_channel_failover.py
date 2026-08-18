@@ -122,6 +122,91 @@ class _NonRetryableModel(AIGCGenerationBase):
         return self._balancer
 
 
+def test_same_channel_name_still_failsover():
+    """同名两路必须按 binding 身份切换,不能用 name 集合把第二路一起删掉。"""
+
+    class _BoomGemini(ProviderChannel):
+        name = "gemini"
+
+        async def check_available(self) -> bool:
+            return True
+
+        async def invoke(self, **kwargs: Any) -> NodeOutput:
+            raise ChannelError(
+                "SSL verify failed",
+                retryable=True,
+                channel=self.name,
+                code="GEMINI_FAILED",
+            )
+
+    class _BackupGemini(ProviderChannel):
+        name = "gemini"
+
+        async def check_available(self) -> bool:
+            return True
+
+        async def invoke(self, **kwargs: Any) -> NodeOutput:
+            return NodeOutput(output_type="image", data=b"backup-ok")
+
+    class _SameNameModel(AIGCGenerationBase):
+        modality = TaskType.IMAGE
+        card = ModelCard(description="x")
+
+        def __init__(self) -> None:
+            self.name = "banana2_samename"
+            self.display_name = "banana2_samename"
+
+        def input_schema(self) -> dict:
+            return {"prompt": PortSpec(type=PortType.TEXT, required=True)}
+
+        def channel_bindings(self) -> list[ChannelBinding]:
+            return [ChannelBinding(_BoomGemini()), ChannelBinding(_BackupGemini())]
+
+        async def execute_on_channel(
+            self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+        ) -> NodeOutput:
+            return await binding.channel.invoke(request=request, on_progress=on_progress)
+
+        def balancer(self) -> LoadBalancer:
+            return LoadBalancer(BalancerConfig(mode="least_failures"))
+
+    out = asyncio.run(_SameNameModel().run(GenerationRequest(task_type=TaskType.IMAGE, prompt="hi")))
+    assert out.data == b"backup-ok"
+
+
+def test_banana2_failsover_to_registry_channel(monkeypatch):
+    """banana2 官方 gemini SSL 失败后必须切到 channel_registry 注入的备援。"""
+    import RH_ComfyUI.utils.backends.gemini_image.channel as gchan
+    from RH_ComfyUI.core import channel_registry
+    from RH_ComfyUI.models.image.defs import Banana2Def
+
+    class _Backup(ProviderChannel):
+        name = "aifoundation"
+
+        async def check_available(self) -> bool:
+            return True
+
+        async def invoke(self, **kwargs: Any) -> NodeOutput:
+            return NodeOutput(output_type="image", data=b"aif-ok")
+
+    async def _boom_gemini(self, **kwargs: Any) -> NodeOutput:
+        raise ChannelError("SSL verify failed", retryable=True, channel="gemini", code="GEMINI_FAILED")
+
+    async def _gemini_up(self) -> bool:
+        return True
+
+    monkeypatch.setattr(gchan.GeminiImageChannel, "invoke", _boom_gemini)
+    monkeypatch.setattr(gchan.GeminiImageChannel, "check_available", _gemini_up)
+
+    channel_registry.register_binding("banana2", _Backup(), vendor_model="NB2")
+    try:
+        model = Banana2Def()
+        out = asyncio.run(model.run(GenerationRequest(task_type=TaskType.IMAGE, prompt="hi")))
+        assert out.data == b"aif-ok"
+    finally:
+        channel_registry.unregister("banana2", "aifoundation")
+
+
 def test_non_retryable_error_skips_breaker_and_failover():
     # retryable=False:不切换通道、不计入熔断(通道是健康的,坏的是参数)
     lb = LoadBalancer(BalancerConfig(mode="least_failures", failure_threshold=1))

@@ -4,6 +4,8 @@
 |---|---|
 | `channel.py` | `ProviderChannel`(全模态通用的粗粒度通道 ABC:`check_available` / `unavailable_reason` / `invoke`)、`ChannelBinding`(通道 + vendor_model + 权重)、`LocalChannel`(本地/测试用) |
 | `polling.py` | `PollingChannelMixin` — "创建任务 → 轮询终态"型上游的通用骨架(自 seedance provider 提炼泛化) |
+| `registry.py` | `channel_registry` — 外部插件为既有模型追加通道 |
+| `resync.py` | `register_resync_hook` / `bind_config_resync` — 配置改完按快照重挂绑定 |
 
 ## 与旧 SeedanceProvider 的关系
 

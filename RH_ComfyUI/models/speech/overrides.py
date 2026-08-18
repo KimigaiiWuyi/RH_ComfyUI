@@ -10,6 +10,10 @@ from ..bridge import SpeechPipelineModel
 from ...core.schema.card import ModelCard
 from ...core.base.emotion import EmotionStyle
 from ...utils.core.pipeline import NodeDef
+from ...utils.backends.minimax.config import (
+    minimax_disabled_reason,
+    is_minimax_model_enabled,
+)
 
 
 class IndexTTS2Model(SpeechPipelineModel):
@@ -50,6 +54,17 @@ class MinimaxSpeechModel(SpeechPipelineModel):
         "fluent",
         "whisper",
     ]
+
+    async def check_available(self) -> bool:
+        if not is_minimax_model_enabled(self.name):
+            return False
+        return await super().check_available()
+
+    async def unavailable_reason(self) -> str:
+        disabled = minimax_disabled_reason(self.name, self.display_name)
+        if disabled is not None:
+            return disabled
+        return await super().unavailable_reason()
 
 
 class FishTtsModel(SpeechPipelineModel):

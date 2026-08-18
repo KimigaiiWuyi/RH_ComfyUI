@@ -12,6 +12,7 @@ from RH_ComfyUI.models.image.defs import (
     MinimaxImage01Def,
 )
 from RH_ComfyUI.models.video.defs import (
+    MiniMaxH3Def,
     Seedance25Def,
     Seedance2FastDef,
     Seedance15ProDef,
@@ -51,6 +52,18 @@ def test_seedance_variants_declare_media_ports(cls):
     node = cls.node_def()
     for port in ("images", "video_refs", "audio_refs", "frame_mode"):
         assert port in node.inputs, f"{cls.__name__} 缺少 {port} 端口"
+
+
+def test_minimax_h3_declares_media_ports():
+    node = MiniMaxH3Def.node_def()
+    for port in ("images", "video_refs", "audio_refs", "frame_mode", "task_mode"):
+        assert port in node.inputs, f"minimax_h3 缺少 {port} 端口"
+    assert node.inputs["task_mode"].values == ["auto", "t2v", "i2v", "first_last", "reference"]
+    assert node.inputs["images"].max_items == 9
+    assert node.inputs["duration"].minimum == 4
+    assert node.inputs["duration"].maximum == 15
+    assert node.inputs["resolution"].values == ["768p", "2k"]
+    assert "generate_audio" not in node.inputs
 
 
 def test_seedance25_declares_task_mode_and_output_format():

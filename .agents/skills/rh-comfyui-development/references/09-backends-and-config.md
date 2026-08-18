@@ -17,7 +17,7 @@
 > SDK 限制 project 与 api_key 互斥)。banana2(Nano Banana 2)是**原生 Gemini 模型**,
 > 在 `Banana2Def.channel_bindings()` 里唯一挂这条通道,与 gpt-image-2 完全独立。
 | `rh_app` | `rh_app/` | RunningHub **AI 应用** | webapp id=`workflow_file`;与 comfyui **不同 API**;**无** remote cancel;可 query resume |
-| `minimax` | `minimax/` | MiniMax | 图片 + 语音(T2A) |
+| `minimax` | `minimax/` | MiniMax | 图片 + 语音(T2A);H3 视频走独立 `minimax-h3` 通道 |
 | `mimo` | `mimo/` | MiMo TTS | 语音 |
 | `tx_aiart` | `tx_aiart/` | 腾讯云混元 AI 艺术 | ImageOutpainting 扩图;TC3-HMAC,不依赖官方 SDK;凭证 `TX_AIArt_secret_id` / `TX_AIArt_secret_key` |
 
@@ -74,6 +74,7 @@ ComfyUI 字段注入。
 | `music.py` | ace_step1.5 |
 | `speech.py` | IndexTTS2(含参考音频注入) |
 | `mimo_speech.py` / `minimax_speech.py` | mimo_tts / minimax_t2a_speech |
+| `minimax_h3_billing.py` | minimax_h3 动态积分 |
 
 改某模型的请求组装 → 改对应 mapper;改参数面(校验/调用方表单)→ 改 defs 的
 PortSpec。两者必须同步(mapper 消费的字段要在 inputs 里声明)。
@@ -86,15 +87,13 @@ PortSpec。两者必须同步(mapper 消费的字段要在 inputs 里声明)。
 
 | 键 | 用途 |
 |---|---|
-| `ComfyUI_BaseURL` | ComfyUI 地址 |
-| `RH_apikey` | RunningHub |
+| `ComfyUI_BaseURL` / `ComfyUI_Enabled_Workflows` | ComfyUI 地址 + **启用工作流列表**(GsListStrConfig,默认空;勾选/自填内部模型名或 json,改完即时生效) |
+| `RH_apikey` / `RH_App_Enabled_Apps` | RunningHub 通用 Key + **启用的 RH AI 应用**(GsListStrConfig,默认勾满 anima/多角度/抠图/高清/扩图;留空则全关;改完即时生效) |
 | `OpenAI_Image_apikey` / `OpenAI_Image_BaseURL` | OpenAI 兼容生图 |
-| `Gemini_Image_apikey` / `Gemini_Image_BaseURL` / `Gemini_Image_Use_Vertex` / `Gemini_Image_Project_ID` / `Gemini_Image_Location` / `Gemini_Image_SA_File` | Gemini 生图(**显式开关** `Use_Vertex` 决定模式:开=VertexAI+ADC/SA(忽略 key),关=AI Studio+key;不再由 Project ID 推断。`BaseURL`=直连不通时的中转地址,仅 AI Studio 生效,留空直连官方) |
-| `MiniMax_apikey` / `MIMO_apikey` | MiniMax / MiMo |
+| `Gemini_Image_apikey` / `Gemini_Image_BaseURL` / `Gemini_Image_Use_Vertex` / `Gemini_Image_Project_ID` / `Gemini_Image_Location` / `Gemini_Image_SA_File` / `Gemini_Enabled_Models` | Gemini 生图(**显式开关** `Use_Vertex` 决定模式:开=VertexAI+ADC/SA(忽略 key),关=AI Studio+key;不再由 Project ID 推断。`BaseURL`=直连不通时的中转地址,仅 AI Studio 生效,留空直连官方)。`Gemini_Enabled_Models` 勾选 banana1/banana2/banana_pro,默认空则不走 Gemini 通道 |
+| `MiniMax_apikey` / `MiniMax_Enabled_Models` / `MIMO_apikey` | MiniMax(文生图/T2A/H3 共用 Key;启用列表默认空)/ MiMo |
 | `Seedance_apikey_{ark,runninghub}` + `Seedance_BaseURL_*` + `Seedance_Enable_*` | Seedance 内置供应商凭证(网关凭证在外部插件自己的面板) |
-| `Seedance_Dry_Run` | Seedance 干跑(拦截出站请求 + 打印;抛 `DryRunInterrupt` 终止,积分自动退款) |
 | `OpenAI_Image_Providers` | OpenAI 兼容供应商池(重复组,每行一家,含 `weight` 负载权重;见 13 章;增删/改映射/改权重后需 `rh 刷新供应商`) |
-| `Load_Balance_Mode` / `Failure_Threshold` | 全模态通用的负载均衡策略 / 熔断阈值(每次决策实时读取,改完即生效;旧 `Seedance_Load_Balance` / `Seedance_Failure_Threshold` 已迁移至此) |
 | `TX_AIArt_secret_id` / `TX_AIArt_secret_key` / `TX_AIArt_region` | 腾讯云混元扩图(`tx_aiart`);region 默认 `ap-guangzhou` |
 
 **PLUGIN_CONFIG(plugin_config.py)— 插件行为**
@@ -103,6 +102,8 @@ PortSpec。两者必须同步(mapper 消费的字段要在 inputs 里声明)。
 |---|---|
 | `Max_Concurrency` | 全局并发闸大小(改配置即刻生效,见 05 章 5.4) |
 | `Dispatch_Timeout` | 单任务超时预算(秒,默认 1800,0=不限;覆盖排队+执行全程,超时退款,见 05 章 5.1) |
+| `Dry_Run` | 全局干跑(拦截**全部**模型出站请求,抛 `DryRunInterrupt` 终止并退款;改完即生效) |
+| `Load_Balance_Mode` / `Failure_Threshold` | 全模态负载均衡策略 / 熔断阈值(每次决策实时读取,改完即生效) |
 | `Default_Point` | 新用户初始积分 |
 | `Draw_Point` / `Edit_Image_Point` / `Music_Point` / `Speech_Point` / `Video_Point` | 各任务兜底价格(模型自带 point_cost 优先;按参数分档计费用模型的 `estimate_cost()` 钩子) |
 
@@ -125,13 +126,13 @@ header value b'Bearer '` 或旧 URL 持续报错。
 | `mimo` | `MIMO_apikey` | `@property api_key` 直接读 `SERVICE_CONFIG` | ✅ 每次请求即时 |
 | `minimax` | `MiniMax_apikey` | `@property api_key` 直接读 `SERVICE_CONFIG` | ✅ 每次请求即时 |
 | `gpt-image-2` | `OpenAI_Image_apikey` / `BaseURL` | `api_key` 用懒加载 + `refresh_config()` | ✅ executor 入口每次 `refresh` |
-| `rh_app` | `RH_apikey` | `@property api_key` + `_require_api_key()` | ✅ 每次请求即时 |
-| `comfyui` | `ComfyUI_BaseURL` + `RH_apikey` | `url` / `server_address` / `api_key` 全 `@property` | ✅ 每次请求即时 |
+| `rh_app` | `RH_apikey` + `RH_App_Enabled_Apps` | `@property api_key`;启用列表每次 `check_available`/`invoke` 热读 | ✅ 每次请求即时 |
+| `comfyui` | `ComfyUI_BaseURL` + `RH_apikey` + `ComfyUI_Enabled_Workflows` | `url` / `server_address` / `api_key` 全 `@property`;启用列表每次 `check_available`/`invoke` 热读 | ✅ 每次请求即时 |
 | `seedance` | `Seedance_apikey_*` + `Seedance_BaseURL_*` | provider 用 `update_credentials()` | ✅ `SeedanceProviderChannel._get_provider` 每次比对新旧值再热更新 |
 | `openai_image` 供应商池 | `OpenAI_Image_Providers` 行内 key/url | `credentials_resolver` 每请求实时解析 | ✅ 凭证即时;增删供应商/改映射需 `rh 刷新供应商` |
 | `gemini_image` | `Gemini_Image_*` | 全 `@property` 直读 | ✅ 每次请求即时 |
 | `tx_aiart` | `TX_AIArt_secret_id` / `TX_AIArt_secret_key` / `TX_AIArt_region` | `@property` 直读 | ✅ 每次请求即时 |
-| 负载均衡器 | `Load_Balance_Mode` / `Failure_Threshold` | `config_resolver` 每次决策实时读 | ✅ 改完即生效(2026-07-10 起) |
+| 负载均衡器 | PLUGIN_CONFIG `Load_Balance_Mode` / `Failure_Threshold` | `config_resolver` 每次决策实时读 | ✅ 改完即生效 |
 
 ### 红线:不要在 `__init__` 里把 `api_key` 存成实例属性
 

@@ -11,10 +11,15 @@ import subprocess
 import pytest
 
 from RH_ComfyUI.utils.audio_process import (
+    H3_REF_AUDIO_MAX_S,
+    H3_REF_AUDIO_MIN_S,
     SEEDANCE_REF_AUDIO_MAX_S,
+    H3_REF_AUDIO_LOOP_TARGET_S,
+    H3_REF_AUDIO_TRIM_TARGET_S,
     SEEDANCE_REF_AUDIO_TRIM_TARGET_S,
     probe_audio_duration,
     clamp_seedance_ref_audio,
+    clamp_minimax_h3_ref_audio,
 )
 
 
@@ -80,4 +85,34 @@ def test_long_audio_trims():
     assert action == "trim"
     assert new_dur <= SEEDANCE_REF_AUDIO_MAX_S
     assert abs(new_dur - SEEDANCE_REF_AUDIO_TRIM_TARGET_S) < 0.8
+    assert len(out) > 0
+
+
+@pytest.mark.skipif(not _has_ffmpeg(), reason="ffmpeg/ffprobe not on PATH")
+def test_h3_legal_audio_unchanged():
+    data = _make_test_m4a(8.0)
+    out, new_dur, action, mime = asyncio.run(clamp_minimax_h3_ref_audio(data))
+    assert action is None
+    assert out is data or out == data
+    assert 7.5 <= new_dur <= 8.5
+    assert mime
+
+
+@pytest.mark.skipif(not _has_ffmpeg(), reason="ffmpeg/ffprobe not on PATH")
+def test_h3_short_audio_loops():
+    data = _make_test_m4a(1.2)
+    out, new_dur, action, _mime = asyncio.run(clamp_minimax_h3_ref_audio(data))
+    assert action == "loop"
+    assert new_dur >= H3_REF_AUDIO_MIN_S
+    assert abs(new_dur - H3_REF_AUDIO_LOOP_TARGET_S) < 0.8
+    assert len(out) > 0
+
+
+@pytest.mark.skipif(not _has_ffmpeg(), reason="ffmpeg/ffprobe not on PATH")
+def test_h3_long_audio_trims():
+    data = _make_test_m4a(20.0)
+    out, new_dur, action, _mime = asyncio.run(clamp_minimax_h3_ref_audio(data))
+    assert action == "trim"
+    assert new_dur <= H3_REF_AUDIO_MAX_S
+    assert abs(new_dur - H3_REF_AUDIO_TRIM_TARGET_S) < 0.8
     assert len(out) > 0

@@ -55,7 +55,12 @@ class RHAppAdapter(Adapter):
         on_progress=None,
     ) -> NodeOutput:
         # 1. webapp_id
+        from .config import is_rh_app_enabled, rh_app_disabled_reason
+
         webapp_id = node.workflow_file
+        if not is_rh_app_enabled(node.name, webapp_id or ""):
+            reason = rh_app_disabled_reason(node.name, node.display_name or node.name)
+            raise RuntimeError(reason or f"{node.name} 未启用")
         if not webapp_id:
             raise RuntimeError(f"RH App 节点 '{node.name}' 缺少 workflow 字段,请填写 webappId 作为 workflow 值")
 

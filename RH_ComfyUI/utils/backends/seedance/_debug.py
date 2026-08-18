@@ -1,6 +1,6 @@
 """Seedance 调试工具:脱敏 + 完整 body dump。
 
-仅供 `SeedanceProvider._request` 在开启 `Seedance_Dry_Run` 时使用,
+仅供 `SeedanceProvider._request` 在开启全局 `Dry_Run` 时使用,
 用于打印被拦截请求的 headers / body。
 """
 

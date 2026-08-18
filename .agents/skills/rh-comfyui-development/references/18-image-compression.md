@@ -57,7 +57,11 @@ compressed, info = compress_to_max_pixels(raw_bytes, "image/png", max_pixels=128
 
 1. **只处理图片 mime**（`image/png`、`image/jpeg`、`image/webp`）；视频/音频/其他类型直接透传。
 2. **惰性导入 PIL**：函数体内 `from PIL import Image`，模块加载不依赖 Pillow。
-3. **不改变格式**：输入 PNG 输出 PNG，输入 JPEG 输出 JPEG。不做格式转换。
+3. **压缩本身不改变格式**：输入 PNG 输出 PNG，输入 JPEG 输出 JPEG。
+   上传前的格式归一见 `ensure_standard_image`：一律 JPEG。已是标准 JPEG
+   不重编码；透明通道先铺中性灰底 `(128,128,128)` 再编码。
+   `ImageGenerationBase` / `VideoGenerationBase.normalize()` 与 Seedance
+   `prepare_request` 都会走这一步。Gemini 上报 mime 必须与字节头一致。
 4. **不放大**：只缩不放。小图（480P 等）原样保留。
 5. **压缩后更大则放弃**：极小概率场景（已高度压缩的源），返回原始 data。
 6. **异常不传播**：压缩是优化，不能让它炸掉上传/生成主路。

@@ -118,3 +118,22 @@ set_media_publisher(my_publish)
 8. **取消 / resume / wire**:闭源通道同样须在 create 后 `bind_vendor_cancel`、
    POST 前 `set_wire_*`;目录 `supports_remote_cancel` 须诚实(无 cancel API
    则 false)。见 [§二十](./20-cancel-resume-and-wire-audit.md)。
+
+## 7.6 通道绑定热重挂
+
+凭证热读(`check_available`)解决不了「给哪个模型挂哪条通道」这份快照。
+外部插件按配置 `register_binding` 的,必须提供可幂等重挂函数,并登记:
+
+```python
+from RH_ComfyUI.core import register_resync_hook, bind_config_resync
+
+def my_register() -> None:
+    # 先 unregister 本层历史绑定,再按当前配置 register_binding
+    ...
+
+register_resync_hook("my_gateway", my_register)
+bind_config_resync(MY_CONFIG, frozenset({"Slot_Enable", "Slot_Models"}))
+```
+
+触发时机:`rh 刷新供应商`;以及被监视配置键的 `set_config` 成功写入。
+钩子失败彼此隔离,开源侧不 import 外部插件。

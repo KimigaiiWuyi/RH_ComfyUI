@@ -8,8 +8,10 @@
 ## 11.1 为什么这件事容易踩坑
 
 `SERVICE_CONFIG`(`StringConfig` 实例)本身**没有**主动 push 机制:
-- 配置写入通过 `set_config()` 同步落盘 + 改 `self.config[key].data`,
-  但它不会通知任何订阅者。
+- 配置写入通过 `set_config()` 同步落盘 + 改 `self.config[key].data`。
+  通道**凭证**靠 `@property` 热读即可;但 `channel_registry` 里的绑定矩阵
+  是注入快照,增删供应商 / 改模型勾选须走 `register_resync_hook`
+  (见 [§七 7.6](./07-closed-source-extension.md)、[§十三](./13-openai-provider-pool.md))。
 - 因此任何"启动时把配置值拷贝到实例属性上"的写法,都会让那个实例
   属性**永远停在启动那一刻的值**。
 

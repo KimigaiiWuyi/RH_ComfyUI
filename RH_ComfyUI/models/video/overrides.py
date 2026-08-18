@@ -23,8 +23,13 @@ from ...core.schema.request import GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...core.channels.channel import ChannelBinding
 from ...core.channels.registry import channel_registry
+from ...utils.backends.minimax.config import (
+    minimax_disabled_reason,
+    is_minimax_model_enabled,
+)
 from ...utils.backends.seedance.channel import builtin_seedance_channels
 from ...utils.backends.happyhorse.channel import builtin_happyhorse_channels
+from ...utils.backends.minimax.h3_channel import builtin_minimax_h3_channels
 
 
 class SeedanceVideoModel(VideoPipelineModel):
@@ -533,8 +538,7 @@ class HappyHorseVideoModel(VideoPipelineModel):
         )
         if not is_edit and (request.video_refs or oc_has_video):
             raise ValidationError(
-                f"{self.display_name} 仅在「视频编辑」模式下接受输入视频;"
-                "多参考 / 首尾帧请移除视频,或切换到视频编辑"
+                f"{self.display_name} 仅在「视频编辑」模式下接受输入视频;多参考 / 首尾帧请移除视频,或切换到视频编辑"
             )
         if is_edit:
             if not request.video_refs and not oc_has_video:
@@ -583,9 +587,368 @@ class HappyHorseVideoModel(VideoPipelineModel):
         )
 
 
+class MiniMaxH3VideoModel(VideoPipelineModel):
+    """MiniMax H3:官方四种模式(文生 / 图生首帧或尾帧 / 首尾帧 / 全能参考)
+
+    与 Seedance 2.0/2.5 同构:task_mode 显式选模式,frame_mode 细化图片角色。
+    官方仅 queued 可远程取消;running 上游拒绝 DELETE,本地仍停轮询。
+    """
+
+    supports_remote_cancel = True
+
+    MAX_IMAGES = 9
+    MAX_VIDEOS = 3
+    MAX_AUDIOS = 3
+    MAX_REFERENCE_TOTAL = 12
+    MAX_PROMPT_CHARS = 7000
+    ref_video_min_s = 2.0
+    ref_video_max_s = 15.0
+    ref_video_loop_target_s = 2.5
+    ref_video_trim_target_s = 14.5
+    ref_audio_min_s = 2.0
+    ref_audio_max_s = 15.0
+    ref_audio_loop_target_s = 2.5
+    ref_audio_trim_target_s = 14.5
+    ref_av_total_max_s = 15.0
+
+    def __init__(self, node: NodeDef) -> None:
+        super().__init__(node)
+        self.supported_shapes = {
+            VideoTaskShape.TEXT2VIDEO,
+            VideoTaskShape.IMAGE2VIDEO,
+            VideoTaskShape.FIRST_LAST_FRAME,
+            VideoTaskShape.MULTIMODAL,
+        }
+        self.supported_resolutions = ["768p", "2k"]
+        self.supported_ratios = [
+            "adaptive",
+            "21:9",
+            "16:9",
+            "4:3",
+            "1:1",
+            "3:4",
+            "9:16",
+        ]
+        # 原生有声,无 generate_audio 开关;标 True 避免默认 True 被基类误拒
+        self.supports_generate_audio = True
+        self.max_reference_total = self.MAX_REFERENCE_TOTAL
+        self.card = ModelCard(
+            description=node.description
+            or "MiniMax H3 四种模式:文生 / 图生(首帧或尾帧) / 首尾帧 / 全能参考,768P 或 2K 直出",
+            strengths=[
+                "2K 直出",
+                "文生 / 图生 / 首尾帧 / 全能参考四种模式",
+                "原生立体声音轨",
+                "复用 MiniMax API Key",
+            ],
+            categories=["短视频", "多素材合成", "院线预告", "音画同步"],
+            weaknesses=[
+                "需按量开通 H3",
+                "时长仅 4~15 秒",
+                "运行中任务无法远程取消(仅排队中可取消)",
+            ],
+            sample_prompts=[
+                "一只橘猫在阳光下的窗台上伸懒腰,镜头缓慢推进",
+                "图片1为主角,音频1为配乐,他在海边迎风奔跑",
+            ],
+            languages=["zh", "en"],
+            speed_hint="slow",
+        )
+
+    def validate(self, request: GenerationRequest) -> None:
+        super().validate(request)
+        prompt = (request.prompt or "").strip()
+        if not prompt:
+            raise ValidationError(f"{self.display_name} 必须填写提示词")
+        if len(prompt) > self.MAX_PROMPT_CHARS:
+            raise ValidationError(
+                f"{self.display_name} 提示词最长 {self.MAX_PROMPT_CHARS} 字符,当前 {len(prompt)}"
+            )
+
+        duration = request.duration
+        if duration is not None and duration != 0 and not (4 <= int(duration) <= 15):
+            raise ValidationError(f"{self.display_name} 时长须为 4~15 秒,当前 {duration}")
+
+        from ...utils.backends.minimax.h3_classify import (
+            TASK_MODE_I2V,
+            TASK_MODE_T2V,
+            TASK_MODE_REFERENCE,
+            TASK_MODE_FIRST_LAST,
+            classify_minimax_h3,
+        )
+
+        spec = classify_minimax_h3(request)
+        n_img = len(spec.images())
+        n_vid = len(spec.videos())
+        n_aud = len(spec.audios())
+        task_raw = spec.params["task_mode"] if "task_mode" in spec.params else "auto"
+        task_mode = task_raw if isinstance(task_raw, str) else "auto"
+
+        if n_img > self.MAX_IMAGES:
+            raise ValidationError(
+                f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,当前 {n_img} 张"
+            )
+        if n_vid > self.MAX_VIDEOS:
+            raise ValidationError(
+                f"{self.display_name} 最多 {self.MAX_VIDEOS} 段参考视频,当前 {n_vid} 段"
+            )
+        if n_aud > self.MAX_AUDIOS:
+            raise ValidationError(
+                f"{self.display_name} 最多 {self.MAX_AUDIOS} 段参考音频,当前 {n_aud} 段"
+            )
+        if n_img + n_vid + n_aud > self.MAX_REFERENCE_TOTAL:
+            raise ValidationError(
+                f"{self.display_name} 参考素材合计最多 {self.MAX_REFERENCE_TOTAL} 个,"
+                f"当前 {n_img + n_vid + n_aud} 个"
+            )
+
+        has_av = n_vid > 0 or n_aud > 0
+        if spec.shape in (VideoTaskShape.IMAGE2VIDEO, VideoTaskShape.FIRST_LAST_FRAME) and has_av:
+            raise ValidationError(
+                f"{self.display_name} 的图生/首尾帧模式不能同时传参考视频或音频;"
+                "请改用「全能参考」模式,或移除音视频素材"
+            )
+        if spec.shape == VideoTaskShape.IMAGE2VIDEO and n_img > 1:
+            raise ValidationError(f"{self.display_name} 的图生模式只接受 1 张图,当前 {n_img} 张")
+        if spec.shape == VideoTaskShape.FIRST_LAST_FRAME and n_img > 2:
+            raise ValidationError(f"{self.display_name} 的首尾帧模式最多 2 张图,当前 {n_img} 张")
+
+        if task_mode == TASK_MODE_T2V and (n_img or has_av):
+            raise ValidationError(f"{self.display_name} 的文生模式不能传图片/视频/音频,请改用对应模式")
+        if task_mode == TASK_MODE_I2V and n_img < 1:
+            raise ValidationError(f"{self.display_name} 的图生模式需要 1 张首帧或尾帧图片")
+        if task_mode == TASK_MODE_FIRST_LAST and n_img < 1:
+            raise ValidationError(f"{self.display_name} 的首尾帧模式至少需要 1 张图(首帧和/或尾帧)")
+        if task_mode == TASK_MODE_REFERENCE and n_img + n_vid + n_aud < 1:
+            raise ValidationError(f"{self.display_name} 的全能参考模式至少需要 1 个图片/视频/音频素材")
+
+        if spec.shape == VideoTaskShape.TEXT2VIDEO:
+            ratio = (request.ratio or "").strip().lower()
+            if ratio == "adaptive":
+                raise ValidationError(
+                    f"{self.display_name} 文生视频不能使用 ratio=adaptive,请指定 16:9 / 9:16 等具体比例"
+                )
+
+    async def check_available(self) -> bool:
+        if not is_minimax_model_enabled(self.name):
+            return False
+        return await super().check_available()
+
+    async def unavailable_reason(self) -> str:
+        disabled = minimax_disabled_reason(self.name, self.display_name)
+        if disabled is not None:
+            return disabled
+        for binding in self.channel_bindings():
+            if await binding.channel.check_available():
+                continue
+            return await binding.channel.unavailable_reason()
+        return (
+            f"{self.display_name} 无可用供应商:请配置 MiniMax_apikey "
+            "并在「启用的 MiniMax 模型」中添加 minimax_h3"
+        )
+
+    async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
+        """参考视频/音频时长钳位 + 参考图短边/宽高比(与 Seedance 共用预处理)。"""
+        import asyncio
+
+        from gsuid_core.logger import logger
+
+        from ...core.schema.types import MediaRef, MediaKind, ContentItem, ContentItemType
+        from ...utils.audio_process import clamp_minimax_h3_ref_audio
+        from ...utils.image_process import prepare_seedance_image_ref, prepare_seedance_image_bytes
+        from ...utils.video_process import ensure_media_bytes, prepare_seedance_ref_video
+
+        video_tasks: dict[str, asyncio.Task] = {}
+        audio_tasks: dict[str, asyncio.Task] = {}
+        video_durs: dict[str, float] = {}
+        audio_durs: dict[str, float] = {}
+
+        def _cache_key(ref: MediaRef) -> str:
+            u = (ref.url or "").strip()
+            if u:
+                return f"url:{u}"
+            if ref.data:
+                return f"data:{id(ref.data)}:{len(ref.data)}"
+            return f"empty:{id(ref)}"
+
+        def _replaced(ref: MediaRef, *, kind: MediaKind, data: bytes, mime: str) -> MediaRef:
+            return MediaRef(
+                kind=kind,
+                data=data,
+                url=None,
+                role=ref.role,
+                mime_type=mime,
+                filename=ref.filename,
+            )
+
+        async def _do_video(ref: MediaRef) -> MediaRef:
+            raw = await ensure_media_bytes(ref)
+            if not raw:
+                return ref
+            new_data, dur, action = await prepare_seedance_ref_video(
+                raw,
+                min_s=self.ref_video_min_s,
+                max_s=self.ref_video_max_s,
+                loop_target_s=self.ref_video_loop_target_s,
+                trim_target_s=self.ref_video_trim_target_s,
+            )
+            video_durs[_cache_key(ref)] = float(dur or 0.0)
+            if action is None and new_data is raw:
+                if ref.data is None and new_data:
+                    return _replaced(ref, kind=MediaKind.VIDEO, data=new_data, mime=ref.mime_type or "video/mp4")
+                return ref
+            return _replaced(ref, kind=MediaKind.VIDEO, data=new_data, mime="video/mp4")
+
+        async def _do_audio(ref: MediaRef) -> MediaRef:
+            raw = await ensure_media_bytes(ref)
+            if not raw:
+                audio_durs[_cache_key(ref)] = 0.0
+                return ref
+            new_data, dur, action, mime = await clamp_minimax_h3_ref_audio(
+                raw,
+                min_s=self.ref_audio_min_s,
+                max_s=self.ref_audio_max_s,
+                loop_target_s=self.ref_audio_loop_target_s,
+                trim_target_s=self.ref_audio_trim_target_s,
+                mime_type=ref.mime_type or "",
+            )
+            audio_durs[_cache_key(ref)] = float(dur or 0.0)
+            if action is None and new_data is raw:
+                if ref.data is None and new_data:
+                    return _replaced(ref, kind=MediaKind.AUDIO, data=new_data, mime=mime)
+                return ref
+            return _replaced(ref, kind=MediaKind.AUDIO, data=new_data, mime=mime)
+
+        def _schedule_video(ref: MediaRef) -> asyncio.Task:
+            key = _cache_key(ref)
+            task = video_tasks.get(key)
+            if task is None:
+                task = asyncio.create_task(_do_video(ref))
+                video_tasks[key] = task
+            return task
+
+        def _schedule_audio(ref: MediaRef) -> asyncio.Task:
+            key = _cache_key(ref)
+            task = audio_tasks.get(key)
+            if task is None:
+                task = asyncio.create_task(_do_audio(ref))
+                audio_tasks[key] = task
+            return task
+
+        scheduled: list[asyncio.Task] = []
+        if request.video_refs:
+            scheduled.extend(_schedule_video(v) for v in request.video_refs)
+        if request.audio_refs:
+            scheduled.extend(_schedule_audio(a) for a in request.audio_refs)
+        if request.ordered_content:
+            for item in request.ordered_content:
+                if item.media is None:
+                    continue
+                if item.type == ContentItemType.VIDEO and item.media.kind == MediaKind.VIDEO:
+                    scheduled.append(_schedule_video(item.media))
+                elif item.type == ContentItemType.AUDIO and item.media.kind == MediaKind.AUDIO:
+                    scheduled.append(_schedule_audio(item.media))
+        if scheduled:
+            await asyncio.gather(*scheduled)
+
+        if request.video_refs:
+            request.video_refs = [await _schedule_video(v) for v in request.video_refs]
+        if request.audio_refs:
+            request.audio_refs = [await _schedule_audio(a) for a in request.audio_refs]
+
+        if request.images:
+            new_images: list[bytes] = []
+            for raw in request.images:
+                out, info = prepare_seedance_image_bytes(raw)
+                if info:
+                    logger.info(f"[minimax_h3] 参考图预处理: {info}")
+                new_images.append(out)
+            request.images = new_images
+
+        if request.ordered_content:
+            new_oc: list[ContentItem] = []
+            for item in request.ordered_content:
+                if item.media is None:
+                    new_oc.append(item)
+                    continue
+                new_media = item.media
+                if item.type == ContentItemType.VIDEO and item.media.kind == MediaKind.VIDEO:
+                    new_media = await _schedule_video(item.media)
+                elif item.type == ContentItemType.AUDIO and item.media.kind == MediaKind.AUDIO:
+                    new_media = await _schedule_audio(item.media)
+                elif item.type == ContentItemType.IMAGE and item.media.kind == MediaKind.IMAGE:
+                    new_media = await prepare_seedance_image_ref(item.media)
+                new_oc.append(
+                    ContentItem(
+                        type=item.type,
+                        media=new_media,
+                        role=item.role,
+                        text=item.text,
+                    )
+                )
+            request.ordered_content = new_oc
+
+        total_v = sum(d for d in video_durs.values() if d > 0)
+        total_a = sum(d for d in audio_durs.values() if d > 0)
+        if total_v > self.ref_av_total_max_s:
+            raise ValidationError(
+                f"{self.display_name} 参考视频总时长须 ≤ {self.ref_av_total_max_s:.0f} 秒,"
+                f"当前约 {total_v:.1f} 秒"
+            )
+        if total_a > self.ref_av_total_max_s:
+            raise ValidationError(
+                f"{self.display_name} 参考音频总时长须 ≤ {self.ref_av_total_max_s:.0f} 秒,"
+                f"当前约 {total_a:.1f} 秒"
+            )
+        for dur in audio_durs.values():
+            if dur <= 0:
+                raise ValidationError(
+                    f"{self.display_name} 无法探测参考音频时长,请换一段 "
+                    f"{self.ref_audio_min_s:.0f}~{self.ref_audio_max_s:.0f} 秒的音频"
+                )
+            if dur < self.ref_audio_min_s:
+                raise ValidationError(
+                    f"{self.display_name} 单段参考音频须 ≥ {self.ref_audio_min_s:.0f} 秒,"
+                    f"当前约 {dur:.1f} 秒"
+                )
+
+        return request
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        node = self.node
+        builtins = builtin_minimax_h3_channels()
+        external = channel_registry.bindings_for(node.name)
+        if node.provider:
+            ch = builtins.get(node.provider)
+            if ch is not None:
+                return [ChannelBinding(ch, vendor_model="MiniMax-H3")]
+            return [b for b in external if b.channel.name == node.provider]
+        bindings: list[ChannelBinding] = [
+            ChannelBinding(ch, vendor_model="MiniMax-H3") for ch in builtins.values()
+        ]
+        bindings.extend(external)
+        return bindings
+
+    async def execute_on_channel(
+        self,
+        request: GenerationRequest,
+        binding: ChannelBinding,
+        *,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> NodeOutput:
+        return await binding.channel.invoke(
+            request=request,
+            node=self.node,
+            on_progress=on_progress,
+            vendor_model=binding.vendor_model,
+        )
+
+
 __all__ = [
     "SeedanceVideoModel",
     "Seedance25VideoModel",
     "Wan22VideoModel",
     "HappyHorseVideoModel",
+    "MiniMaxH3VideoModel",
 ]
+

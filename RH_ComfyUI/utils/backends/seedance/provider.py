@@ -26,6 +26,7 @@ from gsuid_core.logger import logger
 
 from .spec import VideoGenSpec, VideoTaskShape
 from ...core.types import MediaRef, MediaKind
+from ....core.base.errors import DryRunInterrupt
 
 
 class NormalizedStatus(str, Enum):
@@ -96,20 +97,6 @@ class SeedanceProviderError(RuntimeError):
 
 class UnsupportedProviderShapeError(SeedanceProviderError):
     """形态/参数不被该供应商支持(能力矩阵拦截)"""
-
-
-class DryRunInterrupt(BaseException):
-    """Dry-Run 模式中断信号。
-
-    继承自 `BaseException` (而非 `Exception`),确保不会被上游的
-    ``except Exception`` 误捕获,仅在 ``except BaseException``
-    或更顶层的异常处理器中才能捕获它,安全终止流程。
-
-    触发场景:
-    - ``SeedanceProvider._request`` 在 ``dry_run=True`` 时拦截出站请求,
-      打印完整四元组后抛出。
-    - ``SeedanceProviderChannel.invoke`` 捕获后透传,不触发熔断 / 通道切换。
-    """
 
 
 # ── 用量归一化 ──
@@ -500,7 +487,9 @@ class SeedanceProvider(ABC):
         json: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         # ── Dry-Run 拦截: 不真正发送请求,同时 INFO 级打印完整四元组 ──
-        if self.dry_run:
+        from ....rh_config.comfyui_config import plugin_dry_run
+
+        if self.dry_run or plugin_dry_run():
             from ._debug import dump_body, mask_body, mask_headers
 
             logger.info(

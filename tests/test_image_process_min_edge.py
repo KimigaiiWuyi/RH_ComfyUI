@@ -123,7 +123,9 @@ def test_prepare_request_upscales_flat_and_ordered_images():
     assert len(out.images) == 2
     up_flat = _open(out.images[0])
     assert up_flat.size[0] >= 300 and up_flat.size[1] >= 300
-    assert out.images[1] == large
+    large_out = _open(out.images[1])
+    assert large_out.size == (512, 512)
+    assert image_mime_from_bytes(out.images[1]) == "image/jpeg"
 
     oc_img = next(i for i in out.ordered_content if i.type == ContentItemType.IMAGE)
     assert oc_img.media is not None

@@ -166,6 +166,26 @@ def test_base_exception_still_refunds(monkeypatch):
         model_registry.unregister(model.name)
 
 
+def test_plugin_dry_run_blocks_all_and_refunds(registered_model, monkeypatch):
+    """PLUGIN_CONFIG.Dry_Run 拦截全部模型,预扣后退款。"""
+    from RH_ComfyUI.core.base.errors import DryRunInterrupt
+
+    _mute_recording(monkeypatch)
+    monkeypatch.setattr(
+        "RH_ComfyUI.rh_config.comfyui_config.plugin_dry_run",
+        lambda: True,
+    )
+    policy = FakePolicy()
+    with pytest.raises(DryRunInterrupt):
+        asyncio.run(
+            dispatch(
+                GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model="fake_dispatch_model"),
+                _ctx(policy),
+            )
+        )
+    assert policy.refunds == 1 and policy.balance == 100
+
+
 class _CancelModel(FakeModel):
     name = "fake_cancel_model"
 

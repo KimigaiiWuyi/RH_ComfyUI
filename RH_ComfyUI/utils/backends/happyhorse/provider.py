@@ -456,7 +456,9 @@ class HappyHorseProvider:
         headers: Optional[dict[str, str]] = None,
         json: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        if self.dry_run:
+        from ....rh_config.comfyui_config import plugin_dry_run
+
+        if self.dry_run or plugin_dry_run():
             logger.info(
                 f"[HappyHorse:{self.name}] Dry-Run 拦截(未发送) {method} {url}\n"
                 f"  headers: {mask_headers(headers)}\n"

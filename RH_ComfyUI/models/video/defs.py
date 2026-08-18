@@ -10,6 +10,7 @@ from __future__ import annotations
 from .overrides import (
     Wan22VideoModel,
     SeedanceVideoModel,
+    MiniMaxH3VideoModel,
     HappyHorseVideoModel,
     Seedance25VideoModel,
 )
@@ -27,6 +28,7 @@ from ...utils.mappers.seedance_billing import (
     input_video_duration_from_params,
 )
 from ...utils.mappers.happyhorse_billing import estimate_happyhorse_points
+from ...utils.mappers.minimax_h3_billing import estimate_minimax_h3_points
 
 
 class Seedance15ProDef(SeedanceVideoModel):
@@ -1034,6 +1036,187 @@ class Wan22VideogenDef(Wan22VideoModel):
         )
 
 
+class MiniMaxH3Def(MiniMaxH3VideoModel):
+    """MiniMax H3 — 官方 MiniMax-H3,复用 MiniMax_apikey,需在启用列表勾选"""
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="minimax_h3",
+            display_name="MiniMax H3",
+            task_type=TaskType("video"),
+            backend="minimax-h3",
+            point_cost=400,
+            description=(
+                "MiniMax H3 四种模式:文生 / 图生(首帧或尾帧) / 首尾帧 / 全能参考,"
+                "768P 或 2K 直出,4~15 秒,原生有声;复用 MiniMax API Key"
+            ),
+            knowledge_content=(
+                "MiniMax H3(官方 Model ID: MiniMax-H3)统一视频节点,四种模式与 Seedance 2.0/2.5 同构。"
+                "\n"
+                "task_mode(可显式指定,默认 auto 按输入自动):"
+                "\n"
+                "  - auto: 0 图=文生 / 1 图=图生首帧 / 2 图=首尾帧 / 图+音视频或≥3 图=全能参考"
+                "\n"
+                "  - t2v: 文生视频(仅 prompt;ratio 须为具体比例,不能 adaptive)"
+                "\n"
+                "  - i2v: 图生视频(1 张图作首帧;frame_mode=last_frame 则作尾帧)"
+                "\n"
+                "  - first_last: 首尾帧(图1=首帧,图2=尾帧;也可只传一张)"
+                "\n"
+                "  - reference: 全能参考(图≤9 + 视频≤3 + 音频≤3,合计≤12)"
+                "\n"
+                "frame_mode 细化图片角色:auto / first_frame / last_frame / first_last / reference。"
+                "\n"
+                "图生/首尾帧与参考音视频互斥,不可混用。"
+                "\n"
+                "分辨率 768P / 2K;时长 4~15 秒整数;原生输出立体声音轨。"
+                "\n"
+                "凭证复用 MiniMax_apikey;须在「启用的 MiniMax 模型」中勾选 minimax_h3。"
+                "\n"
+                "需按量开通 H3。排队中任务可远程取消;运行中任务上游不可取消。"
+                "\n"
+            ),
+            requirements=["minimax_apikey"],
+            backend_model="MiniMax-H3",
+            backend_models={"minimax-h3": "MiniMax-H3"},
+            mode="declarative",
+            inputs={
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=True,
+                    title="提示词",
+                    description=(
+                        "视频描述(必填,最长 7000 字符)。"
+                        "多模态可用「图片1」「视频1」「音频1」引用下方素材。"
+                    ),
+                ),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=9,
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description=(
+                        "图片输入(最多 9 张)。task_mode=auto 时:\n"
+                        "  - 0 张 = 文生\n"
+                        "  - 1 张 = 图生(默认首帧;frame_mode=last_frame 则尾帧)\n"
+                        "  - 2 张 = 首尾帧\n"
+                        "  - ≥3 张或带音视频 = 全能参考"
+                    ),
+                ),
+                "video_refs": PortSpec(
+                    type=PortType.LIST,
+                    max_items=3,
+                    item_type=PortType.VIDEO,
+                    title="参考视频",
+                    description="仅全能参考模式;最多 3 段,单段 2~15 秒,总时长 ≤15 秒;与图生/首尾帧互斥",
+                ),
+                "audio_refs": PortSpec(
+                    type=PortType.LIST,
+                    max_items=3,
+                    item_type=PortType.AUDIO,
+                    title="参考音频",
+                    description="仅全能参考模式;最多 3 段,单段 2~15 秒;与图生/首尾帧互斥",
+                ),
+                "task_mode": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "t2v", "i2v", "first_last", "reference"],
+                    title="任务模式",
+                    description=(
+                        "官方四种模式(与 Seedance 2.0/2.5 的 task_mode 同级):\n"
+                        "  - auto: 按输入自动 文生/图生/首尾帧/全能参考\n"
+                        "  - t2v: 文生视频(不要传图或音视频)\n"
+                        "  - i2v: 图生视频(1 张图,默认首帧)\n"
+                        "  - first_last: 首尾帧(图1=首帧,图2=尾帧)\n"
+                        "  - reference: 全能参考(图/视频/音频可组合,合计≤12)"
+                    ),
+                ),
+                "frame_mode": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "first_frame", "last_frame", "first_last", "reference"],
+                    title="多图角色",
+                    description=(
+                        "图片角色(与 task_mode 正交,auto 时也可单独用):\n"
+                        "  - auto: 1 图=首帧,2 图=首尾帧\n"
+                        "  - first_frame: 强制图生首帧\n"
+                        "  - last_frame: 强制图生尾帧\n"
+                        "  - first_last: 强制首尾帧(不可带参考音视频)\n"
+                        "  - reference: 全部图片仅作参考"
+                    ),
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="16:9",
+                    values=["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
+                    title="宽高比",
+                    description=(
+                        "文生视频必须指定具体比例(不能 adaptive);"
+                        "图生首尾帧由输入图决定(adaptive);"
+                        "参考生默认 adaptive,也可指定"
+                    ),
+                ),
+                "resolution": PortSpec(
+                    type=PortType.ENUM,
+                    default="2k",
+                    values=["768p", "2k"],
+                    title="分辨率",
+                    description="输出分辨率:768P 或 2K 直出",
+                ),
+                "duration": PortSpec(
+                    type=PortType.INTEGER,
+                    default=5,
+                    minimum=4,
+                    maximum=15,
+                    title="时长",
+                    description="输出时长(秒),4~15 的整数",
+                ),
+                "watermark": PortSpec(
+                    type=PortType.BOOLEAN,
+                    default=False,
+                    title="AIGC 水印",
+                    description="是否添加 AIGC 标识水印",
+                ),
+            },
+            outputs={
+                "video": PortSpec(type=PortType.OUTPUT_VIDEO, description="生成的视频(MP4,原生有声)"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["video"],
+                mode="async_poll",
+                priority=87,
+            ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        resolution = request.params.get("resolution") or request.resolution or "2k"
+        duration = request.duration
+        if duration is None:
+            duration = request.params.get("duration", 5)
+        try:
+            duration_f = float(duration)
+        except (TypeError, ValueError):
+            duration_f = 5.0
+        return estimate_minimax_h3_points(
+            str(resolution),
+            duration_f,
+            video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
+        )
+
+    def point_range(self) -> tuple[int, int]:
+        """最小 768P×4s;最大 2K×15s + 输入 15s。"""
+        return (
+            estimate_minimax_h3_points("768p", 4),
+            estimate_minimax_h3_points("2k", 15, input_video_duration=15.0),
+        )
+
+
 ALL_MODELS = [
     Seedance15ProDef,
     Seedance2Def,
@@ -1041,5 +1224,6 @@ ALL_MODELS = [
     Seedance2MiniDef,
     Seedance2FastDef,
     HappyHorse11Def,
+    MiniMaxH3Def,
     Wan22VideogenDef,
 ]

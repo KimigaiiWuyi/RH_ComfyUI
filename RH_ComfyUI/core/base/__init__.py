@@ -6,6 +6,7 @@ from .music import MusicGenerationBase
 from .video import VideoTaskShape, VideoGenerationBase
 from .errors import (
     ChannelError,
+    DryRunInterrupt,
     GenerationError,
     ValidationError,
     BillingDeniedError,
@@ -30,6 +31,7 @@ __all__ = [
     "ChannelError",
     "AllChannelsFailedError",
     "BillingDeniedError",
+    "DryRunInterrupt",
     "validate_against_schema",
     "schema_supports_request",
 ]

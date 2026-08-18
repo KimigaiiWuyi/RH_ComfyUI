@@ -57,12 +57,9 @@ def service_config_credentials() -> ProviderCredentials:
 
 
 def _dry_run_enabled() -> bool:
-    from ....rh_config.comfyui_config import SERVICE_CONFIG
+    from ....rh_config.comfyui_config import plugin_dry_run
 
-    try:
-        return bool(SERVICE_CONFIG.get_config("HappyHorse_Dry_Run").data)
-    except Exception:
-        return False
+    return plugin_dry_run()
 
 
 class HappyHorseChannel(ProviderChannel):
@@ -74,8 +71,8 @@ class HappyHorseChannel(ProviderChannel):
         weight: 负载均衡权重。
         credentials_resolver: 凭证回调;默认读宿主 ``HappyHorse_*`` 配置。
         name: 通道名;默认取 ``provider_cls.name``。
-        dry_run_resolver: Dry-Run 开关;默认读宿主 ``HappyHorse_Dry_Run``。
-            外部插件应用自己的开关,避免误读宿主 DashScope Dry-Run。
+        dry_run_resolver: Dry-Run 开关;默认读 ``PLUGIN_CONFIG.Dry_Run``。
+            外部插件可注入自己的 resolver。
     """
 
     name = "dashscope"

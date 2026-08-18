@@ -45,15 +45,25 @@ class ModelRegistry:
         self._lock = threading.Lock()
         self._models: dict[str, AIGCGenerationBase] = {}
 
-    def register(self, model: AIGCGenerationBase) -> None:
+    def register(self, model: AIGCGenerationBase) -> bool:
+        """注册或覆盖同名模型。返回是否为新 name。
+
+        同 name 且同实现(模块+类名)再挂一次:静默覆盖实例,不打 warning。
+        同 name 换了实现:warning 后覆盖。新 name:打一条注册 info。
+        """
+        new_key = f"{type(model).__module__}.{type(model).__qualname__}"
         with self._lock:
-            if model.name in self._models:
-                logger.warning(
-                    f"[ModelRegistry] 模型 {model.name} 被重复注册,"
-                    f"新实现 {type(model).__module__}.{type(model).__qualname__} 覆盖旧实现"
-                )
+            existing = self._models.get(model.name)
             self._models[model.name] = model
-        logger.info(f"[ModelRegistry] 注册模型: {model.name} ({model.display_name})")
+        if existing is None:
+            logger.info(f"[ModelRegistry] 注册模型: {model.name} ({model.display_name})")
+            return True
+        old_key = f"{type(existing).__module__}.{type(existing).__qualname__}"
+        if old_key != new_key:
+            logger.warning(
+                f"[ModelRegistry] 模型 {model.name} 被重复注册,新实现 {new_key} 覆盖旧实现"
+            )
+        return False
 
     def unregister(self, name: str) -> None:
         with self._lock:
