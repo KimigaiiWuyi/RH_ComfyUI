@@ -221,6 +221,8 @@ def _row_plan(row: Any) -> Optional[dict[str, Any]]:
     if actual is None:
         return None
     delta = int(actual) - prepaid
+    extra_obj = _parse_json_object(getattr(row, "extra_params_json", "") or "") or {}
+    already_marked = extra_obj.get("usage_settled_points") is not None
     return {
         "record_id": int(getattr(row, "id", 0) or 0),
         "trace_id": str(getattr(row, "trace_id", "") or ""),
@@ -230,29 +232,20 @@ def _row_plan(row: Any) -> Optional[dict[str, Any]]:
         "prepaid": prepaid,
         "actual": int(actual),
         "delta": delta,
+        "wallet_marked": already_marked,
     }
 
 
 async def _cas_point_cost(record_id: int, expected: int, new_cost: int) -> bool:
-    from sqlmodel import col
-    from sqlalchemy import update
-
-    from gsuid_core.utils.database.base_models import async_maker
-
     from ...utils.database.models import RHComfyuiTaskRecord
 
-    async with async_maker() as session:
-        result = await session.execute(
-            update(RHComfyuiTaskRecord)
-            .where(
-                col(RHComfyuiTaskRecord.id) == int(record_id),
-                col(RHComfyuiTaskRecord.point_cost) == int(expected),
-                col(RHComfyuiTaskRecord.status) == "ok",
-            )
-            .values(point_cost=int(new_cost))
+    return bool(
+        await RHComfyuiTaskRecord.cas_update_point_cost(
+            int(record_id),
+            expected=int(expected),
+            new_cost=int(new_cost),
         )
-        await session.commit()
-        return int(getattr(result, "rowcount", 0) or 0) > 0
+    )
 
 
 async def _apply_wallet(user_id: str, bot_id: str, delta: int, record_id: int) -> str:
@@ -378,37 +371,36 @@ async def _reconcile_locked(
                 changes.append(plan)
                 continue
 
-            wallet_st = "skipped"
-            if adjust_wallet:
-                wallet_st = await _apply_wallet(
-                    plan["user_id"], plan["bot_id"], plan["delta"], plan["record_id"]
-                )
-                if wallet_st == "denied":
-                    wallet_denied += 1
+            try:
+                # 先写消费记录 point_cost(列表/汇总都读这一列),再动钱包。
+                # SQLite UPDATE rowcount 不可靠,必须走 ORM CAS。
+                ok = await _cas_point_cost(plan["record_id"], plan["prepaid"], plan["actual"])
+                if not ok:
+                    errors += 1
                     continue
-                if wallet_st == "error":
-                    wallet_error += 1
-                    continue
-            ok = await _cas_point_cost(plan["record_id"], plan["prepaid"], plan["actual"])
-            if not ok:
-                if wallet_st == "ok":
-                    await _apply_wallet(
-                        plan["user_id"],
-                        plan["bot_id"],
-                        -int(plan["delta"]),
-                        plan["record_id"],
+                wallet_st = "skipped"
+                if adjust_wallet and not plan.get("wallet_marked"):
+                    wallet_st = await _apply_wallet(
+                        plan["user_id"], plan["bot_id"], plan["delta"], plan["record_id"]
                     )
+                    if wallet_st == "denied":
+                        wallet_denied += 1
+                    elif wallet_st == "error":
+                        wallet_error += 1
+                updated += 1
+                if wallet_st == "ok":
+                    if plan["delta"] > 0:
+                        charged_points += plan["delta"]
+                    else:
+                        refunded_points += -plan["delta"]
+                if len(changes) < _MAX_CHANGES:
+                    item = dict(plan)
+                    item["wallet"] = wallet_st
+                    changes.append(item)
+            except Exception as exc:  # noqa: BLE001
                 errors += 1
+                logger.warning(f"[Billing.reconcile] 回写失败 id={plan['record_id']}: {exc}")
                 continue
-            updated += 1
-            if plan["delta"] > 0:
-                charged_points += plan["delta"]
-            else:
-                refunded_points += -plan["delta"]
-            if len(changes) < _MAX_CHANGES:
-                item = dict(plan)
-                item["wallet"] = wallet_st
-                changes.append(item)
 
         await asyncio.sleep(0)
 

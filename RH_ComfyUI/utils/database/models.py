@@ -1415,6 +1415,48 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         return True
 
     @classmethod
+    @with_session
+    async def cas_update_point_cost(
+        cls,
+        session: AsyncSession,
+        record_id: int,
+        *,
+        expected: int,
+        new_cost: int,
+    ) -> bool:
+        """仅当当前 point_cost 仍是 expected 时写入实扣。供用量回算。
+
+        走 ORM + with_session 提交,不依赖 SQLite UPDATE rowcount
+        (aiosqlite 常返回 -1/0,会被误判失败)。
+        """
+        if record_id <= 0:
+            return False
+        stmt = select(cls).where(col(cls.id) == int(record_id))
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return False
+        if (row.status or "").strip().lower() != "ok":
+            return False
+        if int(row.point_cost or 0) != int(expected):
+            return False
+        row.point_cost = int(new_cost)
+        extra: dict[str, Any] = {}
+        raw_extra = (row.extra_params_json or "").strip()
+        import json
+
+        if raw_extra:
+            try:
+                parsed = json.loads(raw_extra)
+                if isinstance(parsed, dict):
+                    extra = parsed
+            except (TypeError, ValueError):
+                extra = {}
+        extra["usage_settled_points"] = int(new_cost)
+        row.extra_params_json = json.dumps(extra, ensure_ascii=False)
+        session.add(row)
+        return True
+
+    @classmethod
     async def cleanup_old_records(cls, keep_days: int = 90) -> int:
         """清理超过 keep_days 天的记录;返回删除条数(分批,避免长事务)"""
         from datetime import timedelta
