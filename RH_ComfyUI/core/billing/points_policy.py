@@ -39,6 +39,57 @@ class PointsBillingPolicy(BillingPolicy):
         )
         reservation.refunded = True
 
+    async def settle(self, reservation: BillingReservation, actual: int | None = None) -> int:
+        """预扣后按实际用量补扣或退差;补扣失败则维持预扣(生成已成功,不打翻主流程)。"""
+        if reservation.refunded:
+            return 0
+        if reservation.committed:
+            if reservation.settled_cost is not None:
+                return reservation.settled_cost
+            return reservation.cost
+
+        prepaid = reservation.cost
+        if actual is None:
+            final = prepaid
+        else:
+            try:
+                n = int(actual)
+            except (TypeError, ValueError):
+                n = 0
+            final = prepaid if n <= 0 else n
+
+        delta = final - prepaid
+        if delta > 0:
+            from ...utils.database.models import RHBind
+
+            ok, detail = await RHBind.deduct_triple(
+                reservation.context.user_id,
+                reservation.context.bot_id,
+                delta,
+                vip_tier=None,
+            )
+            if not ok:
+                reason = (detail or {}).get("reason") or "积分不足"
+                logger.warning(
+                    f"[Billing] 后结算补扣失败,维持预扣 user={reservation.context.user_id} "
+                    f"prepaid={prepaid} actual={final} extra={delta} reason={reason}"
+                )
+                final = prepaid
+        elif delta < 0:
+            from ...utils.database.models import RHBind
+
+            await RHBind.add_triple(
+                reservation.context.user_id,
+                reservation.context.bot_id,
+                -delta,
+                vip_tier=None,
+                cap_to_tier=True,
+            )
+
+        reservation.settled_cost = final
+        reservation.committed = True
+        return final
+
     async def post_refund(self, reservation: BillingReservation, *, model_name: str) -> None:
         """统计表最近一条 failed/cancelled 未退记录 → refunded=True。"""
         from ...utils.database.models import RHComfyuiTaskRecord

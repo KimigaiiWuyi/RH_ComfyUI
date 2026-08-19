@@ -7,7 +7,8 @@
   3.5 begin_dispatch() 插入 RHComfyuiTaskRecord status=running(可查进行中)
   4. model.run() 内自带两层并发闸(供应商全局闸 + (model,channel) 闸),
        整体受超时预算约束(Dispatch_Timeout,0=不限)
-       成功 → policy.commit() → record_dispatch(status=ok) 更新同一行
+       成功 → policy.settle(model.settle_cost(usage)) → record_dispatch(status=ok)
+              settle 只做与预扣的差额(补扣/退差),禁止按实际再全额扣一次
        失败/超时 → record_dispatch(status=failed) → policy.refund() → 原样抛出
        取消/中断(BaseException,如 CancelledError / DryRunInterrupt)
             → record_dispatch(status=cancelled|failed) → 退款 → 原样抛出
@@ -25,6 +26,7 @@ from .context import DispatchContext
 from ..base.errors import GenerationError, describe_exception
 from .active_tasks import cancel_generation, get_active_task_registry
 from ..schema.types import NodeOutput
+from ..billing.settle import invoke_settle_cost
 from ..schema.request import GenerationResult, GenerationRequest
 from ..telemetry.recorder import begin_dispatch, record_dispatch
 from ...utils.core.safe_json import mask_body
@@ -115,13 +117,17 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
         result = GenerationResult.from_node_output(output)
         result.model_used = model.display_name
         result.pipeline_used = model.name
-        result.cost_points = cost
         result.outputs = output.outputs
         result.usage = output.usage
         result.raw = output.raw
-        await ctx.policy.commit(reservation)
+        actual = invoke_settle_cost(model, request, output.usage)
+        final_cost = await ctx.policy.settle(reservation, actual)
+        result.cost_points = final_cost
         elapsed_ms = int((time.monotonic() - start) * 1000)
         result.metadata.setdefault("elapsed_ms", elapsed_ms)
+        if actual is not None and actual != cost:
+            result.metadata["prepaid_points"] = cost
+            result.metadata["settled_points"] = final_cost
         await record_dispatch(
             request=request,
             request_body=request_body,
@@ -132,7 +138,7 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
             elapsed_ms=elapsed_ms,
             error=None,
             ctx=ctx,
-            point_cost=cost,
+            point_cost=final_cost,
             record_id=record_id,
         )
         return result

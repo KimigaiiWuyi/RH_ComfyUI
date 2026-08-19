@@ -200,14 +200,14 @@ def apply_omni_reference_task_type(
 class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
     """火山方舟 Seedance 官方后端
 
-    当 base_url 为非 ARK 默认值(通常为聚合网关)时,
+    当 base_url 为非 ARK 默认值(自定义网关)时,
     自动切换为网关端点 /video/generation/tasks 并解网关 {code,msg,data} 信封。
     """
 
     name = "ark"
     DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 
-    # 网关模式端点(聚合网关 base_url 时使用)
+    # 网关模式端点(自定义 base_url 时使用)
     _GATEWAY_ENDPOINT = "/video/generation/tasks"
     # ARK 原生端点
     _ARK_ENDPOINT = "/contents/generations/tasks"

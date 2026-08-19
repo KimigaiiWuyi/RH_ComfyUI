@@ -50,7 +50,7 @@ class HappyHorseChannel(ProviderChannel):
 
     Args:
         provider_cls: 供应商实现类(默认官方 DashScope ``HappyHorseProvider``;
-            外部聚合网关可注入自己的子类)。
+            外部插件可注入自己的子类)。
         weight: 负载均衡权重。
         credentials_resolver: 凭证回调;默认读宿主 ``HappyHorse_*`` 配置。
         name: 通道名;默认取 ``provider_cls.name``。

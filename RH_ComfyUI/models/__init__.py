@@ -5,7 +5,7 @@ discover_builtin_models() 在 on_core_start 时被调用:
 2. 模型实例注册进 core.routing.model_registry(单一事实来源);
 3. NodeDef 目录(pipeline_registry)由 model_registry 派生 —— Adapter 执行 /
    AI 知识库 / HTTP 契约仍消费 NodeDef,但不再单独注册,避免两表漂移;
-4. 加载 pip entry points 提供的外部模型(闭源接入途径之一)。
+4. 加载 pip entry points 提供的外部模型(外部插件接入途径之一)。
 """
 
 from __future__ import annotations

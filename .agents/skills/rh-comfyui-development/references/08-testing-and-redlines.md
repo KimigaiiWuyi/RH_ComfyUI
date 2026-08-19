@@ -13,7 +13,8 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 | `test_balancer.py` | 负载均衡选择、熔断触发与冷却恢复、scope 隔离 |
 | `test_registry.py` | ModelRegistry 注册/去重/按模态查询 |
 | `test_schema_validation.py` | PortSpec 通用校验 + Seedance/Wan 跨字段约束 |
-| `test_dispatcher_billing.py` | 成功 commit / 校验失败不扣费 / 失败退款幂等 / BaseException(取消/Dry-Run)退款与 status=cancelled / estimate_cost 动态计费 / Dispatch_Timeout 超时退款 |
+| `test_dispatcher_billing.py` | 成功 settle / 校验失败不扣费 / 失败退款幂等 / BaseException 退款 / estimate_cost / settle_cost 差额对齐(禁止双重扣费) / 超时退款 |
+| `test_seedance_usage_reconcile.py` | 历史单 raw usage → 实扣积分(含截断 JSON / content[] 参考视频) |
 | `test_channel_failover.py` | Adapter 错误翻译、多通道故障切换、非重试错误不计熔断不切换、transient(429/503)原通道退避重试一次 |
 | `test_seedance_channel.py` | SeedanceProviderChannel 凭证热更新、异常翻译、Dry-Run 透传 |
 | `test_minimax_h3_model.py` / `test_minimax_h3_billing.py` | MiniMax H3 schema/分类/渲染/启用列表/按秒计费 |
@@ -50,8 +51,8 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
    迁移期安排,不要模仿扩大:schema 类型物理存放在 `utils/core/`(core.schema
    re-export 为规范路径)、telemetry → `utils/database`、顶层 re-export
    `SeedanceProviderChannel`、按需读 `rh_config`;
-6. **开源仓库零闭源 / 零宿主业务硬依赖**(URL/凭证/条件 import 宿主包/
-   按产品来源分叉;见 §七、§二十 §20.5);
+6. **开源仓库零宿主业务硬依赖**(URL/凭证/条件 import 宿主包/
+   按产品来源分叉;代码与注释不暴露具体前端或宿主后端;见 §七、§二十 §20.5);
 7. 模型 `name` 是主键,改名 = 下线旧 + 上线新(统计断档),慎改;
 8. `RHComfyuiTaskRecord` 既有列不改名不删;新列必须带默认值;
 9. 每个新目录必须有 README.md(目录职责 + 维护须知);

@@ -113,7 +113,7 @@ class ModelEntry:
     #    input_schema 即可判定是否可传参考图,以及最多几张 ──
     accepts_images: bool = False
     max_input_images: int = 0
-    # ── 2026-07-21 积分范围新增:前端展示"最低~最高积分"用 ──
+    # ── 2026-07-21 积分范围新增:调用方展示"最低~最高积分"用 ──
     point_range: dict[str, int] = field(default_factory=lambda: {"min": 0, "max": 0})
     # ── 目录分组:默认等于 task_type;专用工具为 "tool"(不进图片生成主列表) ──
     catalog_group: str = ""
@@ -200,11 +200,11 @@ def _aggregate_cancel_flags(
     fallback_cancel: bool,
     fallback_remote: bool,
 ) -> tuple[bool, bool]:
-    """模型顶层 cancel 标志 = 各通道 OR,与 /models 通道明细一致(前端可只读顶层)。
+    """模型顶层 cancel 标志 = 各通道 OR,与 /models 通道明细一致(调用方可只读顶层)。
 
     无通道时:local 回落 ``fallback_cancel``;remote 回落 ``fallback_remote``
     (remote 应为供应商级,无通道时通常 False)。多通道时顶层 true 表示
-    「至少一路可 cancel」;精确到通道时前端应读 ``channels[].supports_*``。
+    「至少一路可 cancel」;精确到通道时调用方应读 ``channels[].supports_*``。
     """
     if not channels:
         return fallback_cancel, fallback_remote
@@ -273,7 +273,7 @@ def _channel_supports_remote_cancel(
     if name in ("minimax-h3",):
         return True
 
-    # 聚合网关异步视频
+    # 外部注入的 gateway_slot 异步视频通道
     if name.startswith("gateway_slot") and (
         name.endswith("_seedance")
         or name.endswith("_happyhorse")
@@ -282,7 +282,7 @@ def _channel_supports_remote_cancel(
     ):
         return True
 
-    # 聚合网关异步生图(gpt-image / banana);seedream 同步端 → False
+    # 外部注入的 gateway_slot 异步生图(gpt-image / banana);seedream 同步端 → False
     if name.startswith("gateway_slot"):
         if "seedream" in name:
             return False
@@ -418,7 +418,7 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
 
 
 async def _build_entry_from_model(model) -> ModelEntry:  # noqa: ANN001
-    """为无 NodeDef 的纯编程式模型(路径 C / 闭源 ABC 模型)构建 ModelEntry。
+    """为无 NodeDef 的纯编程式模型(路径 C / 外部 ABC 模型)构建 ModelEntry。
 
     这类模型只存在于 model_registry(model.node is None),不经 pipeline_registry;
     没有它们清单就违背了"注册即三入口可见"的承诺。backend 留空(无 Adapter)。
@@ -559,7 +559,7 @@ async def build_model_catalog(
             continue
         entries.append(entry)
 
-    # 纯编程式模型(model.node is None,如闭源 ABC 模型)不经 pipeline_registry,
+    # 纯编程式模型(model.node is None,如外部 ABC 模型)不经 pipeline_registry,
     # 单独从 model_registry 补进清单,保证"注册即三入口可见"
     from ..core.routing.registry import model_registry
 
@@ -716,7 +716,7 @@ async def estimate_model_points(
 ) -> dict[str, Any]:
     """根据用户实时选择的参数,估算某模型消耗的积分。
 
-    供前端在用户切换 ratio/image_size/quality/resolution/duration/已连输入数量时
+    供调用方在用户切换 ratio/image_size/quality/resolution/duration/已连输入数量时
     实时预览扣费,无需真正发起生成。对未覆盖 estimate_cost 的模型,返回其静态 point_cost。
 
     Args:
@@ -733,7 +733,7 @@ async def estimate_model_points(
         num_video_refs: 已连输入视频参考数(0=文生视频)。同 num_input_images,
             用占位对象让 len() 命中。
         input_video_duration: 输入参考视频总时长(秒)。Seedance token 公式:
-            (输入视频时长+输出时长)×宽×高×fps/1024;前端探测到后传入,
+            (输入视频时长+输出时长)×宽×高×fps/1024;调用方探测到后传入,
             未传时按「每段默认 5s × 段数」估算。
 
     Returns:
@@ -815,7 +815,7 @@ async def estimate_model_points(
 
     try:
         cost = model_obj.estimate_cost(req)
-    except Exception as e:  # noqa: BLE001 - 估算失败不阻断前端,回落静态值
+    except Exception as e:  # noqa: BLE001 - 估算失败不阻断调用方,回落静态值
         logger.warning(f"[estimate] {model_name} 动态估算失败({e}),回落静态 point_cost")
         return {
             "model": model_name,

@@ -19,7 +19,7 @@ class NewImageModel(ImagePipelineModel):
     @staticmethod
     def node_def() -> NodeDef:
         return NodeDef(
-            name="new_image_model",                  # 契约 name,前端 catalog 用
+            name="new_image_model",                  # 契约 name,调用方 catalog 用
             display_name="新图片模型",
             task_type=TaskType("image"),
             backend="gpt-image-2",                   # 选现有 backend
@@ -122,11 +122,11 @@ pytest tests/test_<model>_billing.py -v                  # 计费曲线单测
 pytest tests/test_model_schema.py -v                     # schema 契约快照
 ```
 
-### Step 5 — 前端同步(谁负责谁改)
+### Step 5 — 调用方同步(谁负责谁改)
 
-- **新 schema 字段**:前端 `GenerationNode.estimateParams` 要读取(`modelApi.ts:140` + `GenerationNode.tsx:1000`)
-- **新计费维度**:前端 `fetchModelEstimate` params 类型同步加,`estimateParams` 从 `displayRefs.length` / `data.<field>` 读
-- **新 backend_model 字段**:如果前端有 UI 展示需要同步更新(参考 §十二、供应商通道)
+- **新 schema 字段**:调用方 estimate 入参要读取
+- **新计费维度**:调用方 estimate query 类型同步加,从已连参考数量 / 当前参数读
+- **新 backend_model 字段**:如果调用方有 UI 展示需要同步更新(参考 §十二、供应商通道)
 
 ## 17.2 新增一个视频/语音/音乐模型
 
@@ -171,14 +171,14 @@ pytest tests/test_model_schema.py -v                     # schema 契约快照
 
 ## 17.5 改 schema(添加/修改/删除字段)
 
-**修改 schema 等于改前端契约**,影响面:
+**修改 schema 等于改调用方契约**,影响面:
 
 ```
 input_schema.images.max_items
        ↓
 model.accepts_images / max_input_images
        ↓
-前端 catalog 展示
+调用方 catalog 展示
        ↓
 estimate_cost 的 supports() 判断
        ↓
@@ -190,31 +190,31 @@ estimate API 是否接受 num_input_images
 2. **确认 supports()**(`base/generation.py`)对 inputs 字段的判定逻辑(参考同模态其他模型)
 3. **确认 estimate_cost** 读这个字段(若 schema 暴露,estimate_cost 也应该读)
 4. **确认 estimate API** 透传这个字段(`estimate_model_points` 签名 + 路由 handler)
-5. **前端同步**:`GenerationNode.estimateParams` 加读取 + `fetchModelEstimate` 加类型
+5. **调用方同步**:estimate 入参加读取 + query 类型同步
 6. **测试**:更新 `tests/test_model_schema.py` 契约快照(如有)
-7. **前端 e2e**:浏览器实测 schema 渲染 + estimate 响应
+7. **调用方 e2e**:实测 schema 渲染 + estimate 响应
 
-## 17.6 闭源接入模型(另外的兼容插件生态)
+## 17.6 外部插件接入模型
 
-参考 §七、闭源插件接入。**不要在开源仓库留任何条件分支**。
+参考 §七、外部插件接入。**不要在开源仓库留任何条件分支**。
 
 ```python
-# 闭源插件里
+# 外部插件里
 from RH_ComfyUI.core.routing.registry import model_registry, AIGCGenerationBase
 
-class ClosedSourceModel(AIGCGenerationBase):
+class ExtPluginModel(AIGCGenerationBase):
     def __init__(self):
         super().__init__(self.node_def())
     @staticmethod
     def node_def():
-        return NodeDef(name="closed_model", ...)
+        return NodeDef(name="ext_model", ...)
     def estimate_cost(self, request):
-        # 闭源自己的计费逻辑(可能调外部 API 查实时价格)
+        # 外部插件自己的计费逻辑(可能调外部 API 查实时价格)
         ...
     def point_range(self):
         return (1, 100)
 
-model_registry.register(ClosedSourceModel())
+model_registry.register(ExtPluginModel())
 ```
 
 ## 17.7 提交前自检清单(2026-07 后必跑;2026-08 取消/wire 增项)
@@ -235,10 +235,10 @@ model_registry.register(ClosedSourceModel())
 
 | 现象 | 根因 | 修复 |
 |---|---|---|
-| 前端不调 estimate,显示固定积分 | `point_range` min == max | 用更长 max 输入 |
-| 前端切 image_size 积分不变 | estimate_cost 读 key 与 API 写 key 不一致 | 改成同 key + `or` 兼容 |
+| 调用方不调 estimate,显示固定积分 | `point_range` min == max | 用更长 max 输入 |
+| 调用方切 image_size 积分不变 | estimate_cost 读 key 与 API 写 key 不一致 | 改成同 key + `or` 兼容 |
 | 4K 反而比 2K 便宜 | `_RATIO_SIZE_MAP` cell 比例错 | 按 OpenAI 4 条硬约束重建 |
-| 前端显示 quality 控件但切换无效 | schema 暴露了计费不区分的字段 | 从 schema 移除 |
+| 调用方显示 quality 控件但切换无效 | schema 暴露了计费不区分的字段 | 从 schema 移除 |
 | 输入多张图积分不变 | `estimate_model_points` 没传 `num_input_images` | 加 `images=[b""] * N` 占位 |
 | FastAPI 422 拒绝 | estimate API 签名缺参数 | 加 Query 参数 |
 | dispatch 报 "积分不足" | `estimate_cost` 返回值 > 用户余额 | 改 billing mapper 或减输入 |
@@ -251,5 +251,5 @@ model_registry.register(ClosedSourceModel())
 
 1. **统计落库**:查 `RHComfyuiTaskRecord`,确认新模型 `status=ok` 比例正常
 2. **estimate 误差**:对比 `task.point_cost` 与实际扣费的差额(应当 < 1 积分/任务)
-3. **前端 422 日志**:浏览器 console / Network 面板,看是否还有未透传的参数
+3. **调用方 422 日志**:看是否还有未透传的参数
 4. **rate 投诉**:用户报告"积分不准"时,先看 §15.5 自检清单 5 条都过了没

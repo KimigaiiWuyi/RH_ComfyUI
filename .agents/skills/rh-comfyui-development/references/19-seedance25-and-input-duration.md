@@ -3,8 +3,8 @@
 > 2026-08 接入 Seedance 2.5,并修正 Seedance 全系列 token 计费中「输入视频时长」
 > 被写死 5 秒的问题。本章给下次查阅用:模型契约、费率、透传链、测试入口。
 >
-> **2026-08 后续修订**:聚合网关(`aigc_system`)已注册 **seedance2.5** 通道
-> (透传 V2);下文「仅 ark」已过时,见 §19.1 与 §19.9。
+> **2026-08 后续修订**:外部通道可经 `channel_registry` 注入 **seedance2.5**;
+> 下文「仅 ark」已过时,见 §19.1 与 §19.9。
 
 ## 19.1 模型身份
 
@@ -15,8 +15,8 @@
 | 类 | `Seedance25Def` → `Seedance25VideoModel` |
 | backend | `seedance` |
 | **ark** Vendor Model | `doubao-seedance-2-5-260628`(方舟日期编码) |
-| **gateway** Vendor Model | **`doubao-seedance-2.5`**(点分;见 `aigc_system` `SHARED_VENDOR_MODELS`) |
-| 通道 | **ark + gateway**(网关经 `channel_registry` 注入 `gateway_slot{N}_seedance`) |
+| **gateway** Vendor Model | **`doubao-seedance-2.5`**(点分;由外部通道映射) |
+| 通道 | **ark + 外部 gateway**(经 `channel_registry` 注入 `gateway_slot{N}_seedance`) |
 | 与 2.0 | **类型分开**(独立 name / backend_model,不合并进 seedance2) |
 
 **⚠ 三套 id 勿混用**:
@@ -31,8 +31,7 @@
 - `RH_ComfyUI/models/video/defs.py` — `Seedance25Def`
 - `RH_ComfyUI/models/video/overrides.py` — `Seedance25VideoModel`
 - `RH_ComfyUI/utils/mappers/seedance_billing.py` — `estimate_seedance25_points`
-- `aigc_system/seedance_gateway/models.py` — 网关 vendor 映射
-- `aigc_system/docs/seedance-passthrough-v2-handover-2026-08.md` — 网关透传 + 信封错误面
+- 外部网关插件 — vendor 映射与透传信封(不在本仓库)
 
 ## 19.2 能力差异(相对 seedance2)
 
@@ -74,6 +73,22 @@ points = yuan × 100                          # 1 元 = 100 积分,最小 1
 
 `duration=-1`(2.5 全模式自动时长):输出时长 = 输入总时长(>0),否则 15s。
 
+### 后结算(供应商 token)
+
+预扣用上式估算,与真实 `usage.total_tokens` 会有偏差(官方 token 口径、
+音频、实际输出秒数)。成功后:
+
+```
+usage.vendor_cost 或 completion_tokens / total_tokens
+  → settle_seedance*_points(tokens × 档位费率)
+  → BillingPolicy.settle 只做与预扣的差额
+```
+
+ark 查询样例 `completion_tokens=total_tokens=488025`(1080p / 5s /
+约 5s 输入)走有输入 1080p 费率。外部网关透传官方 usage 与信封
+`tokenUsage.totalTokens` 都必须归一成 `vendor_cost`。HTTP 宿主已预扣时
+引擎不二次扣 RHBind,由宿主自行差额对齐。
+
 ### 2.5 费率与官方例
 
 ```
@@ -112,11 +127,11 @@ _SEEDANCE25_RATES = {
 - 图/视频/音频数量上限
 - `duration` 为 4~30 或 **-1**(自动);**所有** task_mode / frame_mode 均可 -1,禁止再限成 edit/extend
 - edit/extend 必须有参考视频
-- **extend**：`classify_video_spec` 检查整段 prompt + OC 文本；没有「延长」则最前补 `延长该视频。`（前端会先写 `延长该视频 @视频 视频。`；已含「延长」不叠）
+- **extend**：`classify_video_spec` 检查整段 prompt + OC 文本；没有「延长」则最前补 `延长该视频。`（调用方会先写 `延长该视频 @视频 视频。`；已含「延长」不叠）
 - edit/extend/首帧·首尾帧 的 ratio 必须 adaptive
-- `camera_fixed=true` 直接拒绝(防存量前端/透传脏参数)
+- `camera_fixed=true` 直接拒绝(防存量调用方/透传脏参数)
 - Ark `render_create`: model 为 2.5 时**不写** body.`camera_fixed`
-- aigc `GatewaySeedanceProvider`: 同上,复用 `_is_seedance25_model`(网关点分 `doubao-seedance-2.5`)
+- 外部网关通道: 同上,按点分 `doubao-seedance-2.5` 识别 2.5,不写 `camera_fixed`
 
 ## 19.5 透传链(引擎 → 宿主 HTTP → 调用方 UI)
 
@@ -138,44 +153,30 @@ estimate_model_points(..., input_video_duration=?)
 - Ark provider:`duration=-1` 原样透传;`output_format=mov` 写入 body;
   `omni_reference_task_type` 仅 2.5 **多模态参考**写入(与 duration 同级);编辑=edit、延长=extend、多参考=auto;文生/首帧/首尾帧禁止(否则上游 TaskTypeConstraint);
   媒体上限 30/10/10,max_duration=30
-- **Gateway**(`aigc_system.GatewaySeedanceProvider`):端点
-  `/video/generation/passthrough/tasks`;body.model=`doubao-seedance-2.5`;
-  `duration=-1` 同样原样透传;失败信封须抛 `user_message`(见 §19.9)
+- **外部 Gateway**:端点 `/video/generation/passthrough/tasks`;
+  body.model=`doubao-seedance-2.5`;`duration=-1` 同样原样透传;
+  失败信封须抛 `user_message`(见 §19.9)
 
-### canvas_backend
+### 宿主 HTTP 入口(典型)
 
-```
-POST /api/canvas-backend/estimate
-  body.input_video_duration → _rh_estimate_point_cost(...)
+宿主 estimate / generate 应把调用方探测到的参考视频总秒数写入
+`input_video_duration`,再调引擎 `estimate_model_points` / `submit`。
+引擎不绑定具体宿主路径;契约字段即 `GenerationRequest.params` 与 estimate Query。
 
-POST /api/canvas-backend/generate 预扣
-  GenerateRequest.params.input_video_duration
-  → _rh_estimate_point_cost_from_request
-```
+### 调用方 UI(典型)
 
-- `generate_api.py` — `_rh_estimate_point_cost` / `_from_request` / `api_estimate`
-- `request_schemas.py` — `EstimateReq.input_video_duration`
-- `_SEEDANCE2_FAMILY_RE = ^seedance2` **会匹配** `seedance2.5`(人像库 asset:// 可用)
-
-### InfiniteCanvas 前端
-
-| 位置 | 作用 |
-|---|---|
-| `src/utils/modelApi.ts` `fetchModelEstimate` | query 拼 `input_video_duration` |
-| `GenerationNode.tsx` `estimateParams` | 累加已探测参考视频时长 |
-| `GenerationNode.tsx` `buildGenerateRequest` | 写入 `params.input_video_duration` 供预扣 |
-| `buildGenerateRequest.ts` | 无头提交路径同样写入 |
-| `HomePage.tsx` | 主页草稿同逻辑 |
-| `i18n.ts` | `'seedance2.5'` 中英文显示名 |
-| `FrameModePicker` / `ConfigPicker` | 延长/编辑下拉;UI「自动」= `adaptive`/`duration=-1` |
-| 交接 | InfiniteCanvas `docs/seedance25-modes-duration-popup-handover-2026-08.md` |
+- estimate query 拼 `input_video_duration`(累加已探测参考视频时长)
+- generate `params.input_video_duration` 供预扣
+- 无头提交路径同样写入
+- 显示名按 catalog `display_name`
+- 延长/编辑下拉;UI「自动」= `adaptive` / `duration=-1`
 
 参考视频合法输入区间:
 
 | 模型 | 单段参考视频 |
 |------|----------------|
-| Seedance **2.0** | **2~15s**(越界前端提示裁切) |
-| Seedance **2.5** | **2~30s**(与输出上限对齐;前端按模型切换 max) |
+| Seedance **2.0** | **2~15s**(越界由调用方提示裁切) |
+| Seedance **2.5** | **2~30s**(与输出上限对齐;调用方按模型切换 max) |
 
 输出最长 30s 是 2.5 的输出能力;勿再把 2.5 参考视频上限写死成 15s。
 
@@ -201,15 +202,12 @@ pytest tests/test_seedance25_model.py tests/test_seedance_billing.py \
 - [ ] 改费率 → `_SEEDANCE25_RATES` + `tests/test_seedance_billing.py` 官方例
 - [ ] 改时长上限 → defs PortSpec + Ark `max_duration` + override validate
 - [ ] 改参考上限 → defs max_items + override MAX_* + Ark max_images/videos/audios
-- [ ] 新 estimate 维度 → api + webapi + canvas EstimateReq + 前端 modelApi + estimateParams
-- [ ] 前端显示名 → i18n `model.seedance2.5`
+- [ ] 新 estimate 维度 → api + webapi + 宿主 estimate 入参 + 调用方 query
+- [ ] 调用方显示名跟 catalog `display_name`
 - [ ] 文档 §15(计费总览)若改公式同步改本节
 
-## 19.8 相关外部文档
+## 19.8 相关文档
 
-- InfiniteCanvas skills: `docs/skills/InfiniteCanvasDevelopment/references/15-estimate-flow-and-contract.md` §15.9
-- InfiniteCanvas UI 交接: `docs/seedance25-modes-duration-popup-handover-2026-08.md`
-- aigc 网关透传: `aigc_system/docs/seedance-passthrough-v2-handover-2026-08.md`
 - 火山方舟教程 PDF:`docs/火山方舟_Doubao Seedance 2.5 教程_1786081569.pdf`
 - ark Model ID:`doubao-seedance-2-5-260628`
 - 网关 Model ID:`doubao-seedance-2.5`
@@ -218,15 +216,15 @@ pytest tests/test_seedance25_model.py tests/test_seedance_billing.py \
 
 | 项 | 说明 |
 |----|------|
-| 注册 | `aigc_system` `register_gateway` 把 seedance2.5 绑到 `gateway_slot{N}_seedance` |
+| 注册 | 外部插件把 seedance2.5 绑到 `gateway_slot{N}_seedance` |
 | 端点 | `/video/generation/passthrough/tasks`(非旧 tasks,非 V3 硬切) |
 | 与 ark 并存 | LoadBalancer 在 ark / gateway 间分摊(取决于配置启用与勾选) |
 | 失败信封 | 网关可能 HTTP 200 + `{code,msg,data}`;provider 必须 `user_message=msg` |
-| 用户症状 | 若只见「上游未返回任务ID」→ 查 aigc `parse_create` 信封路径,不是 RH 计费 |
+| 用户症状 | 若只见「上游未返回任务ID」→ 查外部通道 `parse_create` 信封路径,不是 RH 计费 |
 | HappyHorse | **不**共享透传 path;勿因 Seedance 改 path 误伤 |
 
 改 2.5 能力时 checklist 追加:
 
-- [ ] 网关 `SHARED_VENDOR_MODELS` 与 catalog 勾选项
-- [ ] 信封错误单测(`test_passthrough_parse_create_envelope_error_surfaces_msg`)
-- [ ] 前端 task_mode / adaptive / duration=-1 与 RH validate 一致
+- [ ] 外部网关 vendor 映射与 catalog 勾选项
+- [ ] 信封错误面(`user_message=msg`)
+- [ ] 调用方 task_mode / adaptive / duration=-1 与 RH validate 一致

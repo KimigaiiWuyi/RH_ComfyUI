@@ -1,4 +1,4 @@
-"""扩图尺寸规划:原图/目标画布超过 1280 时等比缩小,intended 保持预设尺寸。"""
+"""扩图尺寸规划:原图/目标尺寸超过 1280 时等比缩小,intended 保持预设尺寸。"""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def _png(w: int, h: int) -> bytes:
     return buf.getvalue()
 
 
-def test_small_canvas_no_scale():
+def test_small_output_no_scale():
     plan = plan_outpaint_scale(800, 600, top=100, left=50, right=50, bottom=100)
     assert plan["scale"] == 1.0
     assert plan["send_w"] == 800
@@ -94,7 +94,7 @@ def test_workflow_send_never_zero_after_scale():
 
 
 def test_expand_pads_restores_16x9_after_lift():
-    # 496x864 → 16:9 用户 pad 520/520/0/0,抬 100 后须再加左右,画布回到 16:9
+    # 496x864 → 16:9 用户 pad 520/520/0/0,抬 100 后须再加左右,输出回到 16:9
     send, _crop = bump_zero_outpaint_pads(0, 520, 520, 0)
     t, l, r, b = expand_pads_to_aspect(496, 864, *send, 16 / 9)
     assert t == 100 and b == 100

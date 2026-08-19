@@ -9,8 +9,8 @@
 
 | 调用方 | 场景 | 说明 |
 |--------|------|------|
-| `canvas_backend` → `canvas_backend_r2.publish()` | R2 上传前 | 上游基座不需要 4K 图，白烧带宽和存储 |
-| `aigc_system` → `seedance_gateway` Seedream 5.0 通道 | data URI 内联前 | 压缩后 data URI 不触发网关 413 |
+| 宿主对象存储 publisher | 上传前 | 上游基座不需要 4K 图，白烧带宽和存储 |
+| 外部通道 data URI 内联 | 组装请求前 | 压缩后 data URI 不触发上游 413 |
 
 为避免各插件各写一份，压缩逻辑统一收敛到 `RH_ComfyUI.utils.image_process`。
 
@@ -68,9 +68,9 @@ compressed, info = compress_to_max_pixels(raw_bytes, "image/png", max_pixels=128
 
 ## 调用方接入清单
 
-| 插件 | 文件 | 接入方式 |
-|------|------|----------|
-| canvas_backend | `canvas_backend_r2/__init__.py` | `publish()` 内调用 `compress_to_max_pixels_async` |
-| aigc_system | `seedance_gateway/multimodal.py` | `GatewaySeedreamChannel._materialize_images()` 覆写中调用 |
+| 调用方 | 接入方式 |
+|--------|----------|
+| 宿主对象存储 publisher | 上传前调用 `compress_to_max_pixels_async` |
+| 外部通道 materialize | 把 bytes 编进 data URI / 外链前调用 |
 
 新增调用方只需 `from RH_ComfyUI.utils.image_process import compress_to_max_pixels_async`，无需重复实现。

@@ -1,8 +1,8 @@
 # 十六、模型目录与 estimate API 契约
 
-> 本章是 `/api/RH_ComfyUI/models` 系列接口的**完整契约**。前端用这套接口
-> 拉模型清单 + 实时算积分。改任何字段前**必读**:改 schema 字段会破坏前端
-> catalog 渲染,改 estimate 入参会破坏前端实时预览。
+> 本章是 `/api/RH_ComfyUI/models` 系列接口的**完整契约**。调用方用这套接口
+> 拉模型清单 + 实时算积分。改任何字段前**必读**:改 schema 字段会破坏调用方
+> catalog 渲染,改 estimate 入参会破坏调用方实时预览。
 
 ## 16.1 端点总览
 
@@ -73,11 +73,11 @@
 }
 ```
 
-### 取消能力字段(2026-08) — 前后端统一契约
+### 取消能力字段(2026-08) — 引擎与调用方统一契约
 
-前端**必须以本清单决定能否取消**,禁止写死模型名单:
+调用方**必须以本清单决定能否取消**,禁止写死模型名单:
 
-| 字段 | 位置 | 含义 / 前端用法 |
+| 字段 | 位置 | 含义 / 调用方用法 |
 |------|------|------|
 | `supports_cancel` | 模型顶层 | 是否允许 `POST /tasks/cancel`。有 `channels` 时 = 各通道 OR |
 | `supports_remote_cancel` | 模型顶层 | 是否至少一路可上游 DELETE。有 `channels` 时 = 通道 OR |
@@ -138,15 +138,15 @@
 - `point_cost`:动态算出的积分;`is_dynamic=false` 时是静态 `point_cost`
 - `is_dynamic`:True = `estimate_cost` 返回了与 `point_cost` 不同的值(说明有动态维度)
 - `point_range`:从 `model.point_range()` 取,展示最低/最高积分
-- `params`:本次参与计算的参数(echo 回去,便于前端观测)
+- `params`:本次参与计算的参数(echo 回去,便于调用方观测)
 
 **已知问题**:异常路径(`model 不存在` / `estimate_cost 抛错`)仍返回 200,
-`point_cost=0` + `error` 字段,前端按"积分 0 + 显示错误"处理。**不要把异常当 4xx 抛**,
-否则前端积分预览会断流。
+`point_cost=0` + `error` 字段,调用方按"积分 0 + 显示错误"处理。**不要把异常当 4xx 抛**,
+否则调用方积分预览会断流。
 
-## 16.4 `input_schema` 结构(前端渲染依据)
+## 16.4 `input_schema` 结构(调用方渲染依据)
 
-`input_schema` 是 `NodeDef.inputs` 序列化结果,告诉前端"该模型有哪些参数、什么类型、什么枚举"。
+`input_schema` 是 `NodeDef.inputs` 序列化结果,告诉调用方"该模型有哪些参数、什么类型、什么枚举"。
 
 **字段约定**(参见 `utils/core/types.py:PortSpec`):
 
@@ -185,22 +185,22 @@
 }
 ```
 
-**前端按 schema 渲染参数控件的逻辑**(`GenerationNode.tsx:1000-1037`):
+**调用方按 schema 渲染参数控件的约定**:
 
-| schema.type | 前端控件 | 数据来源 |
+| schema.type | 调用方控件 | 数据来源 |
 |---|---|---|
-| `enum` + ratio | ratio 单选 | `data.aspectRatio` |
-| `enum` + resolution | resolution 单选 | `data.modelRes` |
-| `enum` + image_size | image_size 单选 | `data.dynamicParams.image_size` |
-| `enum` + quality | quality 单选 | `data.dynamicParams.quality` |
-| `integer`/`number` + duration | 数值输入 | `data.duration` |
+| `enum` + ratio | ratio 单选 | 当前宽高比 |
+| `enum` + resolution | resolution 单选 | 当前分辨率 |
+| `enum` + image_size | image_size 单选 | 当前尺寸档 |
+| `enum` + quality | quality 单选 | 当前质量档 |
+| `integer`/`number` + duration | 数值输入 | 当前时长 |
 
-**契约**:schema 字段 → 前端控件 → `data.<field>` → `estimateParams` → `/models/estimate` Query
+**契约**:schema 字段 → 调用方控件 → 当前参数 → `/models/estimate` Query
 
 任何一环漏了都会断:
-- schema 有字段但前端没渲染 → 用户没法调该参数(无害)
-- schema 没字段但前端传了 → 422(无害)
-- **schema 有字段但前端 estimateParams 没传 → estimate 永远用默认值,预览不准**
+- schema 有字段但调用方没渲染 → 用户没法调该参数(无害)
+- schema 没字段但调用方传了 → 422(无害)
+- **schema 有字段但调用方 estimate 没传 → estimate 永远用默认值,预览不准**
 - schema 有字段但 estimate API 签名没声明 → FastAPI 422 拒绝
 - schema 有字段但 estimate_cost 没读 → 切换该字段积分不变
 
@@ -208,7 +208,7 @@
 
 ## 16.5 `point_range` 的"双重作用"
 
-**作用 1**:前端判断是否调 estimate(`min < max` 才调)
+**作用 1**:调用方判断是否调 estimate(`min < max` 才调)
 **作用 2**:UI 展示"该模型最低/最高积分"(给用户预期)
 
 `point_range()` 的实现要点:
@@ -223,12 +223,12 @@
 | 改了什么 | 兼容性影响 | 处理 |
 |---|---|---|
 | 加 ModelEntry 字段(带默认) | 不破 | 同步加到 `_MODEL_ENTRY_GOLDEN` 契约快照 |
-| 改字段类型 | **破** | 必须改前端一起 |
+| 改字段类型 | **破** | 必须改调用方一起 |
 | 删字段 | **破** | 永远不删,标 deprecated |
-| 加 schema 字段(新参数) | 不破 | 同步前端 estimateParams + 后端 estimate API 签名 + estimate_cost 读取 |
+| 加 schema 字段(新参数) | 不破 | 同步调用方 estimate 入参 + 引擎 estimate API 签名 + estimate_cost 读取 |
 | 改 schema 字段名 | **破** | 视为改 schema 类型 |
 | 加 estimate API 入参 | 不破 | 缺失则用默认值 |
-| 改 estimate API 入参名 | **破** | 必须同步前端 fetchModelEstimate |
+| 改 estimate API 入参名 | **破** | 必须同步调用方 estimate query |
 
 ## 16.7 调试与排查
 
@@ -250,8 +250,8 @@ curl -s http://127.0.0.1:8765/api/RH_ComfyUI/models | \
   print('point_range:', m['point_range'])"
 ```
 
-**前端拿到 422 / 默认值的排查步骤**:
-1. 后端 curl `/models/estimate?...` 看是否 422 或 200-but-default
-2. 比对前端发的 query 与后端 `webapi.py:estimate_model_cost` 签名
-3. 比对前端 estimateParams 与 schema(input_schema 是否声明了该字段)
+**调用方拿到 422 / 默认值的排查步骤**:
+1. 引擎 curl `/models/estimate?...` 看是否 422 或 200-but-default
+2. 比对调用方发的 query 与 `webapi.py:estimate_model_cost` 签名
+3. 比对调用方 estimate 入参与 schema(input_schema 是否声明了该字段)
 4. 比对 estimate_cost 读 `request.params["..."]` 的 key 与 estimate API 写到 `params` 的 key

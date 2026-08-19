@@ -3,7 +3,7 @@
 ## 2.1 公开接口边界
 
 `RH_ComfyUI/core/__init__.py` re-export 的符号是**唯一稳定接口**;
-闭源/外部代码只允许 `from RH_ComfyUI.core import ...`,不深入子模块。
+外部代码只允许 `from RH_ComfyUI.core import ...`,不深入子模块。
 开源内部代码可以用子模块路径,但新增公开符号必须同步加进顶层 `__all__`。
 
 注意一个坑:`from .dispatch import dispatch` 会把包属性 `dispatch` 覆盖为

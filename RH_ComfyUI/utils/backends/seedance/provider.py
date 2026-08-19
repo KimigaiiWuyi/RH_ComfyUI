@@ -166,13 +166,13 @@ def normalize_usage(vendor: str, raw: dict[str, Any]) -> dict[str, Any]:
     cost: Optional[int] = None
     cost_ms: Optional[int] = None
 
-    if vendor == "ark":
-        cost = _pick_int(raw, "completion_tokens")
-        if cost is None:
-            cost = _pick_int(raw, "total_tokens")
-    elif vendor == "gateway":
-        cost = _pick_int(raw, "totalTokens")
-        cost_ms = _pick_int(raw, "durationMs")
+    if vendor in ("ark", "gateway"):
+        for key in ("completion_tokens", "total_tokens", "totalTokens", "completionTokens"):
+            cost = _pick_int(raw, key)
+            if cost is not None:
+                break
+        if vendor == "gateway":
+            cost_ms = _pick_int(raw, "durationMs") or _pick_int(raw, "duration_ms")
     elif vendor == "runninghub":
         cost_str = _pick_str(raw, "consumeCoins")
         if cost_str is not None:

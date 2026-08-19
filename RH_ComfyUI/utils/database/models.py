@@ -564,7 +564,7 @@ class RHBind(Bind, table=True):
     ) -> dict[str, Any]:
         """设置该 (user_id, bot_id) 池的额度档;默认立即按新档三桶补满。
 
-        与 bot_id 平台无关 — qq / canvas / 其它一律可设 basic/pro/enterprise。
+        与 bot_id 平台无关 — 任意 bot_id 一律可设 basic/pro/enterprise。
         """
         from ...core.billing.tier_quota import normalize_tier
 

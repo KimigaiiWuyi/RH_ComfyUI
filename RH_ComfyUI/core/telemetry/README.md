@@ -10,5 +10,5 @@
 ## 维护须知
 
 - 所有失败都不允许影响主流程:内部 try/except 吞错并记日志;
-- 闭源通道走同一 `record_dispatch`,只写 channel 名,不落任何私有 URL/参数;
+- 外部通道走同一 `record_dispatch`,只写 channel 名,不落任何私有 URL/参数;
 - 新增统计维度:先在 `RHComfyuiTaskRecord` 加列(带默认值),再在这里补写入。

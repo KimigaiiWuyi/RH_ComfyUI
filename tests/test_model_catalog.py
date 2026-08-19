@@ -51,7 +51,7 @@ def test_seedance2_availability_from_channels_not_adapter():
 
 
 class _PureAbcModel(ImageGenerationBase):
-    """无 NodeDef 的纯编程式模型(路径 C / 闭源接入形态)"""
+    """无 NodeDef 的纯编程式模型(路径 C / 外部插件接入形态)"""
 
     name = "pure_abc_model"
     display_name = "Pure ABC"
@@ -71,7 +71,7 @@ class _PureAbcModel(ImageGenerationBase):
 
 
 def test_catalog_cancel_flags_match_channels_and_rh_app():
-    """/models 取消能力:顶层 = 通道 OR;rh_app 顶层与通道均为 false(前后端契约)。"""
+    """/models 取消能力:顶层 = 通道 OR;rh_app 顶层与通道均为 false(HTTP 契约)。"""
     from RH_ComfyUI.models import discover_builtin_models
     from RH_ComfyUI.utils.backends import init_backends
 
@@ -110,7 +110,7 @@ def test_catalog_cancel_flags_match_channels_and_rh_app():
 
 def test_pure_abc_model_visible_in_catalog():
     # 回归:无 NodeDef 的模型(model.node is None)也必须进 HTTP 清单,
-    # 否则闭源插件按 @register_model 注册的模型在画布上不可见
+    # 否则外部插件按 @register_model 注册的模型在 HTTP 清单上不可见
     model = _PureAbcModel()
     model_registry.register(model)
     try:

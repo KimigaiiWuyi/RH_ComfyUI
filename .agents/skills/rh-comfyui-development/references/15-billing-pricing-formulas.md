@@ -10,14 +10,15 @@
 
 | 钩子 | 何时调用 | 用途 |
 |---|---|---|
-| `estimate_cost(request)` | dispatch 阶段 ③ (预扣) + 前端 `/models/estimate` | **动态计费**核心:按参数算积分 |
+| `estimate_cost(request)` | dispatch 阶段 ③ (预扣) + 调用方 `/models/estimate` | **动态计费**核心:按参数算预扣积分 |
+| `settle_cost(request, usage)` | dispatch 成功后 | 供应商实扣;None=维持预扣。框架只做差额 |
 | `point_cost` (静态属性) | 兜底 / `is_dynamic=false` 时使用 | 模型默认值(estimate 失败时也用它) |
-| `point_range()` (可选) | 前端判断 `min < max` 是否调 estimate API | UI 展示最低/最高,也是触发 estimate 的开关 |
+| `point_range()` (可选) | 调用方判断 `min < max` 是否调 estimate API | UI 展示最低/最高,也是触发 estimate 的开关 |
 
 **调用路径**:
 
 ```
-前端 GenerationNode 看到 currentApiModel.point_range.min < point_range.max
+调用方看到 catalog.point_range.min < point_range.max
    ↓ 300ms 防抖
 GET /api/RH_ComfyUI/models/estimate?model=xxx&ratio=...&image_size=...
    ↓
@@ -98,7 +99,7 @@ points             = (tokens * 21_000 + 999_999) // 1_000_000
 
 **公式**:无 `estimate_cost` 覆盖,直接返回 `self.point_cost`(模型 `node_def()` 里设)。
 
-**point_range**:无 `point_range()` 覆盖或返回 `(point_cost, point_cost)` → 前端判定固定积分,不调 estimate API。
+**point_range**:无 `point_range()` 覆盖或返回 `(point_cost, point_cost)` → 调用方判定固定积分,不调 estimate API。
 
 ### 15.2.4 视频 — 按 token 用量(Seedance 2.x / 1.5 Pro / 1.0 Pro)
 
@@ -121,6 +122,12 @@ points = yuan × 100                             # 1 元 = 100 积分,最小 1
 4s 参考 + 4s 成片 = `(4+4)` 秒 token,不是「把 4 秒输出算成 8 秒」;无输入 4s 仍只按 4s × 无输入单价。
 
 **金额**:`yuan = tokens × 费率 / 1e6`,先四舍五入到分,再 ×100 成积分(对齐官方价表两位小数)。
+
+**后结算**:预扣仍用上式估算。任务成功后若 usage 带
+`vendor_cost` / `completion_tokens` / `total_tokens`(Seedance 官方查询字段),
+`settle_cost` 用**供应商 token × 同一档位费率**算实扣,dispatcher 只补/退差额。
+RunningHub coins 等非 token 单位返回 None,维持预扣。例:ark 1080p 有输入
+`total_tokens=488025` → 488025 × 31 元/M = 15.13 元 = **1513** 积分。
 
 **关键参数**:
 - `resolution` ∈ {480p, 720p, 1080p, 4k}(2.5 为 480p/720p/1080p;480p 按 854×480)
@@ -173,7 +180,7 @@ points  = ceil(seconds × rate × 100)   # 1 元 = 100 积分,最小 1
 | mimo_tts | 6 | 600 |
 
 **point_range 配置铁律**:max 必须用**足够长**的文本(推荐 5000 字符)算,否则
-费率太低的模型(500 积分/M bytes)算不出差异,`min == max` → 前端误判固定积分
+费率太低的模型(500 积分/M bytes)算不出差异,`min == max` → 调用方误判固定积分
 不调 estimate API。详见 §15.4 bug #3。
 
 ### 15.2.7 语音 — 按字符数(中文)
@@ -216,8 +223,7 @@ points  = ceil(seconds × rate × 100)   # 1 元 = 100 积分,最小 1
 1. **后端**:`estimate_model_points` 加 `num_input_images: int = 0` 入参
    (`rh_models/api.py:475`)→ 塞占位 bytes 到 `request.images`,`estimate_cost`
    从 `len(request.images)` 读。
-2. **前端**:`fetchModelEstimate` 加 `num_input_images?: number` 字段
-   (`modelApi.ts:140`),`GenerationNode.estimateParams` 从 `displayRefs.length` 读。
+2. **调用方**:estimate query 加 `num_input_images`,从当前已连参考图数量读取。
 3. **路由 handler**(`webapi.py:148`):FastAPI Query 加 `num_input_images: int = 0`。
 4. **测试**:补 num_input_images 维度回归测试。
 
@@ -233,42 +239,42 @@ points  = ceil(seconds × rate × 100)   # 1 元 = 100 积分,最小 1
 
 ## 15.4 计费相关已知 bug 列表(防踩)
 
-### Bug #1 — schema 暴露前端无法感知的字段
+### Bug #1 — schema 暴露调用方无法感知的字段
 
-**症状**:前端按 `input_schema.quality` 渲染 quality 控件,切换 quality 时积分不变。
+**症状**:调用方按 `input_schema.quality` 渲染 quality 控件,切换 quality 时积分不变。
 
 **根因**:`BananaProDef.node_def()` 声明了 `quality` 字段(透传给上游 API),
 但官方计费曲线**不区分 quality 档位**(`OUTPUT_TOKENS_BY_SIZE` 按 image_size
-固定 token,无 quality_factor)。前端渲染 quality → 用户切 quality 看到积分不变
+固定 token,无 quality_factor)。调用方渲染 quality → 用户切 quality 看到积分不变
 → 困惑。
 
 **修复**:**从 schema 移除该字段**。`estimate_cost` 也**故意不读**该字段。
 详见 `models/image/defs.py:256-353` 的 `BananaProDef`。
 
-**判定规则**:如果某 schema 字段对**计费曲线**无影响,**别暴露给前端**。
+**判定规则**:如果某 schema 字段对**计费曲线**无影响,**别暴露给调用方**。
 否则要么计入计费,要么从 schema 移除。
 
 ### Bug #2 — estimate API 签名缺失参数 → FastAPI 422 拒绝
 
-**症状**:前端按 schema 渲染参数并传到 `/models/estimate`,后端返回 422,
-前端拿到默认静态值。
+**症状**:调用方按 schema 渲染参数并传到 `/models/estimate`,引擎返回 422,
+调用方拿到默认静态值。
 
 **根因**:`estimate_model_points()` 签名只声明了部分参数(早期只有
-`ratio / image_size / quality`),前端发的 `duration / resolution /
+`ratio / image_size / quality`),调用方发的 `duration / resolution /
 generate_audio / num_video_refs` 被 FastAPI 422 拒绝。
 
 **修复**:`estimate_model_points` 完整入参见 `rh_models/api.py:475`,路由 handler
 见 `rh_models/webapi.py:148`。
 
 **防御**:**新加 schema 字段时,必须同步加到 estimate API 签名 + 路由 Query**,
-否则前端调用必失败。改 schema 时也要 grep 一下 `estimate_cost` 里的读法。
+否则调用方调用必失败。改 schema 时也要 grep 一下 `estimate_cost` 里的读法。
 
-### Bug #3 — point_range min == max → 前端不调 estimate
+### Bug #3 — point_range min == max → 调用方不调 estimate
 
-**症状**:动态计费模型,但前端显示固定积分,输入长文本积分不变。
+**症状**:动态计费模型,但调用方显示固定积分,输入长文本积分不变。
 
 **根因**:`point_range()` 用了太短的 max 输入文本,算出的积分仍是 1,与 min=1 相同。
-前端 `GenerationNode.tsx:984-989` 用 `min < max` 判断是否调 estimate,相等就不调。
+调用方用 `min < max` 判断是否调 estimate,相等就不调。
 
 **典型案例**:`IndexTTS2` 早期用 `estimate_index_tts2_points("你" * 300)`,
 300 字符 × 3 bytes = 900 bytes,500 积分/M bytes → 实际 0.45 → 向上取整 1 积分。
@@ -279,7 +285,7 @@ generate_audio / num_video_refs` 被 FastAPI 422 拒绝。
 **回归测试**:`tests/test_dynamic_estimate_trigger.py:test_all_speech_models_have_dynamic_point_range`
 固化"所有动态计费模型的 point_range.min 必须严格 < max"。
 
-**防御**:**写完 `point_range()` 必须跑这个测试**。若 min==max,前端 bug 立刻暴露。
+**防御**:**写完 `point_range()` 必须跑这个测试**。若 min==max,调用方预览 bug 立刻暴露。
 
 ### Bug #4 — _RATIO_SIZE_MAP 比例错误(2026-07 修复)
 
@@ -307,8 +313,8 @@ generate_audio / num_video_refs` 被 FastAPI 422 拒绝。
 `request.images` 默认空 → 永远 0。
 
 **修复**:`estimate_model_points` 加 `num_input_images: int = 0` 入参,
-创建 req 时塞占位 `images=[b""] * num_input_images`。前端 `fetchModelEstimate`
-同步加 `num_input_images` 字段,从 `displayRefs.length` 读。
+创建 req 时塞占位 `images=[b""] * num_input_images`。调用方 estimate
+同步加 `num_input_images` 字段,从已连参考图数量读。
 
 **防御**:任何从 `request.images` / `request.video_refs` 读的 estimate_cost,
 必须确认 estimate API 能传对应的 num_*_images/refs。
@@ -318,7 +324,7 @@ generate_audio / num_video_refs` 被 FastAPI 422 拒绝。
 **症状**:seedream5_pro 切 image_size,积分不变(永远按 2K 默认值)。
 
 **根因**:`Seedream5ProDef.estimate_cost` 早期从 `request.params.get("size_mode")` 读,
-但前端通用约定 + `estimate_model_points` 写到 `request.params["image_size"]`,
+但调用方通用约定 + `estimate_model_points` 写到 `request.params["image_size"]`,
 key 不匹配 → 永远 None → 默认 2K。
 
 **修复**:`defs.py:887` 改成 `request.params.get("image_size") or request.params.get("size_mode")`,
@@ -334,8 +340,8 @@ key 不匹配 → 永远 None → 默认 2K。
 - [ ] `point_cost` 静态值同步(若改了)
 - [ ] estimate API 签名包含所有 schema 参数(ratio/image_size/quality/resolution/duration/generate_audio/num_input_images/num_video_refs)
 - [ ] schema 与 estimate_cost 读法一致(key 不漂移)
-- [ ] 前端 `fetchModelEstimate` 同步加新参数(若新加)
-- [ ] 前端 `GenerationNode.estimateParams` 从 `displayRefs.length` / `data.<field>` 读
+- [ ] 调用方 estimate query 同步加新参数(若新加)
+- [ ] 调用方从已连参考数量 / 当前参数对象读 estimate 入参
 - [ ] 跑全套测试:`pytest tests/`
 - [ ] 端到端验证:`curl "http://127.0.0.1:8765/api/RH_ComfyUI/models/estimate?model=<name>&..."`
 

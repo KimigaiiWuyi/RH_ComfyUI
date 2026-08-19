@@ -1,7 +1,7 @@
 # core — 生成引擎内核
 
 基于 ABC 的可编程生成架构内核,替代旧的纯 YAML Pipeline 声明方式。
-本包是**开源/闭源边界**:闭源插件只允许 `from RH_ComfyUI.core import ...`
+本包是**公开接口边界**:外部插件只允许 `from RH_ComfyUI.core import ...`
 (顶层 `__init__.py` 的公开接口),不得深入子模块 import。
 
 ## 子目录

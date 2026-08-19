@@ -272,12 +272,42 @@ async def _call_async(fn: Any, *args: Any, **kwargs: Any) -> Any:
     return res
 
 
+async def _load_record_body(record_id: Optional[int]) -> Optional[dict[str, Any]]:
+    """读取 running 行的 request_body_json,供 resume 后结算还原参数。"""
+    if not record_id:
+        return None
+    try:
+        import json
+
+        from sqlmodel import col, select
+
+        from gsuid_core.utils.database.base_models import async_maker
+
+        from ...utils.database.models import RHComfyuiTaskRecord
+
+        async with async_maker() as session:
+            stmt = select(RHComfyuiTaskRecord).where(col(RHComfyuiTaskRecord.id) == int(record_id))
+            row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return None
+        raw = getattr(row, "request_body_json", None)
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[resume_poll] 读 request_body 失败 record_id={record_id}: {exc}")
+    return None
+
+
 async def _finalize_record(
     record_id: Optional[int],
     *,
     status: str,
     error: str = "",
     elapsed_ms: int = 0,
+    actual_cost: Optional[int] = None,
 ) -> None:
     """更新统计行终态;失败/取消时有条件退回 RHBind 预扣。
 
@@ -287,6 +317,7 @@ async def _finalize_record(
       (避免 refund_points 失败却已标退款导致丢积分)
     - ``entry_point=http`` 为 ExternalPrepaid,宿主管钱包,引擎不退 RHBind
     - 其它入口(command/agent 等)原 dispatch 走 PointsBillingPolicy 预扣,须退 RHBind
+    - 成功且 ``actual_cost`` 有效时:写回 point_cost;非 http 入口对 RHBind 只做差额
     """
     if not record_id:
         return
@@ -297,7 +328,7 @@ async def _finalize_record(
         from gsuid_core.utils.database.base_models import async_maker
 
         from ...utils.database.models import RHComfyuiTaskRecord
-        from ...core.billing.points_api import refund_points
+        from ...core.billing.points_api import charge_points, refund_points
 
         rid = int(record_id)
         need_refund = status in ("failed", "cancelled")
@@ -309,6 +340,8 @@ async def _finalize_record(
         bid = "default"
         want_refund = False
         wallet_is_rhbind = True
+        claimed = False
+        settled: Optional[int] = None
 
         async with async_maker() as session:
             stmt = select(RHComfyuiTaskRecord).where(col(RHComfyuiTaskRecord.id) == rid)
@@ -334,6 +367,13 @@ async def _finalize_record(
                 and cost > 0
                 and bool(uid)
             )
+            if status == "ok" and actual_cost is not None:
+                try:
+                    n = int(actual_cost)
+                except (TypeError, ValueError):
+                    n = 0
+                if n > 0:
+                    settled = n
 
             # 仅抢占终态,不提前标 refunded(钱包成功后再标)
             values: dict[str, Any] = {
@@ -341,6 +381,8 @@ async def _finalize_record(
                 "elapsed_ms": elapsed_ms,
                 "error_message": err,
             }
+            if settled is not None:
+                values["point_cost"] = settled
             where = [
                 col(RHComfyuiTaskRecord.id) == rid,
                 col(RHComfyuiTaskRecord.status) == "running",
@@ -350,6 +392,38 @@ async def _finalize_record(
             )
             await session.commit()
             claimed = _update_claimed_rows(result)
+
+        if claimed and settled is not None and wallet_is_rhbind and uid:
+            delta = int(settled) - cost
+            if delta != 0:
+                try:
+                    if delta > 0:
+                        await charge_points(
+                            uid,
+                            bid,
+                            delta,
+                            reason=f"resume_settle:record={rid}",
+                        )
+                    else:
+                        await refund_points(
+                            uid,
+                            bid,
+                            -delta,
+                            reason=f"resume_settle:record={rid}",
+                        )
+                    logger.info(
+                        f"[resume_poll] 后结算差额 record_id={rid} prepaid={cost} "
+                        f"actual={settled} delta={delta}"
+                    )
+                except Exception as settle_exc:  # noqa: BLE001
+                    logger.warning(
+                        f"[resume_poll] 后结算差额失败(统计已写 actual) record_id={rid}: {settle_exc}"
+                    )
+        elif claimed and settled is not None and not wallet_is_rhbind:
+            logger.info(
+                f"[resume_poll] entry_point=http 后结算只记账 record_id={rid} "
+                f"prepaid={cost} actual={settled}"
+            )
 
         if want_refund and claimed:
             try:
@@ -777,7 +851,7 @@ async def _resume_gateway_image(
     model: str,
     on_progress: Optional[ProgressCallback],
 ) -> GenerationResult:
-    """聚合网关异步图任务:经 channel_registry 注入的通道 client.poll_until_done。
+    """外部注入通道的异步图任务:经 channel_registry 取 client.poll_until_done。
 
     不 import 宿主包;优先 ``get_resume_client()`` 公开协议。
     """
@@ -993,7 +1067,21 @@ async def resume_poll(
         result.elapsed_ms = elapsed_ms
         if not result.kind and kind:
             result.kind = kind
-        await _finalize_record(record_id, status="ok", elapsed_ms=elapsed_ms)
+        actual_cost: Optional[int] = None
+        usage = getattr(result, "usage", None)
+        if isinstance(usage, dict) and usage:
+            try:
+                from ..billing.settle import settle_model_cost
+
+                body = await _load_record_body(record_id)
+                actual_cost = settle_model_cost(model, usage, params=body)
+            except Exception as settle_exc:  # noqa: BLE001
+                logger.warning(f"[resume_poll] settle_model_cost 失败 model={model}: {settle_exc}")
+        if actual_cost:
+            result.point_cost = actual_cost
+        await _finalize_record(
+            record_id, status="ok", elapsed_ms=elapsed_ms, actual_cost=actual_cost
+        )
         await _emit(on_progress, "done", 100, "恢复完成")
         return result
     except asyncio.CancelledError:

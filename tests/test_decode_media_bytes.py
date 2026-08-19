@@ -40,7 +40,7 @@ def test_decode_media_bytes_accepts_data_uri_as_url():
 
 def test_decode_media_bytes_rejects_relative_url():
     with pytest.raises(ValueError, match="http\\(s\\)|不可下载"):
-        asyncio.run(_decode_media_bytes({"url": "/api/canvas-backend/assets/x/raw"}))
+        asyncio.run(_decode_media_bytes({"url": "/api/host/assets/x/raw"}))
 
 
 def test_decode_media_bytes_rejects_asset_scheme():

@@ -1,6 +1,6 @@
 """classify_video_spec — 输入形态分类 / 有序内容与扁平媒体的取舍
 
-回归重点:ordered_content **仅含文本段**(前端 buildOrderedContent 对任意 prompt
+回归重点:ordered_content **仅含文本段**(调用方对任意 prompt
 都会产出一个 text 段)时,不能走有序分支 —— 否则 else 分支里的 images /
 video_refs / audio_refs("连线但未 @"的素材落在这些扁平字段)会被整体忽略,
 导致"普通链接没 @"时图片凭空丢失(线上现象:gateway dreamina-seedance-2.0
@@ -79,7 +79,7 @@ def test_ordered_content_merges_flat_video_refs():
 def test_ordered_content_does_not_double_count_flat_images():
     """有序段已有图时,扁平 images 即使是同图不同 identity 形态也不得再追加。
 
-    回归:前端 Seedance 路径同时发 ordered_content + images;旧实现 url-vs-bytes
+    回归:调用方 Seedance 路径同时发 ordered_content + images;旧实现 url-vs-bytes
     去重失败会把 9 张变成 18 张 → MEDIA_OVERFLOW(图≤9)。
     """
     imgs = [_img_item(bytes([i]) + b"PNG") for i in range(9)]
@@ -133,7 +133,7 @@ def test_extend_prompt_without_token_gets_prefix():
 
 
 def test_extend_prompt_already_has_token_unchanged():
-    """前端已写「延长该视频 @x 视频。」时后端不得再叠一层。"""
+    """调用方已写「延长该视频 @x 视频。」时引擎不得再叠一层。"""
     prompt = "延长该视频 [参考视频1] 视频。镜头继续"
     req = GenerationRequest(
         task_type=TaskType.VIDEO,

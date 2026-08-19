@@ -1,6 +1,6 @@
 """RH_ComfyUI.core — 生成引擎内核的稳定公开接口
 
-闭源/外部插件只允许从本模块 import(不深入子模块),
+外部插件只允许从本模块 import(不深入子模块),
 未来内核重组不破坏外部代码。
 """
 
@@ -38,6 +38,8 @@ from .billing import (
     BillingReservation,
     PointsBillingPolicy,
     ExternalPrepaidPolicy,
+    settle_model_cost,
+    reconcile_seedance_usage_billing,
 )
 from .routing import (
     LoadBalancer,
@@ -106,7 +108,7 @@ __all__ = [
     "log_binding_diff",
     "ProviderCredentials",
     "SeedanceProviderChannel",
-    # 媒体外链化扩展点(闭源/宿主注册 R2 等 publisher;开源零感知)
+    # 媒体外链化扩展点(宿主注册对象存储 publisher;本引擎零感知实现)
     "MediaPublisher",
     "MediaPublishError",
     "set_media_publisher",
@@ -125,6 +127,8 @@ __all__ = [
     "BillingPolicy",
     "PointsBillingPolicy",
     "ExternalPrepaidPolicy",
+    "settle_model_cost",
+    "reconcile_seedance_usage_billing",
     "DispatchContext",
     "dispatch",
     "cancel_generation",

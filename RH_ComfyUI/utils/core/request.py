@@ -217,9 +217,9 @@ class GenerationRequest:
 
     # ── 水印 ──
     # 默认关:与各视频模型 input_schema 的 watermark PortSpec(default=False)对齐。
-    # PortSpec.default 只是给前端展示用,服务端从不据它回填;省略该字段时真正生效的是
-    # 本 dataclass 默认。之前默认 True 会让"前端没传水印开关"(canvas dynamicParams 为空,
-    # 该字段被 exclude_none 剔除)的请求静默出带水印视频。调用方显式传 True 才加水印。
+    # PortSpec.default 只是给调用方展示用,服务端从不据它回填;省略该字段时真正生效的是
+    # 本 dataclass 默认。之前默认 True 会让"调用方没传水印开关"(可选参数被
+    # exclude_none 剔除)的请求静默出带水印视频。调用方显式传 True 才加水印。
     watermark: bool = False
 
     # ── 摄像机是否固定 ──

@@ -196,7 +196,7 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
             ordered_segments.append(OrderedSegment(kind="media", media=spec_media))
 
         # 有序分支也要把"连线但未进 ordered_content"的扁平 video/audio/images
-        # 追加进尾部(前端 GenerationNode 通常已写进 OC;Agent/主页部分路径
+        # 追加进尾部(HTTP 调用方通常已写进 OC;Agent/命令部分路径
         # 会把未 @ 的素材只放在 video_refs/images 里 —— 旧逻辑会整批丢掉)。
         media, ordered_segments = _append_flat_media_not_in_ordered(media, ordered_segments, request)
 
@@ -289,7 +289,7 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     )
 
 
-# 画布侧永不向官方传 auto(异步校验易 TaskTypeConstraint);auto 当未指定处理
+# 调用方永不向官方传 auto(异步校验易 TaskTypeConstraint);auto 当未指定处理
 _OMNI_REF_TASK_TYPES = frozenset({"reference", "edit", "extend"})
 _OMNI_REF_SHAPES = frozenset(
     {
@@ -345,7 +345,7 @@ def _ensure_extend_prompt_prefix(
 ) -> tuple[str, list[OrderedSegment]]:
     """task_mode=extend 兜底:整段 prompt/OC 文本都没有「延长」时,最前补「延长该视频。」
 
-    前端提交时会写成「延长该视频 @视频 视频。」;本函数只在调用方漏写时补短前缀,
+    调用方提交时会写成「延长该视频 @视频 视频。」;本函数只在漏写时补短前缀,
     避免无参考视频标题时硬编造 @。已含「延长」则原样返回,防止双写。
     """
     if _EXTEND_TOKEN in _collect_prompt_haystack(base_prompt, ordered_segments):

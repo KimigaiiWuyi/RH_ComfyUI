@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Optional
+
 from .overrides import (
     Wan22VideoModel,
     Wan30VideoModel,
@@ -22,8 +24,13 @@ from ...utils.mappers.video import wan_videogen_mapper as _wan_videogen_mapper
 from ...utils.mappers.extra_billing import estimate_wan22_points
 from ...utils.mappers.wan30_billing import estimate_wan30_points
 from ...utils.mappers.seedance_billing import (
+    settle_seedance2_points,
+    settle_seedance25_points,
     estimate_seedance2_points,
     estimate_seedance25_points,
+    settle_seedance2_fast_points,
+    settle_seedance2_mini_points,
+    settle_seedance15_pro_points,
     estimate_seedance2_fast_points,
     estimate_seedance2_mini_points,
     estimate_seedance15_pro_points,
@@ -169,6 +176,19 @@ class Seedance15ProDef(SeedanceVideoModel):
             resolution,
             duration,
             generate_audio=generate_audio,
+            video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
+        )
+
+    def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
+        resolution = request.params.get("resolution") or request.resolution or "720p"
+        generate_audio = request.params.get("generate_audio")
+        if generate_audio is None:
+            generate_audio = request.generate_audio
+        return settle_seedance15_pro_points(
+            usage,
+            str(resolution),
+            generate_audio=bool(generate_audio),
             video_refs=request.video_refs,
             input_video_duration=input_video_duration_from_params(request.params),
         )
@@ -319,6 +339,15 @@ class Seedance2Def(SeedanceVideoModel):
         return estimate_seedance2_points(
             resolution,
             duration,
+            video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
+        )
+
+    def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
+        resolution = request.params.get("resolution") or request.resolution or "720p"
+        return settle_seedance2_points(
+            usage,
+            str(resolution),
             video_refs=request.video_refs,
             input_video_duration=input_video_duration_from_params(request.params),
         )
@@ -542,6 +571,15 @@ class Seedance25Def(Seedance25VideoModel):
             input_video_duration=input_video_duration_from_params(request.params),
         )
 
+    def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
+        resolution = request.params.get("resolution") or request.resolution or "720p"
+        return settle_seedance25_points(
+            usage,
+            str(resolution),
+            video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
+        )
+
     def point_range(self) -> tuple[int, int]:
         """积分范围:最小(480p + 4s + 无输入) ~ 最大(1080p + 30s + 输入 150s=10×15)。"""
         return (
@@ -606,6 +644,15 @@ class Seedance2MiniDef(SeedanceVideoModel):
         return estimate_seedance2_mini_points(
             resolution,
             duration,
+            video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
+        )
+
+    def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
+        resolution = request.params.get("resolution") or request.resolution or "720p"
+        return settle_seedance2_mini_points(
+            usage,
+            str(resolution),
             video_refs=request.video_refs,
             input_video_duration=input_video_duration_from_params(request.params),
         )
@@ -737,6 +784,15 @@ class Seedance2FastDef(SeedanceVideoModel):
         return estimate_seedance2_fast_points(
             resolution,
             duration,
+            video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
+        )
+
+    def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
+        resolution = request.params.get("resolution") or request.resolution or "720p"
+        return settle_seedance2_fast_points(
+            usage,
+            str(resolution),
             video_refs=request.video_refs,
             input_video_duration=input_video_duration_from_params(request.params),
         )

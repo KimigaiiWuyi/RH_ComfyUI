@@ -30,7 +30,7 @@
 
 ## 维护须知
 
-- 本目录只放**开源**模型;闭源模型通过 pip entry points(组名
+- 本目录只放**内置**模型;外部模型通过 pip entry points(组名
   `rh_comfyui.models`)或外部插件直接调 `model_registry.register()` 接入;
 - `knowledge_content` 字段是 AI 知识库的数据源,修改模型能力时同步更新;
 - 修改任何 defs 后跑 `python -m pytest tests/ -q` 与 `ruff check RH_ComfyUI/models`。

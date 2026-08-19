@@ -20,12 +20,16 @@ from RH_ComfyUI.utils.mappers.seedance_billing import (
     _DEFAULT_INPUT_VIDEO_DURATION,
     _calculate_tokens,
     _tokens_to_points,
+    extract_usage_tokens,
+    settle_seedance2_points,
+    settle_seedance25_points,
     estimate_seedance2_points,
     estimate_seedance25_points,
     estimate_seedance2_fast_points,
     estimate_seedance2_mini_points,
     estimate_seedance15_pro_points,
 )
+from RH_ComfyUI.utils.backends.seedance.provider import normalize_usage
 
 # ═══════════════════════════════════════════════════════════════════════
 #  一、常量验证
@@ -366,7 +370,7 @@ def test_seedance15_pro_audio_vs_no_audio_ratio():
 
 def test_seedance10_pro():
     """Seedance 1.0 Pro 固定费率 15 元/M"""
-    # 1.0 Pro 不在 video/defs.py 中定义(可能在 aigc_system),这里只测试计费函数
+    # 1.0 Pro 不在 video/defs.py 中定义(可能由外部插件注册),这里只测试计费函数
     pass
 
 
@@ -467,6 +471,66 @@ def test_seedance15_pro_estimate_cost_without_audio():
     req = _make_video_request(resolution="720p", duration=5, generate_audio=False)
     cost = m.estimate_cost(req)
     assert cost == estimate_seedance15_pro_points("720p", 5, generate_audio=False, video_refs=None)
+
+
+def test_extract_usage_tokens_prefers_vendor_cost():
+    usage = {
+        "vendor": "ark",
+        "vendor_unit": "tokens",
+        "vendor_cost": 488025,
+        "raw_usage": {"completion_tokens": 1, "total_tokens": 1},
+    }
+    assert extract_usage_tokens(usage) == 488025
+
+
+def test_extract_usage_tokens_ignores_non_token_unit():
+    assert extract_usage_tokens({"vendor_unit": "coins", "vendor_cost": 12}) is None
+    assert extract_usage_tokens({"vendor_unit": "seconds", "vendor_cost": 5}) is None
+
+
+def test_extract_usage_tokens_from_raw_ark_keys():
+    assert extract_usage_tokens({"completion_tokens": 100, "total_tokens": 120}) == 100
+    assert extract_usage_tokens({"totalTokens": 488025}) == 488025
+
+
+def test_normalize_usage_gateway_accepts_ark_keys():
+    u = normalize_usage("gateway", {"completion_tokens": 488025, "total_tokens": 488025})
+    assert u["vendor_cost"] == 488025
+    assert u["vendor_unit"] == "tokens"
+    u2 = normalize_usage("gateway", {"totalTokens": 488025})
+    assert u2["vendor_cost"] == 488025
+
+
+def test_settle_seedance2_from_ark_example_with_input():
+    """用户样例:1080p 5s, total_tokens=488025(约 5s 入+5s 出),有输入费率 31 元/M。"""
+    usage = {
+        "vendor": "ark",
+        "vendor_unit": "tokens",
+        "vendor_cost": 488025,
+        "raw_usage": {"completion_tokens": 488025, "total_tokens": 488025},
+    }
+    # 488025 * 31 / 1e6 = 15.128775 → 15.13 元 = 1513
+    assert settle_seedance2_points(usage, "1080p", input_video_duration=5.0) == 1513
+
+
+def test_settle_seedance2_from_ark_example_no_input():
+    usage = {"vendor_unit": "tokens", "vendor_cost": 488025}
+    # 488025 * 51 / 1e6 = 24.889275 → 24.89 元 = 2489
+    assert settle_seedance2_points(usage, "1080p") == 2489
+
+
+def test_settle_seedance25_from_tokens():
+    usage = {"vendor_unit": "tokens", "vendor_cost": 488025}
+    # 1080p 有输入 46 元/M: 488025 * 46 / 1e6 = 22.44915 → 22.45 = 2245
+    assert settle_seedance25_points(usage, "1080p", input_video_duration=5.0) == 2245
+
+
+def test_settle_cost_hook_matches_mapper():
+    m = Seedance2Def()
+    req = _make_video_request(resolution="1080p", duration=5, input_video_duration=5.0)
+    usage = {"vendor_unit": "tokens", "vendor_cost": 488025}
+    assert m.settle_cost(req, usage) == 1513
+    assert m.settle_cost(req, {}) is None
 
 
 def test_all_video_models_minimum_one():

@@ -587,8 +587,8 @@ def preprocess_for_camera_angle(data: bytes, max_long_edge: int = 1080) -> bytes
 
 
 # ── 扩图(outpaint)尺寸规划 ─────────────────────────────────────
-# RunningHub 该应用输出最长边上限 1280。原图过大或目标画布过大时,
-# 先按目标画布等比缩小原图与四向 padding,生成后再由调用方按 intended 尺寸展示。
+# RunningHub 该应用输出最长边上限 1280。原图过大或目标尺寸过大时,
+# 先按目标尺寸等比缩小原图与四向 padding,生成后再由调用方按 intended 尺寸展示。
 
 OUTPAINT_MAX_SIDE: int = 1280
 
@@ -651,7 +651,7 @@ def pick_tx_outpaint_ratio(
 ) -> str | None:
     """选出合法且不等于原图比例的腾讯 Ratio。
 
-    优先用 ``preferred``;否则按 intended 画布找最接近的官方比例。
+    优先用 ``preferred``;否则按 intended 尺寸找最接近的官方比例。
     原图已经是该比例、或 intended 仍是原图比例时返回 None(调用方应拒收)。
     """
     pref = str(preferred or "").strip()
@@ -690,7 +690,7 @@ def expand_pads_to_aspect(
     bottom: int,
     target_ar: float,
 ) -> tuple[int, int, int, int]:
-    """抬升 0 边后若画布比例偏离目标,在已扩展方向补 pad,让送出画布回到目标比例。"""
+    """抬升 0 边后若输出比例偏离目标,在已扩展方向补 pad,让送出尺寸回到目标比例。"""
     w = max(1, int(src_w))
     h = max(1, int(src_h))
     t, l, r, b = (max(0, int(top)), max(0, int(left)), max(0, int(right)), max(0, int(bottom)))
@@ -841,7 +841,7 @@ def scale_and_crop_outpaint(
     user_right: int = 0,
     user_bottom: int = 0,
 ) -> tuple[bytes, tuple[int, int, int, int]]:
-    """回图当作含四向扩展的规划画布:只裁抬升边占比,再等比缩到 intended。
+    """回图当作含四向扩展的规划尺寸:只裁抬升边占比,再等比缩到 intended。
 
     返回 (png 字节, (sx, sy, sw, sh)),坐标在回图像素空间。
     """

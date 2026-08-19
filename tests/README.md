@@ -10,7 +10,8 @@ python -m pytest tests/ -q      # 在插件根目录执行
 | `test_balancer.py` | 负载均衡选择、熔断触发与冷却恢复 |
 | `test_registry.py` | ModelRegistry 注册/去重/按模态查询 |
 | `test_schema_validation.py` | PortSpec 通用校验 + Seedance/Wan 跨字段约束(多参考上限、分辨率约束等) |
-| `test_dispatcher_billing.py` | dispatch 计费路径:成功 commit / 校验失败不扣费 / 失败退款幂等 / BaseException 退款 / estimate_cost 动态计费 / 超时预算 |
+| `test_dispatcher_billing.py` | dispatch 计费路径:成功 settle / 校验失败不扣费 / 失败退款幂等 / BaseException 退款 / estimate_cost / settle_cost 差额对齐 / 超时预算 |
+| `test_seedance_usage_reconcile.py` | 从厂商 raw / 截断 JSON 解析 token,按有输入费率回算积分 |
 | `test_channel_failover.py` | 错误翻译、多通道故障切换、非重试不计熔断、transient(429/503)原通道最长 1h 排队 |
 | `test_seedance_channel.py` | SeedanceProviderChannel 凭证热更新、异常翻译、Dry-Run 透传 |
 | `test_gemini_image.py` | Gemini 双模判定、steps 图片提取、banana2 接线 |

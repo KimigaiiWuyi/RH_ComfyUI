@@ -34,7 +34,7 @@ CAMERA_ANGLE_VERT_MIN: float = -30.0
 CAMERA_ANGLE_VERT_MAX: float = 60.0
 CAMERA_ANGLE_ZOOM_MIN: float = 0.0
 CAMERA_ANGLE_ZOOM_MAX: float = 10.0
-# 中性视角(0/0/5)是原图,前端应直接拒绝,避免积分白扣
+# 中性视角(0/0/5)是原图,调用方应直接拒绝,避免积分白扣
 CAMERA_ANGLE_NEUTRAL: tuple[float, float, float] = (0.0, 0.0, 5.0)
 
 
@@ -44,7 +44,7 @@ def is_camera_angle_neutral(
     zoom: float | None,
 ) -> bool:
     """中性视角判定:与 CAMERA_ANGLE_NEUTRAL 三元组全部相等视为「原图」。
-    缺省值取中性值后再比较,允许前端省略参数但仍能正确识别。"""
+    缺省值取中性值后再比较,允许调用方省略参数但仍能正确识别。"""
     h = CAMERA_ANGLE_NEUTRAL[0] if horizontal is None else float(horizontal)
     v = CAMERA_ANGLE_NEUTRAL[1] if vertical is None else float(vertical)
     z = CAMERA_ANGLE_NEUTRAL[2] if zoom is None else float(zoom)
@@ -137,7 +137,7 @@ class CameraAngleDef(ImagePipelineModel):
                 "\n"
                 "参数:horizontal_angle(0~360,水平旋转,向右);vertical_angle(-30~60,俯仰,越大越俯视);zoom(0~10,越大越近)。"
                 "\n"
-                "中性视角(0, 0, 5) 即原图,前端会拒绝提交以免白扣积分。"
+                "中性视角(0, 0, 5) 即原图,调用方应拒绝提交以免白扣积分。"
                 "\n"
                 "凭证:复用 RH_apikey(RunningHub 通用 key)。"
                 "\n"
@@ -382,9 +382,9 @@ class ImageUpscaleDef(ImagePipelineModel):
 class ImageOutpaintDef(ImagePipelineModel):
     """RH 扩图 — RunningHub AI App 2089261625797861377
 
-    单张输入图 + 四向扩展像素 + 可选提示词 → 扩图画布。
+    单张输入图 + 四向扩展像素 + 可选提示词 → 扩图输出。
     走 rh_app OpenAPI v2(nodeInfoList),凭证复用 RH_apikey。
-    上游输出最长边上限 1280:normalize() 会按目标画布等比缩小原图与 padding。
+    上游输出最长边上限 1280:normalize() 会按目标尺寸等比缩小原图与 padding。
     固定积分 point_cost(无动态计费)。
     """
 
@@ -411,7 +411,7 @@ class ImageOutpaintDef(ImagePipelineModel):
                 "\n"
                 "限制:上游工作流四向都不能为 0,提交前会把 0 边抬到 100;"
                 "调用方应按用户本意在回图后裁掉抬升量。"
-                "上游输出最长边不超过 1280。原图或目标画布过大时会先等比缩小再扩图。"
+                "上游输出最长边不超过 1280。原图或目标尺寸过大时会先等比缩小再扩图。"
                 "\n"
                 "凭证:复用 RH_apikey(RunningHub 通用 key)。"
                 "\n"

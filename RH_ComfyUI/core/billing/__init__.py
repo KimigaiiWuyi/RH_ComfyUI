@@ -1,6 +1,11 @@
 """core.billing — 统一计费拦截(策略可插拔) + 三重余额公开 API"""
 
 from .policy import BillingPolicy, BillingContext, BillingReservation
+from .settle import settle_model_cost, invoke_settle_cost
+from .reconcile import (
+    DEFAULT_SEEDANCE_RECONCILE_MODELS,
+    reconcile_seedance_usage_billing,
+)
 from .points_api import (
     PointsDeniedError,
     set_vip_tier as set_points_vip_tier,
@@ -27,6 +32,10 @@ __all__ = [
     "BillingPolicy",
     "PointsBillingPolicy",
     "ExternalPrepaidPolicy",
+    "invoke_settle_cost",
+    "settle_model_cost",
+    "DEFAULT_SEEDANCE_RECONCILE_MODELS",
+    "reconcile_seedance_usage_billing",
     "CANVAS_BOT_ID",
     "TierQuotas",
     "get_tier_quotas",

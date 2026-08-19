@@ -88,7 +88,7 @@ async def materialize(data: bytes, mime: str = "image/png") -> Optional[str]:
 
     - 未注册 publisher → 返回 ``None``(调用方自行 data URL / 透传)
     - 已注册 → 调用 publisher;外部异常统一包装为 ``MediaPublishError``,
-      避免开源侧依赖闭源错误类型
+      避免本引擎依赖外部实现的错误类型
     """
     publisher = media_host_registry.get()
     if publisher is None:
@@ -97,7 +97,7 @@ async def materialize(data: bytes, mime: str = "image/png") -> Optional[str]:
         return await publisher(data, mime)
     except MediaPublishError:
         raise
-    except Exception as exc:  # noqa: BLE001 — 第三方/闭源错误类型不泄漏
+    except Exception as exc:  # noqa: BLE001 — 第三方/外部错误类型不泄漏
         raise MediaPublishError(f"媒体发布失败({type(exc).__name__}: {exc})") from exc
 
 

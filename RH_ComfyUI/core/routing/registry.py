@@ -1,15 +1,15 @@
-"""ModelRegistry — 模型注册表(开源/闭源统一扩展点)
+"""ModelRegistry — 模型注册表(内置/外部统一扩展点)
 
 注册途径(按加载顺序):
 1. 开源内置:models/__init__.py 的 discover_builtin_models() 在 on_core_start
    时装载(YAML 桥接模型 + 编程式模型类),import/调用即注册。
 2. Python entry points:pip 包在 pyproject.toml 声明
    [project.entry-points."rh_comfyui.models"],启动时自动加载(可选途径)。
-3. 外部插件直接调用:另外的兼容插件生态在自己的 @on_core_start 里 import 本模块并调
+3. 外部插件直接调用:外部插件在自己的 @on_core_start 里 import 本模块并调
    register_model()。注册表接受任意时点注册。
 
-去重规则:同 name 后注册者覆盖先注册者并打 warning(允许另外的兼容插件生态覆盖开源
-同名模型,例如把开源 seedance2 换成走内部网关的版本)。
+去重规则:同 name 后注册者覆盖先注册者并打 warning(允许外部插件覆盖内置
+同名模型,例如把内置 seedance2 换成走自定义通道的版本)。
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ def register_model(cls: type[T]) -> type[T]:
 
 
 def load_entry_point_models() -> int:
-    """加载 pip 包通过 entry points 提供的模型(闭源接入途径之一)"""
+    """加载 pip 包通过 entry points 提供的模型(外部插件接入途径之一)"""
     from importlib.metadata import entry_points
 
     count = 0

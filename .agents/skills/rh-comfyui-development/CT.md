@@ -2,7 +2,7 @@
 
 审查结论：目标基本完成，但有 6 处隐含 bug（已全部修复）
 
-文档声称的架构目标（ABC 全编程式、dispatch 唯一执行路径、校验先于扣费、单层负载均衡、凭证热更新、闭源零依赖）在代码里基本都成立，测试基线也是绿的。但逐行对照后发现以下问题：
+文档声称的架构目标（ABC 全编程式、dispatch 唯一执行路径、校验先于扣费、单层负载均衡、凭证热更新、外部插件零硬依赖）在代码里基本都成立，测试基线也是绿的。但逐行对照后发现以下问题：
 
 已修复的 bug（按严重程度）
 
@@ -15,7 +15,7 @@
 
 已完成的优化
 
-- HTTP 清单补录纯编程式模型：文档承诺"注册即三入口可见"，但 /RH_ComfyUI/models 只列带 NodeDef 的模型，闭源插件按路径 C 注册的纯 ABC 模型在调用方上不可见。/models/summary 的可用数也仍按 Adapter 判定（Seedance/Gemini 永远算不可用）。两处都已修正。
+- HTTP 清单补录纯编程式模型：文档承诺"注册即三入口可见"，但 /RH_ComfyUI/models 只列带 NodeDef 的模型，外部插件按路径 C 注册的纯 ABC 模型在调用方上不可见。/models/summary 的可用数也仍按 Adapter 判定（Seedance/Gemini 永远算不可用）。两处都已修正。
 - 去重：rh_generate 里 25 行透明图合白底实现与 utils/image_process.py 完全重复，已改为共享导入。
 - Seedance_Dry_Run 配置描述与实际行为对齐（原来写的异常类型是错的）；api.py 的 __all__ 补上 get_model_input_schema；给 openai_image/gemini_image 两个目录补 README（红线 9 的要求）。
 

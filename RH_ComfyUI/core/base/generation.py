@@ -152,6 +152,16 @@ class AIGCGenerationBase(ABC):
         """
         return self.point_cost
 
+    def settle_cost(self, request: GenerationRequest, usage: dict) -> Optional[int]:
+        """成功后按供应商用量计算实扣积分;None = 维持预扣。
+
+        dispatcher 在 ``model.run()`` 成功后调用,把返回值交给
+        ``BillingPolicy.settle(reservation, actual)`` 做差额对齐
+        (actual>预扣则补扣,actual<预扣则退差;禁止按 actual 再全额扣一次)。
+        必须是纯函数:只读 request/usage,不做 IO。usage 无法换算时返回 None。
+        """
+        return None
+
     def point_range(self) -> tuple[int, int]:
         """该模型单次请求的积分范围(min, max)。
 

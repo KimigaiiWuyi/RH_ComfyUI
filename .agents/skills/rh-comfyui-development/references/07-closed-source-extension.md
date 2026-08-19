@@ -1,14 +1,14 @@
-# 七、闭源插件接入
+# 七、外部插件接入
 
-原则:闭源包 **import 开源包**,反向零依赖。开源仓库里没有任何闭源代码、
-条件 import 或另外的兼容插件生态逻辑;接入面只有 `RH_ComfyUI.core` 顶层公开接口。
+原则:外部包 **import 开源包**,反向零依赖。开源仓库里没有任何宿主业务代码、
+条件 import 或按产品来源分叉的逻辑;接入面只有 `RH_ComfyUI.core` 顶层公开接口。
 
 ## 7.1 两种注册途径
 
 **途径 A:独立 gsuid_core 插件(推荐)**
 
 ```python
-# 闭源插件 RH_ExtPlugin/__init__.py
+# 外部插件 RH_ExtPlugin/__init__.py
 from gsuid_core.server import on_core_start
 
 @on_core_start
@@ -20,10 +20,10 @@ async def register_ext_models() -> None:
     model_registry.register(InternalTTSModel())
 ```
 
-**途径 B:pip entry points(pip 分发的闭源包)**
+**途径 B:pip entry points(pip 分发的外部包)**
 
 ```toml
-# 闭源包 pyproject.toml
+# 外部包 pyproject.toml
 [project.entry-points."rh_comfyui.models"]
 ext_plugin = "rh_ext_plugin.models:provide_models"
 ```
@@ -39,13 +39,13 @@ def provide_models() -> list[type]:
 ## 7.2 覆盖开源同名模型
 
 `ModelRegistry.register()` 对重名执行"后注册覆盖"(有 warning 日志)。
-另外的兼容插件生态用 `name = "seedance2"` 即可把开源 seedance2 换成走内部网关的
+外部插件用 `name = "seedance2"` 即可把开源 seedance2 换成走自定义通道的
 版本,三大入口无感切换;起新名则与开源版并存。
 注册顺序保证:开源 `discover_builtin_models()` 在 on_core_start 先跑,
-闭源插件的 on_core_start 后跑(gsuid_core 按插件加载序执行钩子);
-若不确定顺序,闭源侧可在自己的钩子里 import 开源 models 包强制先加载。
+外部插件的 on_core_start 后跑(gsuid_core 按插件加载序执行钩子);
+若不确定顺序,外部侧可在自己的钩子里 import 开源 models 包强制先加载。
 
-## 7.3 闭源模型类模板
+## 7.3 外部模型类模板
 
 ```python
 from RH_ComfyUI.core import (
@@ -71,7 +71,7 @@ class ExtSeedanceModel(VideoGenerationBase):
     display_name = "Seedance 2.0(内部)"
     modality = TaskType.VIDEO
     point_cost = 10
-    card = ModelCard(description="走另外的兼容插件生态内部网关的 Seedance 2.0")
+    card = ModelCard(description="走外部插件内部通道的 Seedance 2.0")
 
     def input_schema(self) -> dict[str, PortSpec]: ...
     def channel_bindings(self) -> list[ChannelBinding]:
@@ -80,13 +80,13 @@ class ExtSeedanceModel(VideoGenerationBase):
         return await binding.channel.invoke(request=request, on_progress=on_progress)
 ```
 
-## 7.4 媒体外链化(R2 等)扩展点
+## 7.4 媒体外链化(对象存储等)扩展点
 
 开源引擎**不得** import 其他本地包。需要把参考图
 bytes 变成上游可 GET 的公网 URL 时,走 `core` 的 media publisher:
 
 ```python
-# 闭源/宿主插件 @on_core_start
+# 宿主插件 @on_core_start
 from RH_ComfyUI.core import set_media_publisher
 
 async def my_publish(data: bytes, mime: str = "image/png") -> str:
@@ -106,16 +106,17 @@ set_media_publisher(my_publish)
    (内核重组只保证顶层稳定);
 2. **计费统计自动生效**:模型经 dispatch 执行即走 reserve/commit/refund 并
    落 RHComfyuiTaskRecord;统计只有 channel 名,私有 URL/参数不落库;
-3. 另外的兼容插件生态独立钱包 → 实现自己的 `BillingPolicy` 子类,在**自己的入口**构造
+3. 外部插件独立钱包 → 实现自己的 `BillingPolicy` 子类,在**自己的入口**构造
    DispatchContext 时注入,不改开源 dispatcher;
-4. 闭源专属命令 → gsuid_core 标准 SV + 构造 DispatchContext 调 dispatch;
+4. 外部专属命令 → gsuid_core 标准 SV + 构造 DispatchContext 调 dispatch;
 5. 需要开源侧新钩子时,提交的是**通用**扩展点(新的 Policy/Channel 抽象),
-   另外的兼容插件生态逻辑留在闭源包 —— 不接受按来源分叉的条件式提交;
+   宿主业务逻辑留在外部包 —— 不接受按来源分叉的条件式提交;
 6. **反向零依赖**:开源仓库不得 import 宿主业务包(含 soft-import 任意
-   画布后端 / 聚合网关 / 账号系统等);宿主能力一律通过扩展点注入。
+   宿主 HTTP 入口 / 外部网关 / 账号系统等);宿主能力一律通过扩展点注入。
 7. **文档与注释中立**:示例用「宿主 / 调用方 / 外部插件」,不把具体产品
    路径写成引擎架构前提;公开 API 对任意 bot_id / HTTP 宿主通用。
-8. **取消 / resume / wire**:闭源通道同样须在 create 后 `bind_vendor_cancel`、
+   **不得**在代码、注释或本 SKILL 中暴露具体前端产品或宿主后端的存在。
+8. **取消 / resume / wire**:外部通道同样须在 create 后 `bind_vendor_cancel`、
    POST 前 `set_wire_*`;目录 `supports_remote_cancel` 须诚实(无 cancel API
    则 false)。见 [§二十](./20-cancel-resume-and-wire-audit.md)。
 

@@ -12,7 +12,7 @@
 | 4. model.run() 失败 | 原样抛出 | **先落统计(failed)再退款**(幂等) | status=failed |
 | 4. model.run() 超时 | 超过 `Dispatch_Timeout` → `GenerationError`("生成超时") | 退款 | status=failed(不是 cancelled) |
 | 4. model.run() 取消/中断 | `BaseException`(CancelledError / DryRunInterrupt)原样抛出 | 同样退款(2026-07-10 起;此前 BaseException 绕过退款吞积分) | CancelledError→status=cancelled,其余=failed |
-| 4. model.run() 成功 | — | commit | status=ok |
+| 4. model.run() 成功 | — | **settle**(预扣后按 `settle_cost(usage)` 差额对齐,禁止双重扣费) | status=ok,point_cost=实扣 |
 
 ### 主动取消 · resume-poll · 最终 wire(2026-08)
 
@@ -30,9 +30,14 @@
 `prompt` / `request_body_json` **优先最终上游载荷**,非调用方入参原文。
 
 **预扣金额 = `model.estimate_cost(request)`**(动态计费钩子,默认 = 静态
-`point_cost`):校验通过后调用一次,该值同时用于 reserve / `result.cost_points`
-/ 统计表 `point_cost` 落库,三处口径一致。按参数分档计费的模型只需覆盖
-estimate_cost,dispatcher 与统计不用改。
+`point_cost`):校验通过后调用一次,用于 reserve。成功后
+`model.settle_cost(request, usage)` 若返回正整数,`policy.settle` **只补/退
+与预扣的差额**,`result.cost_points` 与统计 `point_cost` 写成实扣。
+`settle_cost` 返回 None(默认)则预扣即终扣。
+
+**禁止双重扣费**:settle 绝不能按 actual 再全额扣一次。HTTP 入口
+`ExternalPrepaidPolicy` 不碰 RHBind,只把实扣写进 result;调用方
+对已预扣账本做同样的差额对齐。
 
 **超时预算**:`PLUGIN_CONFIG.Dispatch_Timeout`(秒,默认 1800,0=不限,
 每次 dispatch 实时读、改配置即刻生效)用 `asyncio.wait_for` 包住
@@ -47,18 +52,19 @@ user_message 的 `GenerationError`,按普通失败退款落库。
 且退款标记为真 = 已退,用户看错了;记录缺失 = 有代码绕过了 dispatch(严重,
 必须修);status=ok 但用户没收到 = 入口层发送环节问题。
 
-## 5.2 BillingPolicy 三件套(core/billing/)
+## 5.2 BillingPolicy(core/billing/)
 
 ```
 reserve(ctx, cost) -> BillingReservation   # 预扣;不足抛 BillingDeniedError
-commit(reservation)                        # 成功后确认
+settle(reservation, actual=None) -> int    # 成功后差额对齐;None=预扣即终扣
+commit(reservation)                        # 兼容旧调用;settle 内部会调
 refund(reservation)                        # 失败退款;必须幂等(判 reservation.refunded)
 ```
 
 | 实现 | 用于 | 行为 |
 |---|---|---|
-| `PointsBillingPolicy` | 命令 / Agent 入口 | RHBind 积分真实扣减 |
-| `ExternalPrepaidPolicy` | HTTP 入口 | 调用方已扣费,只记账不扣费(防双重扣费) |
+| `PointsBillingPolicy` | 命令 / Agent 入口 | RHBind 预扣;settle 补扣/退差 |
+| `ExternalPrepaidPolicy` | HTTP 入口 | 调用方已扣费;settle 只记账实扣,不操作 RHBind |
 
 新入口有独立钱包 → 写新的 Policy 子类并在入口构造 `DispatchContext` 时
 注入;**不要在 dispatcher 里加分支**。
@@ -77,7 +83,7 @@ elapsed_ms / error / request_body_json / extra_params_json`。
 - **`prompt` / `request_body_json` 终态以 wire 为准**(§二十 §20.4);
   `begin_task` 仅写 running 快照,可被 UPDATE 覆盖;
 - `extra_params_json` 可含 `vendor_task_id` / `vendor_channel`(resume 用);
-- 闭源通道走同一 record_dispatch,只落 `channel` 名,**不落私有密钥**;
+- 外部通道走同一 record_dispatch,只落 `channel` 名,**不落私有密钥**;
   wire body 中 base64 须 `mask_body`;
 - 加统计维度:先在 `RHComfyuiTaskRecord` 加列(带默认值,依赖
   gsuid_core 的 exec_list 自动迁移),再在 recorder 补写入;
@@ -95,7 +101,16 @@ elapsed_ms / error / request_body_json / extra_params_json`。
   体验问题靠 on_progress 回调向用户播报;总时长兜底由 §5.1 的
   `Dispatch_Timeout` 超时预算负责。
 
-## 5.5 供应商对账
+## 5.5 历史单按供应商 usage 回算
+
+`reconcile_seedance_usage_billing`(默认 `seedance2` / `seedance2.5`):
+扫 `RHComfyuiTaskRecord` 中 **status=ok、未退款、raw_response_json 能解析出
+token 用量** 的行,按 `settle_*_points` 算实扣,与当前 `point_cost` 只做差额。
+`apply=False` 预览;`adjust_wallet=True` 时同步改 RHBind(与预扣同一账本)。
+已对齐的行跳过,可重复执行。调用方若另有任务表,用返回的 `changes[].trace_id`
+自行回写,引擎不感知调用方表结构。
+
+## 5.6 供应商对账
 
 统计表已带 `backend_provider / backend_key_prefix / elapsed_ms / status` 维度,
 聚合出口是 `RHComfyuiTaskRecord.get_provider_summaries()`(按供应商聚合

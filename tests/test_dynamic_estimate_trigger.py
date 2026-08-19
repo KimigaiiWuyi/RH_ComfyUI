@@ -1,13 +1,13 @@
 """回归: 动态计费模型的 point_range.min 必须严格 < point_range.max。
 
-前端 GenerationNode.tsx 用 `point_range.min < point_range.max` 判断是否要
-请求 /api/RH_ComfyUI/models/estimate API。如果 min == max,前端当成"固定积分"
+调用方用 `point_range.min < point_range.max` 判断是否要
+请求 /api/RH_ComfyUI/models/estimate API。如果 min == max,当成"固定积分"
 不会调 estimate,导致长文本输入时积分预览永远显示最小值(实际生成扣费可能
 远超该值)。
 
 历史 bug:IndexTTS2 / mimo_tts 的 point_range max 用 300 字符算出来的积分
 仍然是 1(费率太低,900 bytes 不到 1M bytes 起征点),min == max = 1,
-前端不调 estimate。
+调用方不调 estimate。
 """
 
 from __future__ import annotations

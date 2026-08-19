@@ -29,7 +29,7 @@ def test_banana2_accepts_14_images():
 
 
 def test_banana_pro_exposes_nbp_image_size_tiers():
-    # NBP 档位事实(aigc_system AIFBananaChannel._BANANA_TIERS):1K/2K/4K,无 512
+    # NBP 档位事实(上游 1K/2K/4K,无 512)
     node = BananaProDef.node_def()
     size = node.inputs.get("image_size")
     assert size is not None, "banana_pro 缺少 image_size 尺寸档端口"

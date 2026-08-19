@@ -114,7 +114,7 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
     "_divider_quota_tiers": GsDivider(
         "额度档位(三重余额)",
         "5 小时 / 自然日 / 自然周 三桶满额;档位 free/basic/pro/enterprise 与 bot_id 无关,"
-        "存在 RHBind.vip_tier,画布/bot/agent 通用",
+        "存在 RHBind.vip_tier,HTTP/bot/agent 通用",
     ),
     "Quota_Timezone": GsStrConfig(
         "额度日/周界时区",

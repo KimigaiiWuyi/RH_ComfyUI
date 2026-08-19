@@ -135,7 +135,7 @@ async def list_all_models() -> dict[str, object]:
     }
     ```
 
-    取消字段(前后端统一契约 — 前端**必须**据此决定是否展示取消按钮):
+    取消字段(引擎与调用方统一契约 — 调用方**必须**据此决定是否展示取消按钮):
     - ``supports_cancel``: 模型顶层;本进程 ``POST .../tasks/cancel`` 是否允许
       (有 channels 时 = 任一通道 ``channels[].supports_cancel`` 的 OR)
     - ``supports_remote_cancel``: 创建上游后是否可远程 DELETE
@@ -188,7 +188,7 @@ async def estimate_model_cost(
 ) -> dict[str, object]:
     """根据用户实时选择的参数,估算某模型消耗的积分。
 
-    前端在用户切换 ratio / image_size / quality / resolution / duration / 已连输入数量时调用,
+    调用方在用户切换 ratio / image_size / quality / resolution / duration / 已连输入数量时调用,
     实时预览扣费。
 
     例(图片模型):
@@ -248,7 +248,7 @@ class CancelTaskResult(_Base):
 async def cancel_running_task(body: CancelTaskBody) -> dict[str, object]:
     """取消本进程内进行中的生成。
 
-    前端应先读 ``GET /api/RH_ComfyUI/models`` 的 ``supports_cancel``
+    调用方应先读 ``GET /api/RH_ComfyUI/models`` 的 ``supports_cancel``
     (或多通道时当前通道的 ``channels[].supports_cancel``);为 false 时
     **不要**调本接口(如 rh_app 一律不可取消,只能 resume)。
 

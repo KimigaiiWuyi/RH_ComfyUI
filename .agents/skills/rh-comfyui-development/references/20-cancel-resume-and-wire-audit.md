@@ -67,9 +67,9 @@ cancel_generation(trace_id | record_id)
 桥接模型(`models/bridge.py`):仅 `node.backend in ("comfyui", "gemini-image")`
 时默认 `supports_remote_cancel=True`;**`rh_app` 保持 False**。
 
-### 目录 `/models` 透出(前后端统一契约)
+### 目录 `/models` 透出(引擎与调用方统一契约)
 
-前端**只根据** `GET /api/RH_ComfyUI/models` 决定能否取消,禁止写死模型名:
+调用方**只根据** `GET /api/RH_ComfyUI/models` 决定能否取消,禁止写死模型名:
 
 | 读哪个字段 | 何时 |
 |------------|------|
@@ -242,18 +242,18 @@ dispatch finally → clear_wire_audit()
 
 RH_ComfyUI 是**开源独立插件**:
 
-1. **不得** `import` / soft-import 宿主业务包(业务画布后端、聚合网关、账号系统等)
-2. **不得**在源码注释/文档示例中绑定具体宿主产品路径作为硬依赖
+1. **不得** `import` / soft-import 宿主业务包(宿主 HTTP 入口、外部网关、账号系统等)
+2. **不得**在源码、注释、文档示例中绑定具体宿主产品路径,也不得暴露具体前端或宿主后端
 3. 宿主能力一律扩展点注入:
    - `set_media_publisher` — bytes → 公网 URL
    - `channel_registry.register_binding` — 外挂通道
    - `register_resync_hook` / `bind_config_resync` — 配置改完重挂绑定
    - `BillingPolicy` 子类 — 独立钱包
-   - `model_registry` / entry points — 闭源模型
+   - `model_registry` / entry points — 外部模型
 4. 公开 API 用中性词:**调用方 / 宿主 / 外部插件**,不用具体产品名当架构前提
-5. `bot_id` 是自由字符串(如 `"qq"` / `"canvas"` 均可);`CANVAS_BOT_ID` 仅文档化常量,非硬绑定
+5. `bot_id` 是自由字符串(任意入口名均可);已导出的 bot_id 常量仅作约定值,非硬绑定
 
-详见 [§七 闭源接入](./07-closed-source-extension.md) §7.4–7.5。
+详见 [§七 外部插件接入](./07-closed-source-extension.md) §7.4–7.5。
 
 ---
 

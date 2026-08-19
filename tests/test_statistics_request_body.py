@@ -172,7 +172,7 @@ def test_begin_then_record_updates_same_row(monkeypatch) -> None:
     )
 
     async def _run() -> None:
-        rid = await statistics.begin_task(request=request, node=node, bot_id="canvas", point_cost=5)
+        rid = await statistics.begin_task(request=request, node=node, bot_id="http", point_cost=5)
         assert rid == 7
         assert inserts[0]["status"] == "running"
         assert inserts[0]["point_cost"] == 5

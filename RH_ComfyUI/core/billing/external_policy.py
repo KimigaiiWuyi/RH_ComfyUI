@@ -16,6 +16,8 @@ from .policy import BillingPolicy, BillingContext, BillingReservation
 
 
 class ExternalPrepaidPolicy(BillingPolicy):
+    """宿主已预扣。引擎 settle 只记账实际额,不操作 RHBind(防双重扣费/双退)。"""
+
     async def reserve(self, ctx: BillingContext, cost: int) -> BillingReservation:
         return BillingReservation(cost=cost, context=ctx)
 
@@ -24,6 +26,10 @@ class ExternalPrepaidPolicy(BillingPolicy):
         if reservation.refunded:
             return
         reservation.refunded = True
+
+    async def settle(self, reservation: BillingReservation, actual: int | None = None) -> int:
+        """记录实扣供 result.cost_points / 统计;钱包差额由宿主自行对齐。"""
+        return await super().settle(reservation, actual)
 
 
 __all__ = ["ExternalPrepaidPolicy"]

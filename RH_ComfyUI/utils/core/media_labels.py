@@ -119,7 +119,7 @@ def ensure_media_ref_labels(request: GenerationRequest) -> GenerationRequest:
 
     调用方:``ImageGenerationBase.normalize`` / ``VideoGenerationBase.normalize``。
     对无 ordered_content 媒体项的请求原样返回(纯扁平路径由调用方
-    在提交前把 [@] 换成 图片N,见前端 stripMentions)。
+    在提交前把 [@] 换成 图片N)。
     """
     oc = list(request.ordered_content or [])
     if not oc or not any(item.media is not None for item in oc):

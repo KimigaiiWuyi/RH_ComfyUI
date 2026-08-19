@@ -27,7 +27,9 @@ from .RH_ComfyUI.api import (  # noqa: F401
     get_point_cost,
     get_quota_status,
     cancel_generation,
+    settle_model_cost,
     force_refill_points,
+    reconcile_seedance_usage_billing,
     get_all_tier_quotas,
     get_model_input_schema,
 )
@@ -72,6 +74,8 @@ __all__ = [
     "submit",
     "cancel_generation",
     "resume_poll",
+    "settle_model_cost",
+    "reconcile_seedance_usage_billing",
     "get_point_cost",
     "list_models",
     "is_available",

@@ -45,6 +45,36 @@ class FakePolicy(BillingPolicy):
     async def commit(self, reservation: BillingReservation) -> None:
         self.commits += 1
         reservation.committed = True
+        if reservation.settled_cost is None:
+            reservation.settled_cost = reservation.cost
+
+    async def settle(self, reservation: BillingReservation, actual: int | None = None) -> int:
+        if reservation.refunded:
+            return 0
+        if reservation.committed:
+            if reservation.settled_cost is not None:
+                return reservation.settled_cost
+            return reservation.cost
+        prepaid = reservation.cost
+        if actual is None:
+            final = prepaid
+        else:
+            try:
+                n = int(actual)
+            except (TypeError, ValueError):
+                n = 0
+            final = prepaid if n <= 0 else n
+        delta = final - prepaid
+        if delta > 0:
+            if self.balance < delta:
+                final = prepaid
+            else:
+                self.balance -= delta
+        elif delta < 0:
+            self.balance += -delta
+        reservation.settled_cost = final
+        await self.commit(reservation)
+        return final
 
 
 class FakeModel(AIGCGenerationBase):
@@ -229,6 +259,124 @@ class _TieredCostModel(FakeModel):
 
     def estimate_cost(self, request: GenerationRequest) -> int:
         return 12 if request.resolution == "1080p" else self.point_cost
+
+
+class _SettleCostModel(FakeModel):
+    """后结算:预扣 12,供应商 usage 给出实扣。"""
+
+    name = "fake_settle_model"
+    point_cost = 5
+    actual = 20
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        return 12
+
+    def settle_cost(self, request: GenerationRequest, usage: dict) -> int | None:
+        if usage.get("vendor_cost"):
+            return int(usage["vendor_cost"])
+        return self.actual
+
+    async def execute_on_channel(
+        self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+    ) -> NodeOutput:
+        return NodeOutput(
+            output_type="image",
+            data=b"png",
+            mime_type="image/png",
+            usage={"vendor_unit": "tokens", "vendor_cost": self.actual},
+        )
+
+
+def test_settle_cost_true_up_charges_delta_only(monkeypatch):
+    """预扣 12、实扣 20:只补 8,余额 80;禁止按 20 再扣一遍变成 68。"""
+    _mute_recording(monkeypatch)
+    model = _SettleCostModel()
+    model_registry.register(model)
+    try:
+        policy = FakePolicy()
+        result = asyncio.run(
+            dispatch(
+                GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                _ctx(policy),
+            )
+        )
+        assert result.cost_points == 20
+        assert policy.balance == 80
+        assert policy.commits == 1 and policy.refunds == 0
+    finally:
+        model_registry.unregister(model.name)
+
+
+def test_settle_cost_refunds_overestimate(monkeypatch):
+    """预扣 12、实扣 5:退差 7,余额 95。"""
+    _mute_recording(monkeypatch)
+    model = _SettleCostModel()
+    model.actual = 5
+    model_registry.register(model)
+    try:
+        policy = FakePolicy()
+        result = asyncio.run(
+            dispatch(
+                GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                _ctx(policy),
+            )
+        )
+        assert result.cost_points == 5
+        assert policy.balance == 95
+    finally:
+        model_registry.unregister(model.name)
+
+
+def test_settle_cost_none_keeps_prepaid(monkeypatch):
+    """settle_cost 返回 None 时维持预扣。"""
+    _mute_recording(monkeypatch)
+
+    class _NoSettle(FakeModel):
+        name = "fake_no_settle"
+        point_cost = 8
+
+        def settle_cost(self, request: GenerationRequest, usage: dict) -> int | None:
+            return None
+
+    model = _NoSettle()
+    model_registry.register(model)
+    try:
+        policy = FakePolicy()
+        result = asyncio.run(
+            dispatch(
+                GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                _ctx(policy),
+            )
+        )
+        assert result.cost_points == 8
+        assert policy.balance == 92
+    finally:
+        model_registry.unregister(model.name)
+
+
+def test_external_prepaid_settle_does_not_touch_wallet(monkeypatch):
+    """HTTP ExternalPrepaid:引擎只记账实扣,不操作余额(宿主自己差额对齐)。"""
+    from RH_ComfyUI.core.billing.external_policy import ExternalPrepaidPolicy
+
+    _mute_recording(monkeypatch)
+    model = _SettleCostModel()
+    model_registry.register(model)
+    try:
+        policy = ExternalPrepaidPolicy()
+        ctx = DispatchContext(
+            billing=BillingContext(user_id="u1", bot_id="test", entry_point="http"),
+            policy=policy,
+        )
+        result = asyncio.run(
+            dispatch(
+                GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                ctx,
+            )
+        )
+        assert result.cost_points == 20
+        assert result.metadata.get("prepaid_points") == 12
+    finally:
+        model_registry.unregister(model.name)
 
 
 def test_estimate_cost_drives_reserve_and_result(monkeypatch):

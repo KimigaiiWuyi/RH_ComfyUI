@@ -5,7 +5,7 @@
 
 | 文件 | 内容 |
 |---|---|
-| `dispatcher.py` | `dispatch(request, ctx)`:route → validate(不扣费)→ reserve → 并发闸 + 执行 → commit/refund → record_dispatch |
+| `dispatcher.py` | `dispatch(request, ctx)`:route → validate(不扣费)→ reserve → 并发闸 + 执行 → settle/refund → record_dispatch |
 | `context.py` | `DispatchContext` — 入口注入的执行环境(BillingContext + BillingPolicy + 进度回调) |
 | `concurrency.py` | `generation_slot()` — 全局 Semaphore 并发闸(平移自 utils/core/executor)+ 可选模型级闸 |
 
@@ -17,7 +17,7 @@
 | 校验 | `ValidationError` | 不扣费(校验先于扣费) |
 | 预留 | `BillingDeniedError` | 不扣费 |
 | 执行失败 | 原样抛出 | 已预留额度全额退款(幂等) |
-| 成功 | — | commit + 落库 |
+| 成功 | — | settle(预扣后按 usage 差额对齐,禁止双重扣费) + 落库 |
 
 ## 维护须知
 

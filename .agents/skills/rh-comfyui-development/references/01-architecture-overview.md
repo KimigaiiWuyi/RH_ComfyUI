@@ -20,7 +20,7 @@
 │       → commit / refund(幂等)→ record_dispatch(统计落库)      │
 └─────────────────────────────┬─────────────────────────────────────┘
                               ▼
-┌── core/ 内核(开源/闭源边界,只从顶层 __init__ import)────────────┐
+┌── core/ 内核(公开接口边界,只从顶层 __init__ import)─────────────┐
 │ routing/  ModelRegistry + route() 五级路由 + LoadBalancer(熔断) │
 │ billing/  BillingPolicy(reserve/commit/refund)                  │
 │ base/     AIGCGenerationBase + 四大模态 ABC + 错误族              │

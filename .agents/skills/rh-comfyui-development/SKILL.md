@@ -3,7 +3,7 @@ name: rh-comfyui-development
 description: >
   当用户要求"给 RH_ComfyUI 加一个模型"、"新增一个生图/生视频/TTS/音乐模型"、
   "接一家新供应商/渠道"、"改模型参数面/校验规则"、"调整积分/计费"、
-  "查生成统计/退款问题"、"调用方模型清单接口怎么改"、"闭源插件怎么接入"、
+  "查生成统计/退款问题"、"调用方模型清单接口怎么改"、"外部插件怎么接入"、
   "怎么覆盖开源模型"、"dispatch 流程是什么"、"负载均衡/熔断怎么配"、
   "参考音频怎么接"、"取消生成任务"、"supports_remote_cancel"、
   "resume-poll / 启动恢复轮询"、"统计 prompt 不是最终上游请求"、
@@ -17,8 +17,8 @@ description: >
   负载均衡(多通道熔断切换)、统计落库(RHComfyuiTaskRecord)在该点强制拦截。
   2026-08 起:主动取消(cancel_generation + 上游 DELETE)、resume_poll、
   统计 prompt/request_body 以最终 wire 为准;rh_app≠comfyui 取消能力分离。
-  闭源插件通过 model_registry.register() 或 pip entry points
-  (rh_comfyui.models 组)接入,开源仓库零闭源代码、零宿主业务包依赖。
+  外部插件通过 model_registry.register() 或 pip entry points
+  (rh_comfyui.models 组)接入,开源仓库零宿主业务包依赖。
 ---
 
 # RH_ComfyUI 开发与维护完整指南(核心入口)
@@ -36,7 +36,7 @@ description: >
 | 四 | 通道与供应商(ProviderChannel、多通道负载均衡、熔断、新增一家供应商) | [references/04-channels-and-providers.md](./references/04-channels-and-providers.md) |
 | 五 | 计费与统计(BillingPolicy、dispatch 失败语义、取消摘要、wire 摘要) | [references/05-billing-and-telemetry.md](./references/05-billing-and-telemetry.md) |
 | 六 | 三大入口(命令 / AI Agent / HTTP、cancel/resume API、HTTP 契约红线) | [references/06-entry-points.md](./references/06-entry-points.md) |
-| 七 | 闭源插件接入(注册途径、覆盖开源模型、私有数据隔离、独立钱包) | [references/07-closed-source-extension.md](./references/07-closed-source-extension.md) |
+| 七 | 外部插件接入(注册途径、覆盖内置模型、私有数据隔离、独立钱包) | [references/07-closed-source-extension.md](./references/07-closed-source-extension.md) |
 | 八 | 测试、代码红线与上线自查清单 | [references/08-testing-and-redlines.md](./references/08-testing-and-redlines.md) |
 | 九 | 后端 Adapter、映射器与配置体系(六后端、Seedance Provider 子层、SERVICE/PLUGIN_CONFIG 全键) | [references/09-backends-and-config.md](./references/09-backends-and-config.md) |
 | 十 | 命令清单与数据库(触发词、to_ai、RHBind、RHComfyuiTaskRecord 全列) | [references/10-commands-and-database.md](./references/10-commands-and-database.md) |
@@ -66,7 +66,7 @@ description: >
 | **进程重启后继续轮询上游结果** | `resume_poll` + `extra_params.vendor_task_id` | **二十** |
 | **消费页 prompt 与上游不一致** | `wire_capture` 最终 body;backend 须 `set_wire_*` | **二十、五** |
 | 调用方要新字段 | HTTP 契约只增不改,`ModelEntry` 加带默认值的字段 | 六、十六 |
-| 写闭源 / 另外的兼容插件生态模型 | 独立插件 `model_registry.register()` 或 entry points | 七 |
+| 写外部插件模型 | 独立插件 `model_registry.register()` 或 entry points | 七 |
 | 接一个全新上游 API | backends 新 Adapter(或 ProviderChannel)+ 配置键 | 九、四 |
 | 加/改一个图片供应商(如 Gemini)/ 给模型加第二家供应商 | ProviderChannel + `channel_registry.register_binding` | 十二、四 |
 | 给图片模型挂一家 OpenAI 兼容供应商(如千帆,零代码) | 网页控制台 `OpenAI_Image_Providers` + `rh 刷新供应商` | 十三 |
@@ -78,8 +78,10 @@ description: >
 | 改命令触发词 / to_ai 文案 | rh_generate(触发词是兼容承诺,慎改) | 十 |
 | 加统计维度 / 查积分逻辑 | RHComfyuiTaskRecord / RHBind | 十、五 |
 | **改积分价格 / 加新计费维度 / 排查积分不准** | defs 的 `estimate_cost` / `point_range` + `utils/mappers/<model>_billing.py` 常量 | **十五** |
+| **预扣后按供应商 usage 实扣(防双重扣费)** | `settle_cost` + `BillingPolicy.settle`;调用方差额对齐 | **五、十五、十九** |
+| **历史 Seedance 2.x 按 raw usage 回算积分** | `reconcile_seedance_usage_billing` | **五** |
 | **改 schema 字段 / 加新参数面 / 排查 estimate 失效** | defs 的 `node_def()` `inputs` + `rh_models/webapi.py` 路由 handler + `rh_models/api.py:estimate_model_points` | **十六、十七** |
-| **前端报"积分不变" / 不调 estimate / 422 / 4K 反便宜** | 跨前后端双侧排查 | **十五** |
+| **调用方报"积分不变" / 不调 estimate / 422 / 4K 反便宜** | 跨引擎与调用方双侧排查 | **十五** |
 | 上传/传输前压缩图片(4K→1080P、格式不变) | `RH_ComfyUI.utils.image_process.compress_to_max_pixels_async` | **十八** |
 | **加/改 Seedance 2.5 / 输入视频时长影响积分** | defs `seedance2.5` + billing `input_video_duration` + 宿主透传 | **十九、十五** |
 | **新异步 backend 接入** | create 后 bind_vendor_cancel + POST 前 set_wire + 可选 resume | **二十、四、九** |
@@ -88,8 +90,9 @@ description: >
 
 1. **不要绕过 `core.dispatch.dispatch()` 直接调 `model.run()`** —— 计费与统计会丢。
 2. **`check_available()` / `validate()` 禁止网络请求与副作用** —— 路由阶段会批量调用。
-3. **开源仓库零闭源 / 零宿主业务耦合** —— 不写闭源 URL、不写条件 import 宿主包、
+3. **开源仓库零宿主业务耦合** —— 不写宿主 URL、不写条件 import 宿主包、
    不按产品来源分叉;宿主能力用扩展点注入(见 §七、§二十)。
+   代码与注释用中性词「调用方 / 宿主 / 外部插件」,不暴露具体前端或宿主后端。
 
 ## 验证命令
 

@@ -173,6 +173,45 @@ async def submit(
     )
 
 
+def settle_model_cost(
+    model: str,
+    usage: Optional[dict[str, Any]] = None,
+    *,
+    request: Any = None,
+    params: Optional[dict[str, Any]] = None,
+) -> Optional[int]:
+    """按供应商 usage 计算实扣积分(预扣后的后结算)。无法换算时返回 None。
+
+    HTTP 调用方在外部预扣成功后,用本函数或 ``result.point_cost`` 做差额对齐,
+    禁止再按返回值全额扣一次。
+    """
+    from .core.billing.settle import settle_model_cost as _settle
+
+    return _settle(model, usage, request=request, params=params)
+
+
+async def reconcile_seedance_usage_billing(
+    *,
+    model_names: Optional[list[str] | tuple[str, ...]] = None,
+    apply: bool = False,
+    adjust_wallet: bool = True,
+    limit: Optional[int] = None,
+) -> dict[str, Any]:
+    """按供应商原始 usage 回算 Seedance 2.x 历史积分(只做差额)。
+
+    仅处理统计表成功且未退款、并能从 raw_response 解析出 token 的行。
+    ``apply=False`` 预览;``adjust_wallet`` 控制是否改 RHBind。
+    """
+    from .core.billing.reconcile import reconcile_seedance_usage_billing as _rec
+
+    return await _rec(
+        model_names=model_names,
+        apply=apply,
+        adjust_wallet=adjust_wallet,
+        limit=limit,
+    )
+
+
 def get_point_cost(model: str) -> Optional[int]:
     """查询模型的积分消耗(不执行生成)。
 
@@ -656,6 +695,8 @@ __all__ = [
     "submit",
     "cancel_generation",
     "resume_poll",
+    "settle_model_cost",
+    "reconcile_seedance_usage_billing",
     "get_point_cost",
     "list_models",
     "get_model_input_schema",

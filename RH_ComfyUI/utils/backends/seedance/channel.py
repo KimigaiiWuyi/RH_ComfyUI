@@ -6,7 +6,7 @@
 
 - 内置供应商(ark / runninghub):``builtin_seedance_channels()`` 构造,凭证读
   RH_ComfyUI 自己的 SERVICE_CONFIG;
-- 外部供应商(如聚合网关):外部插件用自己的凭证回调构造 SeedanceProviderChannel,
+- 外部供应商:外部插件用自己的凭证回调构造 SeedanceProviderChannel,
   经 ``channel_registry.register_binding()`` 注入宿主模型的候选列表。
 
 Provider 的 render/parse/poll 细粒度机制(provider.py)完全复用;本类只负责
