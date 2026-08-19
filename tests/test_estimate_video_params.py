@@ -103,7 +103,7 @@ def test_seedance25_input_video_duration_changes_cost():
         )
     )
     assert r_long["point_cost"] > r_short["point_cost"]
-    assert r_long["point_cost"] == 1815
+    assert r_long["point_cost"] == 1814
 
 
 def test_image_model_ignores_video_params_gracefully():

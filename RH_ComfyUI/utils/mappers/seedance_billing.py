@@ -1,10 +1,16 @@
 """Seedance 系列视频生成动态积分计价
 
-计价规则(取自官方文档):
+计价规则(取自火山方舟《模型价格》):
   token 用量估算公式:
     (输入视频时长 + 输出视频时长) × 输出视频宽 × 输出视频高 × 输出视频帧率 / 1024
 
-  其中「输入视频时长」为所有参考视频时长之和(秒);无参考视频时为 0。
+  「输入视频时长」= 所有参考视频时长之和(秒);无参考视频时为 0。
+  因此 4s 参考 + 4s 成片 = 按 8s token 计费,这是官方公式,不是把输出算成 8s。
+
+  Seedance 2.0 / 2.5 有输入视频时存在最低 token 用量:
+    输入 2~4 秒按 4 秒计(价表「最低价对应输入 2~4 秒」)。
+
+  金额先按官方价表四舍五入到分,再 ×100 成分(1 元 = 100 积分)。
 
   doubao-seedance-2.0:
     480p/720p: 无输入视频 46 元/M tokens,有输入视频 28 元/M tokens
@@ -23,9 +29,11 @@
   doubao-seedance-1.0-pro:
     15 元/M tokens
 
-  doubao-seedance-2.5 (仅 480p/720p,时长 4~30s 或 -1):
-    无输入视频 70 元/M tokens,有输入视频 42 元/M tokens
+  doubao-seedance-2.5 (480p/720p/1080p,时长 4~30s 或 -1):
+    480p/720p: 无输入 70 元/M,有输入 42 元/M
+    1080p:     无输入 77 元/M,有输入 46 元/M
     例:720p 16:9 5s 无输入 → 108000 tokens × 70 元/M = 7.56 元 = 756 积分
+    例:720p 16:9 5s 输出 + 2~4s 输入 → 8.16 元 = 816 积分
     duration=-1(自动)时:输出时长优先取输入视频总时长,否则 15s。
 
 point_cost 仅作兜底。
@@ -44,6 +52,7 @@ _YUAN_TO_POINTS: int = 100
 
 _RESOLUTION_SPECS: dict[str, tuple[int, int, int]] = {
     # resolution: (width, height, fps)
+    # 480p 16:9 用 854×480(480×16/9≈853.3)。官方 2.5 刊例 3.36 元与此差 1 分。
     "480p": (854, 480, 24),
     "720p": (1280, 720, 24),
     "1080p": (1920, 1080, 24),
@@ -76,12 +85,13 @@ _SEEDANCE2_MINI_RATES = {
     "720p": (23.00, 14.00),
 }
 
-# ── Seedance 2.5 费率(元/M tokens,仅 480p/720p) ──
+# ── Seedance 2.5 费率(元/M tokens) ──
 
 _SEEDANCE25_RATES = {
     # resolution: (无输入视频费率, 有输入视频费率)
     "480p": (70.00, 42.00),
     "720p": (70.00, 42.00),
+    "1080p": (77.00, 46.00),
 }
 
 # duration=-1 且无法解析输入时长时的代理输出秒数
@@ -100,6 +110,9 @@ _SEEDANCE10_PRO_RATE: float = 15.00
 
 _DEFAULT_INPUT_VIDEO_DURATION: float = 5.0
 
+# 有输入视频时官方最低 token 对应输入 4s(2~4s 同价)
+_MIN_BILLED_INPUT_DURATION: float = 4.0
+
 
 def _calculate_tokens(
     input_duration: float,
@@ -116,13 +129,25 @@ def _calculate_tokens(
 
 
 def _tokens_to_points(tokens: float, rate_yuan_per_million: float) -> int:
-    """将 token 数转换为积分(向上取整,最小 1 积分)。
+    """token → 积分。先按官方价表四舍五入到分,再 ×100;最小 1 积分。
 
     rate_yuan_per_million:每百万 token 的费率(元)
     """
-    points_per_million = rate_yuan_per_million * _YUAN_TO_POINTS
-    points = tokens * points_per_million / 1_000_000
-    return max(int(points) + (1 if points > int(points) else 0), 1)
+    yuan = tokens * rate_yuan_per_million / 1_000_000
+    # +1e-12 避免 2.484999… 被当成 2.48 的二进制抖动
+    yuan = round(yuan + 1e-12, 2)
+    return max(int(round(yuan * _YUAN_TO_POINTS)), 1)
+
+
+def _token_input_duration(in_dur: float, has_input: bool) -> float:
+    """写入 token 公式的输入秒数。
+
+    2.0 / 2.5 有参考视频时,估算 token < 最低用量则抬到最低用量;
+    价表写明最低价对应输入 2~4 秒,即按 4 秒计。
+    """
+    if not has_input:
+        return 0.0
+    return max(float(in_dur), _MIN_BILLED_INPUT_DURATION)
 
 
 def _get_resolution_spec(resolution: str) -> tuple[int, int, int]:
@@ -259,7 +284,9 @@ def estimate_seedance2_points(
     in_dur = resolve_input_video_duration(video_refs, input_video_duration=input_video_duration)
     has_input = in_dur > 0 or _has_input_video(video_refs)
 
-    tokens = _calculate_tokens(in_dur, float(output_duration), width, height, fps)
+    tokens = _calculate_tokens(
+        _token_input_duration(in_dur, has_input), float(output_duration), width, height, fps
+    )
     rate = _SEEDANCE2_RATES.get(resolution, _SEEDANCE2_RATES["720p"])
     rate_yuan = rate[1] if has_input else rate[0]
 
@@ -278,7 +305,9 @@ def estimate_seedance2_fast_points(
     in_dur = resolve_input_video_duration(video_refs, input_video_duration=input_video_duration)
     has_input = in_dur > 0 or _has_input_video(video_refs)
 
-    tokens = _calculate_tokens(in_dur, float(output_duration), width, height, fps)
+    tokens = _calculate_tokens(
+        _token_input_duration(in_dur, has_input), float(output_duration), width, height, fps
+    )
     rate = _SEEDANCE2_FAST_RATES.get(resolution, _SEEDANCE2_FAST_RATES["720p"])
     rate_yuan = rate[1] if has_input else rate[0]
 
@@ -297,7 +326,9 @@ def estimate_seedance2_mini_points(
     in_dur = resolve_input_video_duration(video_refs, input_video_duration=input_video_duration)
     has_input = in_dur > 0 or _has_input_video(video_refs)
 
-    tokens = _calculate_tokens(in_dur, float(output_duration), width, height, fps)
+    tokens = _calculate_tokens(
+        _token_input_duration(in_dur, has_input), float(output_duration), width, height, fps
+    )
     rate = _SEEDANCE2_MINI_RATES.get(resolution, _SEEDANCE2_MINI_RATES["720p"])
     rate_yuan = rate[1] if has_input else rate[0]
 
@@ -311,7 +342,7 @@ def estimate_seedance25_points(
     *,
     input_video_duration: Optional[float] = None,
 ) -> int:
-    """Seedance 2.5 估算积分(仅 480p/720p;时长 4~30 或 -1)。
+    """Seedance 2.5 估算积分(480p/720p/1080p;时长 4~30 或 -1)。
 
     duration=-1(自动)时:输出时长 = 输入视频总时长(若 >0),否则 15s。
     """
@@ -323,7 +354,7 @@ def estimate_seedance25_points(
         dur = in_dur if in_dur > 0 else _SEEDANCE25_AUTO_DURATION
 
     width, height, fps = _get_resolution_spec(resolution)
-    tokens = _calculate_tokens(in_dur, dur, width, height, fps)
+    tokens = _calculate_tokens(_token_input_duration(in_dur, has_input), dur, width, height, fps)
     rate = _SEEDANCE25_RATES.get(resolution, _SEEDANCE25_RATES["720p"])
     rate_yuan = rate[1] if has_input else rate[0]
 
@@ -377,8 +408,10 @@ __all__ = [
     "input_video_duration_from_params",
     "_calculate_tokens",
     "_tokens_to_points",
+    "_token_input_duration",
     "_get_resolution_spec",
     "_DEFAULT_INPUT_VIDEO_DURATION",
+    "_MIN_BILLED_INPUT_DURATION",
     "_SEEDANCE2_RATES",
     "_SEEDANCE2_FAST_RATES",
     "_SEEDANCE2_MINI_RATES",

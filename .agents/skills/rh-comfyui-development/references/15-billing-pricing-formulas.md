@@ -107,7 +107,8 @@ points             = (tokens * 21_000 + 999_999) // 1_000_000
 ```
 tokens = (输入视频时长 + 输出视频时长) × 宽 × 高 × fps / 1024
 rate   = 根据 (model, resolution, has_input_video, generate_audio) 选 rate_yuan
-points = ceil(tokens × rate_yuan × 100 / 1e6)   # 1 元 = 100 积分,最小 1
+yuan   = round(tokens × rate_yuan / 1e6, 2)     # 对齐官方价表两位小数
+points = yuan × 100                             # 1 元 = 100 积分,最小 1
 ```
 
 **输入视频时长**(`resolve_input_video_duration`,详见 [§十九](./19-seedance25-and-input-duration.md)):
@@ -116,8 +117,13 @@ points = ceil(tokens × rate_yuan × 100 / 1e6)   # 1 元 = 100 积分,最小 1
 3. 有参考但无时长 → **5s × 段数**(不是固定总 5s)
 4. 无参考 → 0
 
+**2.0 / 2.5 最低 token**:有参考视频时,输入 2~4 秒按 **4 秒** 写入公式(价表「最低价对应输入 2~4 秒」)。
+4s 参考 + 4s 成片 = `(4+4)` 秒 token,不是「把 4 秒输出算成 8 秒」;无输入 4s 仍只按 4s × 无输入单价。
+
+**金额**:`yuan = tokens × 费率 / 1e6`,先四舍五入到分,再 ×100 成积分(对齐官方价表两位小数)。
+
 **关键参数**:
-- `resolution` ∈ {480p, 720p, 1080p, 4k}(2.5 仅 480p/720p)
+- `resolution` ∈ {480p, 720p, 1080p, 4k}(2.5 为 480p/720p/1080p;480p 按 854×480)
 - `duration`: 输出秒;2.0 为 4~15;2.5 为 4~30 或 **-1**
 - `input_video_duration` / `video_refs`:输入总时长 + 有/无输入费率档
 - `generate_audio`(仅 1.5 Pro):有声 16 元/M,无声 8 元/M
@@ -126,11 +132,15 @@ points = ceil(tokens × rate_yuan × 100 / 1e6)   # 1 元 = 100 积分,最小 1
 | 模型 | 后端 channel | duration | 费率(无输入/有输入 元/M) |
 |---|---|---|---|
 | seedance2 | ark / runninghub | 4~15s | 480/720:46/28;1080:51/31;4k:26/16 |
-| **seedance2.5** | **ark + gateway** | **4~30s 或 -1** | **70 / 42**(仅 480p/720p) |
+| **seedance2.5** | **ark + gateway** | **4~30s 或 -1** | **480/720:70/42;1080:77/46** |
 | seedance15_pro | ark | 4~12s | 有声 16 / 无声 8 |
 | seedance2_mini / _fast | 外部/ark | 4~15s | mini 23/14;fast 37/22 |
 
-**2.5 官方例**:720p 5s 无输入 = 108000 tokens × 70 元/M = **7.56 元 = 756 积分**。
+**2.5 官方例**:
+- 720p 5s 无输入 = 108000 tokens × 70 元/M = **7.56 元 = 756 积分**
+- 720p 5s 输出 + 2~4s 输入 = **8.16 元 = 816 积分**
+- 720p 5s 输出 + 30s 输入 = **31.75 元 = 3175 积分**
+- 720p 4s 输出 + 4s 输入 = 8s token × 42 元/M = **7.26 元 = 726 积分**
 
 ### 15.2.4b 视频 — 按秒计价(MiniMax H3)
 
@@ -364,3 +374,4 @@ for m in model_registry.by_modality(__import__('RH_ComfyUI.utils.core.request', 
 | 2026-07 | gpt-image-2 _RATIO_SIZE_MAP | 24 个 cell 全表重建 | Bug #4 修复 |
 | 2026-07 | estimate_model_points | 加 resolution/duration/generate_audio/num_video_refs | Bug #2 修复 |
 | 2026-07 | banana_pro | schema 移除 quality 字段 | Bug #1 修复 |
+| 2026-08 | seedance 2.0/2.5 | 有输入最低按 4s 计;金额先四舍五入到分;480p=856×480;2.5 开放 1080p(77/46) | 对齐火山方舟价表 |

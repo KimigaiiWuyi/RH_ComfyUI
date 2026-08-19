@@ -220,7 +220,7 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
         VideoTaskShape.VIDEO_EDIT,
         VideoTaskShape.VIDEO_EXTEND,
     }
-    # 2.0 支持到 4k;2.5 仅 480p/720p —— 分辨率上限由各模型 schema 约束,这里放宽全集
+    # 2.0 支持到 4k;2.5 支持 480p/720p/1080p —— 分辨率上限由各模型 schema 约束,这里放宽全集
     supported_resolutions = {"480p", "720p", "1080p", "4k"}
     # Seedance 2.5 放宽到 30s / 图 30 / 视频 10 / 音频 10;2.0 模型侧 max_reference 仍挡 12
     min_duration: int = 4

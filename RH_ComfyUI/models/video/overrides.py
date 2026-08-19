@@ -2,7 +2,7 @@
 
 参数面严重不一致的模型在同一 ABC 下共存:
 - Seedance 2.0:多参考(≤12 素材)/首尾帧/单图/纯文本;480p~4k;有声开关
-- Seedance 2.5:多参考(≤50=图30+视频10+音频10)/编辑/延长/首尾帧;仅 480p~720p;
+- Seedance 2.5:多参考(≤50=图30+视频10+音频10)/编辑/延长/首尾帧;480p~1080p;
   时长 4~30s 或 -1;output_format mp4/mov;复用火山方舟 Key
 - Wan 3.0:对齐 Seedance 2.0 + PDF/网页参考文件;480p~1080p;2~30s 或 -1;复用 DashScope Key
 - Wan 2.2:仅首尾帧/首帧/纯文本;≤720p(像素积约束);任意宽高比;无有声
@@ -330,7 +330,7 @@ class Seedance25VideoModel(SeedanceVideoModel):
             VideoTaskShape.VIDEO_EDIT,
             VideoTaskShape.VIDEO_EXTEND,
         }
-        self.supported_resolutions = ["480p", "720p"]
+        self.supported_resolutions = ["480p", "720p", "1080p"]
         self.supports_generate_audio = True
         self.max_reference_total = self.MAX_REFERENCE_TOTAL
         self.card = ModelCard(
@@ -345,7 +345,7 @@ class Seedance25VideoModel(SeedanceVideoModel):
             ],
             categories=["短视频", "长镜头", "多素材合成", "视频编辑", "视频延长"],
             weaknesses=[
-                "分辨率仅 480p / 720p(无 1080p/4K)",
+                "分辨率 480p / 720p / 1080p(无 4K)",
                 "不支持 camera_fixed(固定镜头;官方仅 Seedance 1.x)",
                 "编辑/延长/首尾帧须 ratio=adaptive,自定义比例会异步报错",
             ],

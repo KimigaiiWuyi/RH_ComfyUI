@@ -16,6 +16,7 @@ from RH_ComfyUI.utils.mappers.seedance_billing import (
     _SEEDANCE2_FAST_RATES,
     _SEEDANCE2_MINI_RATES,
     _SEEDANCE25_AUTO_DURATION,
+    _MIN_BILLED_INPUT_DURATION,
     _DEFAULT_INPUT_VIDEO_DURATION,
     _calculate_tokens,
     _tokens_to_points,
@@ -48,6 +49,7 @@ def test_resolution_specs():
     assert _RESOLUTION_SPECS["1080p"] == (1920, 1080, 24)
     assert _RESOLUTION_SPECS["4k"] == (3840, 2160, 24)
     assert _RESOLUTION_SPECS["4K"] == (3840, 2160, 24)
+    assert _MIN_BILLED_INPUT_DURATION == 4.0
 
 
 def test_seedance2_rates():
@@ -71,10 +73,10 @@ def test_seedance2_mini_rates():
 
 
 def test_seedance25_rates():
-    """Seedance 2.5 费率正确(仅 480p/720p):无输入 70 元/M,有输入 42 元/M"""
+    """Seedance 2.5 费率:480p/720p 70/42,1080p 77/46"""
     assert _SEEDANCE25_RATES["480p"] == (70.00, 42.00)
     assert _SEEDANCE25_RATES["720p"] == (70.00, 42.00)
-    assert "1080p" not in _SEEDANCE25_RATES
+    assert _SEEDANCE25_RATES["1080p"] == (77.00, 46.00)
     assert _SEEDANCE25_AUTO_DURATION == 15.0
 
 
@@ -120,11 +122,13 @@ def test_tokens_to_points():
     assert points == 4600
 
 
-def test_tokens_to_points_round_up():
-    """积分向上取整"""
+def test_tokens_to_points_round_yuan_to_fen():
+    """先四舍五入到分再换积分,对齐官方价表两位小数"""
     # 0.5M tokens × 46 元/M = 23 元 = 2300 积分
     points = _tokens_to_points(500_000, 46.00)
     assert points == 2300
+    # 216000 × 42 / 1e6 = 9.072 → 9.07 元 = 907(旧实现 ceil 到 908)
+    assert _tokens_to_points(216_000, 42.00) == 907
 
 
 def test_tokens_to_points_minimum_one():
@@ -204,10 +208,10 @@ def test_seedance2_fast_480p():
 
 
 def test_seedance2_mini_720p():
-    """Seedance 2.0 Mini 720p"""
+    """Seedance 2.0 Mini 720p 无输入:官方 2.48 元 = 248 积分"""
     points = estimate_seedance2_mini_points("720p", 5, video_refs=None)
-    # tokens = 108000, 费率 23 元/M → 108000 × 2300 / 1M = 248.4 → ceil = 249
-    assert points == 249
+    # 108000 × 23 / 1e6 = 2.484 → 2.48 元
+    assert points == 248
 
 
 def test_seedance25_720p_no_input_official_example():
@@ -225,9 +229,9 @@ def test_seedance25_720p_no_input_official_example():
 def test_seedance25_720p_with_input_video_default_5s():
     """有输入视频但无时长 → 默认 5s 输入,走 42 元/M"""
     # tokens = (5+5)×1280×720×24/1024 = 216000
-    # points = 216000 × 42 × 100 / 1_000_000 = 907.2 → ceil 908
+    # 9.072 元 → 9.07 元 = 907
     points = estimate_seedance25_points("720p", 5, video_refs=[object()])
-    assert points == 908
+    assert points == 907
 
 
 def test_resolve_input_video_duration_sums_clips():
@@ -252,9 +256,8 @@ def test_seedance25_input_duration_affects_points():
     short_in = estimate_seedance25_points("720p", 5, input_video_duration=5.0)
     long_in = estimate_seedance25_points("720p", 5, input_video_duration=15.0)
     assert long_in > short_in
-    # 手算: (15+5)×1280×720×24/1024 = 432000 tokens × 42 元/M
-    # = 432000 × 4200 / 1e6 = 1814.4 → ceil 1815
-    assert long_in == 1815
+    # (15+5)×1280×720×24/1024 = 432000 tokens × 42 元/M = 18.144 → 18.14 元
+    assert long_in == 1814
 
 
 def test_seedance25_multi_clip_default_duration():
@@ -277,6 +280,48 @@ def test_seedance25_auto_duration_minus_one():
     auto = estimate_seedance25_points("720p", -1, video_refs=None)
     fifteen = estimate_seedance25_points("720p", 15, video_refs=None)
     assert auto == fifteen
+
+
+def test_seedance25_official_price_table_no_input():
+    """官方价表:无输入 5s。480p=3.36 元;720p=7.56 元;1080p=18.71 元"""
+    assert estimate_seedance25_points("480p", 5, video_refs=None) == 336
+    assert estimate_seedance25_points("720p", 5, video_refs=None) == 756
+    assert estimate_seedance25_points("1080p", 5, video_refs=None) == 1871
+
+
+def test_seedance25_official_min_token_floor_2_to_4s_input():
+    """官方:有输入时最低价对应输入 2~4 秒,5s 输出 720p = 8.16 元"""
+    two = estimate_seedance25_points("720p", 5, input_video_duration=2.0)
+    four = estimate_seedance25_points("720p", 5, input_video_duration=4.0)
+    assert two == four == 816
+    assert estimate_seedance25_points("480p", 5, input_video_duration=4.0) == 363
+    assert estimate_seedance25_points("1080p", 5, input_video_duration=4.0) == 2012
+
+
+def test_seedance25_official_max_input_30s():
+    """官方:720p 5s 输出 + 30s 输入 = 31.75 元;1080p = 78.25 元"""
+    assert estimate_seedance25_points("720p", 5, input_video_duration=30.0) == 3175
+    assert estimate_seedance25_points("1080p", 5, input_video_duration=30.0) == 7825
+
+
+def test_seedance25_4s_input_4s_output_is_eight_seconds_tokens():
+    """4s 参考 + 4s 成片按官方 (输入+输出) 计 8s token,不是把输出算成 8s。
+
+    720p: 8 × 21600 × 42 / 1e6 = 7.26 元 = 726 积分。
+    同参无输入 4s 只有 605 积分;8s 无输入是 1210 积分。
+    """
+    pts = estimate_seedance25_points("720p", 4, input_video_duration=4.0)
+    assert pts == 726
+    assert pts == estimate_seedance25_points("720p", -1, input_video_duration=4.0)
+    assert estimate_seedance25_points("720p", 4, video_refs=None) == 605
+    assert estimate_seedance25_points("720p", 8, video_refs=None) == 1210
+
+
+def test_seedance2_official_with_input_min_floor():
+    """2.0 同样 2~4s 输入同价。720p 5s 输出最低 5.44 元"""
+    two = estimate_seedance2_points("720p", 5, input_video_duration=2.0)
+    four = estimate_seedance2_points("720p", 5, input_video_duration=4.0)
+    assert two == four == 544
 
 
 def test_seedance2_mini_cheaper_than_fast():
@@ -404,8 +449,8 @@ def test_seedance25_point_range_dynamic():
     lo, hi = m.point_range()
     assert lo < hi
     assert lo == estimate_seedance25_points("480p", 4, video_refs=None)
-    # max = 720p 30s 输出 + 150s 输入(10 段 × 15s 上限)
-    assert hi == estimate_seedance25_points("720p", 30, input_video_duration=150.0)
+    # max = 1080p 30s 输出 + 150s 输入(10 段 × 15s 上限)
+    assert hi == estimate_seedance25_points("1080p", 30, input_video_duration=150.0)
 
 
 def test_seedance15_pro_estimate_cost_with_audio():

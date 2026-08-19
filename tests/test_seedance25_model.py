@@ -49,7 +49,7 @@ def test_schema_ports_and_limits():
     assert node.inputs["images"].max_items == 30
     assert node.inputs["video_refs"].max_items == 10
     assert node.inputs["audio_refs"].max_items == 10
-    assert node.inputs["resolution"].values == ["480p", "720p"]
+    assert node.inputs["resolution"].values == ["480p", "720p", "1080p"]
     assert node.inputs["duration"].minimum == -1
     assert node.inputs["duration"].maximum == 30
     assert node.inputs["output_format"].values == ["mp4", "mov"]
@@ -69,7 +69,7 @@ def test_channel_bindings_only_ark():
     assert ark_b.vendor_model == "doubao-seedance-2-5-260628"
 
 
-def test_reject_1080p():
+def test_accept_1080p():
     m = Seedance25Def()
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
@@ -78,8 +78,7 @@ def test_reject_1080p():
         duration=5,
         ratio="adaptive",
     )
-    with pytest.raises(ValidationError, match="1080p|分辨率"):
-        m.validate(req)
+    m.validate(req)
 
 
 def test_reject_too_many_videos():

@@ -342,7 +342,7 @@ class Seedance25Def(Seedance25VideoModel):
     与 seedance2 / seedance2_fast 类型分开;复用 Seedance_apikey_ark。
     能力差异(相对 2.0):
       - 输出时长 4~30 秒,编辑/延长可用 -1 跟随输入
-      - 分辨率仅 480p / 720p
+      - 分辨率 480p / 720p / 1080p
       - 多模态参考上限 50(图 30 + 视频 10 + 音频 10)
       - 支持 output_format=mp4|mov
       - task_mode 可显式选择 generate(auto)/edit/extend
@@ -382,7 +382,7 @@ class Seedance25Def(Seedance25VideoModel):
                 "\n"
                 "优势:最长 30 秒连贯直出、50 个多模态参考、mov/mp4 输出、编辑与延长。"
                 "\n"
-                "限制:仅 480p/720p;不支持 camera_fixed(固定镜头,官方仅 1.x);"
+                "限制:480p / 720p / 1080p(无 4K);不支持 camera_fixed(固定镜头,官方仅 1.x);"
                 "\n"
                 "编辑/延长/首尾帧必须 ratio=adaptive,否则上游异步报错。"
                 "\n"
@@ -464,9 +464,9 @@ class Seedance25Def(Seedance25VideoModel):
                 "resolution": PortSpec(
                     type=PortType.ENUM,
                     default="720p",
-                    values=["480p", "720p"],
+                    values=["480p", "720p", "1080p"],
                     title="分辨率",
-                    description="视频分辨率(2.5 仅支持 480p / 720p)",
+                    description="视频分辨率(2.5 支持 480p / 720p / 1080p)",
                 ),
                 "duration": PortSpec(
                     type=PortType.INTEGER,
@@ -543,10 +543,10 @@ class Seedance25Def(Seedance25VideoModel):
         )
 
     def point_range(self) -> tuple[int, int]:
-        """积分范围:最小(480p + 4s + 无输入) ~ 最大(720p + 30s + 输入 150s=10×15)。"""
+        """积分范围:最小(480p + 4s + 无输入) ~ 最大(1080p + 30s + 输入 150s=10×15)。"""
         return (
             estimate_seedance25_points("480p", 4, video_refs=None),
-            estimate_seedance25_points("720p", 30, input_video_duration=150.0),
+            estimate_seedance25_points("1080p", 30, input_video_duration=150.0),
         )
 
 
