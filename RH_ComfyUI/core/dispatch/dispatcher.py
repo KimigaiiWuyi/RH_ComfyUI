@@ -120,7 +120,10 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
         result.outputs = output.outputs
         result.usage = output.usage
         result.raw = output.raw
-        actual = invoke_settle_cost(model, request, output.usage)
+        settle_usage = dict(output.usage or {})
+        if isinstance(output.raw, dict) and output.raw:
+            settle_usage.setdefault("raw_task", output.raw)
+        actual = invoke_settle_cost(model, request, settle_usage)
         final_cost = await ctx.policy.settle(reservation, actual)
         result.cost_points = final_cost
         elapsed_ms = int((time.monotonic() - start) * 1000)

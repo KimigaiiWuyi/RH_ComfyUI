@@ -24,10 +24,12 @@ from ...utils.mappers.video import wan_videogen_mapper as _wan_videogen_mapper
 from ...utils.mappers.extra_billing import estimate_wan22_points
 from ...utils.mappers.wan30_billing import estimate_wan30_points
 from ...utils.mappers.seedance_billing import (
+    resolution_from_usage,
     settle_seedance2_points,
     settle_seedance25_points,
     estimate_seedance2_points,
     estimate_seedance25_points,
+    output_duration_from_usage,
     settle_seedance2_fast_points,
     settle_seedance2_mini_points,
     settle_seedance15_pro_points,
@@ -38,6 +40,20 @@ from ...utils.mappers.seedance_billing import (
 )
 from ...utils.mappers.happyhorse_billing import estimate_happyhorse_points
 from ...utils.mappers.minimax_h3_billing import estimate_minimax_h3_points
+
+
+def _settle_output_duration(request: GenerationRequest, usage: dict[str, Any]) -> float | None:
+    d = output_duration_from_usage(usage)
+    if d:
+        return d
+    try:
+        raw = request.duration
+        if raw is None:
+            raw = (request.params or {}).get("duration")
+        val = float(raw) if raw is not None else 0.0
+    except (TypeError, ValueError):
+        return None
+    return val if val > 0 else None
 
 
 class Seedance15ProDef(SeedanceVideoModel):
@@ -344,12 +360,13 @@ class Seedance2Def(SeedanceVideoModel):
         )
 
     def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
-        resolution = request.params.get("resolution") or request.resolution or "720p"
+        resolution = resolution_from_usage(usage) or request.params.get("resolution") or request.resolution or "720p"
         return settle_seedance2_points(
             usage,
             str(resolution),
             video_refs=request.video_refs,
             input_video_duration=input_video_duration_from_params(request.params),
+            output_duration=_settle_output_duration(request, usage),
         )
 
     def point_range(self) -> tuple[int, int]:
@@ -572,12 +589,13 @@ class Seedance25Def(Seedance25VideoModel):
         )
 
     def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
-        resolution = request.params.get("resolution") or request.resolution or "720p"
+        resolution = resolution_from_usage(usage) or request.params.get("resolution") or request.resolution or "720p"
         return settle_seedance25_points(
             usage,
             str(resolution),
             video_refs=request.video_refs,
             input_video_duration=input_video_duration_from_params(request.params),
+            output_duration=_settle_output_duration(request, usage),
         )
 
     def point_range(self) -> tuple[int, int]:
@@ -649,12 +667,13 @@ class Seedance2MiniDef(SeedanceVideoModel):
         )
 
     def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
-        resolution = request.params.get("resolution") or request.resolution or "720p"
+        resolution = resolution_from_usage(usage) or request.params.get("resolution") or request.resolution or "720p"
         return settle_seedance2_mini_points(
             usage,
             str(resolution),
             video_refs=request.video_refs,
             input_video_duration=input_video_duration_from_params(request.params),
+            output_duration=_settle_output_duration(request, usage),
         )
 
     def point_range(self) -> tuple[int, int]:
@@ -789,12 +808,13 @@ class Seedance2FastDef(SeedanceVideoModel):
         )
 
     def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
-        resolution = request.params.get("resolution") or request.resolution or "720p"
+        resolution = resolution_from_usage(usage) or request.params.get("resolution") or request.resolution or "720p"
         return settle_seedance2_fast_points(
             usage,
             str(resolution),
             video_refs=request.video_refs,
             input_video_duration=input_video_duration_from_params(request.params),
+            output_duration=_settle_output_duration(request, usage),
         )
 
     def point_range(self) -> tuple[int, int]:

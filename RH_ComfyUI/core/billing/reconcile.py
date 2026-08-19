@@ -18,11 +18,10 @@ from typing import Any, Optional
 from gsuid_core.logger import logger
 
 from ...utils.mappers.seedance_billing import (
-    _RESOLUTION_SPECS,
-    _calculate_tokens,
     extract_usage_tokens,
     settle_seedance2_points,
     settle_seedance25_points,
+    has_input_from_vendor_tokens,
 )
 
 DEFAULT_SEEDANCE_RECONCILE_MODELS: tuple[str, ...] = ("seedance2", "seedance2.5")
@@ -111,6 +110,29 @@ def _content_has_video(body: dict[str, Any]) -> bool:
     return False
 
 
+def vendor_output_meta(raw: Any) -> dict[str, Any]:
+    """从厂商查询报文读实际 resolution / duration(优先于本地落库列)。"""
+    obj = _parse_json_object(raw) or {}
+    blobs: list[dict[str, Any]] = [obj]
+    data = obj.get("data")
+    if isinstance(data, dict):
+        blobs.append(data)
+    res = ""
+    dur: Optional[float] = None
+    for blob in blobs:
+        if not res and blob.get("resolution"):
+            res = str(blob.get("resolution") or "").strip()
+        if dur is None:
+            raw_d = blob.get("duration")
+            try:
+                val = float(raw_d) if raw_d is not None else 0.0
+            except (TypeError, ValueError):
+                val = 0.0
+            if val > 0:
+                dur = val
+    return {"resolution": res, "duration": dur}
+
+
 def request_bits_from_record(
     *,
     resolution: str = "",
@@ -157,19 +179,6 @@ def request_bits_from_record(
     }
 
 
-def _infer_has_input_from_tokens(resolution: str, duration: float, tokens: int, explicit: bool) -> bool:
-    if explicit:
-        return True
-    spec = _RESOLUTION_SPECS.get(resolution) or _RESOLUTION_SPECS.get("720p")
-    if spec is None:
-        return False
-    w, h, fps = spec
-    out_tokens = _calculate_tokens(0.0, max(duration, 1.0), w, h, fps)
-    if out_tokens <= 0:
-        return False
-    return tokens > out_tokens * 1.3
-
-
 def actual_points_for_seedance_record(
     *,
     task_name: str,
@@ -189,23 +198,30 @@ def actual_points_for_seedance_record(
     tokens = extract_usage_tokens(usage)
     if tokens is None:
         return None
+    vendor = vendor_output_meta(raw_response)
     bits = request_bits_from_record(
         resolution=resolution,
         duration_seconds=duration_seconds,
         request_body=request_body,
         extra_params=extra_params,
     )
-    has_input = _infer_has_input_from_tokens(
-        str(bits["resolution"]),
-        float(bits["duration"]),
-        int(tokens),
-        bool(bits["has_input"]),
-    )
+    res = str(vendor.get("resolution") or bits["resolution"] or "720p")
+    out_dur = vendor.get("duration")
+    if out_dur is None or float(out_dur) <= 0:
+        out_dur = float(bits["duration"])
+    inferred = has_input_from_vendor_tokens(int(tokens), res, float(out_dur or 0))
+    has_input = bool(inferred) if inferred is not None else bool(bits["has_input"])
     refs = bits["video_refs"] if has_input else None
     ivd = bits["input_video_duration"] if has_input else None
     if has_input and not refs and ivd is None:
         ivd = 1.0
-    return fn(usage, str(bits["resolution"]), video_refs=refs, input_video_duration=ivd)
+    return fn(
+        usage,
+        res,
+        video_refs=refs,
+        input_video_duration=ivd,
+        output_duration=float(out_dur) if out_dur else None,
+    )
 
 
 def _row_plan(row: Any) -> Optional[dict[str, Any]]:

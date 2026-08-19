@@ -98,6 +98,34 @@ def test_token_heuristic_marks_input_when_wire_lost_refs():
     assert pts == 1513
 
 
+def test_seedance25_720p_30s_output_only_uses_no_input_rate():
+    """厂商 duration=30、token≈纯输出时,不能因落库 duration=5 误走有输入 42 元/M。
+
+    648900 × 42 → 2725(错); × 70 → 4542(对)。
+    """
+    raw = {
+        "id": "cgt-20260819222618-b68k4",
+        "model": "doubao-seedance-2-5-260628",
+        "status": "succeeded",
+        "content": {"video_url": "https://example.com/v.mp4"},
+        "usage": {"completion_tokens": 648900, "total_tokens": 648900},
+        "resolution": "720p",
+        "ratio": "9:16",
+        "duration": 30,
+        "framespersecond": 24,
+        "generate_audio": True,
+    }
+    pts = actual_points_for_seedance_record(
+        task_name="seedance2.5",
+        raw_response=raw,
+        resolution="720p",
+        duration_seconds=5,
+        request_body={"duration": -1, "resolution": "720p", "content": [{"type": "text", "text": "hi"}]},
+    )
+    assert pts == 4542
+    assert pts != 2725
+
+
 def test_unknown_model_returns_none():
     assert (
         actual_points_for_seedance_record(

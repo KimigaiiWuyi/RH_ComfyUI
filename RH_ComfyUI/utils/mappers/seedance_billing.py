@@ -460,16 +460,101 @@ def _settle_tokens_at_rate(usage: Optional[dict[str, Any]], rate_yuan: float) ->
     return _tokens_to_points(float(tokens), rate_yuan)
 
 
+# 供应商 token 相对「纯输出」超过该比例 → 按有输入视频档计费。
+# 4s 输入 + 30s 输出 = 1.133;纯输出噪声约 1.01。取 1.08。
+_HAS_INPUT_TOKEN_RATIO = 1.08
+
+
+def output_duration_from_usage(usage: Optional[dict[str, Any]]) -> Optional[float]:
+    """从后结算 usage / 厂商任务报文读实际输出秒数(>0)。"""
+    if not usage or not isinstance(usage, dict):
+        return None
+    blobs: list[dict[str, Any]] = [usage]
+    for key in ("raw_task", "raw", "raw_usage"):
+        blob = usage.get(key)
+        if isinstance(blob, dict):
+            blobs.append(blob)
+    for blob in blobs:
+        raw = blob.get("duration")
+        if raw is None:
+            continue
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if val > 0:
+            return val
+    return None
+
+
+def resolution_from_usage(usage: Optional[dict[str, Any]]) -> Optional[str]:
+    if not usage or not isinstance(usage, dict):
+        return None
+    blobs: list[dict[str, Any]] = [usage]
+    for key in ("raw_task", "raw", "raw_usage"):
+        blob = usage.get(key)
+        if isinstance(blob, dict):
+            blobs.append(blob)
+    for blob in blobs:
+        res = blob.get("resolution")
+        if res:
+            return str(res).strip()
+    return None
+
+
+def has_input_from_vendor_tokens(tokens: int, resolution: str, output_duration: float) -> Optional[bool]:
+    """用 token 量对比纯输出公式,判断厂商是否按「有输入视频」计费。
+
+    None = 输出时长未知,无法判断。
+    """
+    if tokens <= 0 or output_duration <= 0:
+        return None
+    width, height, fps = _get_resolution_spec(resolution)
+    out_tokens = _calculate_tokens(0.0, output_duration, width, height, fps)
+    if out_tokens <= 0:
+        return None
+    return tokens > out_tokens * _HAS_INPUT_TOKEN_RATIO
+
+
+def _settle_family_points(
+    usage: Optional[dict[str, Any]],
+    resolution: str,
+    rates: dict,
+    video_refs: Optional[list],
+    input_video_duration: Optional[float],
+    output_duration: Optional[float],
+    *,
+    default_key: str = "720p",
+) -> Optional[int]:
+    tokens = extract_usage_tokens(usage)
+    if tokens is None:
+        return None
+    dur = output_duration if output_duration is not None else output_duration_from_usage(usage)
+    inferred = has_input_from_vendor_tokens(int(tokens), resolution, float(dur or 0))
+    if inferred is None:
+        has_input = _has_input_bits(video_refs, input_video_duration)
+    else:
+        has_input = inferred
+    return _tokens_to_points(float(tokens), _pair_rate(rates, resolution, has_input, default_key=default_key))
+
+
 def settle_seedance2_points(
     usage: Optional[dict[str, Any]],
     resolution: str,
     video_refs: Optional[list] = None,
     *,
     input_video_duration: Optional[float] = None,
+    output_duration: Optional[float] = None,
 ) -> Optional[int]:
     """Seedance 2.0 后结算:供应商 token × 档位费率。无法解析 token 时返回 None。"""
-    has_input = _has_input_bits(video_refs, input_video_duration)
-    return _settle_tokens_at_rate(usage, _pair_rate(_SEEDANCE2_RATES, resolution, has_input))
+    return _settle_family_points(
+        usage,
+        resolution,
+        _SEEDANCE2_RATES,
+        video_refs,
+        input_video_duration,
+        output_duration,
+    )
 
 
 def settle_seedance2_fast_points(
@@ -478,10 +563,16 @@ def settle_seedance2_fast_points(
     video_refs: Optional[list] = None,
     *,
     input_video_duration: Optional[float] = None,
+    output_duration: Optional[float] = None,
 ) -> Optional[int]:
-    has_input = _has_input_bits(video_refs, input_video_duration)
-    return _settle_tokens_at_rate(
-        usage, _pair_rate(_SEEDANCE2_FAST_RATES, resolution, has_input, default_key="720p")
+    return _settle_family_points(
+        usage,
+        resolution,
+        _SEEDANCE2_FAST_RATES,
+        video_refs,
+        input_video_duration,
+        output_duration,
+        default_key="720p",
     )
 
 
@@ -491,10 +582,16 @@ def settle_seedance2_mini_points(
     video_refs: Optional[list] = None,
     *,
     input_video_duration: Optional[float] = None,
+    output_duration: Optional[float] = None,
 ) -> Optional[int]:
-    has_input = _has_input_bits(video_refs, input_video_duration)
-    return _settle_tokens_at_rate(
-        usage, _pair_rate(_SEEDANCE2_MINI_RATES, resolution, has_input, default_key="720p")
+    return _settle_family_points(
+        usage,
+        resolution,
+        _SEEDANCE2_MINI_RATES,
+        video_refs,
+        input_video_duration,
+        output_duration,
+        default_key="720p",
     )
 
 
@@ -504,9 +601,16 @@ def settle_seedance25_points(
     video_refs: Optional[list] = None,
     *,
     input_video_duration: Optional[float] = None,
+    output_duration: Optional[float] = None,
 ) -> Optional[int]:
-    has_input = _has_input_bits(video_refs, input_video_duration)
-    return _settle_tokens_at_rate(usage, _pair_rate(_SEEDANCE25_RATES, resolution, has_input))
+    return _settle_family_points(
+        usage,
+        resolution,
+        _SEEDANCE25_RATES,
+        video_refs,
+        input_video_duration,
+        output_duration,
+    )
 
 
 def settle_seedance15_pro_points(
@@ -541,6 +645,9 @@ __all__ = [
     "estimate_seedance15_pro_points",
     "estimate_seedance10_pro_points",
     "extract_usage_tokens",
+    "output_duration_from_usage",
+    "resolution_from_usage",
+    "has_input_from_vendor_tokens",
     "settle_seedance2_points",
     "settle_seedance2_fast_points",
     "settle_seedance2_mini_points",
