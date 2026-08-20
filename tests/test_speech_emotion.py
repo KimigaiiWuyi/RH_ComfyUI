@@ -5,6 +5,7 @@ from RH_ComfyUI.core.base.emotion import (
     to_enum_emotion,
     render_inline_markers,
     extract_emotion_markers,
+    strip_written_letter_fillers,
 )
 from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
 
@@ -32,6 +33,12 @@ def test_extract_emotion_markers():
     cleaned2, labels2 = extract_emotion_markers("普通[文本]和【括注】不受影响")
     assert cleaned2 == "普通[文本]和【括注】不受影响"
     assert labels2 == []
+
+
+def test_strip_written_letter_fillers():
+    assert "zzz" not in strip_written_letter_fillers("唔…早上好…zzz").lower()
+    assert strip_written_letter_fillers("listen to jazz") == "listen to jazz"
+    assert "[happy]" in strip_written_letter_fillers("[happy] 你好")
 
 
 def test_to_inline_tag():

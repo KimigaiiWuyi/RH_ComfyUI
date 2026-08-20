@@ -19,6 +19,7 @@ from .emotion import (
     to_enum_emotion,
     render_inline_markers,
     extract_emotion_markers,
+    strip_written_letter_fillers,
 )
 from .generation import AIGCGenerationBase
 from ..schema.types import PortSpec, PortType
@@ -75,7 +76,9 @@ class DigitalHumanSpeechBase(AIGCGenerationBase):
     def normalize(self, request: GenerationRequest) -> GenerationRequest:
         """在基类统一做情绪整形,再交给各自 mapper(mapper 只读归一后的字段)"""
         request = super().normalize(request)
-        return self._apply_emotion(request)
+        request = self._apply_emotion(request)
+        request.prompt = strip_written_letter_fillers(request.prompt)
+        return request
 
     def _apply_emotion(self, request: GenerationRequest) -> GenerationRequest:
         """按 emotion_style 把(prompt, 情绪块, mood)整形成上游能直接消费的形态

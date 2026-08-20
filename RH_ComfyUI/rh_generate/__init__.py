@@ -41,9 +41,13 @@ async def _do_generate(
     """通用生成执行流程 — 只负责协议翻译,路由/计费/退款/统计都在 dispatch() 里"""
     selected: dict[str, str] = {"display_name": "", "cost": "0"}
 
+    is_ai = type(bot).__name__ == "MockBot"
+
     async def _on_selected(model: AIGCGenerationBase, cost: int) -> None:
         selected["display_name"] = model.display_name
         selected["cost"] = str(cost)
+        if is_ai:
+            return
         now_point = await _current_point(ev)
         await bot.send(
             f"💪 积分充足！已扣除{cost}积分!\n📋 当前积分: {now_point}\n"
@@ -51,14 +55,15 @@ async def _do_generate(
         )
 
     async def _wrapped_progress(event) -> None:
-        await bot.send(f"⏳ {event.message}")
+        if not is_ai:
+            await bot.send(f"⏳ {event.message}")
         if on_progress is not None:
             try:
                 await on_progress(event)
             except Exception:  # noqa: BLE001
                 pass
 
-    entry_point = "agent" if type(bot).__name__ == "MockBot" else "command"
+    entry_point = "agent" if is_ai else "command"
     ctx = DispatchContext(
         billing=BillingContext(user_id=ev.user_id, bot_id=ev.bot_id, entry_point=entry_point),
         policy=_POINTS_POLICY,
@@ -317,6 +322,8 @@ async def generate_music(bot: Bot, ev: Event) -> None:
     block=True,
     to_ai="""将文字转换为自然语音，支持上传参考音频进行语音克隆，支持情绪控制。
     当用户想要文字转语音、制作有声内容、用特定音色朗读时调用。
+    **传入 text 的每一个字都会被原样念出**，包括字母叠字口癖（如 zzz/zz）
+    ——语音模型会把它们读成英文字母，不要写进朗读稿。
     如果用户附带了音频文件，则使用该音频的音色进行语音克隆生成。
 
     **重要**：当没有用户提供参考音频时，你必须先调用
@@ -392,7 +399,8 @@ async def generate_speech(bot: Bot, ev: Event) -> None:
     if result is None:
         return
 
-    await bot.send("✅ 语音生成完成！")
+    if type(bot).__name__ != "MockBot":
+        await bot.send("✅ 语音生成完成！")
     await bot.send(MessageSegment.record(result.data))
 
 

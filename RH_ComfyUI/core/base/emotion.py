@@ -85,6 +85,20 @@ _ZH_TO_TAG: dict[str, str] = {
 # 显式情绪块:`<<EMO: label>>`(与调用方情绪选单/序列化协议一致)。
 _EMO_MARKER_RE = re.compile(r"<<EMO:\s*([^>]*?)\s*>>")
 _MULTISPACE_RE = re.compile(r"\s{2,}")
+# 书面叠字口癖（zz/hhh）：TTS 会逐字母念出
+_WRITTEN_LETTER_FILLER_RE = re.compile(r"(?:(?<=[^A-Za-z])|^)[zZhH]{2,}(?=[^A-Za-z]|$)")
+_FILLER_ELLIPSIS_RE = re.compile(r"(?:…\s*){2,}")
+
+
+def strip_written_letter_fillers(text: str) -> str:
+    """剥拉丁叠字口癖，避免 TTS 把 zz/hhh 念成字母。"""
+    body = text or ""
+    if not body:
+        return body
+    body = _WRITTEN_LETTER_FILLER_RE.sub("", body)
+    body = _MULTISPACE_RE.sub(" ", body)
+    body = _FILLER_ELLIPSIS_RE.sub("…", body)
+    return body.strip()
 
 
 def _normalize_word(word: str) -> str:
