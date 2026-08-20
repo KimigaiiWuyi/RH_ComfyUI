@@ -872,6 +872,8 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         bot_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_ids: Optional[list[str]] = None,
     ) -> TaskSummary:
         """聚合统计:任务量 / 质量 / 积分 / 活跃用户 / 类型分布。
 
@@ -884,6 +886,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         conds: list[ColumnElement[bool]] = []
         if bot_id is not None:
             conds.append(col(cls.bot_id) == bot_id)
+        cls._append_user_conds(conds, user_id=user_id, user_ids=user_ids)
         if start_time is not None:
             conds.append(col(cls.created_at) >= start_time)
         if end_time is not None:
@@ -963,11 +966,25 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         )
 
     @classmethod
+    def _append_user_conds(
+        cls,
+        conds: list[ColumnElement[bool]],
+        user_id: Optional[str] = None,
+        user_ids: Optional[list[str]] = None,
+    ) -> None:
+        """user_ids 非空走 IN;否则单 user_id 等值。空列表由调用方短路,这里不加条件。"""
+        if user_ids:
+            conds.append(col(cls.user_id).in_(list(user_ids)))
+        elif user_id is not None:
+            conds.append(col(cls.user_id) == user_id)
+
+    @classmethod
     @with_session
     async def list_all(
         cls,
         session: AsyncSession,
         user_id: Optional[str] = None,
+        user_ids: Optional[list[str]] = None,
         bot_id: Optional[str] = None,
         group_id: Optional[str] = None,
         task_type: Optional[str] = None,
@@ -988,10 +1005,10 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
 
         与 list_by_user 的区别:不强制 user_id,用于管理员查看全员消费记录。
         大字段(raw_response/request_body 等)默认 defer,避免列表把每行 64KB 全读出。
+        user_ids 非空时按 IN 过滤(姓名搜索可能命中多人);优先于单 user_id。
         """
         conds: list[ColumnElement[bool]] = []
-        if user_id is not None:
-            conds.append(col(cls.user_id) == user_id)
+        cls._append_user_conds(conds, user_id=user_id, user_ids=user_ids)
         if bot_id is not None:
             conds.append(col(cls.bot_id) == bot_id)
         if group_id is not None:
@@ -1046,6 +1063,8 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         end_time: Optional[datetime] = None,
         top_n: int = 20,
         bot_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_ids: Optional[list[str]] = None,
     ) -> list[dict[str, Any]]:
         """按用户聚合消费摘要(供管理员查看"谁花了多少")
 
@@ -1065,6 +1084,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         conds: list[ColumnElement[bool]] = []
         if bot_id is not None:
             conds.append(col(cls.bot_id) == bot_id)
+        cls._append_user_conds(conds, user_id=user_id, user_ids=user_ids)
         if start_time is not None:
             conds.append(col(cls.created_at) >= start_time)
         if end_time is not None:
@@ -1137,6 +1157,86 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
                 }
             )
         return results
+
+    @classmethod
+    @with_session
+    async def get_daily_series(
+        cls,
+        session: AsyncSession,
+        *,
+        bot_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_ids: Optional[list[str]] = None,
+        group_id: Optional[str] = None,
+        status: Optional[str] = None,
+        task_type: Optional[str] = None,
+        task_name: Optional[str] = None,
+        backend: Optional[str] = None,
+        is_refunded: Optional[bool] = None,
+        min_points: Optional[int] = None,
+        max_points: Optional[int] = None,
+        prompt_search: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
+        """按北京日历日聚合:请求数 / 积分合计 / 去重用户数。
+
+        created_at 存 UTC;SQLite 用 ``strftime(..., '+8 hours')`` 切到 UTC+8 的日期。
+        返回 ``[{date, requests, points, users}, ...]``,按 date 升序。缺日由上层补零。
+        """
+        conds: list[ColumnElement[bool]] = []
+        if bot_id is not None:
+            conds.append(col(cls.bot_id) == bot_id)
+        cls._append_user_conds(conds, user_id=user_id, user_ids=user_ids)
+        if group_id is not None:
+            conds.append(col(cls.group_id) == group_id)
+        if status is not None:
+            conds.append(col(cls.status) == status)
+        if task_type is not None:
+            conds.append(col(cls.task_type) == task_type)
+        if task_name is not None:
+            conds.append(col(cls.task_name) == task_name)
+        if backend is not None:
+            conds.append(col(cls.backend) == backend)
+        if is_refunded is not None:
+            conds.append(col(cls.refunded) == is_refunded)
+        if min_points is not None:
+            conds.append(col(cls.point_cost) >= min_points)
+        if max_points is not None:
+            conds.append(col(cls.point_cost) <= max_points)
+        if prompt_search is not None:
+            conds.append(col(cls.prompt).contains(prompt_search))
+        if start_time is not None:
+            conds.append(col(cls.created_at) >= start_time)
+        if end_time is not None:
+            conds.append(col(cls.created_at) <= end_time)
+
+        # 北京日历日(UTC+8)。SQLite datetime 修饰符;列是 naive UTC 字符串。
+        day_expr = func.strftime("%Y-%m-%d", col(cls.created_at), "+8 hours")
+        stmt = select(
+            day_expr.label("day"),
+            func.count().label("requests"),
+            func.coalesce(func.sum(col(cls.point_cost)), 0).label("points"),
+            func.count(func.distinct(col(cls.user_id))).label("users"),
+        ).select_from(cls)
+        if conds:
+            stmt = stmt.where(and_(*conds))
+        stmt = stmt.group_by(day_expr).order_by(day_expr)
+        rows = (await session.execute(stmt)).all()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            day = str(r.day or "").strip()
+            if not day:
+                continue
+            out.append(
+                {
+                    "date": day,
+                    "requests": int(r.requests or 0),
+                    "points": int(r.points or 0),
+                    "users": int(r.users or 0),
+                }
+            )
+        return out
 
     @classmethod
     @with_session

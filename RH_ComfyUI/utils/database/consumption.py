@@ -122,6 +122,50 @@ def _scope_label(days: Optional[int]) -> str:
     return f"最近 {days} 天" if days else "全部时间"
 
 
+MAX_DAYS = 365
+DEFAULT_DAILY_DAYS = 30
+
+_EMPTY_SUMMARY: dict[str, Any] = {
+    "total": 0,
+    "success": 0,
+    "failed": 0,
+    "success_rate": 0.0,
+    "avg_elapsed_ms": 0,
+    "total_points": 0,
+    "active_users": 0,
+    "avg_points": 0.0,
+    "by_task_type": {},
+}
+
+
+def fill_daily_gaps(
+    rows: list[dict[str, Any]],
+    start: datetime,
+    end: datetime,
+) -> list[dict[str, Any]]:
+    """把稀疏日聚合补成连续北京日历日(缺日补 0),最多 365 天。"""
+    by_day = {str(r.get("date") or ""): r for r in rows if r.get("date")}
+    start_d = to_beijing(start).date()
+    end_d = to_beijing(end).date()
+    if end_d < start_d:
+        start_d, end_d = end_d, start_d
+    out: list[dict[str, Any]] = []
+    d = start_d
+    while d <= end_d and len(out) < MAX_DAYS:
+        key = d.isoformat()
+        hit = by_day.get(key)
+        out.append(
+            {
+                "date": key,
+                "requests": int(hit.get("requests") or 0) if hit else 0,
+                "points": int(hit.get("points") or 0) if hit else 0,
+                "users": int(hit.get("users") or 0) if hit else 0,
+            }
+        )
+        d += timedelta(days=1)
+    return out
+
+
 # ─────────────────────────── 用户视图 payload ───────────────────────────
 
 
@@ -250,6 +294,8 @@ async def build_admin_consumption_payload(
     prompt_search: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    user_id: Optional[str] = None,
+    user_ids: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """生成"管理员消费记录"的结构化 payload。
 
@@ -258,6 +304,9 @@ async def build_admin_consumption_payload(
         `build_user_consumption_payload`,额外包一层 `view="user"`。
       - 不指定 `target_user_id`: 走全员视图,返回
         `summary / records / user_summaries` 三段。
+
+    `user_id` / `user_ids` 只作用于全员视图(姓名搜索可能命中多人)。
+    `user_ids=[]` 表示搜索无命中,直接返回空汇总。
     """
     base_filters = {
         "days": days,
@@ -275,6 +324,8 @@ async def build_admin_consumption_payload(
         "prompt_search": prompt_search,
         "group_id": group_id,
         "top_users": top_users,
+        "user_id": user_id,
+        "user_ids": user_ids,
     }
 
     if target_user_id:
@@ -310,30 +361,64 @@ async def build_admin_consumption_payload(
     else:
         start, end = _now_window(days)
 
+    if user_ids is not None and len(user_ids) == 0:
+        return {
+            "view": "global",
+            "scope": _scope_label(days),
+            "bot_id": bot_id,
+            "target_user_id": None,
+            "filters": base_filters,
+            "summary": dict(_EMPTY_SUMMARY),
+            "user_summaries": [],
+            "records": [],
+            "total_count": 0,
+        }
+
     from .stats_cache import get_summary_cached, get_user_summaries_cached
 
-    # 1) 全局汇总 — 合并 SQL + 表缓存(L1/L2)
-    summary = await get_summary_cached(
-        bot_id=bot_id,
-        start_time=start,
-        end_time=end,
-        days=days if date_from is None and date_to is None else None,
-    )
+    has_user_filter = bool(user_id) or bool(user_ids)
+    if has_user_filter:
+        # 用户筛选是管理员钻取,不进全员 stats 缓存,避免污染 key。
+        summary = await RHComfyuiTaskRecord.get_summary(
+            start_time=start,
+            end_time=end,
+            bot_id=bot_id,
+            user_id=user_id,
+            user_ids=user_ids,
+        )
+        user_summaries = await RHComfyuiTaskRecord.get_user_summaries(
+            start_time=start,
+            end_time=end,
+            top_n=top_users,
+            bot_id=bot_id,
+            user_id=user_id,
+            user_ids=user_ids,
+        )
+    else:
+        # 1) 全局汇总 — 合并 SQL + 表缓存(L1/L2)
+        summary = await get_summary_cached(
+            bot_id=bot_id,
+            start_time=start,
+            end_time=end,
+            days=days if date_from is None and date_to is None else None,
+        )
 
-    # 2) 按用户聚合 TOP — 条件聚合 + 表缓存
-    user_summaries = await get_user_summaries_cached(
-        bot_id=bot_id,
-        start_time=start,
-        end_time=end,
-        top_n=top_users,
-        days=days if date_from is None and date_to is None else None,
-    )
+        # 2) 按用户聚合 TOP — 条件聚合 + 表缓存
+        user_summaries = await get_user_summaries_cached(
+            bot_id=bot_id,
+            start_time=start,
+            end_time=end,
+            top_n=top_users,
+            days=days if date_from is None and date_to is None else None,
+        )
     user_summaries = user_summaries or []
 
     # 3) 最近明细(轻量 LIMIT;大 JSON defer)。admin HTTP 页另有 /records 分页,
     #    但 bot 文本仍依赖本段 records,故保留。
     records = await RHComfyuiTaskRecord.list_all(
         bot_id=bot_id,
+        user_id=user_id,
+        user_ids=user_ids,
         group_id=group_id,
         status=status,
         task_type=task_type,
@@ -385,11 +470,12 @@ async def build_admin_records_payload(
     prompt_search: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    user_ids: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """管理员专用的"跨用户条件筛选 records"接口。
 
     与 `build_admin_consumption_payload(view='global')` 的区别:
-      - 支持 `offset`(分页)与 `user_id` 精确过滤;
+      - 支持 `offset`(分页)与 `user_id` / `user_ids` 过滤;
       - 不计算 summary / user_summaries(纯列表接口,调用方可重复请求)。
 
     Args:
@@ -398,9 +484,39 @@ async def build_admin_records_payload(
         offset: 分页偏移。
         days: 最近 N 天(与 date_from/date_to 互斥)。
         user_id: 用户 ID 过滤(可选)。
+        user_ids: 多用户 IN 过滤(姓名搜索);空列表=无命中。
         group_id: 群号过滤(可选,管理员按群分析)。
         其余过滤项语义同 `list_all`。
     """
+    filters = {
+        "user_id": user_id,
+        "user_ids": user_ids,
+        "group_id": group_id,
+        "days": days,
+        "date_from": date_from.isoformat() if date_from else None,
+        "date_to": date_to.isoformat() if date_to else None,
+        "offset": offset,
+        "limit": limit,
+        "status": status,
+        "task_type": task_type,
+        "task_name": task_name,
+        "trace_id": trace_id,
+        "backend": backend,
+        "is_refunded": is_refunded,
+        "min_points": min_points,
+        "max_points": max_points,
+        "prompt_search": prompt_search,
+    }
+    if user_ids is not None and len(user_ids) == 0:
+        return {
+            "view": "records",
+            "scope": _scope_label(days),
+            "bot_id": bot_id,
+            "filters": filters,
+            "records": [],
+            "total_count": 0,
+            "has_more": False,
+        }
     # days 与 date_from/date_to 互斥
     if date_from is not None or date_to is not None:
         start, end = date_from, date_to
@@ -409,6 +525,7 @@ async def build_admin_records_payload(
     records = await RHComfyuiTaskRecord.list_all(
         bot_id=bot_id,
         user_id=user_id,
+        user_ids=user_ids,
         group_id=group_id,
         status=status,
         task_type=task_type,
@@ -429,27 +546,108 @@ async def build_admin_records_payload(
         "view": "records",
         "scope": _scope_label(days),
         "bot_id": bot_id,
-        "filters": {
-            "user_id": user_id,
-            "group_id": group_id,
-            "days": days,
-            "date_from": date_from.isoformat() if date_from else None,
-            "date_to": date_to.isoformat() if date_to else None,
-            "offset": offset,
-            "limit": limit,
-            "status": status,
-            "task_type": task_type,
-            "task_name": task_name,
-            "trace_id": trace_id,
-            "backend": backend,
-            "is_refunded": is_refunded,
-            "min_points": min_points,
-            "max_points": max_points,
-            "prompt_search": prompt_search,
-        },
+        "filters": filters,
         "records": [_record_to_dict(r) for r in records],
         "total_count": len(records),
         "has_more": len(records) == limit,
+    }
+
+
+# ─────────────────────────── 每日趋势 payload(管理员) ───────────────────────────
+
+
+async def build_admin_daily_payload(
+    bot_id: str,
+    *,
+    days: Optional[int] = None,
+    user_id: Optional[str] = None,
+    user_ids: Optional[list[str]] = None,
+    group_id: Optional[str] = None,
+    status: Optional[str] = None,
+    task_type: Optional[str] = None,
+    task_name: Optional[str] = None,
+    backend: Optional[str] = None,
+    is_refunded: Optional[bool] = None,
+    min_points: Optional[int] = None,
+    max_points: Optional[int] = None,
+    prompt_search: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+) -> dict[str, Any]:
+    """管理员每日趋势:请求数 / 积分 / 去重用户数,按北京日历日,缺日补 0。
+
+    未给 days / date_from / date_to 时默认最近 DEFAULT_DAILY_DAYS 天,
+    避免「全部时间」把整表扫进图表。上限 MAX_DAYS。
+    `user_ids=[]` 表示姓名搜索无命中。
+    """
+    defaulted = False
+    if date_from is not None or date_to is not None:
+        if date_from is None:
+            date_from = (date_to or datetime.now(timezone.utc)) - timedelta(days=DEFAULT_DAILY_DAYS)
+        if date_to is None:
+            date_to = datetime.now(timezone.utc)
+        start, end = date_from, date_to
+        span = (to_beijing(end).date() - to_beijing(start).date()).days + 1
+        if span > MAX_DAYS:
+            start = end - timedelta(days=MAX_DAYS - 1)
+    elif days is not None:
+        start, end = _now_window(min(max(days, 1), MAX_DAYS))
+    else:
+        defaulted = True
+        start, end = _now_window(DEFAULT_DAILY_DAYS)
+    if start is None:
+        start = end - timedelta(days=DEFAULT_DAILY_DAYS)
+
+    filters = {
+        "user_id": user_id,
+        "user_ids": user_ids,
+        "group_id": group_id,
+        "days": days if not defaulted else (days or DEFAULT_DAILY_DAYS),
+        "date_from": date_from.isoformat() if date_from else None,
+        "date_to": date_to.isoformat() if date_to else None,
+        "status": status,
+        "task_type": task_type,
+        "task_name": task_name,
+        "backend": backend,
+        "is_refunded": is_refunded,
+        "min_points": min_points,
+        "max_points": max_points,
+        "prompt_search": prompt_search,
+        "defaulted_days": defaulted,
+    }
+    empty_days = fill_daily_gaps([], start, end) if start and end else []
+    if user_ids is not None and len(user_ids) == 0:
+        return {
+            "view": "daily",
+            "scope": _scope_label(filters["days"] if isinstance(filters["days"], int) else None),
+            "bot_id": bot_id,
+            "filters": filters,
+            "days": empty_days,
+        }
+
+    rows = await RHComfyuiTaskRecord.get_daily_series(
+        bot_id=bot_id,
+        user_id=user_id,
+        user_ids=user_ids,
+        group_id=group_id,
+        status=status,
+        task_type=task_type,
+        task_name=task_name,
+        backend=backend,
+        is_refunded=is_refunded,
+        min_points=min_points,
+        max_points=max_points,
+        prompt_search=prompt_search,
+        start_time=start,
+        end_time=end,
+    )
+    rows = rows or []
+    return {
+        "view": "daily",
+        "scope": _scope_label(filters["days"] if isinstance(filters["days"], int) else None),
+        "bot_id": bot_id,
+        "filters": filters,
+        "days": fill_daily_gaps(rows, start, end),
     }
 
 
@@ -526,7 +724,10 @@ __all__ = [
     "build_user_consumption_payload",
     "build_admin_consumption_payload",
     "build_admin_records_payload",
+    "build_admin_daily_payload",
     "build_record_detail_payload",
     "resolve_record_saved_file",
+    "fill_daily_gaps",
     "to_beijing",
+    "DEFAULT_DAILY_DAYS",
 ]

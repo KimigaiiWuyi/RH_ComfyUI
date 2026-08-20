@@ -29,9 +29,9 @@ from .RH_ComfyUI.api import (  # noqa: F401
     cancel_generation,
     settle_model_cost,
     force_refill_points,
-    reconcile_seedance_usage_billing,
     get_all_tier_quotas,
     get_model_input_schema,
+    reconcile_seedance_usage_billing,
 )
 from .RH_ComfyUI.utils.backends import (  # noqa: F401
     AdapterRegistry,
@@ -62,6 +62,7 @@ from .RH_ComfyUI.core.billing.points_api import (
 
 # 结构化查询入口:显式 re-export,外部无需依赖隐式子包路径
 from .RH_ComfyUI.utils.database.consumption import (  # noqa: F401
+    build_admin_daily_payload,
     resolve_record_saved_file,
     build_admin_records_payload,
     build_record_detail_payload,
@@ -103,6 +104,7 @@ __all__ = [
     "build_user_consumption_payload",
     "build_admin_consumption_payload",
     "build_admin_records_payload",
+    "build_admin_daily_payload",
     "build_record_detail_payload",
     "resolve_record_saved_file",
     # 跨插件积分扣减(宿主 credit 入口)
