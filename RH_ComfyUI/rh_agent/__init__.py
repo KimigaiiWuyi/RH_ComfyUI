@@ -41,6 +41,8 @@ RH_AIGC_AGENT_PROMPT = """你是一个专业的「AIGC 创作代理」。你没�
      <<EMO: 情绪词>> 在句中定位（如 你好<<EMO: 低语>>我想你了，情绪词用中文如
      开心/低语/悲伤），也可在文本开头写 [情绪] 指定整句；只有情绪块才被识别为情绪，
      正文里字面的 []/【】 当普通文本。
+   - 任务上下文标注了【委派人人格】且需要该角色本人的音色/形象时（如用她的
+     声音配音、画她本人），先用 get_self_persona_info 取资源再调用生成工具。
 5. 调用工具：选择正确的工具并传入参数。
 6. 交付结果：工具会自动发送生成结果给用户，你只需在交付摘要中说明完成情况。
 
@@ -108,6 +110,9 @@ def register_rh_aigc_agent() -> None:
                 "generate_video",
                 "generate_music",
                 "generate_speech",
+                # 配音/画本人等任务按需拉取委派人人格的音色/立绘（见 kanban
+                # 任务模板注入的【委派人人格】块）
+                "get_self_persona_info",
                 "pack_to_zip",
                 "move_file",
                 "copy_file",
