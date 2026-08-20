@@ -19,6 +19,17 @@ from ...core.request import (
 from ...core.pipeline import NodeDef, MappingRule
 
 
+def _guess_audio_upload_name(data: bytes) -> str:
+    """按魔数给 RunningHub 上传一个带后缀的音频文件名。"""
+    if data[:4] == b"RIFF":
+        return "input.wav"
+    if data[:4] == b"OggS":
+        return "input.ogg"
+    if data[:4] == b"ftyp" or data[4:8] == b"ftyp":
+        return "input.m4a"
+    return "input.mp3"
+
+
 class RHAppAdapter(Adapter):
     """RunningHub 原生 AI 应用后端"""
 
@@ -40,9 +51,9 @@ class RHAppAdapter(Adapter):
 
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(
-            supported_tasks=["image"],
-            supported_params=["prompt", "width", "height", "images"],
-            output_mime=["image/png", "image/jpeg"],
+            supported_tasks=["image", "speech"],
+            supported_params=["prompt", "width", "height", "images", "reference_audio", "mood"],
+            output_mime=["image/png", "image/jpeg", "audio/mpeg", "audio/wav"],
             mode="async_poll",
             priority=55,
         )
@@ -165,6 +176,12 @@ class RHAppAdapter(Adapter):
                         raise RuntimeError(f"[RHApp] 映射图片列表包含非 bytes 元素: target={target}")
                     uploaded.append(await self.api.upload_file(item, filename=f"input_{i}.png"))
                 value = ",".join(uploaded) if len(uploaded) > 1 else uploaded[0]
+            elif mapping_type in {"audio", "upload_audio"}:
+                if not isinstance(value, bytes):
+                    if optional:
+                        continue
+                    raise RuntimeError(f"[RHApp] 映射上传音频需要 bytes 输入: target={target}")
+                value = await self.api.upload_file(value, filename=_guess_audio_upload_name(value))
             elif mapping_type:
                 raise RuntimeError(f"[RHApp] 未知映射类型: {mapping_type}")
 

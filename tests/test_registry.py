@@ -76,3 +76,14 @@ def test_partial_name_and_modality():
     assert m is not None and m.name == "qwen_2512"
     assert reg.find_by_partial_name("qwen", TaskType.VIDEO) is None
     assert len(reg.by_modality(TaskType.IMAGE)) == 2
+
+
+def test_partial_name_is_case_insensitive_and_prefers_exact():
+    """命令入口会把首词 lower();IndexTTS2.5 必须精确命中,不能被 IndexTTS2 抢走。"""
+    from RH_ComfyUI.core.routing.registry import match_partial_name
+
+    names = ["IndexTTS2", "IndexTTS2.5", "mimo_tts"]
+    assert match_partial_name(names, "indextts2.5", lambda n: n) == "IndexTTS2.5"
+    assert match_partial_name(names, "IndexTTS2.5", lambda n: n) == "IndexTTS2.5"
+    assert match_partial_name(names, "indextts2", lambda n: n) == "IndexTTS2"
+    assert match_partial_name(names, "indextts", lambda n: n) == "IndexTTS2"

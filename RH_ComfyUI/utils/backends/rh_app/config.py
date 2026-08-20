@@ -14,6 +14,7 @@ RH_APP_CAMERA_ANGLE = "rh_camera_angle"
 RH_APP_IMAGE_MATTING = "rh_image_matting"
 RH_APP_IMAGE_UPSCALE = "rh_image_upscale"
 RH_APP_IMAGE_OUTPAINT = "rh_image_outpaint"
+RH_APP_INDEXTTS25 = "IndexTTS2.5"
 
 RH_APP_OPTIONS: tuple[str, ...] = (
     RH_APP_ANIMA,
@@ -21,6 +22,7 @@ RH_APP_OPTIONS: tuple[str, ...] = (
     RH_APP_IMAGE_MATTING,
     RH_APP_IMAGE_UPSCALE,
     RH_APP_IMAGE_OUTPAINT,
+    RH_APP_INDEXTTS25,
 )
 
 
@@ -74,6 +76,7 @@ __all__ = [
     "RH_APP_IMAGE_MATTING",
     "RH_APP_IMAGE_OUTPAINT",
     "RH_APP_IMAGE_UPSCALE",
+    "RH_APP_INDEXTTS25",
     "RH_APP_OPTIONS",
     "is_rh_app_enabled",
     "rh_app_disabled_reason",

@@ -27,15 +27,21 @@ _N = TypeVar("_N")
 
 
 def match_partial_name(candidates: Sequence[_N], partial: str, name_of: Callable[[_N], str]) -> Optional[_N]:
-    """精确 → 前缀 → 包含 三级模糊匹配(ModelRegistry / PipelineRegistry 共用)"""
+    """精确 → 前缀 → 包含 三级模糊匹配(ModelRegistry / PipelineRegistry 共用)
+
+    比较一律忽略大小写:命令入口会把首词 lower(),模型名如 IndexTTS2.5 才能命中。
+    """
+    key = (partial or "").lower()
+    if not key:
+        return None
     for c in candidates:
-        if partial == name_of(c):
+        if key == name_of(c).lower():
             return c
     for c in candidates:
-        if name_of(c).startswith(partial):
+        if name_of(c).lower().startswith(key):
             return c
     for c in candidates:
-        if partial in name_of(c):
+        if key in name_of(c).lower():
             return c
     return None
 

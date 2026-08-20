@@ -45,6 +45,7 @@ _RH_APP_NAMES = [
     "rh_image_matting",
     "rh_image_upscale",
     "rh_image_outpaint",
+    "IndexTTS2.5",
 ]
 _GEMINI_MODEL_NAMES = ["banana1", "banana2", "banana_pro"]
 _MINIMAX_MODEL_NAMES = ["minimax_t2a_speech", "minimax_image01", "minimax_h3"]
@@ -90,7 +91,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "从列表勾选要启用的 RH AI 应用;可自由添加内部模型名或 webappId。"
         "默认全部启用。留空则全部不启用。改完即时生效,无需重启。"
         "可选:anima / rh_camera_angle / rh_image_matting / "
-        "rh_image_upscale / rh_image_outpaint。",
+        "rh_image_upscale / rh_image_outpaint / IndexTTS2.5。",
         list(_RH_APP_NAMES),
         options=list(_RH_APP_NAMES),
     ),

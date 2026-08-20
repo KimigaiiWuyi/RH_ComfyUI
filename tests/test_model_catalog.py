@@ -82,7 +82,7 @@ def test_catalog_cancel_flags_match_channels_and_rh_app():
         by_name = {m["name"]: m for m in catalog["models"]}
 
         # rh_app:不能取消
-        for name in ("anima", "rh_camera_angle"):
+        for name in ("anima", "rh_camera_angle", "IndexTTS2.5"):
             if name not in by_name:
                 continue
             m = by_name[name]

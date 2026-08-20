@@ -54,6 +54,17 @@ def test_all_asr_models_have_dynamic_point_range():
         assert rmin < rmax, f"{m.name} 的 point_range=({rmin}, {rmax}) min==max,前端不会调 estimate"
 
 
+def test_index_tts25_shares_index_tts2_point_range():
+    """IndexTTS2.5 与 IndexTTS2 同费率,max 文本同样要够长才能触发 estimate。"""
+    tts2 = model_registry.get("IndexTTS2")
+    tts25 = model_registry.get("IndexTTS2.5")
+    assert tts2 is not None and tts25 is not None
+    assert tts25.point_range() == tts2.point_range()
+    rmin, rmax = tts25.point_range()
+    assert rmin < rmax
+    assert rmax >= 5
+
+
 def test_index_tts2_max_uses_realistic_text_length():
     """IndexTTS2 的 max 必须基于足够长的文本(否则费率再低也算不出差异)。
 

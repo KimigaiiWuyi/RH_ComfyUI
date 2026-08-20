@@ -83,3 +83,10 @@ def test_model_normalize_by_style():
     assert mimo is not None
     out = mimo.normalize(_req("<<EMO: 开心>> 你好"))
     assert out.prompt == "你好" and out.mood == "开心"
+
+    tts25 = model_registry.get("IndexTTS2.5")
+    assert tts25 is not None
+    out = tts25.normalize(_req("<<EMO: 开心>> 你好"))
+    assert out.prompt == "你好" and out.mood == "开心"
+    out = tts25.normalize(_req("你好", "高兴"))
+    assert out.prompt == "你好" and out.mood == "高兴"

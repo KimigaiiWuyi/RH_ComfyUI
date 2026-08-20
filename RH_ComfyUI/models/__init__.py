@@ -14,7 +14,7 @@ from gsuid_core.logger import logger
 
 from .asr import FishAsrModel
 from .video import Wan22VideoModel, SeedanceVideoModel, HappyHorseVideoModel
-from .speech import IndexTTS2Model
+from .speech import IndexTTS2Model, IndexTTS25Model
 
 
 def discover_builtin_models() -> int:
@@ -45,5 +45,6 @@ __all__ = [
     "Wan22VideoModel",
     "HappyHorseVideoModel",
     "IndexTTS2Model",
+    "IndexTTS25Model",
     "FishAsrModel",
 ]

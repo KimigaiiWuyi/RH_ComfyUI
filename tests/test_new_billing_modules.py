@@ -11,7 +11,7 @@ from RH_ComfyUI.models.image.defs import (
     MinimaxImage01Def,
 )
 from RH_ComfyUI.models.music.defs import AceStep15Def
-from RH_ComfyUI.models.speech.defs import FishTtsDef, IndexTTS2Def
+from RH_ComfyUI.models.speech.defs import FishTtsDef, IndexTTS2Def, IndexTTS25Def
 from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.speech_billing import (
     FISHAUDIO_POINTS_PER_MILLION_BYTES,
@@ -222,6 +222,14 @@ def test_index_tts2_estimate_cost_dynamic():
     m = IndexTTS2Def()
     req = _make_speech_request("你好" * 500)
     assert m.estimate_cost(req) == estimate_index_tts2_points("你好" * 500)
+
+
+def test_index_tts25_estimate_cost_matches_index_tts2():
+    """IndexTTS2.5 与 IndexTTS2 共用同一 UTF-8 字节费率。"""
+    m = IndexTTS25Def()
+    req = _make_speech_request("你好" * 500)
+    assert m.estimate_cost(req) == estimate_index_tts2_points("你好" * 500)
+    assert m.point_range() == IndexTTS2Def().point_range()
 
 
 def test_fish_tts_estimate_cost_matches_direct():

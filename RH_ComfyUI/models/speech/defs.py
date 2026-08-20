@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from ..bridge import SpeechPipelineModel
-from .overrides import FishTtsModel, IndexTTS2Model, MinimaxSpeechModel
+from .overrides import FishTtsModel, IndexTTS2Model, IndexTTS25Model, MinimaxSpeechModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
@@ -80,6 +80,96 @@ class IndexTTS2Def(IndexTTS2Model):
         上限取 5000 而非真实模型上限,是为了 UI 上展示"常见长度的最高积分"
         而非理论上限(避免误导用户以为输入多少字都是 8 积分)。
         """
+        return (
+            estimate_index_tts2_points(""),
+            estimate_index_tts2_points("你" * 5000),
+        )
+
+
+class IndexTTS25Def(IndexTTS25Model):
+    """IndexTTS2.5 — RunningHub AI App 2089692922081009666
+
+    走 rh_app OpenAPI v2(nodeInfoList),凭证复用 RH_apikey。
+    audio=参考音频, prompt=待合成文本, text=情绪(开心/高兴等,可空)。
+    计费与 IndexTTS2 相同(5 美元 / M UTF-8 bytes)。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="IndexTTS2.5",
+            display_name="IndexTTS2.5",
+            task_type=TaskType("speech"),
+            backend="rh_app",
+            point_cost=2,
+            description="IndexTTS2.5 云端语音合成，语音自然，中文发音准确，支持音色克隆与情绪",
+            knowledge_content=(
+                "IndexTTS2.5 是 RunningHub 上的 IndexTTS 2.5 语音合成应用。"
+                "\n"
+                "优势：语音自然，中文发音准确，支持参考音频音色克隆与自然语言情绪。"
+                "\n"
+                "输入：prompt 为要说的话；reference_audio 为参考音色(推荐提供)；"
+                "mood 为情绪，如开心、高兴、悲伤，可留空。"
+                "\n"
+                "适用场景：文本转语音，有声内容制作，配音，辅助阅读。"
+                "\n"
+                "不适用场景：音乐生成（建议用 ace_step1.5）。"
+                "\n"
+                "凭证：复用 RH_apikey（RunningHub 通用 key）。"
+                "\n"
+            ),
+            requirements=["rh_apikey"],
+            workflow_file="2089692922081009666",
+            mode="declarative",
+            mappings=[
+                {
+                    "source": "reference_audio",
+                    "target": "2.audio",
+                    "type": "upload_audio",
+                    "optional": True,
+                    "description": "audio",
+                },
+                {
+                    "source": "prompt",
+                    "target": "6.prompt",
+                    "description": "prompt",
+                },
+                {
+                    "source": "mood",
+                    "target": "8.text",
+                    "default": "",
+                    "description": "text",
+                },
+            ],
+            inputs={
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="合成文本", description="待合成文本"),
+                "reference_audio": PortSpec(type=PortType.AUDIO, title="参考音频", description="参考音频,用于音色复刻"),
+                "mood": PortSpec(
+                    type=PortType.STRING,
+                    title="情绪",
+                    description="情绪描述,如开心、高兴、悲伤,可留空",
+                    values=["开心", "高兴", "悲伤", "愤怒", "惊讶", "平静", "兴奋", "温柔"],
+                ),
+            },
+            outputs={
+                "audio": PortSpec(type=PortType.OUTPUT_AUDIO, description="生成的语音"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["speech"],
+                mode="async_poll",
+                priority=75,
+            ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:与 IndexTTS2 相同,按输入文本 UTF-8 字节长度计费。"""
+        return estimate_index_tts2_points(request.prompt)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(空文本) ~ 最大(5000 字符常见上限)。"""
         return (
             estimate_index_tts2_points(""),
             estimate_index_tts2_points("你" * 5000),
@@ -358,4 +448,4 @@ class FishTtsDef(FishTtsModel):
         )
 
 
-ALL_MODELS = [IndexTTS2Def, MimoTtsDef, MinimaxT2aSpeechDef, FishTtsDef]
+ALL_MODELS = [IndexTTS2Def, IndexTTS25Def, MimoTtsDef, MinimaxT2aSpeechDef, FishTtsDef]

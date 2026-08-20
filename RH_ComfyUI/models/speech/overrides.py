@@ -39,6 +39,30 @@ class IndexTTS2Model(SpeechPipelineModel):
         )
 
 
+class IndexTTS25Model(SpeechPipelineModel):
+    """IndexTTS2.5: RunningHub AI 应用上的 IndexTTS 2.5
+
+    参考音频数据流:音频输入口 → HTTP payload.reference_audio
+    → GenerationRequest.reference_audio → schema 的 reference_audio 端口
+    → rh_app 声明式映射 type=upload_audio,写入 AI 应用节点 2.audio。
+    情绪走独立自由文本(节点 8.text),如「开心」「高兴」。
+    """
+
+    emotion_style = EmotionStyle.NATURAL_LANGUAGE
+
+    def __init__(self, node: NodeDef) -> None:
+        super().__init__(node)
+        self.supports_voice_clone = True
+        self.supports_mood = True
+        self.card = ModelCard(
+            description=node.description or "IndexTTS2.5 云端语音合成,中文发音准确,支持音色克隆与情绪",
+            strengths=["中文自然", "参考音频克隆", "情绪/语气控制", "云端无需本地 GPU"],
+            categories=["有声内容", "配音", "数字人语音"],
+            weaknesses=["不适合唱歌与方言"],
+            languages=["zh"],
+        )
+
+
 class MinimaxSpeechModel(SpeechPipelineModel):
     """MiniMax T2A:情绪走固定枚举 —— 枚举外的情绪(含中文自由描述)自动收敛/丢弃"""
 
@@ -82,4 +106,4 @@ class FishTtsModel(SpeechPipelineModel):
         )
 
 
-__all__ = ["IndexTTS2Model", "MinimaxSpeechModel", "FishTtsModel"]
+__all__ = ["IndexTTS2Model", "IndexTTS25Model", "MinimaxSpeechModel", "FishTtsModel"]

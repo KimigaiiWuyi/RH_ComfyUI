@@ -2,7 +2,7 @@
 
 计价规则(取自官方文档):
   - Fish Audio S2 (s2.1-pro):15 美元 / M UTF-8 bytes → 1500 积分 / M bytes
-  - IndexTTS2             : 5 美元 / M UTF-8 bytes →  500 积分 / M bytes
+  - IndexTTS2 / IndexTTS2.5: 5 美元 / M UTF-8 bytes →  500 积分 / M bytes
 
 根据输入文本的 UTF-8 字节长度计费。中文在 UTF-8 下通常 3 字节/字。
 point_cost 仅作兜底。
@@ -17,7 +17,7 @@ from typing import Optional
 # Fish Audio S2:15 美元 / M UTF-8 bytes,1 美元 = 100 积分 → 1500 积分 / M bytes
 FISHAUDIO_POINTS_PER_MILLION_BYTES: int = 1500
 
-# IndexTTS2:5 美元 / M UTF-8 bytes,1 美元 = 100 积分 → 500 积分 / M bytes
+# IndexTTS2 / IndexTTS2.5:5 美元 / M UTF-8 bytes,1 美元 = 100 积分 → 500 积分 / M bytes
 INDEX_TTS2_POINTS_PER_MILLION_BYTES: int = 500
 
 

@@ -329,6 +329,7 @@ async def generate_music(bot: Bot, ev: Event) -> None:
 
     可用模型（text 中的模型名前缀）：
     - IndexTTS2 本地模型（默认）：不加前缀，或前缀 "indextts"
+    - IndexTTS2.5 云端模型：前缀 "indextts2.5"（RunningHub AI 应用，支持音色克隆与情绪）
     - MiniMax T2A 云端模型：前缀 "minimax"
     - 小米 MiMo TTS 云端模型：前缀 "mimo"（支持音色复刻、风格控制、方言、唱歌）
 
@@ -340,9 +341,11 @@ async def generate_music(bot: Bot, ev: Event) -> None:
               格式4: "minimax [happy] 欢迎使用 RH_ComfyUI"（MiniMax + 情绪）
               格式5: "mimo [用慵懒的语调] 我爱你"（MiMo + 风格指令）
               格式6: "mimo [情绪:东北话] 哎呀妈呀"（MiMo + 方言）
+              格式7: "indextts2.5 [开心] 欢迎使用 RH_ComfyUI"（IndexTTS2.5 + 情绪）
               情绪标签用方括号包裹，放在文本开头（模型名之后）。
               当用户提到"小米"、"MiMo"、"mimo"时，必须使用 "mimo" 前缀。
               当用户提到"minimax"时，使用 "minimax" 前缀。
+              当用户提到"indextts2.5"、"IndexTTS2.5"时，使用 "indextts2.5" 前缀。
         audio_id: 可选，参考音频的资源ID，有则进行语音克隆。
                   若未提供且无用户上传音频，应先调用 get_self_persona_info 获取自身音色。
     """,

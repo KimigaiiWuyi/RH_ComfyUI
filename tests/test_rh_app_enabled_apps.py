@@ -35,6 +35,7 @@ def test_enabled_list_default_all_and_webapp_alias(monkeypatch):
     assert is_rh_app_enabled("anima") is True
     assert is_rh_app_enabled(RH_APP_CAMERA_ANGLE) is True
     assert is_rh_app_enabled("rh_image_outpaint") is True
+    assert is_rh_app_enabled("IndexTTS2.5") is True
 
     monkeypatch.setattr(rcfg, "_cfg", lambda key: [] if key == "RH_App_Enabled_Apps" else None)
     assert is_rh_app_enabled("anima") is False
@@ -106,9 +107,16 @@ def test_unnamed_rh_app_channel_does_not_self_disable(monkeypatch):
 def test_rh_app_model_unavailable_when_disabled(monkeypatch):
     import RH_ComfyUI.utils.backends.rh_app.config as rcfg
     from RH_ComfyUI.models.image.defs import ImageOutpaintDef
+    from RH_ComfyUI.models.speech.defs import IndexTTS25Def
 
     monkeypatch.setattr(rcfg, "_cfg", lambda key: [] if key == "RH_App_Enabled_Apps" else None)
     m = ImageOutpaintDef()
     assert asyncio.run(m.check_available()) is False
     reason = asyncio.run(m.unavailable_reason())
     assert "启用的 RunningHub AI 应用" in reason
+
+    tts = IndexTTS25Def()
+    assert asyncio.run(tts.check_available()) is False
+    tts_reason = asyncio.run(tts.unavailable_reason())
+    assert "IndexTTS2.5" in tts_reason
+    assert "启用的 RunningHub AI 应用" in tts_reason
