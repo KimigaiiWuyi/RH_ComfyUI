@@ -20,9 +20,20 @@ def test_fill_daily_gaps_inserts_zeros():
     by_date = {r["date"]: r for r in out}
     assert by_date["2026-08-01"]["requests"] == 3
     assert by_date["2026-08-02"]["requests"] == 0
+    assert by_date["2026-08-02"]["failed"] == 0
     assert by_date["2026-08-02"]["points"] == 0
     assert by_date["2026-08-02"]["users"] == 0
     assert by_date["2026-08-03"]["points"] == 4
+
+
+def test_beijing_day_window_inclusive_count():
+    from RH_ComfyUI.utils.database.consumption import _beijing_day_window
+
+    start, end = _beijing_day_window(14)
+    filled = fill_daily_gaps([], start, end)
+    assert len(filled) == 14
+    start30, end30 = _beijing_day_window(30)
+    assert len(fill_daily_gaps([], start30, end30)) == 30
 
 
 def test_fill_daily_gaps_empty_rows_still_emits_range():

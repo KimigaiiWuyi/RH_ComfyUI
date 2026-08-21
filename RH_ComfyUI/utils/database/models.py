@@ -1179,10 +1179,11 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
     ) -> list[dict[str, Any]]:
-        """按北京日历日聚合:请求数 / 积分合计 / 去重用户数。
+        """按北京日历日聚合:请求数 / 失败数 / 积分合计 / 去重用户数。
 
         created_at 存 UTC;SQLite 用 ``strftime(..., '+8 hours')`` 切到 UTC+8 的日期。
-        返回 ``[{date, requests, points, users}, ...]``,按 date 升序。缺日由上层补零。
+        返回 ``[{date, requests, failed, points, users}, ...]``,按 date 升序。缺日由上层补零。
+        failed 口径与 get_summary 一致:status 为 failed 或 cancelled。
         """
         conds: list[ColumnElement[bool]] = []
         if bot_id is not None:
@@ -1213,9 +1214,20 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
 
         # 北京日历日(UTC+8)。SQLite datetime 修饰符;列是 naive UTC 字符串。
         day_expr = func.strftime("%Y-%m-%d", col(cls.created_at), "+8 hours")
+        failed_v = RHComfyuiTaskStatus.FAILED.value
+        cancelled_v = RHComfyuiTaskStatus.CANCELLED.value
         stmt = select(
             day_expr.label("day"),
             func.count().label("requests"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (col(cls.status).in_((failed_v, cancelled_v)), 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("failed"),
             func.coalesce(func.sum(col(cls.point_cost)), 0).label("points"),
             func.count(func.distinct(col(cls.user_id))).label("users"),
         ).select_from(cls)
@@ -1232,6 +1244,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
                 {
                     "date": day,
                     "requests": int(r.requests or 0),
+                    "failed": int(r.failed or 0),
                     "points": int(r.points or 0),
                     "users": int(r.users or 0),
                 }

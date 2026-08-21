@@ -123,7 +123,17 @@ def _scope_label(days: Optional[int]) -> str:
 
 
 MAX_DAYS = 365
-DEFAULT_DAILY_DAYS = 30
+DEFAULT_DAILY_DAYS = 14
+
+
+def _beijing_day_window(days: int) -> tuple[datetime, datetime]:
+    """最近 N 个北京日历日(含今天),返回 UTC aware (start 00:00, end 23:59:59.999999 +08)。"""
+    n = min(max(int(days), 1), MAX_DAYS)
+    today = to_beijing(datetime.now(timezone.utc)).date()
+    start_d = today - timedelta(days=n - 1)
+    start = datetime(start_d.year, start_d.month, start_d.day, tzinfo=BEIJING_TZ)
+    end = datetime(today.year, today.month, today.day, 23, 59, 59, 999999, tzinfo=BEIJING_TZ)
+    return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
 
 _EMPTY_SUMMARY: dict[str, Any] = {
     "total": 0,
@@ -158,6 +168,7 @@ def fill_daily_gaps(
             {
                 "date": key,
                 "requests": int(hit.get("requests") or 0) if hit else 0,
+                "failed": int(hit.get("failed") or 0) if hit else 0,
                 "points": int(hit.get("points") or 0) if hit else 0,
                 "users": int(hit.get("users") or 0) if hit else 0,
             }
@@ -574,7 +585,7 @@ async def build_admin_daily_payload(
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
 ) -> dict[str, Any]:
-    """管理员每日趋势:请求数 / 积分 / 去重用户数,按北京日历日,缺日补 0。
+    """管理员每日趋势:请求数 / 失败数 / 积分 / 去重用户数,按北京日历日,缺日补 0。
 
     未给 days / date_from / date_to 时默认最近 DEFAULT_DAILY_DAYS 天,
     避免「全部时间」把整表扫进图表。上限 MAX_DAYS。
@@ -591,12 +602,10 @@ async def build_admin_daily_payload(
         if span > MAX_DAYS:
             start = end - timedelta(days=MAX_DAYS - 1)
     elif days is not None:
-        start, end = _now_window(min(max(days, 1), MAX_DAYS))
+        start, end = _beijing_day_window(days)
     else:
         defaulted = True
-        start, end = _now_window(DEFAULT_DAILY_DAYS)
-    if start is None:
-        start = end - timedelta(days=DEFAULT_DAILY_DAYS)
+        start, end = _beijing_day_window(DEFAULT_DAILY_DAYS)
 
     filters = {
         "user_id": user_id,
