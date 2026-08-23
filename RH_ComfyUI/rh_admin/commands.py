@@ -109,13 +109,13 @@ def check_pm(ev: Event) -> Tuple[bool, str]:
     return False, "🚫 您不是管理员，无法执行此操作！"
 
 
-@ai_tools(check_func=check_pm)
+@ai_tools(covers=["写入指定用户的 RH_ComfyUI 积分增量"], check_func=check_pm)
 async def add_user_points(
     target_user_id: Annotated[str, Meta(description="目标用户的唯一标识 ID")],
     point_num: Annotated[int, Meta(description="要增加的积分数量,必须大于 0")],
     ev: Event,
 ) -> str:
-    """增加指定用户的积分.
+    """查询并写入指定用户的积分增量.
 
     该工具用于为特定用户增加积分点数,常用于奖励用户、补偿积分或进行活动赠送.
 
@@ -143,13 +143,13 @@ async def add_user_points(
         return "❌ 增加积分失败！"
 
 
-@ai_tools(check_func=check_pm)
+@ai_tools(covers=["改写指定用户的 RH_ComfyUI 积分余额（扣除）"], check_func=check_pm)
 async def deduct_user_points(
     target_user_id: Annotated[str, Meta(description="目标用户的唯一标识 ID")],
     point_num: Annotated[int, Meta(description="要扣除的积分数量,必须大于 0")],
     ev: Event,
 ) -> str:
-    """扣除指定用户的积分.
+    """查询并改写指定用户的积分余额（扣除）.
 
     该工具用于从特定用户扣除积分点数,常用于消费积分、惩罚或进行积分调整.
     如果用户积分不足,将扣除全部剩余积分.
@@ -186,7 +186,9 @@ async def deduct_user_points(
         return "❌ 扣除积分失败！"
 
 
-@ai_tools
+@ai_tools(
+    covers=["查询指定用户的 RH_ComfyUI 当前积分"],
+)
 async def query_user_points(
     target_user_id: Annotated[str, Meta(description="目标用户的唯一标识 ID")],
     ev: Event,
@@ -215,7 +217,9 @@ async def query_user_points(
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@ai_tools
+@ai_tools(
+    covers=["查询用户生图/视频/音乐/语音任务执行记录"],
+)
 async def query_task_records(
     target_user_id: Annotated[str, Meta(description="目标用户 ID")],
     ev: Event,
@@ -255,7 +259,9 @@ async def query_task_records(
     return "\n".join(lines)
 
 
-@ai_tools
+@ai_tools(
+    covers=["查询全局生图任务成功失败摘要与耗时"],
+)
 async def task_stats_summary(
     ev: Event,
     days: Annotated[int, Meta(description="统计最近 N 天,默认 7")] = 7,
