@@ -34,6 +34,10 @@ def test_node_name_and_schema():
     assert "2k" in (schema["resolution"].values or [])
     assert schema["duration"].minimum == 4
     assert schema["duration"].maximum == 15
+    assert schema["ratio"].values == ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]
+    assert schema["ratio"].default == "16:9"
+    assert "adaptive" not in (schema["ratio"].values or [])
+    assert "auto" not in (schema["ratio"].values or [])
     assert "generate_audio" not in schema
     assert m.supports_remote_cancel is True
 
@@ -82,19 +86,17 @@ def test_estimate_cost_charges_images_over_five():
     assert m.estimate_cost(req6) - m.estimate_cost(req5) == 20
 
 
-def test_validate_t2v_rejects_adaptive():
+def test_validate_t2v_snaps_adaptive_and_auto():
     m = MiniMaxH3Def()
-    req = GenerationRequest(
-        task_type=TaskType.VIDEO,
-        prompt="一只猫在草地上奔跑",
-        ratio="adaptive",
-        generate_audio=True,
-    )
-    try:
+    for raw in ("adaptive", "auto", "", None):
+        req = GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="一只猫在草地上奔跑",
+            ratio=raw,
+            generate_audio=True,
+        )
         m.validate(req)
-        raise AssertionError("expected ValidationError")
-    except ValidationError as e:
-        assert "adaptive" in str(e)
+        assert req.ratio == "16:9"
 
 
 def test_validate_accepts_t2v():
@@ -249,7 +251,11 @@ def test_to_api_resolution_and_ratio():
     spec_i2v = classify_minimax_h3(
         GenerationRequest(task_type=TaskType.VIDEO, prompt="a", images=[b"x"], ratio="16:9")
     )
-    assert to_api_ratio(spec_i2v) == "adaptive"
+    assert to_api_ratio(spec_i2v) == "16:9"
+    spec_auto = classify_minimax_h3(
+        GenerationRequest(task_type=TaskType.VIDEO, prompt="a", images=[b"x"], ratio="adaptive")
+    )
+    assert to_api_ratio(spec_auto) == "16:9"
 
 
 def test_render_create_t2v_body():
@@ -302,7 +308,7 @@ def test_render_create_i2v_first_frame():
         p = MiniMaxH3Provider(api_key="k")
         _method, _url, _headers, body = await p.render_create(spec, model="MiniMax-H3")
         assert body["resolution"] == "768P"
-        assert body["ratio"] == "adaptive"
+        assert body["ratio"] == "16:9"
         assert body["content"][1]["type"] == "image_url"
         assert body["content"][1]["role"] == "first_frame"
         assert body["content"][1]["image_url"]["url"] == "https://cdn.example.com/f.png"
@@ -326,7 +332,7 @@ def test_render_create_last_frame_and_first_last():
         p = MiniMaxH3Provider(api_key="k")
         _m, _u, _h, body = await p.render_create(last, model="MiniMax-H3")
         assert body["content"][1]["role"] == "last_frame"
-        assert body["ratio"] == "adaptive"
+        assert body["ratio"] == "16:9"
 
         flf = classify_minimax_h3(
             GenerationRequest(

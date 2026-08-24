@@ -626,7 +626,6 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
         }
         self.supported_resolutions = ["768p", "2k"]
         self.supported_ratios = [
-            "adaptive",
             "21:9",
             "16:9",
             "4:3",
@@ -661,6 +660,17 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
         )
 
     def validate(self, request: GenerationRequest) -> None:
+        from ...utils.backends.minimax.h3_classify import (
+            TASK_MODE_I2V,
+            TASK_MODE_T2V,
+            TASK_MODE_REFERENCE,
+            TASK_MODE_FIRST_LAST,
+            snap_h3_ratio,
+            classify_minimax_h3,
+        )
+
+        # 目录与上游都不吃 adaptive/auto;残留值钳到 16:9,避免旧节点直接 400。
+        request.ratio = snap_h3_ratio(request.ratio)
         super().validate(request)
         prompt = (request.prompt or "").strip()
         if not prompt:
@@ -673,14 +683,6 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
         duration = request.duration
         if duration is not None and duration != 0 and not (4 <= int(duration) <= 15):
             raise ValidationError(f"{self.display_name} 时长须为 4~15 秒,当前 {duration}")
-
-        from ...utils.backends.minimax.h3_classify import (
-            TASK_MODE_I2V,
-            TASK_MODE_T2V,
-            TASK_MODE_REFERENCE,
-            TASK_MODE_FIRST_LAST,
-            classify_minimax_h3,
-        )
 
         spec = classify_minimax_h3(request)
         n_img = len(spec.images())
@@ -726,13 +728,6 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
             raise ValidationError(f"{self.display_name} 的首尾帧模式至少需要 1 张图(首帧和/或尾帧)")
         if task_mode == TASK_MODE_REFERENCE and n_img + n_vid + n_aud < 1:
             raise ValidationError(f"{self.display_name} 的全能参考模式至少需要 1 个图片/视频/音频素材")
-
-        if spec.shape == VideoTaskShape.TEXT2VIDEO:
-            ratio = (request.ratio or "").strip().lower()
-            if ratio == "adaptive":
-                raise ValidationError(
-                    f"{self.display_name} 文生视频不能使用 ratio=adaptive,请指定 16:9 / 9:16 等具体比例"
-                )
 
     async def unavailable_reason(self) -> str:
         for binding in self.channel_bindings():

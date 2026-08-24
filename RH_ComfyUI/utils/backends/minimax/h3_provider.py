@@ -98,7 +98,7 @@ class MiniMaxH3Provider:
         VideoTaskShape.MULTIMODAL,
     }
     supported_resolutions = {"768p", "2k"}
-    supported_ratios = {"adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"}
+    supported_ratios = {"21:9", "16:9", "4:3", "1:1", "3:4", "9:16"}
     min_duration = 4
     max_duration = 15
     max_images = 9

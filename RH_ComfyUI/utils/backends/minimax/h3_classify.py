@@ -1,10 +1,12 @@
 """MiniMax H3 任务形态分类
 
 官方四种生成模式(video-generation.md,与 Seedance 2.0/2.5 同构):
-  1. 文生视频 t2va          — 仅 text;ratio 必填且不能 adaptive
+  1. 文生视频 t2va          — 仅 text;ratio 必填,只吃具体比例
   2. 图生视频 i2va          — text + 1 张 first_frame 或 last_frame
   3. 首尾帧 first_last      — text + first_frame + last_frame
   4. 全能参考 r2va          — text + reference_image/video/audio
+
+ratio 白名单:21:9 / 16:9 / 4:3 / 1:1 / 3:4 / 9:16。不接受 adaptive / auto。
 
 图生(first/last)与参考(reference_*)互斥。
 
@@ -28,6 +30,11 @@ TASK_MODE_T2V = "t2v"
 TASK_MODE_I2V = "i2v"
 TASK_MODE_FIRST_LAST = "first_last"
 TASK_MODE_REFERENCE = "reference"
+
+# MiniMax-H3 官方 ratio 只吃这 6 档;adaptive/auto 会 400。
+H3_RATIOS: tuple[str, ...] = ("21:9", "16:9", "4:3", "1:1", "3:4", "9:16")
+H3_DEFAULT_RATIO = "16:9"
+_H3_RATIO_LOOKUP: dict[str, str] = {item.lower(): item for item in H3_RATIOS}
 
 _TASK_MODE_ALIASES: dict[str, str] = {
     "auto": "auto",
@@ -105,6 +112,7 @@ def classify_minimax_h3(request: GenerationRequest) -> VideoGenSpec:
     spec.shape = shape
     spec.params["task_mode"] = task_mode
     spec.params["frame_mode"] = frame_mode
+    spec.ratio = snap_h3_ratio(spec.ratio)
     if request.ordered_content and not spec.ordered_segments:
         spec.ordered_segments = _text_only_segments(request)
     _apply_h3_roles(spec, frame_mode=frame_mode)
@@ -159,24 +167,25 @@ def to_api_resolution(resolution: Optional[str]) -> str:
     return "2K"
 
 
-def to_api_ratio(spec: VideoGenSpec) -> Optional[str]:
-    """按形态决定发给上游的 ratio。
+def snap_h3_ratio(raw: Optional[str]) -> str:
+    """空 / adaptive / auto / 未知值 → 16:9;合法具体比例原样返回。"""
+    key = (raw or "").strip()
+    if not key:
+        return H3_DEFAULT_RATIO
+    mapped = _H3_RATIO_LOOKUP.get(key.lower())
+    if mapped:
+        return mapped
+    return H3_DEFAULT_RATIO
 
-    - 文生:必须具体比例(缺省 16:9,拒绝 adaptive)
-    - 图生首尾帧:恒 adaptive
-    - 多模态参考:可选,默认 adaptive
-    """
-    ratio = (spec.ratio or "").strip() or None
-    if spec.shape == VideoTaskShape.TEXT2VIDEO:
-        if not ratio or ratio.lower() == "adaptive":
-            return "16:9"
-        return ratio
-    if spec.shape in (VideoTaskShape.IMAGE2VIDEO, VideoTaskShape.FIRST_LAST_FRAME):
-        return "adaptive"
-    return ratio or "adaptive"
+
+def to_api_ratio(spec: VideoGenSpec) -> str:
+    """发给上游的 ratio:只出 6 档具体比例,从不发 adaptive/auto。"""
+    return snap_h3_ratio(spec.ratio)
 
 
 __all__ = [
+    "H3_RATIOS",
+    "H3_DEFAULT_RATIO",
     "TASK_MODE_T2V",
     "TASK_MODE_I2V",
     "TASK_MODE_FIRST_LAST",
@@ -184,5 +193,6 @@ __all__ = [
     "normalize_task_mode",
     "classify_minimax_h3",
     "to_api_resolution",
+    "snap_h3_ratio",
     "to_api_ratio",
 ]

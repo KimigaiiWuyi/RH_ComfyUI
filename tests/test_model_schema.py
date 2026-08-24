@@ -77,6 +77,9 @@ def test_minimax_h3_declares_media_ports():
     assert node.inputs["duration"].minimum == 4
     assert node.inputs["duration"].maximum == 15
     assert node.inputs["resolution"].values == ["768p", "2k"]
+    assert node.inputs["ratio"].values == ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]
+    assert node.inputs["ratio"].default == "16:9"
+    assert "adaptive" not in node.inputs["ratio"].values
     assert "generate_audio" not in node.inputs
 
 

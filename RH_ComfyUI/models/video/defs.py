@@ -1311,7 +1311,7 @@ class MiniMaxH3Def(MiniMaxH3VideoModel):
                 "\n"
                 "  - auto: 0 图=文生 / 1 图=图生首帧 / 2 图=首尾帧 / 图+音视频或≥3 图=全能参考"
                 "\n"
-                "  - t2v: 文生视频(仅 prompt;ratio 须为具体比例,不能 adaptive)"
+                "  - t2v: 文生视频(仅 prompt;ratio 须为具体比例)"
                 "\n"
                 "  - i2v: 图生视频(1 张图作首帧;frame_mode=last_frame 则作尾帧)"
                 "\n"
@@ -1322,6 +1322,8 @@ class MiniMaxH3Def(MiniMaxH3VideoModel):
                 "frame_mode 细化图片角色:auto / first_frame / last_frame / first_last / reference。"
                 "\n"
                 "图生/首尾帧与参考音视频互斥,不可混用。"
+                "\n"
+                "宽高比只接受 21:9 / 16:9 / 4:3 / 1:1 / 3:4 / 9:16,不能自动。"
                 "\n"
                 "分辨率 768P / 2K;时长 4~15 秒整数;原生输出立体声音轨。"
                 "\n"
@@ -1405,13 +1407,9 @@ class MiniMaxH3Def(MiniMaxH3VideoModel):
                 "ratio": PortSpec(
                     type=PortType.ENUM,
                     default="16:9",
-                    values=["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
+                    values=["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
                     title="宽高比",
-                    description=(
-                        "文生视频必须指定具体比例(不能 adaptive);"
-                        "图生首尾帧由输入图决定(adaptive);"
-                        "参考生默认 adaptive,也可指定"
-                    ),
+                    description="输出宽高比,仅 21:9 / 16:9 / 4:3 / 1:1 / 3:4 / 9:16;不接受自动",
                 ),
                 "resolution": PortSpec(
                     type=PortType.ENUM,
