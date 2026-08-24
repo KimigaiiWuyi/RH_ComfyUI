@@ -65,6 +65,7 @@ from .RH_ComfyUI.utils.database.consumption import (  # noqa: F401
     build_admin_daily_payload,
     resolve_record_saved_file,
     build_admin_records_payload,
+    build_filter_options_payload,
     build_record_detail_payload,
     build_user_consumption_payload,
     build_admin_consumption_payload,
@@ -105,6 +106,7 @@ __all__ = [
     "build_admin_consumption_payload",
     "build_admin_records_payload",
     "build_admin_daily_payload",
+    "build_filter_options_payload",
     "build_record_detail_payload",
     "resolve_record_saved_file",
     # 跨插件积分扣减(宿主 credit 入口)

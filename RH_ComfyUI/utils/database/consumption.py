@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Optional, TypedDict, overload
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -191,6 +192,7 @@ async def build_user_consumption_payload(
     task_name: Optional[str] = None,
     trace_id: Optional[str] = None,
     backend: Optional[str] = None,
+    backend_model: Optional[str] = None,
     is_refunded: Optional[bool] = None,
     min_points: Optional[int] = None,
     max_points: Optional[int] = None,
@@ -210,9 +212,10 @@ async def build_user_consumption_payload(
         days: 仅统计最近 N 天,None 表示不限制(与 date_from/date_to 互斥)。
         status: 任务状态过滤(running / ok / failed / cancelled)。
         task_type: 任务类型过滤(image / video / music / speech)。
-        task_name: 节点名过滤(精确匹配)。
+        task_name: Pipeline 节点名过滤(精确匹配,对应表格「Pipeline」列)。
         trace_id: 追踪 ID 过滤(精确匹配)。
         backend: 后端过滤(comfyui / rh_app / seedance / ...)。
+        backend_model: 厂商模型 ID 过滤(精确匹配,对应表格「模型」列)。
         is_refunded: 是否已退积分(None=不过滤;True/False 精确匹配)。
         min_points: 最低积分消耗(含)。
         max_points: 最高积分消耗(含)。
@@ -236,6 +239,7 @@ async def build_user_consumption_payload(
         task_name=task_name,
         trace_id=trace_id,
         backend=backend,
+        backend_model=backend_model,
         is_refunded=is_refunded,
         min_points=min_points,
         max_points=max_points,
@@ -267,6 +271,7 @@ async def build_user_consumption_payload(
             "task_name": task_name,
             "trace_id": trace_id,
             "backend": backend,
+            "backend_model": backend_model,
             "is_refunded": is_refunded,
             "min_points": min_points,
             "max_points": max_points,
@@ -299,6 +304,7 @@ async def build_admin_consumption_payload(
     task_name: Optional[str] = None,
     trace_id: Optional[str] = None,
     backend: Optional[str] = None,
+    backend_model: Optional[str] = None,
     is_refunded: Optional[bool] = None,
     min_points: Optional[int] = None,
     max_points: Optional[int] = None,
@@ -329,6 +335,7 @@ async def build_admin_consumption_payload(
         "task_name": task_name,
         "trace_id": trace_id,
         "backend": backend,
+        "backend_model": backend_model,
         "is_refunded": is_refunded,
         "min_points": min_points,
         "max_points": max_points,
@@ -350,6 +357,7 @@ async def build_admin_consumption_payload(
             task_name=task_name,
             trace_id=trace_id,
             backend=backend,
+            backend_model=backend_model,
             is_refunded=is_refunded,
             min_points=min_points,
             max_points=max_points,
@@ -436,6 +444,7 @@ async def build_admin_consumption_payload(
         task_name=task_name,
         trace_id=trace_id,
         backend=backend,
+        backend_model=backend_model,
         is_refunded=is_refunded,
         min_points=min_points,
         max_points=max_points,
@@ -475,6 +484,7 @@ async def build_admin_records_payload(
     task_name: Optional[str] = None,
     trace_id: Optional[str] = None,
     backend: Optional[str] = None,
+    backend_model: Optional[str] = None,
     is_refunded: Optional[bool] = None,
     min_points: Optional[int] = None,
     max_points: Optional[int] = None,
@@ -513,6 +523,7 @@ async def build_admin_records_payload(
         "task_name": task_name,
         "trace_id": trace_id,
         "backend": backend,
+        "backend_model": backend_model,
         "is_refunded": is_refunded,
         "min_points": min_points,
         "max_points": max_points,
@@ -543,6 +554,7 @@ async def build_admin_records_payload(
         task_name=task_name,
         trace_id=trace_id,
         backend=backend,
+        backend_model=backend_model,
         is_refunded=is_refunded,
         min_points=min_points,
         max_points=max_points,
@@ -578,6 +590,7 @@ async def build_admin_daily_payload(
     task_type: Optional[str] = None,
     task_name: Optional[str] = None,
     backend: Optional[str] = None,
+    backend_model: Optional[str] = None,
     is_refunded: Optional[bool] = None,
     min_points: Optional[int] = None,
     max_points: Optional[int] = None,
@@ -618,6 +631,7 @@ async def build_admin_daily_payload(
         "task_type": task_type,
         "task_name": task_name,
         "backend": backend,
+        "backend_model": backend_model,
         "is_refunded": is_refunded,
         "min_points": min_points,
         "max_points": max_points,
@@ -643,6 +657,7 @@ async def build_admin_daily_payload(
         task_type=task_type,
         task_name=task_name,
         backend=backend,
+        backend_model=backend_model,
         is_refunded=is_refunded,
         min_points=min_points,
         max_points=max_points,
@@ -658,6 +673,39 @@ async def build_admin_daily_payload(
         "filters": filters,
         "days": fill_daily_gaps(rows, start, end),
     }
+
+
+# 筛选项几乎不随每次生成变,60s 进程缓存避免管理页连点/多 Tab 反复 DISTINCT。
+_FILTER_OPTIONS_TTL_SEC = 60.0
+_FILTER_OPTIONS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_FILTER_OPTIONS_CACHE_MAX = 16
+
+
+async def build_filter_options_payload(bot_id: str) -> dict[str, Any]:
+    """管理页筛选下拉:当前 bot 池里实际出现过的 Pipeline / 模型 / 后端。"""
+    key = bot_id or ""
+    now = time.monotonic()
+    hit = _FILTER_OPTIONS_CACHE.get(key)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    data = await RHComfyuiTaskRecord.list_filter_options(bot_id=bot_id)
+    data = data or {}
+    payload = {
+        "view": "filter_options",
+        "bot_id": bot_id,
+        "pipelines": list(data.get("pipelines") or []),
+        "models": list(data.get("models") or []),
+        "backends": list(data.get("backends") or []),
+    }
+    if len(_FILTER_OPTIONS_CACHE) >= _FILTER_OPTIONS_CACHE_MAX:
+        expired = [k for k, (exp, _) in _FILTER_OPTIONS_CACHE.items() if exp <= now]
+        for k in expired:
+            _FILTER_OPTIONS_CACHE.pop(k, None)
+        if len(_FILTER_OPTIONS_CACHE) >= _FILTER_OPTIONS_CACHE_MAX:
+            oldest = min(_FILTER_OPTIONS_CACHE, key=lambda k: _FILTER_OPTIONS_CACHE[k][0])
+            _FILTER_OPTIONS_CACHE.pop(oldest, None)
+    _FILTER_OPTIONS_CACHE[key] = (now + _FILTER_OPTIONS_TTL_SEC, payload)
+    return payload
 
 
 # ─────────────────────────── 单条记录详情 payload ───────────────────────────
@@ -734,6 +782,7 @@ __all__ = [
     "build_admin_consumption_payload",
     "build_admin_records_payload",
     "build_admin_daily_payload",
+    "build_filter_options_payload",
     "build_record_detail_payload",
     "resolve_record_saved_file",
     "fill_daily_gaps",

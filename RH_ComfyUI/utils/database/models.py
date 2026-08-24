@@ -723,6 +723,11 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         Index("ix_rhcomfyuitaskrecord_bot_user", "bot_id", "user_id"),
         Index("ix_rhcomfyuitaskrecord_bot_status_created", "bot_id", "status", "created_at"),
         Index("ix_rhcomfyuitaskrecord_user_created", "user_id", "created_at"),
+        # 筛选项 DISTINCT 覆盖索引,避免扫含 64KB JSON 的宽行
+        Index("ix_rhcomfyuitaskrecord_bot_pipeline", "bot_id", "task_name", "task_type"),
+        Index("ix_rhcomfyuitaskrecord_bot_bmodel", "bot_id", "backend_model"),
+        Index("ix_rhcomfyuitaskrecord_bot_bmodel_type", "bot_id", "backend_model", "task_type"),
+        Index("ix_rhcomfyuitaskrecord_bot_backend", "bot_id", "backend"),
         {"extend_existing": True},
     )
 
@@ -815,6 +820,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         status: Optional[str] = None,
         trace_id: Optional[str] = None,
         backend: Optional[str] = None,
+        backend_model: Optional[str] = None,
         is_refunded: Optional[bool] = None,
         min_points: Optional[int] = None,
         max_points: Optional[int] = None,
@@ -827,31 +833,22 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         """条件查询任务记录(按时间倒序);任一筛选条件为 None 则不加入 WHERE"""
         # 列数确定的 select 写法,避免变长 splat 导致类型退化为 Any
         conds: list[ColumnElement[bool]] = [col(cls.user_id) == user_id]
-        if bot_id is not None:
-            conds.append(col(cls.bot_id) == bot_id)
-        if task_type is not None:
-            conds.append(col(cls.task_type) == task_type)
-        if task_name is not None:
-            conds.append(col(cls.task_name) == task_name)
-        if status is not None:
-            conds.append(col(cls.status) == status)
-        if trace_id is not None:
-            conds.append(col(cls.trace_id) == trace_id)
-        if backend is not None:
-            conds.append(col(cls.backend) == backend)
-        if is_refunded is not None:
-            conds.append(col(cls.refunded) == is_refunded)
-        if min_points is not None:
-            conds.append(col(cls.point_cost) >= min_points)
-        if max_points is not None:
-            conds.append(col(cls.point_cost) <= max_points)
-        if prompt_search is not None:
-            # LIKE 模糊匹配(2026-07-01 prompt 列已加,见 exec_list)
-            conds.append(col(cls.prompt).contains(prompt_search))
-        if start_time is not None:
-            conds.append(col(cls.created_at) >= start_time)
-        if end_time is not None:
-            conds.append(col(cls.created_at) <= end_time)
+        cls._append_list_filters(
+            conds,
+            bot_id=bot_id,
+            task_type=task_type,
+            task_name=task_name,
+            status=status,
+            trace_id=trace_id,
+            backend=backend,
+            backend_model=backend_model,
+            is_refunded=is_refunded,
+            min_points=min_points,
+            max_points=max_points,
+            prompt_search=prompt_search,
+            start_time=start_time,
+            end_time=end_time,
+        )
 
         stmt = (
             select(cls)
@@ -979,6 +976,111 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             conds.append(col(cls.user_id) == user_id)
 
     @classmethod
+    def _append_list_filters(
+        cls,
+        conds: list[ColumnElement[bool]],
+        *,
+        bot_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+        task_type: Optional[str] = None,
+        task_name: Optional[str] = None,
+        status: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        backend: Optional[str] = None,
+        backend_model: Optional[str] = None,
+        is_refunded: Optional[bool] = None,
+        min_points: Optional[int] = None,
+        max_points: Optional[int] = None,
+        prompt_search: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> None:
+        """列表 / 日聚合共用 WHERE。空串视为未传。
+
+        ``task_name`` / ``backend_model`` / ``backend`` 都是精确等值
+        (下拉选列表项,不是模糊搜)。
+        """
+        if bot_id is not None:
+            conds.append(col(cls.bot_id) == bot_id)
+        if group_id is not None:
+            conds.append(col(cls.group_id) == group_id)
+        if task_type is not None:
+            conds.append(col(cls.task_type) == task_type)
+        name = (task_name or "").strip()
+        if name:
+            conds.append(col(cls.task_name) == name)
+        if status is not None:
+            conds.append(col(cls.status) == status)
+        if trace_id is not None:
+            conds.append(col(cls.trace_id) == trace_id)
+        if backend is not None:
+            conds.append(col(cls.backend) == backend)
+        model = (backend_model or "").strip()
+        if model:
+            conds.append(col(cls.backend_model) == model)
+        if is_refunded is not None:
+            conds.append(col(cls.refunded) == is_refunded)
+        if min_points is not None:
+            conds.append(col(cls.point_cost) >= min_points)
+        if max_points is not None:
+            conds.append(col(cls.point_cost) <= max_points)
+        if prompt_search is not None:
+            conds.append(col(cls.prompt).contains(prompt_search))
+        if start_time is not None:
+            conds.append(col(cls.created_at) >= start_time)
+        if end_time is not None:
+            conds.append(col(cls.created_at) <= end_time)
+
+    @classmethod
+    @with_session
+    async def list_filter_options(
+        cls,
+        session: AsyncSession,
+        bot_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """消费筛选下拉:库里实际出现过的 Pipeline(+task_type) / 模型 / 后端。
+
+        三条 DISTINCT 都走 (bot_id, …) 覆盖索引,不读 raw_response 等宽列。
+        空串不进列表。同名 Pipeline 若出现多种 task_type,保留先见到的。
+        """
+        conds: list[ColumnElement[bool]] = []
+        if bot_id is not None:
+            conds.append(col(cls.bot_id) == bot_id)
+
+        def _where(stmt):  # type: ignore[no-untyped-def]
+            return stmt.where(and_(*conds)) if conds else stmt
+
+        type_rank = {"image": 0, "video": 1, "music": 2, "speech": 3}
+
+        async def _named_types(name_col) -> list[dict[str, str]]:  # type: ignore[no-untyped-def]
+            stmt = _where(select(name_col, col(cls.task_type)).where(name_col != "").distinct())
+            rows = (await session.execute(stmt)).all()
+            first: dict[str, str] = {}
+            for name, ttype in rows:
+                n = str(name or "").strip()
+                if not n or n in first:
+                    continue
+                first[n] = str(ttype or "").strip()
+            return [
+                {"name": n, "task_type": t}
+                for n, t in sorted(
+                    first.items(),
+                    key=lambda kv: (type_rank.get(kv[1], 9), kv[0].lower()),
+                )
+            ]
+
+        async def _distinct(column) -> list[str]:  # type: ignore[no-untyped-def]
+            stmt = _where(select(column).where(column != "").distinct())
+            rows = (await session.execute(stmt)).scalars().all()
+            return sorted((str(v) for v in rows if v), key=str.lower)
+
+        return {
+            "pipelines": await _named_types(col(cls.task_name)),
+            "models": await _named_types(col(cls.backend_model)),
+            "backends": await _distinct(col(cls.backend)),
+        }
+
+    @classmethod
     @with_session
     async def list_all(
         cls,
@@ -992,6 +1094,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         status: Optional[str] = None,
         trace_id: Optional[str] = None,
         backend: Optional[str] = None,
+        backend_model: Optional[str] = None,
         is_refunded: Optional[bool] = None,
         min_points: Optional[int] = None,
         max_points: Optional[int] = None,
@@ -1009,32 +1112,23 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         """
         conds: list[ColumnElement[bool]] = []
         cls._append_user_conds(conds, user_id=user_id, user_ids=user_ids)
-        if bot_id is not None:
-            conds.append(col(cls.bot_id) == bot_id)
-        if group_id is not None:
-            conds.append(col(cls.group_id) == group_id)
-        if task_type is not None:
-            conds.append(col(cls.task_type) == task_type)
-        if task_name is not None:
-            conds.append(col(cls.task_name) == task_name)
-        if status is not None:
-            conds.append(col(cls.status) == status)
-        if trace_id is not None:
-            conds.append(col(cls.trace_id) == trace_id)
-        if backend is not None:
-            conds.append(col(cls.backend) == backend)
-        if is_refunded is not None:
-            conds.append(col(cls.refunded) == is_refunded)
-        if min_points is not None:
-            conds.append(col(cls.point_cost) >= min_points)
-        if max_points is not None:
-            conds.append(col(cls.point_cost) <= max_points)
-        if prompt_search is not None:
-            conds.append(col(cls.prompt).contains(prompt_search))
-        if start_time is not None:
-            conds.append(col(cls.created_at) >= start_time)
-        if end_time is not None:
-            conds.append(col(cls.created_at) <= end_time)
+        cls._append_list_filters(
+            conds,
+            bot_id=bot_id,
+            group_id=group_id,
+            task_type=task_type,
+            task_name=task_name,
+            status=status,
+            trace_id=trace_id,
+            backend=backend,
+            backend_model=backend_model,
+            is_refunded=is_refunded,
+            min_points=min_points,
+            max_points=max_points,
+            prompt_search=prompt_search,
+            start_time=start_time,
+            end_time=end_time,
+        )
 
         stmt = select(cls).options(*cls._defer_heavy_columns())
         if conds:
@@ -1172,6 +1266,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         task_type: Optional[str] = None,
         task_name: Optional[str] = None,
         backend: Optional[str] = None,
+        backend_model: Optional[str] = None,
         is_refunded: Optional[bool] = None,
         min_points: Optional[int] = None,
         max_points: Optional[int] = None,
@@ -1186,31 +1281,23 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         failed 口径与 get_summary 一致:status 为 failed 或 cancelled。
         """
         conds: list[ColumnElement[bool]] = []
-        if bot_id is not None:
-            conds.append(col(cls.bot_id) == bot_id)
         cls._append_user_conds(conds, user_id=user_id, user_ids=user_ids)
-        if group_id is not None:
-            conds.append(col(cls.group_id) == group_id)
-        if status is not None:
-            conds.append(col(cls.status) == status)
-        if task_type is not None:
-            conds.append(col(cls.task_type) == task_type)
-        if task_name is not None:
-            conds.append(col(cls.task_name) == task_name)
-        if backend is not None:
-            conds.append(col(cls.backend) == backend)
-        if is_refunded is not None:
-            conds.append(col(cls.refunded) == is_refunded)
-        if min_points is not None:
-            conds.append(col(cls.point_cost) >= min_points)
-        if max_points is not None:
-            conds.append(col(cls.point_cost) <= max_points)
-        if prompt_search is not None:
-            conds.append(col(cls.prompt).contains(prompt_search))
-        if start_time is not None:
-            conds.append(col(cls.created_at) >= start_time)
-        if end_time is not None:
-            conds.append(col(cls.created_at) <= end_time)
+        cls._append_list_filters(
+            conds,
+            bot_id=bot_id,
+            group_id=group_id,
+            status=status,
+            task_type=task_type,
+            task_name=task_name,
+            backend=backend,
+            backend_model=backend_model,
+            is_refunded=is_refunded,
+            min_points=min_points,
+            max_points=max_points,
+            prompt_search=prompt_search,
+            start_time=start_time,
+            end_time=end_time,
+        )
 
         # 北京日历日(UTC+8)。SQLite datetime 修饰符;列是 naive UTC 字符串。
         day_expr = func.strftime("%Y-%m-%d", col(cls.created_at), "+8 hours")
@@ -1837,6 +1924,14 @@ exec_list.extend(
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_status_created "
         "ON rhcomfyuitaskrecord (bot_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_user_created ON rhcomfyuitaskrecord (user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_pipeline "
+        "ON rhcomfyuitaskrecord (bot_id, task_name, task_type)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_bmodel "
+        "ON rhcomfyuitaskrecord (bot_id, backend_model)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_bmodel_type "
+        "ON rhcomfyuitaskrecord (bot_id, backend_model, task_type)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_backend "
+        "ON rhcomfyuitaskrecord (bot_id, backend)",
         # 统计缓存表索引(表由 create_all 建出后补索引)
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuistatscache_bot_exp ON rhcomfyuistatscache (bot_id, expires_at)",
     ]
