@@ -1,7 +1,8 @@
 """MiniMax 共用配置:API Key 热读 + 模型启用列表。
 
-网页控制台 ``MiniMax_Enabled_Models``(GsListStrConfig)决定哪些 MiniMax
-模型参与分发;默认空列表 = 全部不启用。语音 / 图片 / H3 视频共用
+网页控制台 ``MiniMax_Enabled_Models`` 只门控**官方 MiniMax 通道**;
+默认空列表 = 官方通道全关。语音 / 图片目前只有官方通道,所以等于模型不可用;
+``minimax_h3`` 若已挂其他供应商,模型仍可用。语音 / 图片 / H3 共用
 ``MiniMax_apikey``。
 """
 

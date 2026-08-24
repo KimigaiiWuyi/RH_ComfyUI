@@ -173,13 +173,14 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "MiniMax_Enable": GsBoolConfig(
         "启用 MiniMax 供应商",
-        "是否启用 MiniMax。关闭后文生图 / T2A / H3 均不可用。",
+        "是否启用官方 MiniMax 通道。关闭后文生图 / T2A / 官方 H3 通道不参与分发;"
+        "minimax_h3 若已挂外部插件通道仍可用。",
         True,
     ),
     "MiniMax_Enabled_Models": GsListStrConfig(
         "启用的 MiniMax 模型",
-        "从列表勾选要启用的 MiniMax 模型;可自由添加内部模型名。"
-        "留空则全部不启用。共用下方 MiniMax API Key。"
+        "勾选要走官方 MiniMax 通道的模型;可自由添加内部模型名。"
+        "留空则官方通道全关。minimax_h3 若已挂外部插件通道,模型本身仍可用。"
         "可选:minimax_t2a_speech / minimax_image01 / minimax_h3。",
         list(_MINIMAX_MODEL_NAMES),
         options=list(_MINIMAX_MODEL_NAMES),
@@ -372,13 +373,14 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "HappyHorse_Enable_dashscope": GsBoolConfig(
         "启用 DashScope 供应商",
-        "是否启用 DashScope 通道。禁用后 happyhorse1.1 与 wan3.0 均不可用。",
+        "是否启用官方 DashScope 通道。禁用后官方 happyhorse1.1 / wan3.0 通道不参与分发;"
+        "若已挂外部插件通道,模型仍可用。",
         True,
     ),
     "DashScope_Enabled_Models": GsListStrConfig(
         "启用的 DashScope 模型",
-        "从列表勾选要启用的 DashScope 模型;可自由添加内部模型名。"
-        "留空则全部不启用。共用下方 DashScope API Key。"
+        "勾选要走官方 DashScope 通道的模型;可自由添加内部模型名。"
+        "留空则官方通道全关。happyhorse1.1 / wan3.0 若已挂外部插件通道,模型本身仍可用。"
         "可选:happyhorse1.1 / wan3.0。",
         list(_DASHSCOPE_MODEL_NAMES),
         options=list(_DASHSCOPE_MODEL_NAMES),

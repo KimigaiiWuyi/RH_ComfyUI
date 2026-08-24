@@ -220,15 +220,13 @@ def test_enabled_list_gates_wan30(monkeypatch):
 
 
 def test_model_check_available_respects_list(monkeypatch):
-    import RH_ComfyUI.models.video.overrides as ov
+    """启用列表只关官方 DashScope 通道;无外部通道时模型随之不可用。"""
+    import RH_ComfyUI.utils.backends.wan30.channel as ch_mod
 
-    monkeypatch.setattr(ov, "is_dashscope_model_enabled", lambda name: False)
+    monkeypatch.setattr(ch_mod, "is_dashscope_model_enabled", lambda name: False)
     assert asyncio.run(Wan30Def().check_available()) is False
-    monkeypatch.setattr(ov, "is_dashscope_model_enabled", lambda name: name == "wan3.0")
-    # 无 key 时通道仍不可用,但至少不再被列表提前挡住
-    # 这里只断言列表开启后会继续问通道(返回 False 也行,只要不是列表短路的文案)
     reason = asyncio.run(Wan30Def().unavailable_reason())
-    assert "启用的 DashScope 模型" not in reason or "wan3.0" in reason
+    assert "wan3.0" in reason or "DashScope" in reason or "通道" in reason or "供应商" in reason
 
 
 def test_channel_translates_happyhorse_403_to_retryable_channel_error(monkeypatch):

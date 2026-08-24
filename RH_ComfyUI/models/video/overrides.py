@@ -25,15 +25,7 @@ from ...utils.core.pipeline import NodeDef
 from ...core.channels.channel import ChannelBinding
 from ...core.channels.registry import channel_registry
 from ...utils.backends.wan30.channel import builtin_wan30_channels
-from ...utils.backends.minimax.config import (
-    minimax_disabled_reason,
-    is_minimax_model_enabled,
-)
 from ...utils.backends.seedance.config import is_seedance_model_enabled_on
-from ...utils.backends.dashscope.config import (
-    dashscope_disabled_reason,
-    is_dashscope_model_enabled,
-)
 from ...utils.backends.seedance.channel import builtin_seedance_channels
 from ...utils.backends.happyhorse.channel import builtin_happyhorse_channels
 from ...utils.backends.minimax.h3_channel import builtin_minimax_h3_channels
@@ -592,20 +584,12 @@ class HappyHorseVideoModel(VideoPipelineModel):
             vendor_model=binding.vendor_model,
         )
 
-    async def check_available(self) -> bool:
-        if not is_dashscope_model_enabled(self.name):
-            return False
-        return await super().check_available()
-
     async def unavailable_reason(self) -> str:
-        disabled = dashscope_disabled_reason(self.name, self.display_name)
-        if disabled is not None:
-            return disabled
-        return (
-            f"{self.display_name} 无可用供应商:请在 Web 控制台配置 "
-            "HappyHorse_apikey_dashscope 并启用 HappyHorse_Enable_dashscope,"
-            "同时在「启用的 DashScope 模型」中添加 happyhorse1.1"
-        )
+        for binding in self.channel_bindings():
+            if await binding.channel.check_available():
+                continue
+            return await binding.channel.unavailable_reason()
+        return f"{self.display_name} 无可用供应商"
 
 
 class MiniMaxH3VideoModel(VideoPipelineModel):
@@ -750,23 +734,12 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
                     f"{self.display_name} 文生视频不能使用 ratio=adaptive,请指定 16:9 / 9:16 等具体比例"
                 )
 
-    async def check_available(self) -> bool:
-        if not is_minimax_model_enabled(self.name):
-            return False
-        return await super().check_available()
-
     async def unavailable_reason(self) -> str:
-        disabled = minimax_disabled_reason(self.name, self.display_name)
-        if disabled is not None:
-            return disabled
         for binding in self.channel_bindings():
             if await binding.channel.check_available():
                 continue
             return await binding.channel.unavailable_reason()
-        return (
-            f"{self.display_name} 无可用供应商:请配置 MiniMax_apikey "
-            "并在「启用的 MiniMax 模型」中添加 minimax_h3"
-        )
+        return f"{self.display_name} 无可用供应商"
 
     async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
         """参考视频/音频时长钳位 + 参考图短边/宽高比(与 Seedance 共用预处理)。"""
@@ -1097,20 +1070,12 @@ class Wan30VideoModel(VideoPipelineModel):
             vendor_model=binding.vendor_model,
         )
 
-    async def check_available(self) -> bool:
-        if not is_dashscope_model_enabled(self.name):
-            return False
-        return await super().check_available()
-
     async def unavailable_reason(self) -> str:
-        disabled = dashscope_disabled_reason(self.name, self.display_name)
-        if disabled is not None:
-            return disabled
-        return (
-            f"{self.display_name} 无可用供应商:请在 Web 控制台配置 "
-            "HappyHorse_apikey_dashscope 并启用 HappyHorse_Enable_dashscope,"
-            "同时在「启用的 DashScope 模型」中添加 wan3.0"
-        )
+        for binding in self.channel_bindings():
+            if await binding.channel.check_available():
+                continue
+            return await binding.channel.unavailable_reason()
+        return f"{self.display_name} 无可用供应商"
 
 
 __all__ = [

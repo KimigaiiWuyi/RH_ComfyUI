@@ -85,6 +85,9 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
 - **`Gemini_Enabled_Models`**:与 MiniMax 同构的 GsListStrConfig,默认空。banana1 / banana2 /
   banana_pro 的 Gemini 通道仅在列表勾选后才 `check_available`。banana_pro 的
   gpt-image-2 / 外部通道不受此列表影响。
+- **`MiniMax_Enabled_Models` / `DashScope_Enabled_Models` 同理**:只关官方通道,
+  不挡 host 模型。`minimax_h3` / `happyhorse1.1` / `wan3.0` 只要有任一外部插件
+  通道可用,`/models` 就应 `available=true`。
 - **banana2 独立于 gpt-image-2**:`banana2.backend="gemini-image"`,
   `Banana2Def.channel_bindings()` 只挂 `GeminiImageChannel`;请求 Nano Banana 2
   **不经过** gpt-image-2(OpenAI 兼容)后端。日志里 `[GPT-Image2]` 是**后端名**

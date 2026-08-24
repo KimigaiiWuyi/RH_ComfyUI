@@ -1,7 +1,8 @@
 """MiniMaxH3Channel — 官方 MiniMax-H3 → 通用 ProviderChannel
 
 凭证读 SERVICE_CONFIG 的 MiniMax_apikey;可用性还要求
-MiniMax_Enabled_Models 勾选了 minimax_h3。
+MiniMax_Enabled_Models 勾选了 minimax_h3。该列表只关本官方通道,
+不决定 host 模型 ``minimax_h3`` 整体是否可用。
 """
 
 from __future__ import annotations

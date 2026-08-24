@@ -480,14 +480,12 @@ def test_channel_unavailable_without_enable(monkeypatch):
 
 
 def test_catalog_available_flips_when_enable_list_changes(monkeypatch):
-    """/models 每次 _build_entry → check_available,启用列表热改后即时刷新。"""
-    from RH_ComfyUI.models.video import overrides as ov
+    """官方通道:启用列表热改后 /models 即时刷新(无外部通道时模型=官方通道)。"""
     from RH_ComfyUI.rh_models.api import _build_entry
     from RH_ComfyUI.core.routing.registry import model_registry
     from RH_ComfyUI.utils.backends.minimax import h3_channel as ch_mod
 
     enabled: list[str] = []
-    monkeypatch.setattr(ov, "is_minimax_model_enabled", lambda name: name in enabled)
     monkeypatch.setattr(ch_mod, "is_minimax_model_enabled", lambda name: name in enabled)
     monkeypatch.setattr(ch_mod, "minimax_api_key", lambda: "sk-test")
 
@@ -502,6 +500,48 @@ def test_catalog_available_flips_when_enable_list_changes(monkeypatch):
         entry_on = asyncio.run(_build_entry(node))
         assert entry_on.available is True
     finally:
+        if prev is not None:
+            model_registry.register(prev)
+        else:
+            model_registry.unregister(model.name)
+
+
+def test_catalog_available_when_only_external_channel(monkeypatch):
+    """官方 MiniMax 未勾选时,只要外部插件通道可用,模型仍 available。"""
+    from typing import Any
+
+    from RH_ComfyUI.core import NodeOutput, ProviderChannel, channel_registry
+    from RH_ComfyUI.rh_models.api import _build_entry
+    from RH_ComfyUI.core.routing.registry import model_registry
+    from RH_ComfyUI.utils.backends.minimax import h3_channel as ch_mod
+
+    monkeypatch.setattr(ch_mod, "is_minimax_model_enabled", lambda name: False)
+    monkeypatch.setattr(ch_mod, "minimax_api_key", lambda: "")
+
+    class _Ext(ProviderChannel):
+        name = "ext-h3"
+
+        async def check_available(self) -> bool:
+            return True
+
+        async def invoke(self, **kwargs: Any) -> NodeOutput:
+            return NodeOutput()
+
+    model = MiniMaxH3Def()
+    prev = model_registry.get(model.name)
+    model_registry.register(model)
+    channel_registry.unregister("minimax_h3", "ext-h3")
+    try:
+        entry_off = asyncio.run(_build_entry(model.node))
+        assert entry_off.available is False
+        channel_registry.register_binding("minimax_h3", _Ext(), vendor_model="MiniMax-H3")
+        entry_on = asyncio.run(_build_entry(model.node))
+        assert entry_on.available is True
+        by_name = {c["name"]: c for c in entry_on.channels}
+        assert by_name["minimax-h3"]["available"] is False
+        assert by_name["ext-h3"]["available"] is True
+    finally:
+        channel_registry.unregister("minimax_h3", "ext-h3")
         if prev is not None:
             model_registry.register(prev)
         else:
