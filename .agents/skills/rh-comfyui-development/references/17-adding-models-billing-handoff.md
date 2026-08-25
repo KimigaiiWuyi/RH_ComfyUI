@@ -43,7 +43,8 @@ class NewImageModel(ImagePipelineModel):
     def estimate_cost(self, request: GenerationRequest) -> int:
         """若复用现有计费:调对应 billing mapper。"""
         from ...utils.mappers.<model>_billing import estimate_<model>_points
-        image_size = request.params.get("image_size")
+        # catalog-only 键从 params 读;别名用 or(§6.6 / §15.4 bug #6)
+        image_size = request.params.get("image_size") or request.params.get("size_mode")
         num_input_images = len(request.images) if request.images else 0
         return estimate_<model>_points(num_input_images, image_size)
 
@@ -188,8 +189,10 @@ estimate API 是否接受 num_input_images
 **改动清单**:
 1. `models/<modality>/defs.py` `node_def()` 改 `inputs`
 2. **确认 supports()**(`base/generation.py`)对 inputs 字段的判定逻辑(参考同模态其他模型)
-3. **确认 estimate_cost** 读这个字段(若 schema 暴露,estimate_cost 也应该读)
-4. **确认 estimate API** 透传这个字段(`estimate_model_points` 签名 + 路由 handler)
+3. **确认 estimate_cost** 读这个字段(若 schema 暴露,estimate_cost 也应该读)。
+   不在 `GenerationRequest` dataclass 上的键从 `request.params` 读,见 [§6.6](./06-entry-points.md)
+4. **确认 estimate API** 透传这个字段(`estimate_model_points` 签名 + 路由 handler);
+   写入 params 的键必须与 generate / estimate_cost 同名
 5. **调用方同步**:estimate 入参加读取 + query 类型同步
 6. **测试**:更新 `tests/test_model_schema.py` 契约快照(如有)
 7. **调用方 e2e**:实测 schema 渲染 + estimate 响应
@@ -230,6 +233,7 @@ model_registry.register(ExtPluginModel())
 - [ ] `/models` 中 `supports_remote_cancel` 与真实 API 一致(`rh_app`=false)
 - [ ] 浏览器实测:选新模型 → schema → estimate 实时更新
 - [ ] 手动 `curl /models/estimate?model=<name>&...` 验证新参数透传
+- [ ] 新 catalog 档位:PortSpec 名 = params 键;未升顶层的**不要**加 `GenerationRequest` 字段([§6.6](./06-entry-points.md))
 
 ## 17.8 常见出错模式
 
@@ -237,6 +241,7 @@ model_registry.register(ExtPluginModel())
 |---|---|---|
 | 调用方不调 estimate,显示固定积分 | `point_range` min == max | 用更长 max 输入 |
 | 调用方切 image_size 积分不变 | estimate_cost 读 key 与 API 写 key 不一致 | 改成同 key + `or` 兼容 |
+| 多参考被判成首尾帧 / 须使用 ratio=adaptive | `frame_mode` 停在 HTTP 顶层,没进 `request.params` | submit 透传或手写 params;validate 读 params([§6.6](./06-entry-points.md)) |
 | 4K 反而比 2K 便宜 | `_RATIO_SIZE_MAP` cell 比例错 | 按 OpenAI 4 条硬约束重建 |
 | 调用方显示 quality 控件但切换无效 | schema 暴露了计费不区分的字段 | 从 schema 移除 |
 | 输入多张图积分不变 | `estimate_model_points` 没传 `num_input_images` | 加 `images=[b""] * N` 占位 |

@@ -83,6 +83,8 @@ ComfyUI 字段注入。
 
 改某模型的请求组装 → 改对应 mapper;改参数面(校验/调用方表单)→ 改 defs 的
 PortSpec。两者必须同步(mapper 消费的字段要在 inputs 里声明)。
+catalog-only 键(`frame_mode` / `image_size` / `task_mode` 等)从
+`request.params` 读,见 [§6.6](./06-entry-points.md)。
 
 ## 9.3 配置体系(rh_config/)
 

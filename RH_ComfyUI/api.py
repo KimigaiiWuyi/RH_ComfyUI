@@ -75,9 +75,8 @@ async def submit(
                 `executor.execute_generation` 写入 `RHComfyuiTaskRecord.bot_id`。
                 不传则记为 ""(老行为,与 bot 命令路径不兼容时会丢失统计维度)。
         group_id: 触发者群号(私聊为空),同上。
-        **kwargs: 透传给 `execute_generation` 的动态参数
-                  (images / video_refs / audio_refs / width / height /
-                   ratio / resolution / duration / seed / ...)。
+        **kwargs: 组装进 GenerationRequest。已知字段进顶层;
+                  未知键(frame_mode / image_size / task_mode 等)并入 params。
 
     Returns:
         GenerationResult: 主产物 + 附属产物 + 积分/用量信息。

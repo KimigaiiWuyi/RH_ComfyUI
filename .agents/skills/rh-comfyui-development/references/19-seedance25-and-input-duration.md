@@ -162,6 +162,8 @@ estimate_model_points(..., input_video_duration=?)
 宿主 estimate / generate 应把调用方探测到的参考视频总秒数写入
 `input_video_duration`,再调引擎 `estimate_model_points` / `submit`。
 引擎不绑定具体宿主路径;契约字段即 `GenerationRequest.params` 与 estimate Query。
+`frame_mode` / `task_mode` / `output_format` 同属 catalog-only 键,一律进 params,
+见 [§6.6](./06-entry-points.md)。
 
 ### 调用方 UI(典型)
 

@@ -103,6 +103,7 @@ class NewVideoModel(VideoPipelineModel):
 | 路由优先级 | `capabilities.priority` |
 | Agent 选型描述 | `knowledge_content`(知识库)+ overrides 的 `card`(HTTP card 字段) |
 | 参数默认值/枚举 | `inputs` 的 PortSpec |
+| 新 catalog 档位(非顶层字段) | PortSpec 名 = `params` 键;`validate` / mapper / `estimate_cost` 从 params 读。**不要**给每个 enum 加 `GenerationRequest` 字段,见 [§6.6](./06-entry-points.md) |
 | 请求组装逻辑 | `utils/mappers/` 对应 mapper 函数,或 declarative `mappings` |
 | 下线模型 | 从 `ALL_MODELS` 移除(勿删类,便于回滚) |
 

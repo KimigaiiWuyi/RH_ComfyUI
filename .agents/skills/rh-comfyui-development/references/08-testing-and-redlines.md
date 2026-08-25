@@ -68,6 +68,9 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
     `ratio` 枚举;真实消费像素的(ComfyUI 工作流/rh_app:anima、qwen_2512、
     wan2.2)才保留 `width`/`height`。由 `test_model_schema.py` 与
     `test_gemini_image.py` 强制;新模型接入前先追 mapper/channel 的实际出参。
+13. **catalog 档位进 `params`,不要给每个新 enum 加 `GenerationRequest` 字段**。
+    PortSpec 名 = params 键 = `estimate_cost` 读键;`api.submit` 未知顶层 kwargs
+    已透传进 params。详见 [§6.6](./06-entry-points.md)。
 
 ## 8.3 上线自查清单
 
@@ -83,7 +86,8 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 - [ ] 异步模型:进行中 cancel 一次(status=cancelled、消费记录合理);
 - [ ] 异步模型:查一条 ok 记录的 `prompt`/`request_body_json` 是否为最终上游形态;
 - [ ] 文档同步:模型能力变化 → `knowledge_content` + 相关 README;
-      架构变化 → 本 SKILL(`.agents/skills/rh-comfyui-development/`)对应章节(含 §二十)。
+      架构变化 → 本 SKILL(`.agents/skills/rh-comfyui-development/`)对应章节(含 §二十);
+      新 catalog 档位走 params,见 [§6.6](./06-entry-points.md)。
 
 ## 8.4 常见故障定位
 
@@ -97,6 +101,7 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 | 重启后任务卡 running | 有无 vendor_task_id;宿主是否 resume_poll 或 fail+退(§二十 §20.3) |
 | rh_app 目录显示可远程取消 | `_channel_supports_remote_cancel` 是否被改坏(§二十 §20.2) |
 | 参数改了调用方没变 | 调用方读的是 `input_schema` 序列化,确认改的是 defs 的 PortSpec |
+| 多参考被判成首尾帧 / 须使用 ratio=adaptive | `frame_mode` 没进 `request.params`;validate 误读顶层字段(永远 None)。见 [§6.6](./06-entry-points.md) |
 | 通道频繁切换/全挂 | 熔断日志;`ChannelError.retryable` 是否误标 |
 | import 报 `cannot import name 'dispatcher' from 'dispatch'` | 用 `importlib.import_module`(02 章 2.1 的坑) |
 | 配完 key 不重启直接报 `LocalProtocolError: Illegal header value b'Bearer '` | 老 [§11](./11-credential-hot-reload.md) 现象:单例把空 key 冻在 `__init__`,httpx 拒收 `Bearer `(尾空格)。修法见 §9.4 / §11 |

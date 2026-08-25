@@ -197,6 +197,9 @@
 
 **契约**:schema 字段 → 调用方控件 → 当前参数 → `/models/estimate` Query
 
+generate 走 `api.submit`:**同一把钥匙**写入 `request.params`(未知顶层 kwargs
+会透传)。catalog-only 键不要升 `GenerationRequest` 字段,见 [§6.6](./06-entry-points.md)。
+
 任何一环漏了都会断:
 - schema 有字段但调用方没渲染 → 用户没法调该参数(无害)
 - schema 没字段但调用方传了 → 422(无害)

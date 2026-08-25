@@ -452,7 +452,7 @@ def _png(tag: bytes = b"") -> bytes:
 
 
 def test_three_images_auto_allow_custom_ratio():
-    """≥3 张图 auto 视为多参考,允许 9:16(画布多角色 + 竖屏)。"""
+    """≥3 张图 auto 视为多参考,允许 9:16。"""
     m = Seedance25Def()
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
@@ -514,7 +514,7 @@ def test_three_images_first_last_still_requires_adaptive():
 
 
 def test_build_request_top_level_frame_mode_into_params():
-    """画布 HTTP 顶层 frame_mode 必须进 params,validate 才能看见多参考。"""
+    """submit 顶层 frame_mode 必须进 params,validate 才能看见多参考。"""
     from RH_ComfyUI.api import _build_request
 
     req = asyncio.run(

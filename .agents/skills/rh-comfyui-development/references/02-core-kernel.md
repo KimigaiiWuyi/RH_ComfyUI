@@ -76,7 +76,7 @@ run(request)
 
 | 类型 | 说明 |
 |---|---|
-| `GenerationRequest` | 统一请求:prompt / images / video_refs / audio_refs / reference_audio / ratio / resolution / duration / seed / params(自由字典)等 |
+| `GenerationRequest` | 统一请求:prompt / images / video_refs / audio_refs / reference_audio / ratio / resolution / duration / seed / params(自由字典)等。catalog 档位(`frame_mode` / `image_size` / `task_mode` …)走 **params**,不要给每个 enum 加字段,见 [§6.6](./06-entry-points.md) |
 | `PortSpec(type, required, default, values, min_items, max_items, minimum, maximum, item_type, title, description)` | 单端口声明;title=配置面板短标题(几个字),description=完整说明(Agent 消费,调用方缺 title 时回退用它) |
 | `PortType` | TEXT/INTEGER/NUMBER/BOOLEAN/ENUM/LIST/IMAGE/AUDIO/VIDEO/CONTENT/OUTPUT_* |
 | `NodeOutput` | 模型执行产物(data/mime_type/outputs/usage/metadata) |

@@ -332,6 +332,7 @@ key 不匹配 → 永远 None → 默认 2K。
 
 **防御**:**estimate_cost 读哪个 key,estimate API 就必须写哪个 key**。
 如果模型有内部别名(早期 schema 的 size_mode),用 `or` 兼容。
+generate 路径同样把这些键放进 `request.params`(见 [§6.6](./06-entry-points.md)),不要另起一套名字。
 
 ## 15.5 改计费时自检清单
 

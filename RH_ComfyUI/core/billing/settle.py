@@ -38,7 +38,7 @@ def invoke_settle_cost(model: Any, request: Any, usage: Optional[dict[str, Any]]
 
 
 def request_from_settle_payload(params: Optional[dict[str, Any]], *, model: str = "") -> Any:
-    """从 job.params / GenerateRequest dump 构造最小 GenerationRequest(仅供 settle_cost)。"""
+    """从调用方 params / 请求 dump 构造最小 GenerationRequest(仅供 settle_cost)。"""
     from ..schema.request import TaskType, GenerationRequest
 
     p = dict(params or {})

@@ -136,6 +136,7 @@ uv run ruff format --check RH_ComfyUI tests
 6. `rh_app` ≠ `comfyui` 的 `supports_remote_cancel`。
 7. 重启丢异步任务：`vendor_task_id` + `resume_poll`。
 8. 上游只吃 `ratio` 的模型禁止假装暴露 `width`/`height`。
+9. catalog 档位(`frame_mode` / `image_size` / `task_mode` 等)不是 `GenerationRequest` 字段,进 `params`;validate / estimate_cost 从 params 读。新模型不要为每个 enum 加 dataclass 字段。详见 skill §6.6。
 
 ## Security notes
 

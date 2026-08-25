@@ -94,7 +94,7 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
   不是模型名 —— 别被误导以为路由错了。
 - **schema 用 ratio + image_size,不用宽高**:Gemini 只吃 `aspect_ratio`(枚举)+
   `image_size`(512/1K/2K/4K),不吃像素宽高。banana2 的 input 端口是 `ratio` /
-  `image_size`(`image_size` 走 params 透传给 mapper)。
+  `image_size`(`image_size` 走 `request.params`,见 [§6.6](./06-entry-points.md))。
   `generate_content` 的 aspect_ratio **没有 8:5**;mapper 把 8:5 就近折成 3:2。
 
 ## 4. input_schema 必须与模型能力一致(agent / 调用方据此判参数)
@@ -126,12 +126,10 @@ input 端口**。现全部 Seedance 变体端口已对齐。
 
 ## 5. 计费 / 退款(HTTP 入口)
 
-- http 入口用 `ExternalPrepaidPolicy`:**引擎只记账不扣费**,扣费/退款由调用方
-  (`外部插件/generate_api.py`)负责。生成失败时 调用方侧
-  `_run_generation` 的 `except` 会 `refund_rh` 退还。
-- **两笔独立积分池**:HTTP 入口扣的是 `RHBind`(与 bot 命令共用);调用方
-  `/api/account/me` 显示的是 `外部记账系统` 积分池。别混淆"扣了没退"。
-  `refund_rh` 成功现有 INFO 日志,便于对账。
+- http 入口用 `ExternalPrepaidPolicy`:**引擎只记账不扣费**,扣费/退款由
+  HTTP 宿主自行负责。生成失败时宿主自行退还预扣。
+- **两套账本勿混**:HTTP 入口走预付记账(引擎统计表仍写 `point_cost`);
+  调用方可能另有自己的积分池。别把引擎统计金额当成调用方钱包余额。
 
 ## 验证
 

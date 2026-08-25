@@ -7,7 +7,8 @@ description: >
   "怎么覆盖开源模型"、"dispatch 流程是什么"、"负载均衡/熔断怎么配"、
   "参考音频怎么接"、"取消生成任务"、"supports_remote_cancel"、
   "resume-poll / 启动恢复轮询"、"统计 prompt 不是最终上游请求"、
-  "rh_app 和 comfyui 取消能力"时触发此 SKILL。
+  "rh_app 和 comfyui 取消能力"、"动态参数进 params"、"frame_mode 从哪读"、
+  "新模型 catalog 档位不要加 GenerationRequest 字段"时触发此 SKILL。
   对所有 RH_ComfyUI 插件的开发与维护任务都应优先读取此 SKILL。
 
   RH_ComfyUI 是 gsuid_core 的 AIGC 统一生成插件(图片/视频/音乐/数字人语音)。
@@ -35,7 +36,7 @@ description: >
 | 三 | 新增/修改模型(defs.py 范式、PortSpec、NodeDef、跨字段校验、知识库) | [references/03-adding-models.md](./references/03-adding-models.md) |
 | 四 | 通道与供应商(ProviderChannel、多通道负载均衡、熔断、新增一家供应商) | [references/04-channels-and-providers.md](./references/04-channels-and-providers.md) |
 | 五 | 计费与统计(BillingPolicy、dispatch 失败语义、取消摘要、wire 摘要) | [references/05-billing-and-telemetry.md](./references/05-billing-and-telemetry.md) |
-| 六 | 三大入口(命令 / AI Agent / HTTP、cancel/resume API、HTTP 契约红线) | [references/06-entry-points.md](./references/06-entry-points.md) |
+| 六 | 三大入口(命令 / AI Agent / HTTP、cancel/resume API、HTTP 契约红线、**动态参数进 params §6.6**) | [references/06-entry-points.md](./references/06-entry-points.md) |
 | 七 | 外部插件接入(注册途径、覆盖内置模型、私有数据隔离、独立钱包) | [references/07-closed-source-extension.md](./references/07-closed-source-extension.md) |
 | 八 | 测试、代码红线与上线自查清单 | [references/08-testing-and-redlines.md](./references/08-testing-and-redlines.md) |
 | 九 | 后端 Adapter、映射器与配置体系(六后端、Seedance Provider 子层、SERVICE/PLUGIN_CONFIG 全键) | [references/09-backends-and-config.md](./references/09-backends-and-config.md) |
@@ -56,6 +57,7 @@ description: >
 | 你要做的事 | 走哪条路 | 详见 |
 |---|---|---|
 | 加一个参数面简单的新模型(复用现有 backend) | `models/<模态>/defs.py` 加一个类 + 追加 `ALL_MODELS` | 三 |
+| **新模型动态档位**(frame_mode / image_size / task_mode / 新 enum) | PortSpec 名 = `params` 键;submit 未知顶层 kwargs 会透传进 params;**不要**给每个 enum 加 dataclass 字段 | **六 §6.6**、十七 |
 | 加一个有跨字段约束的模型 | defs 类 + `overrides.py` 校验类 | 三 |
 | 加一个全新执行链的模型(新 HTTP 上游) | backends 客户端 + ProviderChannel + 继承模态 ABC + `@register_model` | 三、四 |
 | 给现有模型加一家供应商 | `channel_bindings()` 追加 `ChannelBinding` | 四 |
@@ -80,7 +82,7 @@ description: >
 | **改积分价格 / 加新计费维度 / 排查积分不准** | defs 的 `estimate_cost` / `point_range` + `utils/mappers/<model>_billing.py` 常量 | **十五** |
 | **预扣后按供应商 usage 实扣(防双重扣费)** | `settle_cost` + `BillingPolicy.settle`;调用方差额对齐 | **五、十五、十九** |
 | **历史 Seedance 2.x 按 raw usage 回算积分** | `reconcile_seedance_usage_billing` | **五** |
-| **改 schema 字段 / 加新参数面 / 排查 estimate 失效** | defs 的 `node_def()` `inputs` + `rh_models/webapi.py` 路由 handler + `rh_models/api.py:estimate_model_points` | **十六、十七** |
+| **改 schema 字段 / 加新参数面 / 排查 estimate 失效** | defs 的 `node_def()` `inputs` + `rh_models/webapi.py` 路由 handler + `rh_models/api.py:estimate_model_points`;catalog-only 键进 params | **十六、十七、六 §6.6** |
 | **调用方报"积分不变" / 不调 estimate / 422 / 4K 反便宜** | 跨引擎与调用方双侧排查 | **十五** |
 | 上传/传输前压缩图片(4K→1080P、格式不变) | `RH_ComfyUI.utils.image_process.compress_to_max_pixels_async` | **十八** |
 | **加/改 Seedance 2.5 / 输入视频时长影响积分** | defs `seedance2.5` + billing `input_video_duration` + 宿主透传 | **十九、十五** |

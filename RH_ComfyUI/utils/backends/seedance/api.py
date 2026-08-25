@@ -256,9 +256,7 @@ class SeedanceAPI:
 
             elapsed = time.time() - start
             if elapsed > max_wait_seconds:
-                # asyncio.TimeoutError 不是 RuntimeError,不动;
-                # 它没有 user_message 语义,会走 generate_api 的
-                # "TimeoutError: msg" fallback,保持可排查。
+                # TimeoutError 无 user_message,宿主按异常类名拼接 fallback。
                 raise asyncio.TimeoutError(f"Seedance 任务等待超时 ({max_wait_seconds}s): {task_id}")
 
             await asyncio.sleep(interval_seconds)

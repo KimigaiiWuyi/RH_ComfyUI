@@ -1,6 +1,6 @@
-"""ExternalPrepaidPolicy — 调用方已扣费(外部插件/外部记账系统 场景)
+"""ExternalPrepaidPolicy — 调用方已扣费(HTTP 宿主预付场景)
 
-引擎侧只记账不扣费:外部插件的扣费/退款仍由其 generate_api 自己做,
+引擎侧只记账不扣费:宿主的扣费/退款由其自身入口完成,
 本策略保证统计表的 point_cost 仍然写入正确金额。
 
 取消约定(防双退):
