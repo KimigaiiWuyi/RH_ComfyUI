@@ -231,7 +231,14 @@ class MiniMaxH3Provider:
             )
 
     async def materialize_media(self, ref: MediaRef) -> Optional[str]:
-        """URL 透传;bytes 优先走媒体 publisher,否则 data URI。"""
+        """URL 透传;bytes 优先走媒体 publisher,否则 data URI。
+
+        参考视频须在透传前钳到 2~15s:http URL 原样上传会被上游拒,或静默用超长原片。
+        """
+        if ref.kind == MediaKind.VIDEO:
+            from ...video_process import prepare_ref_video_if_clamping
+
+            ref = await prepare_ref_video_if_clamping(ref)
         if ref.url:
             return ref.url
         if ref.data is None:
@@ -445,7 +452,11 @@ class MiniMaxH3Provider:
         on_progress: Optional[Callable[[NormalizedTask], Any]] = None,
     ) -> NormalizedTask:
         self.validate_spec(spec)
-        method, url, headers, body = await self.render_create(spec, model=model)
+        from ...video_process import RefVideoClampSpec, use_ref_video_clamp
+
+        # H3 官方单段 [2,15]s、合计 ≤15s;不做 Seedance 407696 像素放大。
+        with use_ref_video_clamp(RefVideoClampSpec(min_pixels=0)):
+            method, url, headers, body = await self.render_create(spec, model=model)
         masked = mask_body(body)
         logger.info(
             f"[MiniMaxH3] 创建任务: model={model or self.VENDOR_MODEL}, endpoint={url}\n"

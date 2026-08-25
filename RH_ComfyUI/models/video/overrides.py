@@ -780,6 +780,7 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
                 max_s=self.ref_video_max_s,
                 loop_target_s=self.ref_video_loop_target_s,
                 trim_target_s=self.ref_video_trim_target_s,
+                min_pixels=0,
             )
             video_durs[_cache_key(ref)] = float(dur or 0.0)
             if action is None and new_data is raw:

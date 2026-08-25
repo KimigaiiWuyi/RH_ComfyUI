@@ -332,12 +332,17 @@ class SeedanceProvider(ABC):
     async def materialize_media(self, ref: MediaRef) -> Optional[str]:
         """默认实现:URL 透传 / bytes → base64 data URL。
 
-        参考图先做 Seedance 短边放大 + 宽高比裁切(2.0/2.5 共用),避免 http URL 把原图交给上游。
+        参考图先做短边放大 + 宽高比裁切;参考视频在 run() 绑了钳位规格时
+        按时长/像素预处理。避免 http URL 把超限原片交给上游。
         """
         if ref.kind == MediaKind.IMAGE:
             from ...image_process import prepare_seedance_image_ref
 
             ref = await prepare_seedance_image_ref(ref)
+        elif ref.kind == MediaKind.VIDEO:
+            from ...video_process import prepare_ref_video_if_clamping
+
+            ref = await prepare_ref_video_if_clamping(ref)
         if ref.url:
             return ref.url
         if ref.data is None:
@@ -594,7 +599,10 @@ class SeedanceProvider(ABC):
         from ._debug import dump_body, mask_body
 
         self.validate_spec(spec)
-        method, url, headers, body = await self.render_create(spec, model=model)
+        from ...video_process import use_ref_video_clamp, seedance_ref_video_clamp_for_vendor
+
+        with use_ref_video_clamp(seedance_ref_video_clamp_for_vendor(model)):
+            method, url, headers, body = await self.render_create(spec, model=model)
         # 请求原文:每单一次(逐个请求的日志压在 debug,轮询会把它放大)。
         # base64 已由 mask_body 换成占位符。
         masked = mask_body(body)

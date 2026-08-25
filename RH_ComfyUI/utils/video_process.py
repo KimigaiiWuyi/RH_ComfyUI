@@ -20,8 +20,11 @@ import math
 import shutil
 import asyncio
 import tempfile
-from typing import Optional
+from typing import Any, Optional
 from pathlib import Path
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 
 from gsuid_core.logger import logger
 
@@ -39,6 +42,60 @@ _FFMPEG_CONCURRENCY = max(1, int(os.environ.get("SEEDANCE_FFMPEG_CONCURRENCY", "
 _FFMPEG_THREADS = max(1, int(os.environ.get("SEEDANCE_FFMPEG_THREADS", "2")))
 
 _ffmpeg_sem: Optional[asyncio.Semaphore] = None
+
+
+@dataclass(frozen=True)
+class RefVideoClampSpec:
+    """提交前参考视频钳位;min_pixels=0 表示不放大(H3 无 Seedance 像素硬限)。"""
+
+    min_s: float = SEEDANCE_REF_VIDEO_MIN_S
+    max_s: float = SEEDANCE_REF_VIDEO_MAX_S
+    loop_target_s: float = SEEDANCE_REF_VIDEO_LOOP_TARGET_S
+    trim_target_s: float = SEEDANCE_REF_VIDEO_TRIM_TARGET_S
+    min_pixels: int = 0
+
+
+_REF_VIDEO_CLAMP: ContextVar[Optional[RefVideoClampSpec]] = ContextVar(
+    "rh_ref_video_clamp",
+    default=None,
+)
+
+
+def is_seedance25_vendor_model(model: Optional[str]) -> bool:
+    """识别 2.5 vendor id(ark 日期编码 / 网关点分 / host 名)。"""
+    if not model:
+        return False
+    m = model.strip().lower()
+    return "seedance-2-5" in m or "seedance-2.5" in m or m.endswith("seedance2.5")
+
+
+def seedance_ref_video_clamp_for_vendor(model: Optional[str]) -> RefVideoClampSpec:
+    """Seedance 2.0=15s;2.5=30s。像素下限两代共用。"""
+    if is_seedance25_vendor_model(model):
+        return RefVideoClampSpec(
+            max_s=30.0,
+            trim_target_s=29.5,
+            min_pixels=SEEDANCE_REF_VIDEO_MIN_PIXELS,
+        )
+    return RefVideoClampSpec(
+        max_s=15.0,
+        trim_target_s=14.5,
+        min_pixels=SEEDANCE_REF_VIDEO_MIN_PIXELS,
+    )
+
+
+def current_ref_video_clamp() -> Optional[RefVideoClampSpec]:
+    return _REF_VIDEO_CLAMP.get()
+
+
+@contextmanager
+def use_ref_video_clamp(spec: Optional[RefVideoClampSpec]):
+    """render_create / materialize 期间绑定钳位;并发任务各有独立 ContextVar。"""
+    token = _REF_VIDEO_CLAMP.set(spec)
+    try:
+        yield spec
+    finally:
+        _REF_VIDEO_CLAMP.reset(token)
 
 
 class VideoProcessError(RuntimeError):
@@ -377,20 +434,86 @@ async def ensure_media_bytes(ref) -> Optional[bytes]:
         return None
 
 
+async def prepare_seedance_video_ref(
+    ref: Any,
+    *,
+    min_s: float = SEEDANCE_REF_VIDEO_MIN_S,
+    max_s: float = SEEDANCE_REF_VIDEO_MAX_S,
+    loop_target_s: float = SEEDANCE_REF_VIDEO_LOOP_TARGET_S,
+    trim_target_s: float = SEEDANCE_REF_VIDEO_TRIM_TARGET_S,
+    min_pixels: int = SEEDANCE_REF_VIDEO_MIN_PIXELS,
+) -> Any:
+    """参考视频提交前改写:时长钳位 + 可选像素放大,并清掉旧 url。
+
+    ``asset://``、非视频、取不到字节、已合法时原样返回。须在 materialize
+    上传/透传之前调用,避免 http URL 把超限原片交给上游。
+    """
+    from .core.types import MediaRef, MediaKind
+
+    if not isinstance(ref, MediaRef) or ref.kind != MediaKind.VIDEO:
+        return ref
+    url = (ref.url or "").strip()
+    if url.lower().startswith("asset://"):
+        return ref
+    raw = ref.data if ref.data else await ensure_media_bytes(ref)
+    if not raw:
+        return ref
+    new_data, _dur, action = await prepare_seedance_ref_video(
+        raw,
+        min_s=min_s,
+        max_s=max_s,
+        loop_target_s=loop_target_s,
+        trim_target_s=trim_target_s,
+        min_pixels=min_pixels,
+    )
+    if action is None and new_data is raw:
+        return ref
+    return MediaRef(
+        kind=MediaKind.VIDEO,
+        data=new_data,
+        url=None,
+        role=ref.role,
+        mime_type="video/mp4",
+        filename=ref.filename,
+    )
+
+
+async def prepare_ref_video_if_clamping(ref: Any) -> Any:
+    """若当前任务绑了 RefVideoClampSpec,按该规格预处理参考视频。"""
+    clamp = current_ref_video_clamp()
+    if clamp is None:
+        return ref
+    return await prepare_seedance_video_ref(
+        ref,
+        min_s=clamp.min_s,
+        max_s=clamp.max_s,
+        loop_target_s=clamp.loop_target_s,
+        trim_target_s=clamp.trim_target_s,
+        min_pixels=clamp.min_pixels,
+    )
+
+
 __all__ = [
     "SEEDANCE_REF_VIDEO_MIN_S",
     "SEEDANCE_REF_VIDEO_MAX_S",
     "SEEDANCE_REF_VIDEO_LOOP_TARGET_S",
     "SEEDANCE_REF_VIDEO_TRIM_TARGET_S",
     "SEEDANCE_REF_VIDEO_MIN_PIXELS",
+    "RefVideoClampSpec",
     "VideoProcessError",
     "ffmpeg_semaphore",
     "ffmpeg_thread_count",
+    "is_seedance25_vendor_model",
+    "seedance_ref_video_clamp_for_vendor",
+    "current_ref_video_clamp",
+    "use_ref_video_clamp",
     "seedance_scale_for_min_pixels",
     "probe_video_meta",
     "probe_video_meta_path",
     "probe_video_duration",
     "prepare_seedance_ref_video",
     "clamp_seedance_ref_video",
+    "prepare_seedance_video_ref",
+    "prepare_ref_video_if_clamping",
     "ensure_media_bytes",
 ]

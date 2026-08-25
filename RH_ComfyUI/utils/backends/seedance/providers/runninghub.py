@@ -136,6 +136,10 @@ class RunningHubSeedanceProvider(SeedanceProvider):
             from ....image_process import prepare_seedance_image_ref
 
             ref = await prepare_seedance_image_ref(ref)
+        elif ref.kind == MediaKind.VIDEO:
+            from ....video_process import prepare_ref_video_if_clamping
+
+            ref = await prepare_ref_video_if_clamping(ref)
         if ref.url and ref.url.lower().startswith(("http://", "https://")):
             return ref.url
         if ref.data is None:

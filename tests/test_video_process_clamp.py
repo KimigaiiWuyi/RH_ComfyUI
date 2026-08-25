@@ -14,10 +14,15 @@ from RH_ComfyUI.utils.video_process import (
     SEEDANCE_REF_VIDEO_MIN_PIXELS,
     SEEDANCE_REF_VIDEO_LOOP_TARGET_S,
     SEEDANCE_REF_VIDEO_TRIM_TARGET_S,
+    RefVideoClampSpec,
     probe_video_meta,
+    use_ref_video_clamp,
     probe_video_duration,
     clamp_seedance_ref_video,
+    prepare_seedance_video_ref,
+    prepare_ref_video_if_clamping,
     seedance_scale_for_min_pixels,
+    seedance_ref_video_clamp_for_vendor,
 )
 
 
@@ -145,3 +150,88 @@ def test_long_and_small_one_pass():
     assert new_dur <= 15.0
     _dur, w, h = asyncio.run(probe_video_meta(out))
     assert w * h >= SEEDANCE_REF_VIDEO_MIN_PIXELS
+
+
+def test_seedance_ref_video_clamp_for_vendor():
+    s20 = seedance_ref_video_clamp_for_vendor("doubao-seedance-2-0")
+    assert s20.max_s == 15.0
+    assert s20.trim_target_s == 14.5
+    assert s20.min_pixels == SEEDANCE_REF_VIDEO_MIN_PIXELS
+    s25 = seedance_ref_video_clamp_for_vendor("doubao-seedance-2.5")
+    assert s25.max_s == 30.0
+    assert s25.trim_target_s == 29.5
+    ark25 = seedance_ref_video_clamp_for_vendor("doubao-seedance-2-5-pro-xxx")
+    assert ark25.max_s == 30.0
+
+
+def test_prepare_seedance_video_ref_clears_url_after_trim(monkeypatch):
+    from RH_ComfyUI.utils.core.types import MediaRef, MediaKind
+
+    async def _fake(data, **kwargs):
+        assert kwargs.get("max_s") == 15.0
+        return b"trimmed-mp4", 14.5, "trim"
+
+    monkeypatch.setattr(
+        "RH_ComfyUI.utils.video_process.prepare_seedance_ref_video",
+        _fake,
+    )
+    ref = MediaRef(kind=MediaKind.VIDEO, data=b"LONG", url="https://cdn.example.com/long.mp4")
+    out = asyncio.run(prepare_seedance_video_ref(ref, max_s=15.0, trim_target_s=14.5))
+    assert out.url is None
+    assert out.data == b"trimmed-mp4"
+    assert out.mime_type == "video/mp4"
+
+
+def test_prepare_seedance_video_ref_skips_asset_url():
+    from RH_ComfyUI.utils.core.types import MediaRef, MediaKind
+
+    ref = MediaRef(kind=MediaKind.VIDEO, url="asset://abc123")
+    out = asyncio.run(prepare_seedance_video_ref(ref))
+    assert out.url == "asset://abc123"
+
+
+def test_prepare_ref_video_if_clamping_noop_without_context(monkeypatch):
+    from RH_ComfyUI.utils.core.types import MediaRef, MediaKind
+
+    called = {"n": 0}
+
+    async def _boom(*_a, **_k):
+        called["n"] += 1
+        raise AssertionError("should not clamp without context")
+
+    monkeypatch.setattr(
+        "RH_ComfyUI.utils.video_process.prepare_seedance_video_ref",
+        _boom,
+    )
+    ref = MediaRef(kind=MediaKind.VIDEO, data=b"VID", url="https://cdn.example.com/v.mp4")
+    out = asyncio.run(prepare_ref_video_if_clamping(ref))
+    assert out is ref
+    assert called["n"] == 0
+
+
+def test_prepare_ref_video_if_clamping_uses_context(monkeypatch):
+    from RH_ComfyUI.utils.core.types import MediaRef, MediaKind
+
+    seen: dict[str, float] = {}
+
+    async def _fake(ref, **kwargs):
+        seen["max_s"] = kwargs.get("max_s", 0)
+        seen["min_pixels"] = kwargs.get("min_pixels", -1)
+        return MediaRef(kind=MediaKind.VIDEO, data=b"TRIM", url=None, mime_type="video/mp4")
+
+    monkeypatch.setattr(
+        "RH_ComfyUI.utils.video_process.prepare_seedance_video_ref",
+        _fake,
+    )
+    ref = MediaRef(kind=MediaKind.VIDEO, data=b"LONG")
+
+    async def _go():
+        with use_ref_video_clamp(RefVideoClampSpec(max_s=15.0, min_pixels=0)):
+            return await prepare_ref_video_if_clamping(ref)
+
+    out = asyncio.run(_go())
+    assert out.data == b"TRIM"
+    assert out.url is None
+    assert seen["max_s"] == 15.0
+    assert seen["min_pixels"] == 0
+

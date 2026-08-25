@@ -681,3 +681,26 @@ def test_run_sets_wire_then_binds_vendor_cancel():
             clear_wire_audit()
 
     asyncio.run(_run())
+
+
+def test_prepare_request_h3_video_skips_seedance_min_pixels(monkeypatch):
+    seen: dict[str, float] = {}
+
+    async def _fake_video(data: bytes, **kwargs):
+        seen["max_s"] = float(kwargs.get("max_s") or 0)
+        seen["min_pixels"] = float(kwargs.get("min_pixels") if "min_pixels" in kwargs else -1)
+        return data, 8.0, None
+
+    import RH_ComfyUI.utils.video_process as video_mod
+
+    monkeypatch.setattr(video_mod, "prepare_seedance_ref_video", _fake_video)
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="动作参考",
+        video_refs=[MediaRef(kind=MediaKind.VIDEO, data=b"VID" * 16)],
+        params={"task_mode": "reference"},
+        generate_audio=True,
+    )
+    asyncio.run(MiniMaxH3Def().prepare_request(req))
+    assert seen["max_s"] == 15.0
+    assert seen["min_pixels"] == 0
