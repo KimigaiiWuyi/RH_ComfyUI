@@ -17,10 +17,13 @@ from .points_api import (
     force_refill_bot_pool,
 )
 from .tier_quota import (
+    TIER_KEYS,
     CANVAS_BOT_ID,
+    UNLIMITED_TIER,
     TierQuotas,
     get_tier_quotas,
     list_tier_quotas,
+    is_unlimited_tier,
     resolve_tier_for_billing,
 )
 from .points_policy import PointsBillingPolicy
@@ -37,8 +40,11 @@ __all__ = [
     "DEFAULT_SEEDANCE_RECONCILE_MODELS",
     "reconcile_seedance_usage_billing",
     "CANVAS_BOT_ID",
+    "TIER_KEYS",
+    "UNLIMITED_TIER",
     "TierQuotas",
     "get_tier_quotas",
+    "is_unlimited_tier",
     "list_tier_quotas",
     "resolve_tier_for_billing",
     "PointsDeniedError",

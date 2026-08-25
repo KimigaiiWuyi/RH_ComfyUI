@@ -61,7 +61,11 @@ class RHBind(Bind, table=True):
     refreshed_at_5h: int = Field(default=0, title="5h计时起点unix(0=未计时)")
     refreshed_at_day: int = Field(default=0, title="日桶上次补满unix")
     refreshed_at_week: int = Field(default=0, title="周桶上次补满unix")
-    vip_tier: str = Field(default="free", title="额度档 free/basic/pro/enterprise", max_length=16)
+    vip_tier: str = Field(
+        default="free",
+        title="额度档 free/basic/pro/enterprise/special/unlimited",
+        max_length=16,
+    )
 
     # ── 内部:三桶读写 ────────────────────────────────────────────
 
@@ -160,6 +164,26 @@ class RHBind(Bind, table=True):
             )
             row = await cls.select_data(user_id=user_id, bot_id=bot_id)
             assert row is not None
+
+        if quotas.unlimited:
+            h5, day, week = cls._bucket_vals(row)
+            r5 = int(getattr(row, "refreshed_at_5h", 0) or 0)
+            rd = int(getattr(row, "refreshed_at_day", 0) or 0)
+            rw = int(getattr(row, "refreshed_at_week", 0) or 0)
+            stored_tier = str(getattr(row, "vip_tier", "") or "free")
+            if stored_tier != tier:
+                await cls.update_data(user_id=user_id, bot_id=bot_id, vip_tier=tier[:16])
+            return cls._status_dict(
+                available=cls._sync_available(h5, day, week),
+                h5=h5,
+                day=day,
+                week=week,
+                quotas=quotas,
+                r5=r5,
+                rd=rd,
+                rw=rw,
+                tier=tier,
+            )
 
         h5, day, week = cls._bucket_vals(row)
         # r5 = 5h 计时起点(0=未开始)
@@ -275,29 +299,34 @@ class RHBind(Bind, table=True):
             next_week_refresh_at,
         )
 
+        unlimited = bool(quotas.unlimited)
         return {
             "available": int(available),
             "point": int(available),
             "tier": tier,
-            "label": getattr(quotas, "label", tier),
+            "label": quotas.label,
+            "unlimited": unlimited,
             "buckets": {
                 "h5": {
                     "balance": int(h5),
                     "cap": int(quotas.h5),
                     # 0 = 未开始计时(满额闲置);>0 = 预计补满 unix
-                    "next_refresh_at": next_5h_refresh_at(r5),
+                    "next_refresh_at": 0 if unlimited else next_5h_refresh_at(r5),
                     "timer_started_at": int(r5),
-                    "timer_active": bool(r5 > 0),
+                    "timer_active": bool(r5 > 0) and not unlimited,
+                    "unlimited": unlimited,
                 },
                 "day": {
                     "balance": int(day),
                     "cap": int(quotas.day),
-                    "next_refresh_at": next_day_refresh_at(),
+                    "next_refresh_at": 0 if unlimited else next_day_refresh_at(),
+                    "unlimited": unlimited,
                 },
                 "week": {
                     "balance": int(week),
                     "cap": int(quotas.week),
-                    "next_refresh_at": next_week_refresh_at(),
+                    "next_refresh_at": 0 if unlimited else next_week_refresh_at(),
+                    "unlimited": unlimited,
                 },
             },
             "refreshed_at": {
@@ -332,6 +361,12 @@ class RHBind(Bind, table=True):
             return True, st
 
         st = await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier)
+        from ...core.billing.tier_quota import now_ts, get_tier_quotas, is_unlimited_tier
+
+        tier = str(st["tier"]) if "tier" in st else "free"
+        if is_unlimited_tier(tier):
+            return True, st
+
         h5 = int(st["buckets"]["h5"]["balance"])
         day = int(st["buckets"]["day"]["balance"])
         week = int(st["buckets"]["week"]["balance"])
@@ -359,10 +394,7 @@ class RHBind(Bind, table=True):
         h5 -= amount
         day -= amount
         week -= amount
-        tier = str(st.get("tier") or "free")
         # 5h:满额闲置(timer=0)时首次消费 → 启动计时
-        from ...core.billing.tier_quota import now_ts, get_tier_quotas
-
         r5 = int(st["refreshed_at"]["h5"])
         if r5 <= 0:
             r5 = now_ts()
@@ -422,6 +454,26 @@ class RHBind(Bind, table=True):
         else:
             tier = "free"
         quotas = get_tier_quotas(tier)
+        if quotas.unlimited:
+            if row is None:
+                await cls.create_data(user_id=user_id, bot_id=bot_id, vip_tier=tier)
+                row = await cls.select_data(user_id=user_id, bot_id=bot_id)
+                assert row is not None
+            h5, day, week = cls._bucket_vals(row)
+            r5 = int(getattr(row, "refreshed_at_5h", 0) or 0)
+            rd = int(getattr(row, "refreshed_at_day", 0) or 0)
+            rw = int(getattr(row, "refreshed_at_week", 0) or 0)
+            return cls._status_dict(
+                available=cls._sync_available(h5, day, week),
+                h5=h5,
+                day=day,
+                week=week,
+                quotas=quotas,
+                r5=r5,
+                rd=rd,
+                rw=rw,
+                tier=tier,
+            )
         if row is None:
             await cls.create_data(user_id=user_id, bot_id=bot_id, vip_tier=tier)
             row = await cls.select_data(user_id=user_id, bot_id=bot_id)
@@ -499,8 +551,11 @@ class RHBind(Bind, table=True):
         )
 
         st = await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier, force=False)
-        tier = normalize_tier(vip_tier or st.get("tier"))
+        raw_tier = vip_tier if vip_tier is not None else (st["tier"] if "tier" in st else None)
+        tier = normalize_tier(raw_tier)
         quotas = get_tier_quotas(tier)
+        if quotas.unlimited:
+            return st
         n = now_ts()
 
         if isinstance(buckets, str):
@@ -564,7 +619,7 @@ class RHBind(Bind, table=True):
     ) -> dict[str, Any]:
         """设置该 (user_id, bot_id) 池的额度档;默认立即按新档三桶补满。
 
-        与 bot_id 平台无关 — 任意 bot_id 一律可设 basic/pro/enterprise。
+        与 bot_id 平台无关 — 任意 bot_id 一律可设 special/unlimited 等档。
         """
         from ...core.billing.tier_quota import normalize_tier
 

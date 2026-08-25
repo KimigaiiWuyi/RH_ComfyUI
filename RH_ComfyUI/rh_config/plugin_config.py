@@ -113,8 +113,9 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
     # ── 三重余额额度(5h / 日 / 周);扣费从三桶同扣,可用=min ──
     "_divider_quota_tiers": GsDivider(
         "额度档位(三重余额)",
-        "5 小时 / 自然日 / 自然周 三桶满额;档位 free/basic/pro/enterprise 与 bot_id 无关,"
-        "存在 RHBind.vip_tier,HTTP/bot/agent 通用",
+        "5 小时 / 自然日 / 自然周 三桶满额;档位 free/basic/pro/enterprise/special/unlimited "
+        "与 bot_id 无关,存在 RHBind.vip_tier,HTTP/bot/agent 通用。"
+        "unlimited 不走数字 cap,扣费永不拒绝",
     ),
     "Quota_Timezone": GsStrConfig(
         "额度日/周界时区",
@@ -143,4 +144,8 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
     "Quota_Enterprise_5h": GsIntConfig("企业档·5小时额度", "enterprise 档 5h 桶满额", 80000),
     "Quota_Enterprise_Day": GsIntConfig("企业档·日额度", "enterprise 档日桶满额", 200000),
     "Quota_Enterprise_Week": GsIntConfig("企业档·周额度", "enterprise 档周桶满额", 800000),
+    # special:5h 默认 50 万,日=4×5h,周=12×5h
+    "Quota_Special_5h": GsIntConfig("特殊档·5小时额度", "special 档 5h 桶满额,默认 500000", 500000),
+    "Quota_Special_Day": GsIntConfig("特殊档·日额度", "special 档日桶满额,默认 5h×4", 2000000),
+    "Quota_Special_Week": GsIntConfig("特殊档·周额度", "special 档周桶满额,默认 5h×12", 6000000),
 }

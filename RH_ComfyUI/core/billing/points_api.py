@@ -116,7 +116,7 @@ async def set_vip_tier(
     *,
     refill: bool = True,
 ) -> dict[str, Any]:
-    """设置某池额度档(free/basic/pro/enterprise),与 bot_id 平台无关。"""
+    """设置某池额度档(free/basic/pro/enterprise/special/unlimited),与 bot_id 无关。"""
     from ...utils.database.models import RHBind
 
     return await RHBind.set_vip_tier(user_id, bot_id, tier, refill=refill)

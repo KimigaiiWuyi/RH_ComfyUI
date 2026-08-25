@@ -7,8 +7,9 @@
 
 VIP 策略(与 bot_id 无关):
   - 档位存在 RHBind.vip_tier(或调用方显式传入 vip_tier)
-  - free / basic / pro / enterprise 全入口通用(HTTP / bot / agent)
+  - free / basic / pro / enterprise / special / unlimited 全入口通用
   - 额度数字权威:``PLUGIN_CONFIG`` 的 Quota_* 键
+  - unlimited 不走三桶数字,扣费永远成功,status.unlimited=True
 """
 
 from __future__ import annotations
@@ -24,13 +25,23 @@ from ...rh_config.comfyui_config import PLUGIN_CONFIG
 # 常用 HTTP/业务入口 bot_id 约定值(任意 bot_id 均可;仅作文档化常量)
 CANVAS_BOT_ID: Final[str] = "canvas"
 
-TIER_KEYS: Final[tuple[str, ...]] = ("free", "basic", "pro", "enterprise")
+TIER_KEYS: Final[tuple[str, ...]] = (
+    "free",
+    "basic",
+    "pro",
+    "enterprise",
+    "special",
+    "unlimited",
+)
+UNLIMITED_TIER: Final[str] = "unlimited"
+_SPECIAL_H5: Final[int] = 500_000
 
 _TIER_CONFIG: Final[Dict[str, tuple[str, str, str]]] = {
     "free": ("Quota_Free_5h", "Quota_Free_Day", "Quota_Free_Week"),
     "basic": ("Quota_Basic_5h", "Quota_Basic_Day", "Quota_Basic_Week"),
     "pro": ("Quota_Pro_5h", "Quota_Pro_Day", "Quota_Pro_Week"),
     "enterprise": ("Quota_Enterprise_5h", "Quota_Enterprise_Day", "Quota_Enterprise_Week"),
+    "special": ("Quota_Special_5h", "Quota_Special_Day", "Quota_Special_Week"),
 }
 
 _TIER_FALLBACK: Final[Dict[str, tuple[int, int, int]]] = {
@@ -38,6 +49,7 @@ _TIER_FALLBACK: Final[Dict[str, tuple[int, int, int]]] = {
     "basic": (20000, 50000, 200000),
     "pro": (40000, 100000, 400000),
     "enterprise": (80000, 200000, 800000),
+    "special": (_SPECIAL_H5, _SPECIAL_H5 * 4, _SPECIAL_H5 * 12),
 }
 
 _TIER_LABELS: Final[Dict[str, str]] = {
@@ -45,6 +57,8 @@ _TIER_LABELS: Final[Dict[str, str]] = {
     "basic": "基础会员",
     "pro": "专业会员",
     "enterprise": "企业会员",
+    "special": "特殊用户",
+    "unlimited": "无上限用户",
 }
 
 
@@ -55,6 +69,7 @@ class TierQuotas:
     h5: int
     day: int
     week: int
+    unlimited: bool = False
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -63,6 +78,7 @@ class TierQuotas:
             "h5": self.h5,
             "day": self.day,
             "week": self.week,
+            "unlimited": self.unlimited,
         }
 
 
@@ -97,7 +113,11 @@ def get_5h_window_seconds() -> int:
 
 def normalize_tier(tier: Optional[str]) -> str:
     t = (tier or "free").strip().lower() or "free"
-    return t if t in _TIER_CONFIG else "free"
+    return t if t in TIER_KEYS else "free"
+
+
+def is_unlimited_tier(tier: Optional[str] = None) -> bool:
+    return normalize_tier(tier) == UNLIMITED_TIER
 
 
 def resolve_tier_for_billing(
@@ -117,6 +137,15 @@ def resolve_tier_for_billing(
 
 def get_tier_quotas(tier: Optional[str] = None) -> TierQuotas:
     t = normalize_tier(tier)
+    if t == UNLIMITED_TIER:
+        return TierQuotas(
+            tier=t,
+            label=_TIER_LABELS[t],
+            h5=0,
+            day=0,
+            week=0,
+            unlimited=True,
+        )
     k5, kd, kw = _TIER_CONFIG[t]
     f5, fd, fw = _TIER_FALLBACK[t]
     return TierQuotas(
@@ -125,6 +154,7 @@ def get_tier_quotas(tier: Optional[str] = None) -> TierQuotas:
         h5=_cfg_int(k5, f5),
         day=_cfg_int(kd, fd),
         week=_cfg_int(kw, fw),
+        unlimited=False,
     )
 
 
@@ -207,10 +237,12 @@ def needs_week_refresh(refreshed_at_week: int, now: Optional[int] = None) -> boo
 __all__ = [
     "CANVAS_BOT_ID",
     "TIER_KEYS",
+    "UNLIMITED_TIER",
     "TierQuotas",
     "get_tier_quotas",
     "list_tier_quotas",
     "normalize_tier",
+    "is_unlimited_tier",
     "resolve_tier_for_billing",
     "get_quota_timezone",
     "get_5h_window_seconds",
