@@ -21,6 +21,7 @@ import httpx
 from gsuid_core.logger import logger
 
 from .provider import SeedanceProviderError
+from ..http_retry import RetryingAsyncClient
 
 
 class SeedanceAPI:
@@ -51,7 +52,7 @@ class SeedanceAPI:
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+            self._client = RetryingAsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
         return self._client
 
     async def aclose(self) -> None:

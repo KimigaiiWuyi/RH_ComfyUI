@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import httpx
-
 from .api import rh_app_api
 from ..base import Adapter
 from ...core.types import NodeOutput, ProgressEvent, CapabilityManifest
@@ -334,10 +332,9 @@ class RHAppAdapter(Adapter):
         if not file_url:
             raise RuntimeError(f"[RHApp] 结果中没有文件 URL: {result_item}")
 
-        async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
-            response = await client.get(file_url)
-            response.raise_for_status()
-            file_data = response.content
+        from ..http_retry import download_with_network_retry
+
+        file_data = await download_with_network_retry(file_url, timeout=120, label="RHApp")
 
         return NodeOutput(
             status="ok",

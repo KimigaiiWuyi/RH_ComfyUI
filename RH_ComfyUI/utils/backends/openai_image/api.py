@@ -16,10 +16,13 @@ import base64
 import asyncio
 from typing import Any, Dict, List, Optional
 
+import httpx
 import aiohttp
 from PIL import Image
 
 from gsuid_core.logger import logger
+
+from ..http_retry import call_with_network_retry, download_with_network_retry
 
 # 像素真源:gpt_image2_billing._RATIO_SIZE_MAP(计费 / 生图 / schema 共用)
 from ...mappers.gpt_image2_billing import (
@@ -106,15 +109,14 @@ async def _to_png_bytes_async(raw: bytes) -> bytes:
 
 
 async def _download(url: str) -> bytes:
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                raise OpenAIImageError(
-                    f"下载结果图失败 HTTP {resp.status}: {url}",
-                    http_status=resp.status,
-                    user_message="下载生成结果失败,请稍后重试。",
-                )
-            return await resp.read()
+    try:
+        return await download_with_network_retry(url, timeout=120.0, label="OpenAIImage")
+    except httpx.HTTPStatusError as exc:
+        raise OpenAIImageError(
+            f"下载结果图失败 HTTP {exc.response.status_code}: {url}",
+            http_status=exc.response.status_code,
+            user_message="下载生成结果失败,请稍后重试。",
+        ) from exc
 
 
 def _edits_fields(
@@ -192,18 +194,20 @@ async def generate_image(
             "num_images": n_refs,
         },
     )
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, **request_kwargs) as resp:
-            if resp.status != 200:
-                text = await resp.text()
-                logger.warning(f"[OpenAIImage] HTTP {resp.status}: {text[:300]}")
-                raise OpenAIImageError(
-                    f"{model} 生图 HTTP {resp.status}: {text[:300]}",
-                    http_status=resp.status,
-                    user_message="生图服务返回错误,请稍后重试。",
-                )
-            data = await resp.json()
+    async def _once() -> Any:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, **request_kwargs) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    logger.warning(f"[OpenAIImage] HTTP {resp.status}: {text[:300]}")
+                    raise OpenAIImageError(
+                        f"{model} 生图 HTTP {resp.status}: {text[:300]}",
+                        http_status=resp.status,
+                        user_message="生图服务返回错误,请稍后重试。",
+                    )
+                return await resp.json()
 
+    data = await call_with_network_retry(_once, label=f"POST {url}")
     return await _extract_image(data, model)
 
 

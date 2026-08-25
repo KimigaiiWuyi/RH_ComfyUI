@@ -22,6 +22,11 @@ from PIL import Image
 
 from gsuid_core.logger import logger
 
+from ..http_retry import (
+    is_network_error,
+    call_with_network_retry,
+    download_with_network_retry,
+)
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 
@@ -93,25 +98,33 @@ class SeedreamAPI:
         for attempt in range(max_retries):
             try:
                 self._require_api_key()
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, headers=self._headers(), json=body) as resp:
-                        logger.info(f"[Seedream] 响应状态: {resp.status}")
-                        if resp.status != 200:
-                            try:
-                                err_body = await resp.text()
-                                logger.warning(f"[Seedream] 错误响应体: {err_body[:500]}")
-                            except Exception:
-                                pass
-                            # 429/5xx 退避重试一次
-                            if resp.status in (429, 500, 502, 503, 504):
-                                if attempt < max_retries - 1:
-                                    logger.warning(f"[Seedream] {resp.status} 退避后重试 ({attempt + 1}/{max_retries})")
-                                    continue
-                            return resp.status
-                        data = await resp.json()
-                        logger.debug(f"[Seedream] 响应数据: {data}")
-                        return data
+
+                async def _once() -> Union[Dict[str, Any], int]:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(url, headers=self._headers(), json=body) as resp:
+                            logger.info(f"[Seedream] 响应状态: {resp.status}")
+                            if resp.status != 200:
+                                try:
+                                    err_body = await resp.text()
+                                    logger.warning(f"[Seedream] 错误响应体: {err_body[:500]}")
+                                except Exception:
+                                    pass
+                                return resp.status
+                            data = await resp.json()
+                            logger.debug(f"[Seedream] 响应数据: {data}")
+                            return data
+
+                result = await call_with_network_retry(_once, label=f"POST {url}")
+                if isinstance(result, int):
+                    if result in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
+                        logger.warning(f"[Seedream] {result} 退避后重试 ({attempt + 1}/{max_retries})")
+                        continue
+                    return result
+                return result
             except Exception as e:  # noqa: BLE001
+                if is_network_error(e):
+                    logger.warning(f"[Seedream] 请求异常(网络重试已耗尽): {e}")
+                    return 500
                 logger.warning(f"[Seedream] 请求异常: {e}")
                 if attempt < max_retries - 1:
                     continue
@@ -123,12 +136,8 @@ class SeedreamAPI:
     async def _download_image_from_url(self, url: str) -> Union[Image.Image, int]:
         logger.info(f"[Seedream] 下载图片: {url}")
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
-                    if resp.status != 200:
-                        logger.warning(f"[Seedream] 下载图片失败,状态码: {resp.status}")
-                        return 500
-                    return Image.open(io.BytesIO(await resp.read()))
+            raw = await download_with_network_retry(url, timeout=120.0, label="Seedream")
+            return Image.open(io.BytesIO(raw))
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[Seedream] 下载图片失败: {e}")
             return 500

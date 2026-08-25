@@ -5,21 +5,22 @@
 
 from __future__ import annotations
 
-import asyncio
-import base64
-import hashlib
 import hmac
 import json
 import time
-from datetime import datetime, timezone
+import base64
+import asyncio
+import hashlib
 from io import BytesIO
 from typing import Any
+from datetime import datetime, timezone
 
 import aiohttp
 from PIL import Image
 
 from gsuid_core.logger import logger
 
+from ..http_retry import is_network_error, call_with_network_retry
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 SERVICE = "aiart"
@@ -224,20 +225,28 @@ class TxAiartAPI:
             logger.info(f"[tx_aiart] ImageOutpainting ratio={ratio} attempt={attempt}/{max_retries}")
             try:
                 timeout = aiohttp.ClientTimeout(total=120)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.post(url, data=payload.encode("utf-8"), headers=headers) as resp:
-                        text = await resp.text()
-                        try:
-                            data = json.loads(text)
-                        except Exception:
-                            last_error = f"HTTP {resp.status}: {text[:240]}"
-                            logger.warning(f"[tx_aiart] 非 JSON 响应: {last_error}")
-                            await asyncio.sleep(1.5)
-                            continue
+
+                async def _once() -> tuple[int, str]:
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        async with session.post(url, data=payload.encode("utf-8"), headers=headers) as resp:
+                            return resp.status, await resp.text()
+
+                status, text = await call_with_network_retry(_once, label=f"POST {url}")
+                try:
+                    data = json.loads(text)
+                except Exception:
+                    last_error = f"HTTP {status}: {text[:240]}"
+                    logger.warning(f"[tx_aiart] 非 JSON 响应: {last_error}")
+                    await asyncio.sleep(5.0)
+                    continue
             except Exception as exc:  # noqa: BLE001
+                if is_network_error(exc):
+                    last_error = str(exc)
+                    logger.warning(f"[tx_aiart] 请求异常(网络重试已耗尽): {exc}")
+                    raise RuntimeError(f"腾讯云扩图失败: {last_error}") from exc
                 last_error = str(exc)
                 logger.warning(f"[tx_aiart] 请求异常: {exc}")
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(5.0)
                 continue
 
             response = data.get("Response") if isinstance(data, dict) else None

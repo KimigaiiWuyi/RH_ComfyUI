@@ -22,6 +22,7 @@ from RH_ComfyUI.utils.video_process import (
     prepare_seedance_video_ref,
     prepare_ref_video_if_clamping,
     seedance_scale_for_min_pixels,
+    plan_clip_durations_for_budget,
     seedance_ref_video_clamp_for_vendor,
 )
 
@@ -150,6 +151,25 @@ def test_long_and_small_one_pass():
     assert new_dur <= 15.0
     _dur, w, h = asyncio.run(probe_video_meta(out))
     assert w * h >= SEEDANCE_REF_VIDEO_MIN_PIXELS
+
+
+def test_plan_clip_durations_within_budget_unchanged():
+    out = plan_clip_durations_for_budget([14.5], budget_s=15.0, min_s=2.0, target_s=14.5)
+    assert out == [14.5]
+    two = plan_clip_durations_for_budget([5.0, 6.0], budget_s=15.0, min_s=2.0, target_s=14.5)
+    assert two == [5.0, 6.0]
+
+
+def test_plan_clip_durations_two_long_clips_share_budget():
+    out = plan_clip_durations_for_budget([14.95, 14.95], budget_s=15.0, min_s=2.0, target_s=14.5)
+    assert abs(sum(out) - 14.5) < 0.05
+    assert all(2.0 <= d <= 14.95 for d in out)
+    assert all(abs(d - 7.25) < 0.05 for d in out)
+
+
+def test_plan_clip_durations_single_long_clip():
+    out = plan_clip_durations_for_budget([30.0], budget_s=15.0, min_s=2.0, target_s=14.5)
+    assert abs(out[0] - 14.5) < 1e-6
 
 
 def test_seedance_ref_video_clamp_for_vendor():

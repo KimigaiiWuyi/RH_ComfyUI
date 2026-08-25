@@ -9,7 +9,7 @@ video_refs / audio_refs("连线但未 @"的素材落在这些扁平字段)会被
 
 from RH_ComfyUI.core.schema.types import MediaRef, MediaKind, ContentItem, ContentItemType
 from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
-from RH_ComfyUI.utils.backends.seedance.spec import VideoTaskShape
+from RH_ComfyUI.utils.backends.seedance.spec import MediaRole, VideoTaskShape
 from RH_ComfyUI.utils.backends.seedance.classify import classify_video_spec
 
 
@@ -19,6 +19,14 @@ def _txt(t: str) -> ContentItem:
 
 def _img_item(data: bytes) -> ContentItem:
     return ContentItem(type=ContentItemType.IMAGE, media=MediaRef(kind=MediaKind.IMAGE, data=data))
+
+
+def _ref_img_item(data: bytes) -> ContentItem:
+    return ContentItem(
+        type=ContentItemType.IMAGE,
+        role="reference",
+        media=MediaRef(kind=MediaKind.IMAGE, data=data, role="reference"),
+    )
 
 
 def test_text_only_ordered_content_keeps_flat_images():
@@ -186,3 +194,50 @@ def test_edit_prompt_without_token_not_prefixed():
     spec = classify_video_spec(req)
     assert spec.shape == VideoTaskShape.VIDEO_EDIT
     assert spec.prompt == "把背景换成海边"
+
+
+def test_three_images_auto_is_multimodal():
+    spec = classify_video_spec(
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="三角色",
+            images=[b"A", b"B", b"C"],
+        )
+    )
+    assert spec.shape == VideoTaskShape.MULTIMODAL
+    assert spec.omni_reference_task_type == "reference"
+
+
+def test_two_images_auto_still_first_last():
+    spec = classify_video_spec(
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="首尾",
+            images=[b"A", b"B"],
+        )
+    )
+    assert spec.shape == VideoTaskShape.FIRST_LAST_FRAME
+
+
+def test_oc_reference_roles_are_multimodal():
+    spec = classify_video_spec(
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="多参考",
+            ordered_content=[_txt("多参考"), _ref_img_item(b"A"), _ref_img_item(b"B")],
+        )
+    )
+    assert spec.shape == VideoTaskShape.MULTIMODAL
+    assert all(m.role == MediaRole.REFERENCE for m in spec.images())
+
+
+def test_omni_hint_reference_forces_multimodal():
+    spec = classify_video_spec(
+        GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="多参考",
+            images=[b"ONLY"],
+            omni_reference_task_type="reference",
+        )
+    )
+    assert spec.shape == VideoTaskShape.MULTIMODAL

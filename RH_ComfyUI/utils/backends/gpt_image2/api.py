@@ -13,6 +13,7 @@ from PIL import Image
 
 from gsuid_core.logger import logger
 
+from ..http_retry import is_network_error, call_with_network_retry
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 
@@ -75,7 +76,7 @@ class GPTImage2API:
         if data:
             params["data"] = data
 
-        try:
+        async def _once() -> Union[Dict[str, Any], int]:
             async with aiohttp.ClientSession() as session:
                 async with session.request(method, url, headers=headers, **params) as resp:
                     logger.info(f"[GPT-Image2] 响应状态: {resp.status}")
@@ -92,7 +93,12 @@ class GPTImage2API:
                     logger.debug(f"[GPT-Image2] 响应数据: {resp_data}")
                     return resp_data
 
+        try:
+            return await call_with_network_retry(_once, label=f"{method} {url}")
         except Exception as e:
+            if is_network_error(e):
+                logger.warning(f"[GPT-Image2] 请求失败(网络重试已耗尽): {e}")
+                raise
             logger.warning(f"[GPT-Image2] 请求失败: {e}")
             return 500
 
@@ -133,6 +139,9 @@ class GPTImage2API:
                 return resp
 
             except Exception as e:
+                if is_network_error(e):
+                    logger.warning(f"[GPT-Image2] 请求异常(网络重试已耗尽): {e}")
+                    return 500
                 logger.warning(f"[GPT-Image2] 请求异常: {e}, 重试 ({fail_count + 1}/{max_retries})")
                 fail_count += 1
                 await asyncio.sleep(1)

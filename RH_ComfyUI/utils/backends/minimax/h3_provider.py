@@ -20,6 +20,7 @@ import httpx
 from gsuid_core.logger import logger
 
 from .config import minimax_api_key, minimax_dry_run
+from ..http_retry import RetryingAsyncClient
 from .h3_classify import to_api_ratio, to_api_resolution
 from ...core.types import MediaRef, MediaKind
 from ..seedance.spec import MediaRole, SpecMedia, VideoGenSpec, VideoTaskShape
@@ -376,7 +377,7 @@ class MiniMaxH3Provider:
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+            self._client = RetryingAsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
         return self._client
 
     async def _request(
@@ -558,6 +559,7 @@ class MiniMaxH3Provider:
             try:
                 task = await self.get(task_id)
             except (httpx.HTTPError, asyncio.TimeoutError, OSError) as poll_exc:
+                # Transport retry (5× / 5s) already happened in RetryingAsyncClient.
                 elapsed = loop.time() - start
                 raise MiniMaxH3ProviderError(
                     f"MiniMax H3 轮询失败({type(poll_exc).__name__}: {poll_exc}); "

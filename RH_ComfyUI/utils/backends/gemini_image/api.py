@@ -19,10 +19,9 @@ import base64
 import asyncio
 from typing import Any, Optional
 
-import httpx
-
 from gsuid_core.logger import logger
 
+from ..http_retry import download_with_network_retry
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 # background interaction 终态(官方 Interactions API status 枚举)
@@ -426,10 +425,7 @@ def _safe_dump(interaction: Any) -> str:
 
 
 async def _download(url: str) -> bytes:
-    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        return resp.content
+    return await download_with_network_retry(url, timeout=120.0, label="GeminiImage")
 
 
 gemini_image_api = GeminiImageAPI()

@@ -25,6 +25,7 @@ from ...utils.core.types import (
     image_item,
     video_item,
     draft_task_item,
+    media_ref_cache_key,
 )
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "ContentItemType",
     "PortSpec",
     "MediaRef",
+    "media_ref_cache_key",
     "ContentItem",
     "CapabilityManifest",
     "ProgressEvent",

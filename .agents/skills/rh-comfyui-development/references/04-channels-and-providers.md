@@ -102,3 +102,17 @@ channel_registry.register_binding("gpt-image-2", MyAzureChannel())
 (`core/channels/polling.py`)提供的通用骨架,不要自己写 while+sleep。
 模型侧把 `execution_mode` 声明为 `async_poll`(HTTP 清单会透出,
 调用方据此展示进度条)。
+
+### 4.5.1 网络抖动重试(与模型无关)
+
+上游 HTTP 的 **ReadError / ConnectError / 超时** 等传输层失败,在发出请求的
+那一层等 **5 秒再发同一请求**,共 **5 次**;五次都失败才向上抛
+`POLL_NETWORK_ERROR` / `PROVIDER_NETWORK_ERROR`。实现:
+
+- `utils/backends/http_retry.py`:`RetryingAsyncClient` / `call_with_network_retry`
+- Seedance / HappyHorse / MiniMax H3 的 `_get_client()` 已换成该 client,
+  网关 Seedance GET 轮询走同一路径
+- **不要**在 `poll_until_done` 再套一层同样的 5×5s(会变成 25 次)
+
+HTTP 4xx/5xx **响应**不是网络抖动,不走这层;429/503 仍走通道
+`transient` 排队。

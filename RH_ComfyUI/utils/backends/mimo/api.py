@@ -10,6 +10,7 @@ import aiohttp
 
 from gsuid_core.logger import logger
 
+from ..http_retry import is_network_error, call_with_network_retry
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 
@@ -92,50 +93,54 @@ class MIMOAPI:
                 token_prefix = self.api_key[:6]
                 logger.info(f"[MiMo] 请求: POST {self.chat_url}, token_prefix={token_prefix}***")
 
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        self.chat_url,
-                        headers=self._headers(),
-                        json=json,
-                    ) as resp:
-                        logger.info(f"[MiMo] 响应状态: {resp.status}")
-
-                        if resp.status != 200:
-                            # 读取错误响应体以便排查
-                            try:
-                                error_body = await resp.text()
-                                logger.warning(f"[MiMo] 请求失败: {resp.status}, 响应: {error_body[:500]}")
-                            except Exception:
-                                logger.warning(f"[MiMo] 请求失败: {resp.status}")
-
-                            # 401/403 鉴权错误不重试
-                            if resp.status in (401, 403):
-                                logger.error("[MiMo] API Key 无效或未配置，请在 Web 控制台配置 MIMO_apikey")
+                async def _once() -> Union[Dict[str, Any], int]:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            self.chat_url,
+                            headers=self._headers(),
+                            json=json,
+                        ) as resp:
+                            logger.info(f"[MiMo] 响应状态: {resp.status}")
+                            if resp.status != 200:
+                                try:
+                                    error_body = await resp.text()
+                                    logger.warning(f"[MiMo] 请求失败: {resp.status}, 响应: {error_body[:500]}")
+                                except Exception:
+                                    logger.warning(f"[MiMo] 请求失败: {resp.status}")
                                 return resp.status
+                            return await resp.json()
 
-                            if resp.status == 429:
-                                logger.info("[MiMo] 请求过于频繁(429)，等待60秒后重试...")
-                                await asyncio.sleep(60)
-                                continue
+                resp_or_status = await call_with_network_retry(
+                    _once, label=f"POST {self.chat_url}"
+                )
+                if isinstance(resp_or_status, int):
+                    if resp_or_status in (401, 403):
+                        logger.error("[MiMo] API Key 无效或未配置，请在 Web 控制台配置 MIMO_apikey")
+                        return resp_or_status
+                    if resp_or_status == 429:
+                        logger.info("[MiMo] 请求过于频繁(429)，等待60秒后重试...")
+                        await asyncio.sleep(60)
+                        continue
+                    fail_count += 1
+                    logger.warning(f"[MiMo] 重试 ({fail_count}/{max_retries})")
+                    continue
 
-                            fail_count += 1
-                            logger.warning(f"[MiMo] 重试 ({fail_count}/{max_retries})")
-                            continue
+                resp_data = resp_or_status
+                logger.debug(f"[MiMo] 响应数据keys: {list(resp_data.keys())}")
 
-                        resp_data = await resp.json()
-                        logger.debug(f"[MiMo] 响应数据keys: {list(resp_data.keys())}")
+                error = resp_data.get("error")
+                if error:
+                    error_msg = error.get("message", "未知错误")
+                    logger.error(f"[MiMo] API 错误: {error_msg}")
+                    fail_count += 1
+                    continue
 
-                        # 检查错误
-                        error = resp_data.get("error")
-                        if error:
-                            error_msg = error.get("message", "未知错误")
-                            logger.error(f"[MiMo] API 错误: {error_msg}")
-                            fail_count += 1
-                            continue
-
-                        return resp_data
+                return resp_data
 
             except Exception as e:
+                if is_network_error(e):
+                    logger.warning(f"[MiMo] 请求异常(网络重试已耗尽): {e}")
+                    return 500
                 logger.warning(f"[MiMo] 请求异常: {e}, 重试 ({fail_count + 1}/{max_retries})")
                 fail_count += 1
                 await asyncio.sleep(1)

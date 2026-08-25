@@ -24,13 +24,12 @@ import time
 import asyncio
 from typing import Any, Optional, Protocol, runtime_checkable
 
-import httpx
-
 from gsuid_core.logger import logger
 
 from ...api import GenerationResult
 from ..channels.channel import ProviderChannel
 from ...utils.core.types import ProgressEvent, ProgressCallback
+from ...utils.backends.http_retry import download_with_network_retry
 
 
 class ResumeNotSupportedError(RuntimeError):
@@ -716,10 +715,7 @@ async def _resume_rh_app(
         raise ResumeFailedError(f"[RHApp] 无文件 URL: {item}")
 
     await _emit(on_progress, "downloading", 90, "下载产物")
-    async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
-        resp = await client.get(file_url)
-        resp.raise_for_status()
-        data = resp.content
+    data = await download_with_network_retry(file_url, timeout=120, label="resume")
 
     return GenerationResult(
         kind=kind,

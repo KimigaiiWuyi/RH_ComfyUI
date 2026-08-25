@@ -14,6 +14,7 @@ validate() 的跨字段约束里 —— 这正是"参数处理回到代码"的�
 from __future__ import annotations
 
 from typing import Optional
+from dataclasses import dataclass
 
 from ..bridge import VideoPipelineModel
 from ...core.base.video import VideoTaskShape
@@ -29,6 +30,339 @@ from ...utils.backends.seedance.config import is_seedance_model_enabled_on
 from ...utils.backends.seedance.channel import builtin_seedance_channels
 from ...utils.backends.happyhorse.channel import builtin_happyhorse_channels
 from ...utils.backends.minimax.h3_channel import builtin_minimax_h3_channels
+
+
+@dataclass(frozen=True)
+class RefMediaPrep:
+    """Seedance / H3 / Wan 共用的参考音视频预处理参数。"""
+
+    video_min_s: float
+    video_max_s: float
+    video_loop_target_s: float
+    video_trim_target_s: float
+    video_min_pixels: int
+    audio_max_s: float
+    audio_trim_target_s: float
+    audio_min_s: float = 0.0
+    audio_loop_target_s: float = 0.0
+    h3_audio: bool = False
+    total_max_s: float = 0.0
+    total_target_s: float = 0.0
+    reject_unprobeable_audio: bool = False
+    image_log: str = "seedance"
+
+
+async def prepare_ref_media_request(request: GenerationRequest, cfg: RefMediaPrep) -> GenerationRequest:
+    """单段钳位(Seedance ffmpeg) + 可选总时长预算再裁,写回 video_refs / OC。
+
+    超总预算不拒请求,按 target 再裁(H3 官方合计 ≤15s,安全裁到 ~14.5s)。
+    """
+    import asyncio
+
+    from gsuid_core.logger import logger
+
+    from ...core.base.errors import ValidationError
+    from ...core.schema.types import MediaRef, MediaKind, ContentItem, ContentItemType, media_ref_cache_key
+    from ...utils.audio_process import clamp_seedance_ref_audio, clamp_minimax_h3_ref_audio
+    from ...utils.image_process import prepare_seedance_image_ref, prepare_seedance_image_bytes
+    from ...utils.video_process import (
+        ensure_media_bytes,
+        prepare_seedance_ref_video,
+    )
+
+    video_tasks: dict[str, asyncio.Task] = {}
+    audio_tasks: dict[str, asyncio.Task] = {}
+    video_out: dict[str, MediaRef] = {}
+    audio_out: dict[str, MediaRef] = {}
+    video_durs: dict[str, float] = {}
+    audio_durs: dict[str, float] = {}
+
+    def _cache_key(ref: MediaRef) -> str:
+        return media_ref_cache_key(ref)
+
+    def _replaced(ref: MediaRef, *, kind: MediaKind, data: bytes, mime: str) -> MediaRef:
+        return MediaRef(
+            kind=kind,
+            data=data,
+            url=None,
+            role=ref.role,
+            mime_type=mime,
+            filename=ref.filename,
+        )
+
+    async def _do_video(ref: MediaRef) -> MediaRef:
+        key = _cache_key(ref)
+        raw = await ensure_media_bytes(ref)
+        if not raw:
+            video_out[key] = ref
+            return ref
+        new_data, dur, action = await prepare_seedance_ref_video(
+            raw,
+            min_s=cfg.video_min_s,
+            max_s=cfg.video_max_s,
+            loop_target_s=cfg.video_loop_target_s,
+            trim_target_s=cfg.video_trim_target_s,
+            min_pixels=cfg.video_min_pixels,
+        )
+        video_durs[key] = float(dur or 0.0)
+        if action is None and new_data is raw:
+            out = (
+                _replaced(ref, kind=MediaKind.VIDEO, data=new_data, mime=ref.mime_type or "video/mp4")
+                if ref.data is None and new_data
+                else ref
+            )
+            video_out[key] = out
+            return out
+        out = _replaced(ref, kind=MediaKind.VIDEO, data=new_data, mime="video/mp4")
+        video_out[key] = out
+        return out
+
+    async def _do_audio(ref: MediaRef) -> MediaRef:
+        key = _cache_key(ref)
+        raw = await ensure_media_bytes(ref)
+        if not raw:
+            audio_durs[key] = 0.0
+            audio_out[key] = ref
+            return ref
+        if cfg.h3_audio:
+            new_data, dur, action, mime = await clamp_minimax_h3_ref_audio(
+                raw,
+                min_s=cfg.audio_min_s,
+                max_s=cfg.audio_max_s,
+                loop_target_s=cfg.audio_loop_target_s,
+                trim_target_s=cfg.audio_trim_target_s,
+                mime_type=ref.mime_type or "",
+            )
+        else:
+            new_data, dur, action = await clamp_seedance_ref_audio(
+                raw,
+                max_s=cfg.audio_max_s,
+                trim_target_s=cfg.audio_trim_target_s,
+                mime_type=ref.mime_type or "",
+            )
+            mime = "audio/mp4"
+        audio_durs[key] = float(dur or 0.0)
+        if action is None and new_data is raw:
+            out = (
+                _replaced(ref, kind=MediaKind.AUDIO, data=new_data, mime=mime)
+                if ref.data is None and new_data
+                else ref
+            )
+            audio_out[key] = out
+            return out
+        out = _replaced(ref, kind=MediaKind.AUDIO, data=new_data, mime=mime)
+        audio_out[key] = out
+        return out
+
+    def _schedule_video(ref: MediaRef) -> asyncio.Task:
+        key = _cache_key(ref)
+        task = video_tasks.get(key)
+        if task is None:
+            task = asyncio.create_task(_do_video(ref))
+            video_tasks[key] = task
+        return task
+
+    def _schedule_audio(ref: MediaRef) -> asyncio.Task:
+        key = _cache_key(ref)
+        task = audio_tasks.get(key)
+        if task is None:
+            task = asyncio.create_task(_do_audio(ref))
+            audio_tasks[key] = task
+        return task
+
+    scheduled: list[asyncio.Task] = []
+    if request.video_refs:
+        scheduled.extend(_schedule_video(v) for v in request.video_refs)
+    if request.audio_refs:
+        scheduled.extend(_schedule_audio(a) for a in request.audio_refs)
+    if request.ordered_content:
+        for item in request.ordered_content:
+            if item.media is None:
+                continue
+            if item.type == ContentItemType.VIDEO and item.media.kind == MediaKind.VIDEO:
+                scheduled.append(_schedule_video(item.media))
+            elif item.type == ContentItemType.AUDIO and item.media.kind == MediaKind.AUDIO:
+                scheduled.append(_schedule_audio(item.media))
+    if scheduled:
+        await asyncio.gather(*scheduled)
+
+    if cfg.total_max_s > 0:
+        await _fit_total_duration_budget(
+            video_out,
+            video_durs,
+            budget_s=cfg.total_max_s,
+            target_s=cfg.total_target_s or cfg.video_trim_target_s,
+            min_s=cfg.video_min_s,
+            video_min_pixels=cfg.video_min_pixels,
+        )
+        await _fit_total_audio_budget(
+            audio_out,
+            audio_durs,
+            budget_s=cfg.total_max_s,
+            target_s=cfg.total_target_s or cfg.audio_trim_target_s,
+            min_s=cfg.audio_min_s or 0.0,
+            h3_audio=cfg.h3_audio,
+            audio_loop_target_s=cfg.audio_loop_target_s,
+            audio_trim_target_s=cfg.audio_trim_target_s,
+        )
+
+    def _final_video(ref: MediaRef) -> MediaRef:
+        return video_out.get(_cache_key(ref), ref)
+
+    def _final_audio(ref: MediaRef) -> MediaRef:
+        return audio_out.get(_cache_key(ref), ref)
+
+    if request.video_refs:
+        request.video_refs = [_final_video(v) for v in request.video_refs]
+    if request.audio_refs:
+        request.audio_refs = [_final_audio(a) for a in request.audio_refs]
+
+    if request.images:
+        new_images: list[bytes] = []
+        for raw in request.images:
+            out, info = prepare_seedance_image_bytes(raw)
+            if info:
+                logger.info(f"[{cfg.image_log}] 参考图预处理: {info}")
+            new_images.append(out)
+        request.images = new_images
+
+    if request.ordered_content:
+        new_oc: list[ContentItem] = []
+        for item in request.ordered_content:
+            if item.media is None:
+                new_oc.append(item)
+                continue
+            new_media = item.media
+            if item.type == ContentItemType.VIDEO and item.media.kind == MediaKind.VIDEO:
+                new_media = _final_video(item.media)
+            elif item.type == ContentItemType.AUDIO and item.media.kind == MediaKind.AUDIO:
+                new_media = _final_audio(item.media)
+            elif item.type == ContentItemType.IMAGE and item.media.kind == MediaKind.IMAGE:
+                new_media = await prepare_seedance_image_ref(item.media)
+            new_oc.append(
+                ContentItem(
+                    type=item.type,
+                    media=new_media,
+                    role=item.role,
+                    text=item.text,
+                )
+            )
+        request.ordered_content = new_oc
+
+    if cfg.reject_unprobeable_audio:
+        for dur in audio_durs.values():
+            if dur <= 0:
+                raise ValidationError(
+                    "无法探测参考音频时长,请换一段 "
+                    f"{cfg.audio_min_s:.0f}~{cfg.audio_max_s:.0f} 秒的音频"
+                )
+            if cfg.audio_min_s > 0 and dur < cfg.audio_min_s:
+                raise ValidationError(
+                    f"单段参考音频须 ≥ {cfg.audio_min_s:.0f} 秒,当前约 {dur:.1f} 秒"
+                )
+
+    return request
+
+
+async def _fit_total_duration_budget(
+    video_out: dict,
+    video_durs: dict[str, float],
+    *,
+    budget_s: float,
+    target_s: float,
+    min_s: float,
+    video_min_pixels: int,
+) -> None:
+    from ...core.schema.types import MediaRef, MediaKind
+    from ...utils.video_process import prepare_seedance_ref_video, plan_clip_durations_for_budget
+
+    keys = [k for k, d in video_durs.items() if d > 0]
+    if not keys:
+        return
+    old = [video_durs[k] for k in keys]
+    planned = plan_clip_durations_for_budget(old, budget_s=budget_s, min_s=min_s, target_s=target_s)
+    for key, before, want in zip(keys, old, planned):
+        if want >= before - 0.05:
+            continue
+        ref = video_out.get(key)
+        if not isinstance(ref, MediaRef) or not ref.data:
+            continue
+        new_data, dur, action = await prepare_seedance_ref_video(
+            ref.data,
+            min_s=0.0,
+            max_s=want,
+            trim_target_s=want,
+            min_pixels=video_min_pixels,
+        )
+        if action is None and new_data is ref.data:
+            video_durs[key] = want
+            continue
+        video_out[key] = MediaRef(
+            kind=MediaKind.VIDEO,
+            data=new_data,
+            url=None,
+            role=ref.role,
+            mime_type="video/mp4",
+            filename=ref.filename,
+        )
+        video_durs[key] = float(dur or want)
+
+
+async def _fit_total_audio_budget(
+    audio_out: dict,
+    audio_durs: dict[str, float],
+    *,
+    budget_s: float,
+    target_s: float,
+    min_s: float,
+    h3_audio: bool,
+    audio_loop_target_s: float,
+    audio_trim_target_s: float,
+) -> None:
+    from ...core.schema.types import MediaRef, MediaKind
+    from ...utils.audio_process import clamp_seedance_ref_audio, clamp_minimax_h3_ref_audio
+    from ...utils.video_process import plan_clip_durations_for_budget
+
+    keys = [k for k, d in audio_durs.items() if d > 0]
+    if not keys:
+        return
+    old = [audio_durs[k] for k in keys]
+    planned = plan_clip_durations_for_budget(old, budget_s=budget_s, min_s=min_s, target_s=target_s)
+    for key, before, want in zip(keys, old, planned):
+        if want >= before - 0.05:
+            continue
+        ref = audio_out.get(key)
+        if not isinstance(ref, MediaRef) or not ref.data:
+            continue
+        if h3_audio:
+            new_data, dur, action, mime = await clamp_minimax_h3_ref_audio(
+                ref.data,
+                min_s=0.0,
+                max_s=want,
+                loop_target_s=audio_loop_target_s,
+                trim_target_s=want,
+                mime_type=ref.mime_type or "",
+            )
+        else:
+            new_data, dur, action = await clamp_seedance_ref_audio(
+                ref.data,
+                max_s=want,
+                trim_target_s=want,
+                mime_type=ref.mime_type or "",
+            )
+            mime = ref.mime_type or "audio/mp4"
+        if action is None and new_data is ref.data:
+            audio_durs[key] = want
+            continue
+        audio_out[key] = MediaRef(
+            kind=MediaKind.AUDIO,
+            data=new_data,
+            url=None,
+            role=ref.role,
+            mime_type=mime,
+            filename=ref.filename,
+        )
+        audio_durs[key] = float(dur or want)
 
 
 class SeedanceVideoModel(VideoPipelineModel):
@@ -84,149 +418,19 @@ class SeedanceVideoModel(VideoPipelineModel):
         图片:宽或高 < 300px 时等比放大;宽高比超出 0.40~2.50 时居中裁到 0.41 或 2.49。
         多段参考并发处理,ffmpeg 由全局闸限并发。探测/编解码失败放行原片。
         """
-        import asyncio
-
-        from gsuid_core.logger import logger
-
-        from ...core.schema.types import MediaRef, MediaKind, ContentItem, ContentItemType
-        from ...utils.audio_process import clamp_seedance_ref_audio
-        from ...utils.image_process import prepare_seedance_image_ref, prepare_seedance_image_bytes
-        from ...utils.video_process import ensure_media_bytes, prepare_seedance_ref_video
-
-        video_tasks: dict[str, asyncio.Task] = {}
-        audio_tasks: dict[str, asyncio.Task] = {}
-
-        def _cache_key(ref: MediaRef) -> str:
-            u = (ref.url or "").strip()
-            if u:
-                return f"url:{u}"
-            if ref.data:
-                return f"data:{id(ref.data)}:{len(ref.data)}"
-            return f"empty:{id(ref)}"
-
-        def _replaced(
-            ref: MediaRef,
-            *,
-            kind: MediaKind,
-            data: bytes,
-            mime: str,
-        ) -> MediaRef:
-            return MediaRef(
-                kind=kind,
-                data=data,
-                url=None,
-                role=ref.role,
-                mime_type=mime,
-                filename=ref.filename,
-            )
-
-        async def _do_video(ref: MediaRef) -> MediaRef:
-            raw = await ensure_media_bytes(ref)
-            if not raw:
-                return ref
-            new_data, _dur, action = await prepare_seedance_ref_video(
-                raw,
-                min_s=self.ref_video_min_s,
-                max_s=self.ref_video_max_s,
-                loop_target_s=self.ref_video_loop_target_s,
-                trim_target_s=self.ref_video_trim_target_s,
-                min_pixels=self.ref_video_min_pixels,
-            )
-            if action is None and new_data is raw:
-                if ref.data is None and new_data:
-                    return _replaced(ref, kind=MediaKind.VIDEO, data=new_data, mime=ref.mime_type or "video/mp4")
-                return ref
-            return _replaced(ref, kind=MediaKind.VIDEO, data=new_data, mime="video/mp4")
-
-        async def _do_audio(ref: MediaRef) -> MediaRef:
-            raw = await ensure_media_bytes(ref)
-            if not raw:
-                return ref
-            new_data, _dur, action = await clamp_seedance_ref_audio(
-                raw,
-                max_s=self.ref_audio_max_s,
-                trim_target_s=self.ref_audio_trim_target_s,
-                mime_type=ref.mime_type or "",
-            )
-            if action is None and new_data is raw:
-                if ref.data is None and new_data:
-                    return _replaced(ref, kind=MediaKind.AUDIO, data=new_data, mime=ref.mime_type or "audio/mp4")
-                return ref
-            return _replaced(ref, kind=MediaKind.AUDIO, data=new_data, mime="audio/mp4")
-
-        def _schedule_video(ref: MediaRef) -> asyncio.Task:
-            key = _cache_key(ref)
-            task = video_tasks.get(key)
-            if task is None:
-                task = asyncio.create_task(_do_video(ref))
-                video_tasks[key] = task
-            return task
-
-        def _schedule_audio(ref: MediaRef) -> asyncio.Task:
-            key = _cache_key(ref)
-            task = audio_tasks.get(key)
-            if task is None:
-                task = asyncio.create_task(_do_audio(ref))
-                audio_tasks[key] = task
-            return task
-
-        async def _upscale_image_ref(ref: MediaRef) -> MediaRef:
-            return await prepare_seedance_image_ref(ref)
-
-        scheduled: list[asyncio.Task] = []
-        if request.video_refs:
-            scheduled.extend(_schedule_video(v) for v in request.video_refs)
-        if request.audio_refs:
-            scheduled.extend(_schedule_audio(a) for a in request.audio_refs)
-        if request.ordered_content:
-            for item in request.ordered_content:
-                if item.media is None:
-                    continue
-                if item.type == ContentItemType.VIDEO and item.media.kind == MediaKind.VIDEO:
-                    scheduled.append(_schedule_video(item.media))
-                elif item.type == ContentItemType.AUDIO and item.media.kind == MediaKind.AUDIO:
-                    scheduled.append(_schedule_audio(item.media))
-        if scheduled:
-            await asyncio.gather(*scheduled)
-
-        if request.video_refs:
-            request.video_refs = [await _schedule_video(v) for v in request.video_refs]
-        if request.audio_refs:
-            request.audio_refs = [await _schedule_audio(a) for a in request.audio_refs]
-
-        if request.images:
-            new_images: list[bytes] = []
-            for raw in request.images:
-                out, info = prepare_seedance_image_bytes(raw)
-                if info:
-                    logger.info(f"[seedance] 参考图预处理: {info}")
-                new_images.append(out)
-            request.images = new_images
-
-        if request.ordered_content:
-            new_oc: list[ContentItem] = []
-            for item in request.ordered_content:
-                if item.media is None:
-                    new_oc.append(item)
-                    continue
-                new_media = item.media
-                if item.type == ContentItemType.VIDEO and item.media.kind == MediaKind.VIDEO:
-                    new_media = await _schedule_video(item.media)
-                elif item.type == ContentItemType.AUDIO and item.media.kind == MediaKind.AUDIO:
-                    new_media = await _schedule_audio(item.media)
-                elif item.type == ContentItemType.IMAGE and item.media.kind == MediaKind.IMAGE:
-                    new_media = await _upscale_image_ref(item.media)
-                new_oc.append(
-                    ContentItem(
-                        type=item.type,
-                        media=new_media,
-                        role=item.role,
-                        text=item.text,
-                    )
-                )
-            request.ordered_content = new_oc
-
-        return request
+        return await prepare_ref_media_request(
+            request,
+            RefMediaPrep(
+                video_min_s=self.ref_video_min_s,
+                video_max_s=self.ref_video_max_s,
+                video_loop_target_s=self.ref_video_loop_target_s,
+                video_trim_target_s=self.ref_video_trim_target_s,
+                video_min_pixels=self.ref_video_min_pixels,
+                audio_max_s=self.ref_audio_max_s,
+                audio_trim_target_s=self.ref_audio_trim_target_s,
+                image_log="seedance",
+            ),
+        )
 
     # ── 多供应商通道(交给通用 LoadBalancer 排序 / 熔断 / 故障切换) ──
 
@@ -351,9 +555,18 @@ class Seedance25VideoModel(SeedanceVideoModel):
         )
 
     def validate(self, request: GenerationRequest) -> None:
+        from ...utils.backends.seedance.classify import (
+            request_has_av,
+            count_request_images,
+            request_forces_multiref,
+            resolve_request_task_mode,
+            resolve_request_frame_mode,
+        )
+
+        n_img = count_request_images(request)
         # 先做 2.5 专属数量上限(父类 SeedanceVideoModel 只限制视频/音频 ≤3)
-        if len(request.images) > self.MAX_IMAGES:
-            raise ValidationError(f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,当前 {len(request.images)} 张")
+        if n_img > self.MAX_IMAGES:
+            raise ValidationError(f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,当前 {n_img} 张")
         if len(request.video_refs) > self.MAX_VIDEOS:
             raise ValidationError(
                 f"{self.display_name} 最多 {self.MAX_VIDEOS} 段参考视频,当前 {len(request.video_refs)} 段"
@@ -374,23 +587,25 @@ class Seedance25VideoModel(SeedanceVideoModel):
                 f"{self.display_name} 不支持 camera_fixed(固定镜头);该参数仅 Seedance 1.0 / 1.5 可用,请关闭后重试"
             )
 
-        task_mode = str((request.params or {}).get("task_mode") or "auto").strip().lower()
-        frame_mode = str((request.params or {}).get("frame_mode") or "auto").strip().lower()
+        task_mode = resolve_request_task_mode(request)
+        frame_mode = resolve_request_frame_mode(request)
         duration = request.duration
         ratio = (request.ratio or "").strip().lower()
-        n_img = len(request.images)
-        has_av = bool(request.video_refs or request.audio_refs)
+        has_av = request_has_av(request)
 
         # duration=-1 = 自动时长,文生 / 多参考 / 首尾帧 / 编辑 / 延长均合法
         if duration is not None and duration != 0 and duration != -1 and not (4 <= int(duration) <= 30):
             raise ValidationError(f"{self.display_name} 时长须为 4~30 秒或 -1(自动),当前 {duration}")
 
         # 官方约束:视频编辑 / 延长 / 首帧·首尾帧 必须 ratio=adaptive,自定义比例会异步报错
-        # 多模态参考(带视频/音频,或 frame_mode=reference)与纯文生可用自定义比例
+        # 多模态参考(带视频/音频 / frame_mode=reference / omni=reference / ≥3 张图)与纯文生可用自定义比例
         is_edit_or_extend = task_mode in ("edit", "extend")
-        is_frame_driven = (
-            not has_av and frame_mode != "reference" and n_img >= 1 and task_mode == "auto"
-        ) or frame_mode == "first_last"
+        is_frame_driven = frame_mode == "first_last" or (
+            not has_av
+            and not request_forces_multiref(request, n_img=n_img)
+            and 1 <= n_img <= 2
+            and task_mode == "auto"
+        )
         if (is_edit_or_extend or is_frame_driven) and ratio and ratio != "adaptive":
             raise ValidationError(
                 f"{self.display_name} 在视频编辑/延长/首帧·首尾帧任务下须使用 ratio=adaptive,"
@@ -398,7 +613,6 @@ class Seedance25VideoModel(SeedanceVideoModel):
             )
 
         if is_edit_or_extend and not request.video_refs:
-            # ordered_content 里也可能只挂了视频
             from ...core.schema.types import MediaKind, ContentItemType
 
             oc_has_video = any(
@@ -737,172 +951,29 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
         return f"{self.display_name} 无可用供应商"
 
     async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
-        """参考视频/音频时长钳位 + 参考图短边/宽高比(与 Seedance 共用预处理)。"""
-        import asyncio
+        """参考视频/音频时长钳位 + 参考图短边/宽高比(复用 Seedance ffmpeg 预处理)。
 
-        from gsuid_core.logger import logger
-
-        from ...core.schema.types import MediaRef, MediaKind, ContentItem, ContentItemType
-        from ...utils.audio_process import clamp_minimax_h3_ref_audio
-        from ...utils.image_process import prepare_seedance_image_ref, prepare_seedance_image_bytes
-        from ...utils.video_process import ensure_media_bytes, prepare_seedance_ref_video
-
-        video_tasks: dict[str, asyncio.Task] = {}
-        audio_tasks: dict[str, asyncio.Task] = {}
-        video_durs: dict[str, float] = {}
-        audio_durs: dict[str, float] = {}
-
-        def _cache_key(ref: MediaRef) -> str:
-            u = (ref.url or "").strip()
-            if u:
-                return f"url:{u}"
-            if ref.data:
-                return f"data:{id(ref.data)}:{len(ref.data)}"
-            return f"empty:{id(ref)}"
-
-        def _replaced(ref: MediaRef, *, kind: MediaKind, data: bytes, mime: str) -> MediaRef:
-            return MediaRef(
-                kind=kind,
-                data=data,
-                url=None,
-                role=ref.role,
-                mime_type=mime,
-                filename=ref.filename,
-            )
-
-        async def _do_video(ref: MediaRef) -> MediaRef:
-            raw = await ensure_media_bytes(ref)
-            if not raw:
-                return ref
-            new_data, dur, action = await prepare_seedance_ref_video(
-                raw,
-                min_s=self.ref_video_min_s,
-                max_s=self.ref_video_max_s,
-                loop_target_s=self.ref_video_loop_target_s,
-                trim_target_s=self.ref_video_trim_target_s,
-                min_pixels=0,
-            )
-            video_durs[_cache_key(ref)] = float(dur or 0.0)
-            if action is None and new_data is raw:
-                if ref.data is None and new_data:
-                    return _replaced(ref, kind=MediaKind.VIDEO, data=new_data, mime=ref.mime_type or "video/mp4")
-                return ref
-            return _replaced(ref, kind=MediaKind.VIDEO, data=new_data, mime="video/mp4")
-
-        async def _do_audio(ref: MediaRef) -> MediaRef:
-            raw = await ensure_media_bytes(ref)
-            if not raw:
-                audio_durs[_cache_key(ref)] = 0.0
-                return ref
-            new_data, dur, action, mime = await clamp_minimax_h3_ref_audio(
-                raw,
-                min_s=self.ref_audio_min_s,
-                max_s=self.ref_audio_max_s,
-                loop_target_s=self.ref_audio_loop_target_s,
-                trim_target_s=self.ref_audio_trim_target_s,
-                mime_type=ref.mime_type or "",
-            )
-            audio_durs[_cache_key(ref)] = float(dur or 0.0)
-            if action is None and new_data is raw:
-                if ref.data is None and new_data:
-                    return _replaced(ref, kind=MediaKind.AUDIO, data=new_data, mime=mime)
-                return ref
-            return _replaced(ref, kind=MediaKind.AUDIO, data=new_data, mime=mime)
-
-        def _schedule_video(ref: MediaRef) -> asyncio.Task:
-            key = _cache_key(ref)
-            task = video_tasks.get(key)
-            if task is None:
-                task = asyncio.create_task(_do_video(ref))
-                video_tasks[key] = task
-            return task
-
-        def _schedule_audio(ref: MediaRef) -> asyncio.Task:
-            key = _cache_key(ref)
-            task = audio_tasks.get(key)
-            if task is None:
-                task = asyncio.create_task(_do_audio(ref))
-                audio_tasks[key] = task
-            return task
-
-        scheduled: list[asyncio.Task] = []
-        if request.video_refs:
-            scheduled.extend(_schedule_video(v) for v in request.video_refs)
-        if request.audio_refs:
-            scheduled.extend(_schedule_audio(a) for a in request.audio_refs)
-        if request.ordered_content:
-            for item in request.ordered_content:
-                if item.media is None:
-                    continue
-                if item.type == ContentItemType.VIDEO and item.media.kind == MediaKind.VIDEO:
-                    scheduled.append(_schedule_video(item.media))
-                elif item.type == ContentItemType.AUDIO and item.media.kind == MediaKind.AUDIO:
-                    scheduled.append(_schedule_audio(item.media))
-        if scheduled:
-            await asyncio.gather(*scheduled)
-
-        if request.video_refs:
-            request.video_refs = [await _schedule_video(v) for v in request.video_refs]
-        if request.audio_refs:
-            request.audio_refs = [await _schedule_audio(a) for a in request.audio_refs]
-
-        if request.images:
-            new_images: list[bytes] = []
-            for raw in request.images:
-                out, info = prepare_seedance_image_bytes(raw)
-                if info:
-                    logger.info(f"[minimax_h3] 参考图预处理: {info}")
-                new_images.append(out)
-            request.images = new_images
-
-        if request.ordered_content:
-            new_oc: list[ContentItem] = []
-            for item in request.ordered_content:
-                if item.media is None:
-                    new_oc.append(item)
-                    continue
-                new_media = item.media
-                if item.type == ContentItemType.VIDEO and item.media.kind == MediaKind.VIDEO:
-                    new_media = await _schedule_video(item.media)
-                elif item.type == ContentItemType.AUDIO and item.media.kind == MediaKind.AUDIO:
-                    new_media = await _schedule_audio(item.media)
-                elif item.type == ContentItemType.IMAGE and item.media.kind == MediaKind.IMAGE:
-                    new_media = await prepare_seedance_image_ref(item.media)
-                new_oc.append(
-                    ContentItem(
-                        type=item.type,
-                        media=new_media,
-                        role=item.role,
-                        text=item.text,
-                    )
-                )
-            request.ordered_content = new_oc
-
-        total_v = sum(d for d in video_durs.values() if d > 0)
-        total_a = sum(d for d in audio_durs.values() if d > 0)
-        if total_v > self.ref_av_total_max_s:
-            raise ValidationError(
-                f"{self.display_name} 参考视频总时长须 ≤ {self.ref_av_total_max_s:.0f} 秒,"
-                f"当前约 {total_v:.1f} 秒"
-            )
-        if total_a > self.ref_av_total_max_s:
-            raise ValidationError(
-                f"{self.display_name} 参考音频总时长须 ≤ {self.ref_av_total_max_s:.0f} 秒,"
-                f"当前约 {total_a:.1f} 秒"
-            )
-        for dur in audio_durs.values():
-            if dur <= 0:
-                raise ValidationError(
-                    f"{self.display_name} 无法探测参考音频时长,请换一段 "
-                    f"{self.ref_audio_min_s:.0f}~{self.ref_audio_max_s:.0f} 秒的音频"
-                )
-            if dur < self.ref_audio_min_s:
-                raise ValidationError(
-                    f"{self.display_name} 单段参考音频须 ≥ {self.ref_audio_min_s:.0f} 秒,"
-                    f"当前约 {dur:.1f} 秒"
-                )
-
-        return request
+        单段钳到 [2,15]s;多段合计若仍 >15s,再按预算裁到 ~14.5s,不拒请求。
+        """
+        return await prepare_ref_media_request(
+            request,
+            RefMediaPrep(
+                video_min_s=self.ref_video_min_s,
+                video_max_s=self.ref_video_max_s,
+                video_loop_target_s=self.ref_video_loop_target_s,
+                video_trim_target_s=self.ref_video_trim_target_s,
+                video_min_pixels=0,
+                audio_max_s=self.ref_audio_max_s,
+                audio_trim_target_s=self.ref_audio_trim_target_s,
+                audio_min_s=self.ref_audio_min_s,
+                audio_loop_target_s=self.ref_audio_loop_target_s,
+                h3_audio=True,
+                total_max_s=self.ref_av_total_max_s,
+                total_target_s=self.ref_video_trim_target_s,
+                reject_unprobeable_audio=True,
+                image_log="minimax_h3",
+            ),
+        )
 
     def channel_bindings(self) -> list[ChannelBinding]:
         node = self.node

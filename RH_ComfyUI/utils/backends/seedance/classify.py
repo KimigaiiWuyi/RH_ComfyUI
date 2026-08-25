@@ -7,13 +7,16 @@
        - "reference":  全部图片仅作参考 → MULTIMODAL(多参考生成)
        - "first_last": 强制首尾帧(图1=首帧, 图2=尾帧, 其余 reference)
        - "auto"/缺省:  走下方自动判定
-  3. 含视频或音频参考 → MULTIMODAL(图/视频/音频均 reference)
-  4. 图片 >= 2         → FIRST_LAST_FRAME(图1=首帧, 图2=尾帧, 其余 reference)
-  5. 图片 == 1         → IMAGE2VIDEO(图1=首帧)
-  6. 其余              → TEXT2VIDEO
+  3. omni_reference_task_type=reference / OC 图显式 role=reference → MULTIMODAL
+  4. 含视频或音频参考 → MULTIMODAL(图/视频/音频均 reference)
+  5. 图片 >= 3        → MULTIMODAL(schema:auto 仅 2 张默认首尾帧)
+  6. 图片 == 2         → FIRST_LAST_FRAME(图1=首帧, 图2=尾帧)
+  7. 图片 == 1         → IMAGE2VIDEO(图1=首帧)
+  8. 其余              → TEXT2VIDEO
 
 "2 张图到底是首尾帧还是双参考"仅靠图片数量无法分辨 —— HTTP 简单调用用
 frame_mode 区分;多素材连线场景用 ordered_content 的 role 字段逐素材指定。
+≥3 张图不再默认首尾帧,否则三角色多参考 + 自定义比例会被拦成 adaptive。
 """
 
 from __future__ import annotations
@@ -142,6 +145,98 @@ def _build_image_dedup_map(items) -> tuple[dict[int, int], set[int]]:
     return orig_to_deduped, keep
 
 
+def resolve_request_frame_mode(request: GenerationRequest) -> str:
+    """HTTP 顶层 frame_mode 会进 params(GenerationRequest 无同名字段)。"""
+    params = request.params or {}
+    return str(params.get("frame_mode") or "auto").strip().lower()
+
+
+def resolve_request_task_mode(request: GenerationRequest) -> str:
+    params = request.params or {}
+    return str(params.get("task_mode") or "auto").strip().lower()
+
+
+def resolve_request_omni_hint(request: GenerationRequest) -> str:
+    params = request.params or {}
+    raw = request.omni_reference_task_type or params.get("omni_reference_task_type")
+    if isinstance(raw, str):
+        return raw.strip().lower()
+    return ""
+
+
+def _content_item_kind_value(item) -> str:
+    if item.media is not None:
+        k = item.media.kind
+        return str(k.value if hasattr(k, "value") else k).strip().lower()
+    t = item.type
+    tv = t.value if hasattr(t, "value") else t
+    return str(tv or "").replace("_url", "").strip().lower()
+
+
+def _content_item_role(item) -> str:
+    raw = item.role or ""
+    if not raw and item.media is not None:
+        raw = getattr(item.media, "role", "") or ""
+    return str(raw).strip().lower()
+
+
+def _item_is_image(item) -> bool:
+    kind = _content_item_kind_value(item)
+    if kind in ("image", "image_url"):
+        return True
+    return item.type == ContentItemType.IMAGE
+
+
+def _item_is_av(item) -> bool:
+    kind = _content_item_kind_value(item)
+    if kind in ("video", "audio", "video_url", "audio_url"):
+        return True
+    return item.type in (ContentItemType.VIDEO, ContentItemType.AUDIO)
+
+
+def count_request_images(request: GenerationRequest) -> int:
+    """扁平 images 与 OC 图取 max,避免双发双计,也覆盖只发 OC。"""
+    n_flat = len(request.images or [])
+    n_oc = sum(1 for item in (request.ordered_content or []) if _item_is_image(item))
+    return max(n_flat, n_oc)
+
+
+def request_has_av(request: GenerationRequest) -> bool:
+    if request.video_refs or request.audio_refs:
+        return True
+    return any(_item_is_av(item) for item in (request.ordered_content or []))
+
+
+def oc_images_are_explicit_reference(request: GenerationRequest) -> bool:
+    """OC 里至少一张图显式 role=reference,且没有任何 first/last_frame。"""
+    roles: list[str] = []
+    for item in request.ordered_content or []:
+        if not _item_is_image(item):
+            continue
+        roles.append(_content_item_role(item))
+    if not roles:
+        return False
+    if any(r in ("first_frame", "last_frame") for r in roles):
+        return False
+    return any(r == "reference" for r in roles)
+
+
+def request_forces_multiref(request: GenerationRequest, *, n_img: Optional[int] = None) -> bool:
+    """多参考:frame_mode / omni / OC role / ≥3 张图。首尾帧显式开关优先排除。"""
+    frame_mode = resolve_request_frame_mode(request)
+    if frame_mode == "first_last":
+        return False
+    if frame_mode == "reference":
+        return True
+    if resolve_request_omni_hint(request) == "reference":
+        return True
+    if oc_images_are_explicit_reference(request):
+        return True
+    if n_img is None:
+        n_img = count_request_images(request)
+    return n_img >= 3
+
+
 def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     """根据用户的通用输入,产出供应商无关的 `VideoGenSpec`。
 
@@ -221,10 +316,10 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     n_img = len([m for m in media if m.kind == MediaKind.IMAGE])
     has_av = any(m.kind in (MediaKind.VIDEO, MediaKind.AUDIO) for m in media)
 
-    frame_mode = str(params.get("frame_mode") or "auto").strip().lower()
+    frame_mode = resolve_request_frame_mode(request)
     # task_mode: Seedance 2.5 等把「生成 / 编辑 / 延长」显式拆开的半显式开关
     # (与 frame_mode 正交;frame_mode 只管图片角色,task_mode 管任务形态)
-    task_mode = str(params.get("task_mode") or "auto").strip().lower()
+    task_mode = resolve_request_task_mode(request)
 
     if shape_override is not None:
         shape = shape_override
@@ -232,12 +327,12 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
         shape = VideoTaskShape.VIDEO_EDIT
     elif task_mode == "extend":
         shape = VideoTaskShape.VIDEO_EXTEND
-    elif frame_mode == "reference":
-        # 全部图片仅作参考素材(多参考生成),不指定首尾帧
-        shape = VideoTaskShape.MULTIMODAL if (n_img or has_av) else VideoTaskShape.TEXT2VIDEO
     elif frame_mode == "first_last":
         # 强制首尾帧;若同时带音视频参考,形态仍是多模态,但图1/图2 的首尾帧角色保留
         shape = VideoTaskShape.MULTIMODAL if has_av else VideoTaskShape.FIRST_LAST_FRAME
+    elif request_forces_multiref(request, n_img=n_img):
+        # 全部图片仅作参考(frame_mode / omni / OC role / ≥3 张)
+        shape = VideoTaskShape.MULTIMODAL if (n_img or has_av) else VideoTaskShape.TEXT2VIDEO
     elif has_av:
         shape = VideoTaskShape.MULTIMODAL
     elif n_img >= 2:
@@ -453,4 +548,13 @@ def _append_flat_media_not_in_ordered(
     return media, ordered_segments
 
 
-__all__ = ["classify_video_spec"]
+__all__ = [
+    "classify_video_spec",
+    "count_request_images",
+    "oc_images_are_explicit_reference",
+    "request_forces_multiref",
+    "request_has_av",
+    "resolve_request_frame_mode",
+    "resolve_request_omni_hint",
+    "resolve_request_task_mode",
+]

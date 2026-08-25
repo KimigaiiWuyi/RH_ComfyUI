@@ -17,6 +17,7 @@ from websockets import ClientConnection
 
 from gsuid_core.logger import logger
 
+from ..http_retry import RetryingAsyncClient
 from ...resource.RESOURCE_PATH import OUTPUT_PATH
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
@@ -214,7 +215,7 @@ class ComfyUIAPI:
         max_attempts = 24 if self.is_runninghub else 1
         last_payload: Any = None
         for attempt in range(1, max_attempts + 1):
-            async with httpx.AsyncClient(timeout=6000, follow_redirects=True) as client:
+            async with RetryingAsyncClient(timeout=6000, follow_redirects=True) as client:
                 req = await client.post(f"{self.url}/prompt", json=p, headers=headers)
                 req.raise_for_status()
                 prompt_data = req.json()
@@ -272,7 +273,7 @@ class ComfyUIAPI:
         logger.info(
             f"[ComfyUI] 上游 cancel POST {url} taskId={task_id}"
         )
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        async with RetryingAsyncClient(timeout=30.0, follow_redirects=True) as client:
             resp = await client.post(url, headers=headers, json=payload)
             # 业务码:0=成功;807=任务不存在(可视为已结束,不抛)
             try:
@@ -307,7 +308,7 @@ class ComfyUIAPI:
         headers = {"Content-Type": "application/json"}
         base = self.url
         pid = str(prompt_id)
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        async with RetryingAsyncClient(timeout=15.0, follow_redirects=True) as client:
             in_running = False
             in_pending = False
             try:
@@ -431,7 +432,7 @@ class ComfyUIAPI:
             "subfolder": str(subfolder),
             "type": folder_type,
         }
-        async with httpx.AsyncClient(timeout=6000, follow_redirects=True) as client:
+        async with RetryingAsyncClient(timeout=6000, follow_redirects=True) as client:
             response = await client.get(url, params=params, timeout=10.0)
             response.raise_for_status()
             return response.content
@@ -510,7 +511,7 @@ class ComfyUIAPI:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                async with httpx.AsyncClient(timeout=6000, follow_redirects=True) as client:
+                async with RetryingAsyncClient(timeout=6000, follow_redirects=True) as client:
                     response = await client.get(url, params=params, timeout=10.0)
                     response.raise_for_status()
                     return response.content
@@ -653,7 +654,7 @@ class ComfyUIAPI:
             "overwrite": (None, "true"),
         }
 
-        async with httpx.AsyncClient(timeout=6000, follow_redirects=True) as client:
+        async with RetryingAsyncClient(timeout=6000, follow_redirects=True) as client:
             response = await client.post(f"{self.url}/upload/image", files=files)
             try:
                 return response.json()["name"]
@@ -677,7 +678,7 @@ class ComfyUIAPI:
         headers = {"Authorization": f"Bearer {key}"}
         files = {"file": (filename, data)}
 
-        async with httpx.AsyncClient(timeout=6000, follow_redirects=True) as client:
+        async with RetryingAsyncClient(timeout=6000, follow_redirects=True) as client:
             response = await client.post(url, headers=headers, files=files)
             response.raise_for_status()
             payload = response.json()

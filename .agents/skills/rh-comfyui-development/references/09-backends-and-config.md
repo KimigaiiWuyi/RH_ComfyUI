@@ -5,6 +5,11 @@
 `utils/backends/` 是所有上游通信细节的家。每个后端是一个 `Adapter` 子类
 (`base.py`),注册进 `backend_registry`(`init_backends()` 启动时调用)。
 
+出站 HTTP 的传输层抖动(ReadError 等)统一走 `http_retry.py`:等 5 秒重试,
+共 5 次才向上报网络错误。新 backend 的 `AsyncClient` 用 `RetryingAsyncClient`,
+aiohttp 路径包 `call_with_network_retry`;不要在 poll 循环再叠一层。详见
+[§4.5.1](./04-channels-and-providers.md)。
+
 | 后端名(backend 字段) | 目录 | 上游 | 说明 |
 |---|---|---|---|
 | `comfyui` | `comfyui/` | 本地/远程 ComfyUI | WebSocket + workflow JSON;可 cancel(local interrupt 或 RH `/task/openapi/cancel`);可 history resume |

@@ -9,6 +9,7 @@
 ```
 backends/
 ├── __init__.py          # AdapterRegistry 注册表 + init_backends()
+├── http_retry.py        # 传输层 5×/5s 重试(ReadError 等;HTTP 状态不走这层)
 ├── base.py              # Adapter 抽象基类
 ├── comfyui/             # ComfyUI 后端（WebSocket API）
 │   ├── __init__.py

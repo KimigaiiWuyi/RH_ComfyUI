@@ -361,7 +361,13 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
 
     video_refs: list = list(req_kwargs["video_refs"])
     audio_refs: list = list(req_kwargs["audio_refs"])
+    image_roles: list[str] = []
     if "images" in req_kwargs and req_kwargs["images"]:
+        for d in req_kwargs["images"]:
+            if isinstance(d, dict):
+                role = str(d.get("role") or "").strip().lower()
+                if role:
+                    image_roles.append(role)
         images: list[bytes] = []
         for d in req_kwargs["images"]:
             if isinstance(d, dict):
@@ -423,9 +429,17 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
     if "audio_payload" in req_kwargs and isinstance(req_kwargs["audio_payload"], dict):
         req_kwargs["audio_payload"] = await _decode_media_bytes(req_kwargs["audio_payload"])
 
-    # 透传后端私有参数到 params
+    # 透传后端私有参数到 params。frame_mode 是 HTTP 顶层半显式开关,
+    # GenerationRequest 无同名字段,必须进 params,否则 Seedance 2.5 把多参考图
+    # 判成首尾帧并强制 adaptive。扁平 images 若全部 role=reference,也视为多参考。
+    existing_params = req_kwargs.get("params") if isinstance(req_kwargs.get("params"), dict) else {}
+    fm = str(existing_params.get("frame_mode") or passthrough.get("frame_mode") or "").strip().lower()
+    if fm in ("", "auto") and image_roles:
+        if not any(r in ("first_frame", "last_frame") for r in image_roles) and all(
+            r == "reference" for r in image_roles
+        ):
+            passthrough["frame_mode"] = "reference"
     if passthrough:
-        existing_params = req_kwargs.get("params") or {}
         if isinstance(existing_params, dict):
             existing_params.update(passthrough)
             req_kwargs["params"] = existing_params
@@ -592,15 +606,11 @@ async def _decode_media_bytes(d: dict[str, Any]) -> bytes:
         )
         raise ValueError(f"媒体 url 必须是 http(s) 链接或 data URI,收到不可下载的 url={preview!r}")
 
-    # 异步下载:调用方在 async submit() 的上下文中,使用 AsyncClient
-    # 避免同步 httpx.Client 阻塞事件循环。
-    import httpx
+    # 异步下载:调用方在 async submit() 的上下文中,网络抖动等 5s 再试,共 5 次。
+    from .utils.backends.http_retry import download_with_network_retry
 
     logger.debug(f"[RH_ComfyUI.api] 下载媒体 url={_preview_media_url(url, limit=200)}")
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        return r.content
+    return await download_with_network_retry(url, timeout=30.0, label="RH_ComfyUI.api")
 
 
 # ── 三重余额公开 API(外部宿主 / 插件预扣) ──────────────────────────

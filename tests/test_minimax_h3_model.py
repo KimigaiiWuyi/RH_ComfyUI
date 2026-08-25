@@ -3,7 +3,15 @@
 import asyncio
 
 from RH_ComfyUI.core.base.errors import ValidationError
-from RH_ComfyUI.core.schema.types import MediaRef, MediaKind, text_item, image_item
+from RH_ComfyUI.core.schema.types import (
+    MediaRef,
+    MediaKind,
+    ContentItem,
+    ContentItemType,
+    text_item,
+    image_item,
+    media_ref_cache_key,
+)
 from RH_ComfyUI.models.video.defs import MiniMaxH3Def
 from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.backends.seedance.spec import MediaRole, VideoTaskShape
@@ -681,6 +689,77 @@ def test_run_sets_wire_then_binds_vendor_cancel():
             clear_wire_audit()
 
     asyncio.run(_run())
+
+
+def test_media_ref_cache_key_same_bytes_not_id():
+    blob = b"VID" * 64
+    a = MediaRef(kind=MediaKind.VIDEO, data=blob)
+    b = MediaRef(kind=MediaKind.VIDEO, data=bytes(list(blob)))
+    assert media_ref_cache_key(a) == media_ref_cache_key(b)
+    c = MediaRef(kind=MediaKind.VIDEO, data=b"OTHER" * 64)
+    assert media_ref_cache_key(a) != media_ref_cache_key(c)
+
+
+def test_media_ref_cache_key_canonicalizes_url_path():
+    a = MediaRef(kind=MediaKind.VIDEO, url="https://host.example/api/canvas-backend/assets/abc/raw?sig=1")
+    b = MediaRef(kind=MediaKind.VIDEO, url="/api/canvas-backend/assets/abc/raw")
+    assert media_ref_cache_key(a) == media_ref_cache_key(b)
+
+
+def test_prepare_request_h3_same_video_in_oc_and_refs_counts_once(monkeypatch):
+    """video_refs + ordered_content 双写同一段片,总时长不得翻倍。"""
+
+    async def _fake_video(data: bytes, **_kwargs):
+        return data, 14.95, None
+
+    import RH_ComfyUI.utils.video_process as video_mod
+
+    monkeypatch.setattr(video_mod, "prepare_seedance_ref_video", _fake_video)
+    blob = b"VID" * 32
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="动作参考",
+        video_refs=[MediaRef(kind=MediaKind.VIDEO, data=blob)],
+        ordered_content=[
+            ContentItem(
+                type=ContentItemType.VIDEO,
+                media=MediaRef(kind=MediaKind.VIDEO, data=bytes(blob)),
+            ),
+        ],
+        params={"task_mode": "reference"},
+        generate_audio=True,
+    )
+    out = asyncio.run(MiniMaxH3Def().prepare_request(req))
+    assert out.video_refs
+
+
+def test_prepare_request_h3_two_videos_trim_to_total_budget(monkeypatch):
+    """两段各 ~15s 合计超 15s:再裁到预算内,不拒请求。"""
+    max_s_seen: list[float] = []
+
+    async def _fake_video(data: bytes, **kwargs):
+        max_s = float(kwargs.get("max_s") or 0)
+        max_s_seen.append(max_s)
+        if 0 < max_s < 15:
+            return data, max_s, "trim"
+        return data, 14.95, None
+
+    import RH_ComfyUI.utils.video_process as video_mod
+
+    monkeypatch.setattr(video_mod, "prepare_seedance_ref_video", _fake_video)
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="两段参考",
+        video_refs=[
+            MediaRef(kind=MediaKind.VIDEO, data=b"AAA" * 32),
+            MediaRef(kind=MediaKind.VIDEO, data=b"BBB" * 32),
+        ],
+        params={"task_mode": "reference"},
+        generate_audio=True,
+    )
+    out = asyncio.run(MiniMaxH3Def().prepare_request(req))
+    assert out.video_refs
+    assert any(0 < s < 15 for s in max_s_seen)
 
 
 def test_prepare_request_h3_video_skips_seedance_min_pixels(monkeypatch):

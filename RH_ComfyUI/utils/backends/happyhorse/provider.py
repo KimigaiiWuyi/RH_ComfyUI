@@ -23,11 +23,12 @@ from .classify import (
     to_api_resolution,
     rewrite_prompt_for_r2v,
 )
+
+# 复用 seedance 的 header 脱敏
+from ..http_retry import RetryingAsyncClient
 from ...core.types import MediaRef
 from ..seedance.spec import MediaRole, VideoGenSpec, VideoTaskShape
 from ...core.safe_json import dump_body, mask_body
-
-# 复用 seedance 的 header 脱敏
 from ..seedance._debug import mask_headers
 from ..seedance.provider import (
     TERMINAL_STATUSES,
@@ -445,7 +446,7 @@ class HappyHorseProvider:
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+            self._client = RetryingAsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
         return self._client
 
     async def _request(
@@ -673,6 +674,7 @@ class HappyHorseProvider:
             try:
                 task = await self.get(task_id)
             except (httpx.HTTPError, asyncio.TimeoutError, OSError) as poll_exc:
+                # Transport retry (5× / 5s) already happened in RetryingAsyncClient.
                 elapsed = loop.time() - start
                 raise HappyHorseProviderError(
                     f"{self.name} 轮询失败({type(poll_exc).__name__}: {poll_exc}); "

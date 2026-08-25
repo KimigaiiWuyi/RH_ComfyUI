@@ -25,6 +25,7 @@ import httpx
 from gsuid_core.logger import logger
 
 from .spec import VideoGenSpec, VideoTaskShape
+from ..http_retry import RetryingAsyncClient
 from ...core.types import MediaRef, MediaKind
 from ....core.base.errors import DryRunInterrupt
 
@@ -480,7 +481,7 @@ class SeedanceProvider(ABC):
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+            self._client = RetryingAsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
         return self._client
 
     async def _request(
@@ -662,8 +663,8 @@ class SeedanceProvider(ABC):
             try:
                 task = await self.get(task_id)
             except (httpx.HTTPError, asyncio.TimeoutError, OSError) as poll_exc:
-                # 网络级错误: 附加上次状态 / 已等待时长 / 轮询次数 后包装抛出,
-                # 让上层(executor)能记录到上下文而非裸 ReadTimeout。
+                # Transport retry (5× / 5s) already happened in RetryingAsyncClient.
+                # Reaching here means five consecutive network failures on this GET.
                 elapsed = loop.time() - start
                 raise SeedanceProviderError(
                     f"{self.name} 轮询失败({type(poll_exc).__name__}: {poll_exc}); "

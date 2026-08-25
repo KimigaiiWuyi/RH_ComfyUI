@@ -17,6 +17,7 @@ from gsuid_core.logger import logger
 
 from .classify import classify_happyhorse, resolve_vendor_model
 from .provider import HappyHorseProvider, HappyHorseProviderError
+from ..http_retry import download_with_network_retry
 from ...core.types import NodeOutput, ProgressEvent
 from ...core.request import GenerationRequest
 from ..dashscope.config import (
@@ -281,31 +282,16 @@ async def _download(
     url: str,
     *,
     timeout: float = 300.0,
-    max_retries: int = 3,
-    initial_backoff: float = 1.0,
+    max_retries: int = 5,
+    initial_backoff: float = 5.0,
 ) -> bytes:
-    last_exc: Optional[BaseException] = None
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        for attempt in range(max_retries):
-            try:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                return resp.content
-            except httpx.HTTPStatusError as exc:
-                if 400 <= exc.response.status_code < 500:
-                    raise
-                last_exc = exc
-            except (httpx.HTTPError, asyncio.TimeoutError, OSError) as exc:
-                last_exc = exc
-            if attempt < max_retries - 1:
-                backoff = initial_backoff * (2**attempt)
-                logger.warning(
-                    f"[HappyHorse] 下载失败({type(last_exc).__name__}: {last_exc}),"
-                    f" {attempt + 1}/{max_retries} 次重试,等待 {backoff:.1f}s"
-                )
-                await asyncio.sleep(backoff)
-    assert last_exc is not None
-    raise last_exc
+    return await download_with_network_retry(
+        url,
+        timeout=timeout,
+        attempts=max_retries,
+        wait_s=initial_backoff,
+        label="HappyHorse",
+    )
 
 
 def _evt(stage: str, percent: float, message: str) -> ProgressEvent:

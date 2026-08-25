@@ -9,6 +9,7 @@ import httpx
 
 from gsuid_core.logger import logger
 
+from ..http_retry import RetryingAsyncClient
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 # RunningHub 共享型/独占型 API 并发或机器数打满时的业务码。
@@ -99,7 +100,7 @@ class RHAppAPI:
         url = f"{self.base_url}/api/webapp/apiCallDemo"
         params = {"apiKey": api_key, "webappId": webapp_id}
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        async with RetryingAsyncClient(timeout=30, follow_redirects=True) as client:
             response = await client.get(url, params=params)
             response.raise_for_status()
             data = response.json()
@@ -120,7 +121,7 @@ class RHAppAPI:
 
         files = {"file": (filename, file_data)}
 
-        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        async with RetryingAsyncClient(timeout=60, follow_redirects=True) as client:
             response = await client.post(url, headers=headers, files=files)
             response.raise_for_status()
             data = response.json()
@@ -165,7 +166,7 @@ class RHAppAPI:
 
         last_reason = "queue full"
         for attempt in range(1, _RH_QUEUE_RETRY_ATTEMPTS + 1):
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            async with RetryingAsyncClient(timeout=30, follow_redirects=True) as client:
                 response = await client.post(url, headers=self._headers(), json=payload)
                 response.raise_for_status()
                 data = response.json()
@@ -198,7 +199,7 @@ class RHAppAPI:
         url = f"{self.base_url}/openapi/v2/query"
         payload = {"taskId": task_id}
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        async with RetryingAsyncClient(timeout=30, follow_redirects=True) as client:
             response = await client.post(url, headers=self._headers(), json=payload)
             response.raise_for_status()
             return response.json()
@@ -246,6 +247,9 @@ class RHAppAPI:
                     raise
                 result = None
                 poll_error = e
+            except httpx.TransportError:
+                # query_task already retried 5× / 5s
+                raise
             except httpx.HTTPError as e:
                 result = None
                 poll_error = e

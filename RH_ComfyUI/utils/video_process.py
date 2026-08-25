@@ -412,6 +412,53 @@ async def clamp_seedance_ref_video(
     )
 
 
+def plan_clip_durations_for_budget(
+    durations: list[float],
+    *,
+    budget_s: float,
+    min_s: float,
+    target_s: float,
+) -> list[float]:
+    """把多段参考时长压进总预算。已合法则原样返回,从不拉长任何一段。
+
+    MiniMax H3 官方:单段 [2,15]s 且合计 ≤15s。超预算时裁到 target_s(约 14.5,
+    留余量),各段尽量 ≥ min_s。H3 最多 3 段,3×2s=6s < 14.5,总能放下。
+    """
+    durs = [max(0.0, float(d)) for d in durations]
+    if not durs:
+        return durs
+    total = sum(durs)
+    if total <= budget_s + 1e-6:
+        return durs
+    cap = min(float(target_s), float(budget_s))
+    if cap <= 0:
+        return durs
+    floor = max(0.0, float(min_s))
+    positives = [i for i, d in enumerate(durs) if d > 0]
+    if not positives:
+        return durs
+    min_needed = floor * len(positives)
+    if min_needed >= cap - 1e-9:
+        return [floor if d > 0 else 0.0 for d in durs]
+    scale = cap / total
+    planned = [d * scale for d in durs]
+    deficit = 0.0
+    for i, p in enumerate(planned):
+        if durs[i] <= 0:
+            continue
+        if p < floor:
+            deficit += floor - p
+            planned[i] = floor
+    if deficit > 1e-6:
+        room_idx = [i for i in positives if planned[i] > floor]
+        room_total = sum(planned[i] - floor for i in room_idx)
+        if room_total > 1e-9:
+            for i in room_idx:
+                take = deficit * ((planned[i] - floor) / room_total)
+                planned[i] = max(floor, planned[i] - take)
+    return [min(p, d) if d > 0 else 0.0 for p, d in zip(planned, durs)]
+
+
 async def ensure_media_bytes(ref) -> Optional[bytes]:
     """MediaRef → bytes:优先 data,否则 http(s) 下载;失败返回 None。"""
     if ref.data:
@@ -422,13 +469,10 @@ async def ensure_media_bytes(ref) -> Optional[bytes]:
     low = url.lower()
     if not low.startswith(("http://", "https://")):
         return None
-    import httpx
+    from .backends.http_retry import download_with_network_retry
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.content
+        return await download_with_network_retry(url, timeout=60.0, label="video_process")
     except Exception as exc:  # noqa: BLE001
         logger.warning("[video_process] 下载参考媒体失败 url=%s err=%s", url[:120], exc)
         return None
@@ -513,6 +557,7 @@ __all__ = [
     "probe_video_duration",
     "prepare_seedance_ref_video",
     "clamp_seedance_ref_video",
+    "plan_clip_durations_for_budget",
     "prepare_seedance_video_ref",
     "prepare_ref_video_if_clamping",
     "ensure_media_bytes",

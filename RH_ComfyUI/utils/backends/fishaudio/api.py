@@ -16,6 +16,7 @@ import httpx
 
 from gsuid_core.logger import logger
 
+from ..http_retry import RetryingAsyncClient
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 # 仅对接官方公开端点(不额外暴露地址配置)。
@@ -83,7 +84,7 @@ class FishAudioAPI:
 
         url = f"{self.base_url}/model"
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with RetryingAsyncClient(timeout=_TIMEOUT) as client:
                 resp = await client.post(url, headers=self._auth_header(), files=files, data=data)
                 if resp.status_code not in (200, 201):
                     body = resp.text[:300]
@@ -109,7 +110,7 @@ class FishAudioAPI:
         """查询音色训练状态;查询失败返回 None(视作不再阻塞)"""
         url = f"{self.base_url}/model/{model_id}"
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with RetryingAsyncClient(timeout=_TIMEOUT) as client:
                 resp = await client.get(url, headers=self._auth_header())
                 if resp.status_code != 200:
                     return None
@@ -161,7 +162,7 @@ class FishAudioAPI:
         logger.info(f"[FishAudio] 合成: model={engine}, cloned={bool(reference_id)}, text={text[:50]}...")
 
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with RetryingAsyncClient(timeout=_TIMEOUT) as client:
                 resp = await client.post(url, headers=headers, json=body)
                 if resp.status_code != 200:
                     detail = resp.text[:200]
@@ -219,7 +220,7 @@ class FishAudioAPI:
         )
 
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with RetryingAsyncClient(timeout=_TIMEOUT) as client:
                 resp = await client.post(url, headers=self._auth_header(), files=files, data=data)
                 if resp.status_code != 200:
                     detail = resp.text[:200]

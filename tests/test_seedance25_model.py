@@ -445,3 +445,117 @@ def test_ark_media_limits_allow_seedance25():
     assert p.max_videos >= 10
     assert p.max_audios >= 10
     assert p.max_duration >= 30
+
+
+def _png(tag: bytes = b"") -> bytes:
+    return b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + tag
+
+
+def test_three_images_auto_allow_custom_ratio():
+    """≥3 张图 auto 视为多参考,允许 9:16(画布多角色 + 竖屏)。"""
+    m = Seedance25Def()
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="三角色展示",
+        images=[_png(b"a"), _png(b"b"), _png(b"c")],
+        duration=5,
+        ratio="9:16",
+    )
+    m.validate(req)
+
+
+def test_omni_reference_allows_custom_ratio_without_frame_mode():
+    m = Seedance25Def()
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="多参考",
+        images=[_png()],
+        duration=5,
+        ratio="9:16",
+        omni_reference_task_type="reference",
+    )
+    m.validate(req)
+
+
+def test_oc_reference_roles_allow_custom_ratio():
+    from RH_ComfyUI.core.schema.types import ContentItem, ContentItemType
+
+    m = Seedance25Def()
+    imgs = [
+        ContentItem(
+            type=ContentItemType.IMAGE,
+            role="reference",
+            media=MediaRef(kind=MediaKind.IMAGE, data=_png(bytes([i])), role="reference"),
+        )
+        for i in range(3)
+    ]
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="三角色",
+        ordered_content=imgs,
+        duration=5,
+        ratio="9:16",
+    )
+    m.validate(req)
+
+
+def test_three_images_first_last_still_requires_adaptive():
+    m = Seedance25Def()
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="首尾帧",
+        images=[_png(b"a"), _png(b"b"), _png(b"c")],
+        duration=5,
+        ratio="9:16",
+        params={"frame_mode": "first_last"},
+    )
+    with pytest.raises(ValidationError, match="adaptive"):
+        m.validate(req)
+
+
+def test_build_request_top_level_frame_mode_into_params():
+    """画布 HTTP 顶层 frame_mode 必须进 params,validate 才能看见多参考。"""
+    from RH_ComfyUI.api import _build_request
+
+    req = asyncio.run(
+        _build_request(
+            task_type="video",
+            prompt="三角色展示",
+            kwargs={
+                "model": "seedance2.5",
+                "ratio": "9:16",
+                "duration": 5,
+                "resolution": "720p",
+                "frame_mode": "reference",
+                "omni_reference_task_type": "reference",
+                "images": [
+                    {"data": _png(b"1"), "role": "reference"},
+                    {"data": _png(b"2"), "role": "reference"},
+                    {"data": _png(b"3"), "role": "reference"},
+                ],
+            },
+        )
+    )
+    assert req.params.get("frame_mode") == "reference"
+    Seedance25Def().validate(req)
+
+
+def test_build_request_infers_reference_from_image_roles():
+    from RH_ComfyUI.api import _build_request
+
+    req = asyncio.run(
+        _build_request(
+            task_type="video",
+            prompt="多参考",
+            kwargs={
+                "ratio": "9:16",
+                "duration": 5,
+                "images": [
+                    {"data": _png(b"1"), "role": "reference"},
+                    {"data": _png(b"2"), "role": "reference"},
+                ],
+            },
+        )
+    )
+    assert req.params.get("frame_mode") == "reference"
+    Seedance25Def().validate(req)

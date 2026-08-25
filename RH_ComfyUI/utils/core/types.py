@@ -12,9 +12,11 @@
 
 from __future__ import annotations
 
+import hashlib
 from enum import Enum
 from typing import Any, Union, Callable, Optional, Awaitable
 from dataclasses import field, dataclass
+from urllib.parse import urlsplit
 
 # ═══════════════════════════════════════════════════════════════════════
 #  PortType — 端口类型枚举
@@ -322,6 +324,22 @@ class MediaRef:
         return self.url is not None and self.data is None
 
 
+def media_ref_cache_key(ref: MediaRef) -> str:
+    """prepare_request 去重键。同内容的两份 bytes 必须撞同一键,禁止 ``id(data)``。
+
+    调用方常同时发 ``video_refs`` 与 ``ordered_content``(同一段片两份副本)。
+    用 ``id(data)`` 会把 ~15s 计两次 → MiniMax H3 「总时长须 ≤ 15 秒,当前约 29.9 秒」。
+    """
+    data = ref.data
+    if data:
+        return f"sha256:{hashlib.sha256(data).hexdigest()}"
+    raw_url = (ref.url or "").strip()
+    if not raw_url:
+        return f"empty:{id(ref)}"
+    path = urlsplit(raw_url).path or raw_url.split("?", 1)[0]
+    return f"url:{path}"
+
+
 # ── MediaRef 便利构造器 ──
 
 
@@ -623,6 +641,7 @@ __all__ = [
     # 类型
     "PortSpec",
     "MediaRef",
+    "media_ref_cache_key",
     "ContentItem",
     "CapabilityManifest",
     "ProgressEvent",

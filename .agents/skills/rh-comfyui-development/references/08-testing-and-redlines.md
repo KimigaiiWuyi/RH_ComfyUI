@@ -32,6 +32,7 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 | `test_video_normalize.py` | 视频预处理下沉:normalize() 统一缩放 images 与 ordered_content 图片项 |
 | `test_cancel_generation.py` | cancel 登记/远程 bind、`rh_app`≠`comfyui` 通道 remote cancel、`can_resume`、模型 cancel 标志 |
 | `test_statistics_request_body.py` | request_body 脱敏、**wire 优先于入参 prompt/body**、begin→update 同 id |
+| `test_network_retry.py` | 传输层 5×/5s:ReadError 重试、HTTP 4xx 不重试、五次失败才抛 |
 
 约定:用 FakeModel + FakePolicy,不 mock 网络(内核本身不应有网络调用);
 统计落库用 `_mute_recording` monkeypatch 静音。
