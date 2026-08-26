@@ -18,7 +18,7 @@ class PollingChannelMixin:
     """子类提供 poll_once(task_id) -> (done: bool, payload);本类提供节奏与超时"""
 
     poll_interval_seconds: float = 5.0
-    poll_timeout_seconds: float = 1800.0
+    poll_timeout_seconds: float = 3600.0
     heartbeat_every: int = 6  # 每 N 次轮询打一条心跳日志
 
     async def poll_until_done(

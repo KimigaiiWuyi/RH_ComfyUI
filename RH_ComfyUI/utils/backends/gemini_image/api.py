@@ -225,7 +225,7 @@ class GeminiImageAPI:
         client = self._build_client()
         interaction = await client.aio.interactions.get(interaction_id)
         interaction = await self._poll_until_done(
-            client, interaction, interval=1.5, max_wait=1800.0
+            client, interaction, interval=1.5, max_wait=3600.0
         )
         status = str(getattr(interaction, "status", None) or "").lower()
         if status in {"failed", "cancelled", "canceled"}:

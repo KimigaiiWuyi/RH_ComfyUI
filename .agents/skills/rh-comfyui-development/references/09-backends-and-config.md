@@ -108,7 +108,7 @@ catalog-only 键(`frame_mode` / `image_size` / `task_mode` 等)从
 | 键 | 用途 |
 |---|---|
 | `Max_Concurrency` | 全局并发闸大小(改配置即刻生效,见 05 章 5.4) |
-| `Dispatch_Timeout` | 单任务超时预算(秒,默认 1800,0=不限;覆盖排队+执行全程,超时退款,见 05 章 5.1) |
+| `Dispatch_Timeout` | 单任务超时预算(秒,默认 3600,0=不限;覆盖排队+执行全程,超时退款,见 05 章 5.1) |
 | `Dry_Run` | 全局干跑(拦截**全部**模型出站请求,抛 `DryRunInterrupt` 终止并退款;改完即生效) |
 | `Load_Balance_Mode` / `Failure_Threshold` | 全模态负载均衡策略 / 熔断阈值(每次决策实时读取,改完即生效) |
 | `Default_Point` | 新用户初始积分 |

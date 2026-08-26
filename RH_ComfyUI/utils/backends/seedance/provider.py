@@ -641,7 +641,7 @@ class SeedanceProvider(ABC):
         task_id: str,
         *,
         interval: float = 8.0,
-        max_wait: float = 1800.0,
+        max_wait: float = 3600.0,
         # 15 × 8s ≈ 2 分钟一条心跳(原来 5 ≈ 40s:× 并发就是每分钟上百行)。
         # 心跳只为"长任务没卡死"提供证据;状态真变了另有 INFO 行。
         heartbeat_every: int = 15,

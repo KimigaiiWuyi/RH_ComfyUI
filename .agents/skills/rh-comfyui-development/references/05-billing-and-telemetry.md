@@ -39,7 +39,7 @@
 `ExternalPrepaidPolicy` 不碰 RHBind,只把实扣写进 result;调用方
 对已预扣账本做同样的差额对齐。
 
-**超时预算**:`PLUGIN_CONFIG.Dispatch_Timeout`(秒,默认 1800,0=不限,
+**超时预算**:`PLUGIN_CONFIG.Dispatch_Timeout`(秒,默认 3600,0=不限,
 每次 dispatch 实时读、改配置即刻生效)用 `asyncio.wait_for` 包住
 "排队等并发闸 + model.run()" 全程 —— 排队发生在扣费之后,没有预算时一个
 卡死的上游会占住全局并发闸拖垮后续所有任务。超时被翻译成带人话

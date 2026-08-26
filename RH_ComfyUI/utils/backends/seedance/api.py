@@ -196,7 +196,7 @@ class SeedanceAPI:
         task_id: str,
         *,
         interval_seconds: float = 10.0,
-        max_wait_seconds: float = 1800.0,
+        max_wait_seconds: float = 3600.0,
         on_progress=None,
     ) -> dict[str, Any]:
         """轮询直到任务进入终态
@@ -204,7 +204,7 @@ class SeedanceAPI:
         Args:
             task_id: 任务 ID
             interval_seconds: 轮询间隔
-            max_wait_seconds: 最大等待时长(30 分钟默认)
+            max_wait_seconds: 最大等待时长(60 分钟默认)
             on_progress: 可选的 async 回调,接收 dict 形式的当前任务状态
 
         Returns:

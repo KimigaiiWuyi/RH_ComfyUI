@@ -545,7 +545,7 @@ class MiniMaxH3Provider:
         task_id: str,
         *,
         interval: Optional[float] = None,
-        max_wait: float = 1800.0,
+        max_wait: float = 3600.0,
         heartbeat_every: int = 6,
         on_progress: Optional[Callable[[NormalizedTask], Any]] = None,
     ) -> NormalizedTask:
