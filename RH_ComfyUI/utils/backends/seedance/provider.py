@@ -330,8 +330,24 @@ class SeedanceProvider(ABC):
 
     # ── 媒体准备 ──
 
+    async def _publish_video_bytes(self, data: bytes, mime: str) -> Optional[str]:
+        """参考视频 bytes → 对象存储外链;未注册 publisher 时返回 None(调用方回落)。"""
+        from ....core.media_host import MediaPublishError, materialize
+
+        try:
+            published = await materialize(data, mime)
+        except MediaPublishError as exc:
+            raise SeedanceProviderError(
+                f"参考视频外链化失败: {exc}",
+                code="MEDIA_PUBLISH_FAILED",
+                retryable=True,
+                provider=self.name,
+                user_message="参考视频上传失败,请稍后重试。",
+            ) from exc
+        return published or None
+
     async def materialize_media(self, ref: MediaRef) -> Optional[str]:
-        """默认实现:URL 透传 / bytes → base64 data URL。
+        """默认实现:URL 透传;参考图 bytes → data URL;参考视频 bytes 优先外链。
 
         参考图先做短边放大 + 宽高比裁切;参考视频在 run() 绑了钳位规格时
         按时长/像素预处理。避免 http URL 把超限原片交给上游。
@@ -349,6 +365,10 @@ class SeedanceProvider(ABC):
         if ref.data is None:
             return None
         mime = ref.mime_type or "application/octet-stream"
+        if ref.kind == MediaKind.VIDEO:
+            hosted = await self._publish_video_bytes(ref.data, mime)
+            if hosted:
+                return hosted
         return self.bytes_to_data_url(ref.data, mime)
 
     async def materialize_all(self, refs: list[MediaRef]) -> list[Optional[str]]:
@@ -437,8 +457,7 @@ class SeedanceProvider(ABC):
 
             if remote_cancel_already_attempted():
                 logger.debug(
-                    f"[Seedance:{self.name}] 跳过 CancelledError 兜底 DELETE"
-                    f"(cancel_generation 已尝试上游): {task_id}"
+                    f"[Seedance:{self.name}] 跳过 CancelledError 兜底 DELETE(cancel_generation 已尝试上游): {task_id}"
                 )
                 return
         except Exception:  # noqa: BLE001
@@ -510,9 +529,7 @@ class SeedanceProvider(ABC):
         from ._debug import dump_body, mask_body, mask_headers
 
         method_u = (method or "").upper()
-        is_cancel_req = method_u in ("DELETE", "PUT") or (
-            method_u == "POST" and "/cancel" in (url or "").lower()
-        )
+        is_cancel_req = method_u in ("DELETE", "PUT") or (method_u == "POST" and "/cancel" in (url or "").lower())
         req_emit = logger.info if is_cancel_req else logger.debug
         req_emit(
             f"[Seedance:{self.name}] 请求 {method_u} {url}\n"
@@ -539,10 +556,7 @@ class SeedanceProvider(ABC):
             resp_emit = logger.info
         else:
             resp_emit = logger.debug
-        resp_emit(
-            f"[Seedance:{self.name}] 响应 {resp.status_code} ({len(resp.content)} bytes)\n"
-            f"  body: {resp_text}"
-        )
+        resp_emit(f"[Seedance:{self.name}] 响应 {resp.status_code} ({len(resp.content)} bytes)\n  body: {resp_text}")
 
         if resp.status_code >= 400:
             raise self._build_http_error(resp)

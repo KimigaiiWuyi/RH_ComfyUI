@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gsuid_core.logger import logger
 from gsuid_core.webconsole.mount_app import PageSchema, GsAdminModel, site
 from gsuid_core.utils.database.startup import exec_list
-from gsuid_core.utils.database.base_models import Bind, with_session
+from gsuid_core.utils.database.base_models import Bind, with_session, with_read_session
 
 from ..core.request import TaskType
 from ...rh_config.comfyui_config import PLUGIN_CONFIG
@@ -864,7 +864,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     # ── 查询 / 清理方法:风格与 外部插件的 VideoJob.list_by_owner() 一致 ──
 
     @classmethod
-    @with_session
+    @with_read_session
     async def list_by_user(
         cls,
         session: AsyncSession,
@@ -917,7 +917,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         return list(rows)
 
     @classmethod
-    @with_session
+    @with_read_session
     async def get_summary(
         cls,
         session: AsyncSession,
@@ -1087,7 +1087,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             conds.append(col(cls.created_at) <= end_time)
 
     @classmethod
-    @with_session
+    @with_read_session
     async def list_filter_options(
         cls,
         session: AsyncSession,
@@ -1136,7 +1136,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         }
 
     @classmethod
-    @with_session
+    @with_read_session
     async def list_all(
         cls,
         session: AsyncSession,
@@ -1193,7 +1193,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         return list(rows)
 
     @classmethod
-    @with_session
+    @with_read_session
     async def get_by_record_id(
         cls,
         session: AsyncSession,
@@ -1204,7 +1204,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         return (await session.execute(stmt)).scalar_one_or_none()
 
     @classmethod
-    @with_session
+    @with_read_session
     async def get_user_summaries(
         cls,
         session: AsyncSession,
@@ -1308,7 +1308,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         return results
 
     @classmethod
-    @with_session
+    @with_read_session
     async def get_daily_series(
         cls,
         session: AsyncSession,
@@ -1394,7 +1394,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         return out
 
     @classmethod
-    @with_session
+    @with_read_session
     async def get_provider_summaries(
         cls,
         session: AsyncSession,
@@ -1798,7 +1798,7 @@ class RHComfyuiStatsCache(SQLModel, table=True):
     updated_at: int = Field(default=0, title="更新 unix 秒")
 
     @classmethod
-    @with_session
+    @with_read_session
     async def get_valid(
         cls,
         session: AsyncSession,

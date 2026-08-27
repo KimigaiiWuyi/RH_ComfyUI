@@ -26,7 +26,7 @@ from .classify import (
 
 # 复用 seedance 的 header 脱敏
 from ..http_retry import RetryingAsyncClient
-from ...core.types import MediaRef
+from ...core.types import MediaRef, MediaKind
 from ..seedance.spec import MediaRole, VideoGenSpec, VideoTaskShape
 from ...core.safe_json import dump_body, mask_body
 from ..seedance._debug import mask_headers
@@ -287,6 +287,21 @@ class HappyHorseProvider:
         if ref.data is None:
             return None
         mime = ref.mime_type or "application/octet-stream"
+        if ref.kind == MediaKind.VIDEO:
+            from ....core.media_host import MediaPublishError, materialize
+
+            try:
+                published = await materialize(ref.data, mime)
+            except MediaPublishError as exc:
+                raise HappyHorseProviderError(
+                    f"参考视频外链化失败: {exc}",
+                    code="MEDIA_PUBLISH_FAILED",
+                    retryable=True,
+                    provider=self.name,
+                    user_message="参考视频上传失败,请稍后重试。",
+                ) from exc
+            if published:
+                return published
         b64 = base64.b64encode(ref.data).decode("ascii")
         return f"data:{mime};base64,{b64}"
 
@@ -642,8 +657,7 @@ class HappyHorseProvider:
 
             if remote_cancel_already_attempted():
                 logger.debug(
-                    f"[HappyHorse:{self.name}] 跳过 CancelledError 兜底 cancel"
-                    f"(cancel_generation 已尝试上游): {task_id}"
+                    f"[HappyHorse:{self.name}] 跳过 CancelledError 兜底 cancel(cancel_generation 已尝试上游): {task_id}"
                 )
                 return
         except Exception:  # noqa: BLE001
