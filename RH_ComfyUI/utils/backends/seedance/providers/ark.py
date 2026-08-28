@@ -155,6 +155,20 @@ def _is_seedance25_model(model: str | None) -> bool:
     return "seedance-2-5" in m or "seedance-2.5" in m or m.endswith("seedance2.5")
 
 
+def _is_seedance2_family(model: str | None) -> bool:
+    """识别 Seedance 2.x(含 2.0 / Fast / Mini / 2.5)。官方 2.x 均不支持 camera_fixed。"""
+    if not model:
+        return False
+    m = model.strip().lower()
+    return (
+        "seedance-2" in m
+        or "seedance2." in m
+        or "seedance2_" in m
+        or m.endswith("seedance2")
+        or m.endswith("seedance2.5")
+    )
+
+
 # 不把 auto 写入官方 body;auto 视同未指定,走下方回填或省略
 _OMNI_REF_TASK_TYPES = frozenset({"reference", "edit", "extend"})
 
@@ -307,8 +321,8 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
             body["generate_audio"] = True
         if not spec.watermark:
             body["watermark"] = False
-        # camera_fixed 仅 1.x;2.5(ark/网关 model id)写入会 400
-        if spec.camera_fixed and not _is_seedance25_model(model):
+        # camera_fixed 仅 1.x;2.x 写入会 400 InvalidParameter
+        if spec.camera_fixed and not _is_seedance2_family(model):
             body["camera_fixed"] = True
         if spec.return_last_frame:
             body["return_last_frame"] = True

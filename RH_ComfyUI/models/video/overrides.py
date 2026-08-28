@@ -409,6 +409,11 @@ class SeedanceVideoModel(VideoPipelineModel):
             raise ValidationError(f"{self.display_name} 最多接受 3 段参考视频,当前 {len(request.video_refs)} 段")
         if len(request.audio_refs) > 3:
             raise ValidationError(f"{self.display_name} 最多接受 3 段参考音频,当前 {len(request.audio_refs)} 段")
+        # catalog 未声明则拒绝:2.x 官方不支持;1.5 Pro 仍暴露该端口
+        if request.camera_fixed and "camera_fixed" not in self.node.inputs:
+            raise ValidationError(
+                f"{self.display_name} 不支持 camera_fixed(固定镜头);该参数仅 Seedance 1.0 / 1.5 可用,请关闭后重试"
+            )
 
     async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
         """提交前预处理:参考视频时长/像素 + 参考音频时长 + 参考图短边/宽高比。

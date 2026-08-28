@@ -251,7 +251,9 @@ class Seedance2Def(SeedanceVideoModel):
                 "\n"
                 "支持 16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9 / adaptive 比例,"
                 "\n"
-                "默认生成同步音频(generate_audio=false 可关),支持摄像机固定、水印、seed、可选尾帧等。"
+                "默认生成同步音频(generate_audio=false 可关),支持水印、seed、可选尾帧等。"
+                "\n"
+                "不支持 camera_fixed(固定镜头,官方仅 Seedance 1.x)。"
                 "\n"
                 "支持时长:4~15 秒。"
                 "\n"
@@ -327,9 +329,6 @@ class Seedance2Def(SeedanceVideoModel):
                 ),
                 "watermark": PortSpec(
                     type=PortType.BOOLEAN, default=False, title="AI 水印", description="是否添加 AI 水印"
-                ),
-                "camera_fixed": PortSpec(
-                    type=PortType.BOOLEAN, default=False, title="固定镜头", description="摄像机是否固定"
                 ),
                 "return_last_frame": PortSpec(
                     type=PortType.BOOLEAN, default=False, title="返回尾帧", description="是否同时返回尾帧图"
@@ -777,9 +776,6 @@ class Seedance2FastDef(SeedanceVideoModel):
                 ),
                 "watermark": PortSpec(
                     type=PortType.BOOLEAN, default=False, title="AI 水印", description="是否添加 AI 水印"
-                ),
-                "camera_fixed": PortSpec(
-                    type=PortType.BOOLEAN, default=False, title="固定镜头", description="摄像机是否固定"
                 ),
                 "return_last_frame": PortSpec(
                     type=PortType.BOOLEAN, default=False, title="返回尾帧", description="是否同时返回尾帧图"

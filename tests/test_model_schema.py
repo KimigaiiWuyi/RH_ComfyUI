@@ -14,8 +14,10 @@ from RH_ComfyUI.models.image.defs import (
 from RH_ComfyUI.models.video.defs import (
     Wan30Def,
     MiniMaxH3Def,
+    Seedance2Def,
     Seedance25Def,
     Seedance2FastDef,
+    Seedance2MiniDef,
     Seedance15ProDef,
     Wan22VideogenDef,
 )
@@ -81,6 +83,19 @@ def test_minimax_h3_declares_media_ports():
     assert node.inputs["ratio"].default == "16:9"
     assert "adaptive" not in node.inputs["ratio"].values
     assert "generate_audio" not in node.inputs
+
+
+@pytest.mark.parametrize(
+    "cls",
+    [Seedance2Def, Seedance2FastDef, Seedance2MiniDef, Seedance25Def],
+)
+def test_seedance2_family_hides_camera_fixed(cls):
+    """官方 2.x 不支持 camera_fixed;catalog 暴露会让前端出现「固定镜头」。"""
+    assert "camera_fixed" not in cls.node_def().inputs
+
+
+def test_seedance15_keeps_camera_fixed():
+    assert "camera_fixed" in Seedance15ProDef.node_def().inputs
 
 
 def test_seedance25_declares_task_mode_and_output_format():

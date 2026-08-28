@@ -8,7 +8,7 @@ import pytest
 
 from RH_ComfyUI.core.base.errors import ValidationError
 from RH_ComfyUI.core.schema.types import MediaRef, MediaKind
-from RH_ComfyUI.models.video.defs import Seedance25Def
+from RH_ComfyUI.models.video.defs import Seedance2Def, Seedance25Def
 from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.backends.seedance.spec import VideoTaskShape
 from RH_ComfyUI.utils.backends.seedance.classify import classify_video_spec
@@ -194,8 +194,9 @@ def test_duration_minus_one_allowed_in_all_modes():
         m.validate(req)
 
 
-def test_reject_camera_fixed():
-    m = Seedance25Def()
+@pytest.mark.parametrize("cls", [Seedance25Def, Seedance2Def])
+def test_reject_camera_fixed(cls):
+    m = cls()
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
         prompt="固定镜头",
@@ -277,8 +278,8 @@ def test_ark_render_omits_default_mp4_output_format():
     assert "output_format" not in body
 
 
-def test_ark_render_omits_camera_fixed_for_seedance25():
-    """存量请求即使带 camera_fixed=true,2.5 请求体也不得写入(上游 400)。"""
+def test_ark_render_omits_camera_fixed_for_seedance2_family():
+    """存量请求即使带 camera_fixed=true,2.x 请求体也不得写入(上游 400)。"""
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
         prompt="文生",
@@ -289,12 +290,18 @@ def test_ark_render_omits_camera_fixed_for_seedance25():
     spec = classify_video_spec(req)
     assert spec.camera_fixed is True
     p = ArkSeedanceProvider(api_key="test-key")
-    for model in ("doubao-seedance-2-5-260628", "doubao-seedance-2.5"):
+    for model in (
+        "doubao-seedance-2-5-260628",
+        "doubao-seedance-2.5",
+        "doubao-seedance-2-0-260128",
+        "doubao-seedance-2-0-fast-260128",
+        "doubao-seedance-2-0-mini-260615",
+    ):
         _m, _u, _h, body = asyncio.run(p.render_create(spec, model=model))
         assert "camera_fixed" not in body, model
 
 
-def test_ark_render_keeps_camera_fixed_for_seedance2():
+def test_ark_render_keeps_camera_fixed_for_seedance15():
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
         prompt="文生",
@@ -304,7 +311,7 @@ def test_ark_render_keeps_camera_fixed_for_seedance2():
     )
     spec = classify_video_spec(req)
     p = ArkSeedanceProvider(api_key="test-key")
-    _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2-0-260128"))
+    _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-1-5-pro-251215"))
     assert body.get("camera_fixed") is True
 
 
