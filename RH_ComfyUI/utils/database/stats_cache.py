@@ -18,13 +18,14 @@ from dataclasses import dataclass
 
 from gsuid_core.logger import logger
 
-# 内存新鲜窗口：未脏且未过期则不后台重算。脏了仍立刻返回上一份。
-_L1_FRESH_SEC = 30.0
+# 同一 bot 全表 SUM 的最小间隔。脏了仍立刻返回上一份，到期才后台重算。
+# 以前 dirty 无视年龄 → 每条生成后下一次 /admin/stats 都扫流水表。
+_L1_MIN_RECOMPUTE_SEC = 30.0
 _L1_MAX = 128
 
 # L2 表 TTL（重启后的温缓存；活进程不靠它挡刷新）
-_TTL_WINDOWED = 45
-_TTL_ALL_HISTORY = 90
+_TTL_WINDOWED = 120
+_TTL_ALL_HISTORY = 6 * 3600
 
 
 @dataclass
@@ -62,17 +63,19 @@ def make_cache_key(
     days: Optional[int] = None,
     top_n: int = 0,
 ) -> str:
-    """稳定短键;内容哈希防超长。"""
-    raw = "|".join(
-        [
-            kind,
-            bot_id or "",
-            _iso(start_time),
-            _iso(end_time),
-            str(days if days is not None else ""),
-            str(int(top_n or 0)),
-        ]
-    )
+    """稳定短键;内容哈希防超长。
+
+    滑动窗（``days=N`` / 全部时间）**不要**把 ``now()`` 写进键，否则每次
+    /admin/stats 都是新 key → L1/L2 永远 miss → 共享库全表 SUM。
+    自定义 ``date_from``/``date_to`` 才用起止时刻。
+    """
+    if days is not None:
+        window = f"d{int(days)}"
+    elif start_time is None and end_time is None:
+        window = "all"
+    else:
+        window = f"{_iso(start_time)}|{_iso(end_time)}"
+    raw = "|".join([kind, bot_id or "", window, str(int(top_n or 0))])
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
     return f"{kind}:{bot_id or '_'}:{digest}"[:256]
 
@@ -123,9 +126,10 @@ def _spawn(coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any] | None:
 def _needs_refresh(entry: _MemEntry | None) -> bool:
     if entry is None:
         return True
-    if entry.dirty:
-        return True
-    return (time.monotonic() - entry.computed_mono) >= _L1_FRESH_SEC
+    age = time.monotonic() - entry.computed_mono
+    if age < _L1_MIN_RECOMPUTE_SEC:
+        return False
+    return entry.dirty
 
 
 async def cache_get(key: str) -> Any | None:
@@ -231,7 +235,7 @@ async def get_summary_cached(
     end_time: Optional[datetime],
     days: Optional[int] = None,
 ) -> dict[str, Any]:
-    """内存命中立刻返回；脏/过期则后台重算。冷启动才同步扫表。"""
+    """内存命中立刻返回。脏且距上次全表 SUM ≥ 30s 才后台重算。冷启动才同步扫表。"""
     from .models import RHComfyuiTaskRecord
 
     bid = bot_id or ""

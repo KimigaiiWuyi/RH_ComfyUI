@@ -112,10 +112,16 @@ def _aggregate_by_task_type(records: list[RHComfyuiTaskRecord]) -> list[TaskType
     ]
 
 
-def _now_window(days: Optional[int]) -> tuple[Optional[datetime], datetime]:
-    """根据 days 计算时间窗;None 表示不限制。返回 (start, end) 二元组。"""
+def _now_window(days: Optional[int]) -> tuple[Optional[datetime], Optional[datetime]]:
+    """根据 days 计算时间窗。
+
+    ``days is None`` → ``(None, None)``（全部时间，SQL 不加 created_at 条件）。
+    以前即使不限天数也把 ``end=now()`` 传进 stats 缓存键，每次请求都 miss。
+    """
+    if not days:
+        return None, None
     end = datetime.now(timezone.utc)
-    start = end - timedelta(days=days) if days else None
+    start = end - timedelta(days=days)
     return start, end
 
 

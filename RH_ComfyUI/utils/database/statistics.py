@@ -247,12 +247,8 @@ async def begin_task(
             point_cost=point_cost if point_cost else int(node.point_cost or 0),
         )
         record_id = await RHComfyuiTaskRecord.insert_task_record(**kwargs)
-        try:
-            from .stats_cache import invalidate_stats_cache
-
-            await invalidate_stats_cache(bot_id=bot_id or kwargs.get("bot_id") or None)
-        except Exception:  # noqa: BLE001
-            pass
+        # running 行不标脏 stats：合计/榜单看终态；begin 每次 invalidate
+        # 会让 /admin/stats 在任务进行中就扫全表。record_task 终态再标脏。
         logger.info(
             f"[RHComfyUI.Statistics] began id={record_id} task={node.name} "
             f"user={kwargs['user_id']} status=running cost={kwargs['point_cost']}"
