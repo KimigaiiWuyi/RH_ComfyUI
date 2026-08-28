@@ -43,11 +43,11 @@ _SHAPE_TO_VENDOR: dict[VideoTaskShape, str] = {
     VideoTaskShape.VIDEO_EXTEND: VENDOR_MODEL_EDIT,
 }
 
-# 单次扫描:「[参考图片N]」/「图片N」/「image N」/「[Image N]」→「[Image N]」
-# 结构化「[参考图片N]」必须排在裸「图片N」前,避免拆成「[参考[Image N]]」。
+# 单次扫描:「[@参考图片N]」/「[参考图片N]」/「图片N」/「image N」/「[Image N]」→「[Image N]」
+# 结构化「[@参考图片N]」必须排在裸「图片N」前,避免拆成「[@参考[Image N]]」。
 # 交替一次替换,避免先改成 [Image N] 再被二次包成 [[Image N]]
 _IMAGE_REF_PATTERN = re.compile(
-    r"\[\s*参考图片\s*(\d+)\s*\]"
+    r"\[\s*@?\s*参考图片\s*(\d+)\s*\]"
     r"|图片\s*(\d+)"
     r"|\[\s*[Ii]mage\s*(\d+)\s*\]"
     r"|(?<![A-Za-z])[Ii]mage\s*(\d+)"
@@ -143,7 +143,7 @@ def _apply_happyhorse_roles(spec: VideoGenSpec) -> None:
 
 
 def rewrite_prompt_for_r2v(prompt: str) -> str:
-    """把通用「[参考图片N]」/「图片N」引用改写为 HappyHorse R2V 的 ``[Image N]``。"""
+    """把通用「[@参考图片N]」/「[参考图片N]」/「图片N」引用改写为 HappyHorse R2V 的 ``[Image N]``。"""
     if not prompt:
         return prompt
 

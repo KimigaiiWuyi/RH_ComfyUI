@@ -24,15 +24,15 @@ from ..happyhorse.classify import to_api_resolution
 
 VENDOR_MODEL = "wan3.0-video"
 
-# 图片N / [Image N] / [参考图片N] → 图N(官方 prompt 指代)
+# 图片N / [Image N] / [@参考图片N] / [参考图片N] → 图N(官方 prompt 指代)
 _IMAGE_REF_PATTERN = re.compile(
-    r"\[\s*参考图片\s*(\d+)\s*\]"
+    r"\[\s*@?\s*参考图片\s*(\d+)\s*\]"
     r"|图片\s*(\d+)"
     r"|\[\s*[Ii]mage\s*(\d+)\s*\]"
     r"|(?<![A-Za-z\u4e00-\u9fff])[Ii]mage\s*(\d+)"
 )
-_VIDEO_REF_PATTERN = re.compile(r"\[\s*参考视频\s*(\d+)\s*\]")
-_AUDIO_REF_PATTERN = re.compile(r"\[\s*参考音频\s*(\d+)\s*\]")
+_VIDEO_REF_PATTERN = re.compile(r"\[\s*@?\s*参考视频\s*(\d+)\s*\]")
+_AUDIO_REF_PATTERN = re.compile(r"\[\s*@?\s*参考音频\s*(\d+)\s*\]")
 
 
 def _param_url(params: dict, *keys: str) -> str:

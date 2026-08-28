@@ -25,6 +25,7 @@ from ..provider import (
     normalize_usage,
 )
 from ....core.types import MediaKind
+from ....core.media_labels import append_spaced_media_ref
 
 # Seedance / 方舟 content[] 协议:每种媒体的 type 键与 payload 键同名。
 # 视频必须是 video_url(不是 image_url),音频必须是 audio_url —— 否则上游
@@ -63,8 +64,10 @@ class ContentArrayMixin:
         """按 `ordered_segments` 渲染 content[];无序段时回退到 prompt+media。
 
         Seedance API 限制: content[] 中最多只能有一个 text 项。
-        因此将所有 text 段合并为一个,媒体引用以 "图片1"/"视频1"/"音频1" 形式嵌入文本,
-        媒体项按图片→视频→音频顺序附在文字之后。
+        因此将所有 text 段合并为 content[0],媒体引用以「[@参考图片1]」等
+        按 @ 出现顺序嵌入该 text(前后留空格)。
+        媒体项必须紧跟 text、且 **保持 ordered_segments（即提示词 @ 顺序）**,
+        禁止再按图片→视频→音频重排 —— 否则网关 ``content[N]`` 对不上第 N 个 @。
         """
         if spec.ordered_segments:
             # 有序路径:并行 materialize 所有媒体
@@ -76,9 +79,7 @@ class ContentArrayMixin:
 
             url_iter = iter(urls)
             text_parts: list[str] = []
-            images: list[dict[str, Any]] = []
-            videos: list[dict[str, Any]] = []
-            audios: list[dict[str, Any]] = []
+            media_items: list[dict[str, Any]] = []
             img_idx = 0
             vid_idx = 0
             aud_idx = 0
@@ -103,23 +104,19 @@ class ContentArrayMixin:
 
                 if kind == MediaKind.IMAGE:
                     img_idx += 1
-                    text_parts.append(f"【图片{img_idx}】")
-                    images.append(d)
+                    append_spaced_media_ref(text_parts, kind, img_idx)
                 elif kind == MediaKind.VIDEO:
                     vid_idx += 1
-                    text_parts.append(f"【视频{vid_idx}】")
-                    videos.append(d)
+                    append_spaced_media_ref(text_parts, kind, vid_idx)
                 elif kind == MediaKind.AUDIO:
                     aud_idx += 1
-                    text_parts.append(f"【音频{aud_idx}】")
-                    audios.append(d)
+                    append_spaced_media_ref(text_parts, kind, aud_idx)
+                media_items.append(d)
 
             items: list[dict[str, Any]] = []
             if text_parts:
                 items.append({"type": "text", "text": "".join(text_parts)})
-            items.extend(images)
-            items.extend(videos)
-            items.extend(audios)
+            items.extend(media_items)
             return items
 
         # 兜底路径:无 ordered_segments 时,prompt + 扁平 media(老 provider 行为)

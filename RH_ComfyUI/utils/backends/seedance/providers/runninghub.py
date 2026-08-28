@@ -64,9 +64,9 @@ def _view_url(file_name: str) -> str:
     return f"https://www.runninghub.cn/view?filename={file_name}"
 
 
-# 结构化 [参考图片N] 优先;再匹配裸 图片N / image N
+# 结构化 [@参考图片N] / [参考图片N] 优先;再匹配裸 图片N / image N
 _REF_REWRITE_RE = re.compile(
-    r"(\[\s*参考图片\s*(\d+)\s*\])|(\[\s*参考视频\s*(\d+)\s*\])|(\[\s*参考音频\s*(\d+)\s*\])"
+    r"(\[\s*@?\s*参考图片\s*(\d+)\s*\])|(\[\s*@?\s*参考视频\s*(\d+)\s*\])|(\[\s*@?\s*参考音频\s*(\d+)\s*\])"
     r"|(图片\s*(\d+))|(视频\s*(\d+))|(音频\s*(\d+))"
     r"|(image\s*(\d+))|(video\s*(\d+))|(audio\s*(\d+))",
     re.IGNORECASE,
@@ -74,7 +74,7 @@ _REF_REWRITE_RE = re.compile(
 
 
 def _rewrite_refs_to_at(prompt: str) -> str:
-    """把「[参考图片N]/图片N/…」改写为「@Image N/@Video N/@Audio N」(RunningHub 引用语法)。"""
+    """把「[@参考图片N]/[参考图片N]/图片N/…」改写为「@Image N/@Video N/@Audio N」(RunningHub 引用语法)。"""
 
     def _sub(match: re.Match[str]) -> str:
         # 1-2: [参考图片N]  3-4: [参考视频N]  5-6: [参考音频N]

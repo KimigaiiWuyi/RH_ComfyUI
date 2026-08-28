@@ -67,13 +67,16 @@ def _media_dedup_key(ref: MediaRef) -> Optional[str]:
     return hashlib.sha256(ref.data).hexdigest()
 
 
-# 匹配「[参考图片N] / 图片N / image N / …」,捕获组 = digit。
+# 匹配「[@参考图片N] / [参考图片N] / 图片N / image N / …」,捕获组 = digit。
 # 结构化标记优先,避免 dedup 改写时只动内层数字导致括号残缺。
 # IGNORECASE 处理英文大小写。
 _REF_REWRITE_PATTERNS: tuple[tuple[re.Pattern[str], int], ...] = (
-    (re.compile(r"\[\s*参考图片\s*(\d+)\s*\]"), 1),
-    (re.compile(r"\[\s*参考视频\s*(\d+)\s*\]"), 1),
-    (re.compile(r"\[\s*参考音频\s*(\d+)\s*\]"), 1),
+    (re.compile(r"\[\s*@?\s*参考图片\s*(\d+)\s*\]"), 1),
+    (re.compile(r"\[\s*@?\s*参考视频\s*(\d+)\s*\]"), 1),
+    (re.compile(r"\[\s*@?\s*参考音频\s*(\d+)\s*\]"), 1),
+    (re.compile(r"【\s*图片\s*(\d+)\s*】"), 1),
+    (re.compile(r"【\s*视频\s*(\d+)\s*】"), 1),
+    (re.compile(r"【\s*音频\s*(\d+)\s*】"), 1),
     (re.compile(r"图片\s*(\d+)"), 1),
     (re.compile(r"视频\s*(\d+)"), 1),
     (re.compile(r"音频\s*(\d+)"), 1),

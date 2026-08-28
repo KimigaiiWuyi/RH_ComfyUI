@@ -6,7 +6,8 @@
 ``prompt + images``。若剥掉媒体占位只剩空白文案,会得到无主语的残缺 prompt。
 
 约定代号(有结构,便于模型与下游改写识别):
-  ``[参考图片N]`` / ``[参考视频N]`` / ``[参考音频N]``
+  ``[@参考图片N]`` / ``[@参考视频N]`` / ``[@参考音频N]``
+写入正文时前后各留一个空格,避免和邻接汉字粘连。
 与扁平 ``images[N-1]`` / ``video_refs`` / ``audio_refs`` 下标对齐。
 
 本模块在引擎入口层统一兜底:
@@ -22,6 +23,38 @@ from typing import Any, Optional
 
 from .types import MediaRef, MediaKind, ContentItem, ContentItemType
 from .request import GenerationRequest
+
+_KIND_TO_REF_NAME = {
+    "image": "参考图片",
+    "image_url": "参考图片",
+    "video": "参考视频",
+    "video_url": "参考视频",
+    "audio": "参考音频",
+    "audio_url": "参考音频",
+}
+
+
+def _kind_key(kind: Any) -> str:
+    if kind is None:
+        return "image"
+    raw = kind.value if hasattr(kind, "value") else kind
+    return str(raw or "image").strip().lower()
+
+
+def media_ref_marker(kind: Any, n: int) -> str:
+    """结构化代号本体,不含两侧空格: ``[@参考图片1]``。"""
+    name = _KIND_TO_REF_NAME.get(_kind_key(kind), "参考图片")
+    return f"[@{name}{n}]"
+
+
+def append_spaced_media_ref(parts: list[str], kind: Any, n: int) -> None:
+    """把 `` [@参考图片N] `` 接到 parts:前侧缺空白才补,后侧恒留一格。"""
+    marker = media_ref_marker(kind, n)
+    prev = parts[-1] if parts else ""
+    if prev and not prev[-1].isspace():
+        parts.append(" ")
+    parts.append(marker)
+    parts.append(" ")
 
 
 def _media_identity(ref: MediaRef) -> str:
@@ -50,7 +83,7 @@ def _kind_of(item: ContentItem) -> Optional[MediaKind]:
 
 
 def labeled_prompt_from_ordered_content(items: list[ContentItem]) -> str:
-    """按 ordered_content 书写顺序拼出带 ``[参考图片N]`` 等结构化代号的 prompt。
+    """按 ordered_content 书写顺序拼出带 ``[@参考图片N]`` 等结构化代号的 prompt。
 
     文本段原样拼接;媒体项插入对应代号(同 media 去重复用序号)。
     无任何有效段时返回空串。
@@ -79,19 +112,19 @@ def labeled_prompt_from_ordered_content(items: list[ContentItem]) -> str:
             if n is None:
                 n = len(image_nums) + 1
                 image_nums[key] = n
-            parts.append(f"[参考图片{n}]")
+            append_spaced_media_ref(parts, kind, n)
         elif kind == MediaKind.VIDEO:
             n = video_nums.get(key)
             if n is None:
                 n = len(video_nums) + 1
                 video_nums[key] = n
-            parts.append(f"[参考视频{n}]")
+            append_spaced_media_ref(parts, kind, n)
         elif kind == MediaKind.AUDIO:
             n = audio_nums.get(key)
             if n is None:
                 n = len(audio_nums) + 1
                 audio_nums[key] = n
-            parts.append(f"[参考音频{n}]")
+            append_spaced_media_ref(parts, kind, n)
 
     return "".join(parts)
 
@@ -128,7 +161,7 @@ def ensure_media_ref_labels(request: GenerationRequest) -> GenerationRequest:
     labeled = labeled_prompt_from_ordered_content(oc)
     if labeled.strip():
         # OC 是书写顺序的权威来源:banana/gpt-image/happyhorse 等只读 prompt 时
-        # 必须能在文本里看到 [参考图片N];Seedance content[] 仍走 ordered_segments 注入。
+        # 必须能在文本里看到 [@参考图片N];Seedance content[] 仍走 ordered_segments 注入。
         request.prompt = labeled
 
     # 只读 images 的通道(banana / gpt-image / seedream…):OC 有图而扁平 images 空时回填
@@ -181,24 +214,26 @@ def labeled_prompt_from_oc_dicts(items: list[Any]) -> str:
             if n is None:
                 n = len(image_nums) + 1
                 image_nums[key] = n
-            parts.append(f"[参考图片{n}]")
+            append_spaced_media_ref(parts, "image", n)
         elif t in ("video_url", "video"):
             n = video_nums.get(key)
             if n is None:
                 n = len(video_nums) + 1
                 video_nums[key] = n
-            parts.append(f"[参考视频{n}]")
+            append_spaced_media_ref(parts, "video", n)
         elif t in ("audio_url", "audio"):
             n = audio_nums.get(key)
             if n is None:
                 n = len(audio_nums) + 1
                 audio_nums[key] = n
-            parts.append(f"[参考音频{n}]")
+            append_spaced_media_ref(parts, "audio", n)
 
     return "".join(parts)
 
 
 __all__ = [
+    "media_ref_marker",
+    "append_spaced_media_ref",
     "labeled_prompt_from_ordered_content",
     "flatten_image_bytes_from_ordered_content",
     "ensure_media_ref_labels",

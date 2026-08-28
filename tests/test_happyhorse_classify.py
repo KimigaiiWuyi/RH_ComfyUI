@@ -99,6 +99,7 @@ def test_frame_mode_edit_is_video_edit():
 def test_rewrite_prompt_image_refs():
     assert rewrite_prompt_for_r2v("图片1中的女孩与图片 2") == "[Image 1]中的女孩与[Image 2]"
     assert rewrite_prompt_for_r2v("看[参考图片1]和[参考图片2]") == "看[Image 1]和[Image 2]"
+    assert rewrite_prompt_for_r2v("看[@参考图片1]和[@参考图片2]") == "看[Image 1]和[Image 2]"
     assert rewrite_prompt_for_r2v("看 image 1 和 Image2") == "看 [Image 1] 和 [Image 2]"
     assert rewrite_prompt_for_r2v("已是 [Image 3]") == "已是 [Image 3]"
 

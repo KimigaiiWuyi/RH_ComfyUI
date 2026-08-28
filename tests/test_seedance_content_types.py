@@ -75,6 +75,42 @@ def test_mp4_mislabeled_as_image_emits_video_url():
     assert "image_url" not in {c["type"] for c in compact}
 
 
+def test_ordered_content_keeps_mention_order_not_kind_groups():
+    """@图 @视频 @图 → content[] 必须是 image, video, image, 不能打散成先图后视频。
+
+    网关报 content[2] 时要能对上第 2 个 @（视频），不能变成第 2 张图。
+    """
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="",
+        ordered_content=[
+            ContentItem(type=ContentItemType.TEXT, text="先图后视频再图"),
+            ContentItem(
+                type=ContentItemType.IMAGE,
+                media=MediaRef(kind=MediaKind.IMAGE, url="https://ex.com/a.png"),
+                role="reference",
+            ),
+            ContentItem(
+                type=ContentItemType.VIDEO,
+                media=MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4"),
+                role="reference",
+            ),
+            ContentItem(
+                type=ContentItemType.IMAGE,
+                media=MediaRef(kind=MediaKind.IMAGE, url="https://ex.com/c.png"),
+                role="reference",
+            ),
+        ],
+        params={"frame_mode": "reference"},
+    )
+    content = _build(req)
+    types = [c["type"] for c in content]
+    assert types == ["text", "image_url", "video_url", "image_url"], content
+    text = str(content[0].get("text") or "")
+    assert text.index("[@参考图片1]") < text.index("[@参考视频1]") < text.index("[@参考图片2]")
+    assert content[2]["video_url"]["url"] == "https://ex.com/v.mp4"
+
+
 def test_ordered_content_video_url_preserved():
     req = GenerationRequest(
         task_type=TaskType.VIDEO,

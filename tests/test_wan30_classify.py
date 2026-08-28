@@ -73,3 +73,4 @@ def test_file_url_overrides_two_image_first_last():
 def test_rewrite_prompt_uses_tu_n():
     assert rewrite_prompt_for_wan30("图片1抱着图片2") == "图1抱着图2"
     assert rewrite_prompt_for_wan30("[Image 1]走过[参考视频1]") == "图1走过视频1"
+    assert rewrite_prompt_for_wan30("[Image 1]走过[@参考视频1]") == "图1走过视频1"

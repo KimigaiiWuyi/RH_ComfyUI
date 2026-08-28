@@ -195,8 +195,8 @@ result = await resume_poll(
 
 `begin_task` 只能记**调用方入参**。Seedance 等会在 POST 前:
 
-- 改写引用语法(`transform_prompt`:`[参考图片N]` / `图片N` → 供应商语法)
-- 注入 `【图片N】` 进 content[] 文本段
+- 改写引用语法(`transform_prompt`:`[@参考图片N]` / `[参考图片N]` / `图片N` → 供应商语法)
+- 注入 `[@参考图片N]` 进 content[] 文本段(前后空格)
 - 组装完整 HTTP body(含 materialize 后的 URL)
 
 若终态仍写入口 `request.prompt` / 入口 body,**消费页展示与实际上游不一致**。

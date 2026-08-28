@@ -248,7 +248,7 @@ model_registry.register(ExtPluginModel())
 | FastAPI 422 拒绝 | estimate API 签名缺参数 | 加 Query 参数 |
 | dispatch 报 "积分不足" | `estimate_cost` 返回值 > 用户余额 | 改 billing mapper 或减输入 |
 | 显示 is_dynamic=false | `estimate_cost` 返回值 == `point_cost` | 检查 `point_range` 覆盖是否正确 |
-| 消费页 prompt 无【图片N】/ 仍是 [参考图片N] | 未 set_wire 或 record 未 UPDATE | §二十 §20.4 |
+| 消费页 prompt 无 [@参考图片N] / 仍是调用方入参 | 未 set_wire 或 record 未 UPDATE | §二十 §20.4 |
 | rh_app 显示可远程取消 | 通道 remote 计算错误 | §二十 §20.2 |
 | 重启后无法 resume | 未 bind_vendor_cancel / 无 vendor_task_id | §二十 §20.3 |
 
