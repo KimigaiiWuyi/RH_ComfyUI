@@ -88,6 +88,57 @@ def test_run_falls_over_to_next_provider():
     assert out.data == b"ok"
 
 
+@pytest.mark.parametrize("transient", [False, True])
+def test_strict_create_once_never_reexecutes_or_switches_channel(transient: bool) -> None:
+    from RH_ComfyUI.utils.core.types import ProgressCallback
+    from RH_ComfyUI.utils.backends.http_retry import strict_create_once_scope
+
+    class _StrictModel(_TwoChannelModel):
+        calls: int = 0
+
+        async def execute_on_channel(
+            self,
+            request: GenerationRequest,
+            binding: ChannelBinding,
+            *,
+            on_progress: ProgressCallback | None = None,
+        ) -> NodeOutput:
+            self.calls += 1
+            raise ChannelError("ack lost", retryable=True, transient=transient, channel=binding.channel.name)
+
+    model = _StrictModel()
+    request = GenerationRequest(task_type=TaskType.IMAGE, prompt="synthetic")
+    with strict_create_once_scope(True), pytest.raises(ChannelError, match="ack lost"):
+        asyncio.run(model.run(request))
+    assert model.calls == 1
+
+
+@pytest.mark.parametrize("target_registered", [False, True])
+def test_strict_explicit_model_never_falls_back_to_other_version(target_registered: bool) -> None:
+    from RH_ComfyUI.core.routing.registry import ModelRegistry
+    from RH_ComfyUI.core.routing.router import route
+    from RH_ComfyUI.core.base.errors import ModelUnavailableError
+    from RH_ComfyUI.utils.backends.http_retry import strict_create_once_scope
+
+    registry = ModelRegistry()
+    older = _TwoChannelModel()
+    older.name, older.modality = "seedance-2.0", TaskType.VIDEO
+    registry.register(older)
+
+    class _Unavailable(_TwoChannelModel):
+        async def check_available(self) -> bool:
+            return False
+
+    if target_registered:
+        target = _Unavailable()
+        target.name, target.modality = "seedance-2.5", TaskType.VIDEO
+        registry.register(target)
+    request = GenerationRequest(task_type=TaskType.VIDEO, model="seedance-2.5", prompt="synthetic")
+    with strict_create_once_scope(True), pytest.raises(ModelUnavailableError, match="未切换模型"):
+        asyncio.run(route(request, registry))
+    assert asyncio.run(route(request, registry)) is older
+
+
 class _RejectChannel(ProviderChannel):
     name = "reject"
 

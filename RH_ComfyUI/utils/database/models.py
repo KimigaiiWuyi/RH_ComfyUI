@@ -1,9 +1,27 @@
+from __future__ import annotations
+
+import json
+import hashlib
 from enum import Enum
-from typing import Any, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, Optional, TypedDict
 from datetime import datetime, timezone
 
 from sqlmodel import Field, SQLModel, col
-from sqlalchemy import Index, ColumnElement, and_, case, func, delete, select
+from sqlalchemy import (
+    JSON,
+    Index,
+    Column,
+    ColumnElement,
+    CheckConstraint,
+    UniqueConstraint,
+    and_,
+    case,
+    func,
+    text,
+    delete,
+    select,
+    update,
+)
 from sqlalchemy.orm import defer
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,10 +29,61 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gsuid_core.logger import logger
 from gsuid_core.webconsole.mount_app import PageSchema, GsAdminModel, site
 from gsuid_core.utils.database.startup import exec_list
-from gsuid_core.utils.database.base_models import Bind, with_session, with_read_session
+from gsuid_core.utils.database.base_models import Bind, BaseIDModel, with_session, with_read_session
 
 from ..core.request import TaskType
+from .wallet_contract import (
+    MAX_WALLET_POINTS,
+    WalletIntegrityError,
+    WalletOperationCommand,
+    WalletOperationConflict,
+    validate_wallet_points,
+)
 from ...rh_config.comfyui_config import PLUGIN_CONFIG
+
+if TYPE_CHECKING:
+    from ...core.billing.tier_quota import TierQuotas
+
+
+class QuotaBucket(TypedDict):
+    balance: int
+    cap: int
+    next_refresh_at: int
+    unlimited: bool
+
+
+class TimedQuotaBucket(QuotaBucket):
+    timer_started_at: int
+    timer_active: bool
+
+
+class QuotaBuckets(TypedDict):
+    h5: TimedQuotaBucket
+    day: QuotaBucket
+    week: QuotaBucket
+
+
+class QuotaRefreshTimes(TypedDict):
+    h5: int
+    day: int
+    week: int
+
+
+class QuotaStatus(TypedDict):
+    available: int
+    point: int
+    tier: str
+    label: str
+    unlimited: bool
+    buckets: QuotaBuckets
+    refreshed_at: QuotaRefreshTimes
+
+
+class QuotaResult(QuotaStatus, total=False):
+    ok: bool
+    need: int
+    reason: str
+    short_buckets: list[str]
 
 
 class TaskSummary(TypedDict):
@@ -67,72 +136,180 @@ class RHBind(Bind, table=True):
         max_length=16,
     )
 
-    # ── 内部:三桶读写 ────────────────────────────────────────────
+    # 钱包读写先保留写事务；周期刷新与资金动作共用同一个行主键。
 
     @classmethod
-    def _bucket_vals(cls, row: "RHBind") -> tuple[int, int, int]:
-        return (
-            int(getattr(row, "point_5h", 0) or 0),
-            int(getattr(row, "point_day", 0) or 0),
-            int(getattr(row, "point_week", 0) or 0),
-        )
+    async def begin_write(cls, session: AsyncSession) -> None:
+        if session.get_bind().dialect.name == "sqlite":
+            await session.execute(text("BEGIN IMMEDIATE"))
+        else:
+            await session.connection(execution_options={"isolation_level": "SERIALIZABLE"})
+
+    @classmethod
+    def _bucket_vals(cls, row: RHBind) -> tuple[int, int, int]:
+        return row.point_5h, row.point_day, row.point_week
 
     @classmethod
     def _sync_available(cls, h5: int, day: int, week: int) -> int:
-        return max(0, min(int(h5), int(day), int(week)))
+        return max(0, min(h5, day, week))
 
     @classmethod
-    async def _persist_buckets(
+    async def _wallet_in_session(
         cls,
+        session: AsyncSession,
         user_id: str,
         bot_id: str,
         *,
-        h5: int,
-        day: int,
-        week: int,
-        refreshed_at_5h: int,
-        refreshed_at_day: int,
-        refreshed_at_week: int,
-        vip_tier: str = "free",
-    ) -> int:
-        available = cls._sync_available(h5, day, week)
-        await cls.update_data(
+        vip_tier: str | None = None,
+        create: bool = True,
+        initial_point: int | None = None,
+    ) -> RHBind:
+        from ...core.billing.tier_quota import (
+            now_ts,
+            normalize_tier,
+            get_tier_quotas,
+            start_of_local_day,
+            start_of_local_week,
+        )
+
+        rows = list(
+            (
+                await session.execute(
+                    select(cls).where(col(cls.user_id) == user_id, col(cls.bot_id) == bot_id).limit(2).with_for_update()
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if len(rows) > 1:
+            raise WalletIntegrityError("WALLET_BINDING_NOT_UNIQUE")
+        if rows:
+            return rows[0]
+        if not create:
+            raise WalletIntegrityError("WALLET_BINDING_MISSING")
+        tier = normalize_tier(vip_tier)
+        quotas = get_tier_quotas(tier)
+        n = now_ts()
+        day = max(initial_point, quotas.day) if initial_point is not None else quotas.day
+        row = cls(
             user_id=user_id,
             bot_id=bot_id,
-            point=available,
-            point_5h=int(h5),
-            point_day=int(day),
-            point_week=int(week),
-            refreshed_at_5h=int(refreshed_at_5h),
-            refreshed_at_day=int(refreshed_at_day),
-            refreshed_at_week=int(refreshed_at_week),
-            vip_tier=(vip_tier or "free")[:16],
+            group_id=None,
+            vip_tier=tier,
+            point=cls._sync_available(quotas.h5, day, quotas.week),
+            point_5h=quotas.h5,
+            point_day=day,
+            point_week=quotas.week,
+            refreshed_at_5h=0,
+            refreshed_at_day=start_of_local_day(n),
+            refreshed_at_week=start_of_local_week(n),
         )
-        return available
+        session.add(row)
+        await session.flush()
+        return row
 
     @classmethod
-    async def ensure_refreshed(
+    def _row_status(cls, row: RHBind, tier: str | None = None) -> QuotaStatus:
+        from ...core.billing.tier_quota import normalize_tier, get_tier_quotas
+
+        resolved = normalize_tier(tier if tier is not None else row.vip_tier)
+        h5, day, week = cls._bucket_vals(row)
+        return cls._status_dict(
+            available=cls._sync_available(h5, day, week),
+            h5=h5,
+            day=day,
+            week=week,
+            quotas=get_tier_quotas(resolved),
+            r5=row.refreshed_at_5h,
+            rd=row.refreshed_at_day,
+            rw=row.refreshed_at_week,
+            tier=resolved,
+        )
+
+    @classmethod
+    async def _atomic_deduct_buckets_in_session(
         cls,
+        session: AsyncSession,
+        row: RHBind,
+        amount: int,
+        now_ts_val: int,
+    ) -> None:
+        if row.id is None:
+            raise WalletIntegrityError("WALLET_BINDING_MISSING")
+        result = await session.execute(
+            update(cls)
+            .where(
+                col(cls.id) == row.id,
+                col(cls.point_5h) >= amount,
+                col(cls.point_day) >= amount,
+                col(cls.point_week) >= amount,
+            )
+            .values(
+                point_5h=col(cls.point_5h) - amount,
+                point_day=col(cls.point_day) - amount,
+                point_week=col(cls.point_week) - amount,
+                point=func.min(col(cls.point_5h) - amount, col(cls.point_day) - amount, col(cls.point_week) - amount),
+                refreshed_at_5h=case(
+                    (col(cls.refreshed_at_5h) <= 0, now_ts_val),
+                    else_=col(cls.refreshed_at_5h),
+                ),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if not isinstance(result, CursorResult) or result.rowcount != 1:
+            raise WalletIntegrityError("WALLET_UPDATE_FAILED")
+        await session.refresh(row)
+
+    @classmethod
+    async def _atomic_add_buckets_in_session(
+        cls,
+        session: AsyncSession,
+        row: RHBind,
+        amount: int,
+        *,
+        cap_h5: int,
+        cap_day: int,
+        cap_week: int,
+    ) -> None:
+        if row.id is None:
+            raise WalletIntegrityError("WALLET_BINDING_MISSING")
+        h5 = case(
+            (col(cls.point_5h) > cap_h5, col(cls.point_5h)),
+            else_=func.min(col(cls.point_5h) + amount, cap_h5),
+        )
+        day = case(
+            (col(cls.point_day) > cap_day, col(cls.point_day)),
+            else_=func.min(col(cls.point_day) + amount, cap_day),
+        )
+        week = case(
+            (col(cls.point_week) > cap_week, col(cls.point_week)),
+            else_=func.min(col(cls.point_week) + amount, cap_week),
+        )
+        result = await session.execute(
+            update(cls)
+            .where(col(cls.id) == row.id)
+            .values(
+                point_5h=h5,
+                point_day=day,
+                point_week=week,
+                point=func.min(h5, day, week),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if not isinstance(result, CursorResult) or result.rowcount != 1:
+            raise WalletIntegrityError("WALLET_UPDATE_FAILED")
+        await session.refresh(row)
+
+    @classmethod
+    async def ensure_refreshed_in_session(
+        cls,
+        session: AsyncSession,
         user_id: str,
         bot_id: str,
         *,
-        vip_tier: Optional[str] = None,
+        vip_tier: str | None = None,
         force: bool = False,
-    ) -> dict[str, Any]:
-        """懒刷新三桶到档位满额,返回 status dict(含 available)。
-
-        档位优先级(与 bot_id 无关):
-          1. 显式 ``vip_tier`` 参数
-          2. 行上已存 ``RHBind.vip_tier``
-          3. free
-
-        force=True 时无视时间戳,三桶立即补满(管理端/手动刷新);5h 计时清零。
-
-        5h 计时规则:
-          - 补满后 timer=0,闲置不计时
-          - 首次扣费时写入 timer=now
-          - timer 起经过窗口秒数后自动补满并 timer=0
-        """
+    ) -> QuotaStatus:
         from ...core.billing.tier_quota import (
             now_ts,
             normalize_tier,
@@ -144,140 +321,46 @@ class RHBind(Bind, table=True):
             start_of_local_week,
         )
 
-        n = now_ts()
-        row = await cls.select_data(user_id=user_id, bot_id=bot_id)
-
-        if vip_tier is not None:
-            tier = normalize_tier(vip_tier)
-        elif row is not None:
-            tier = normalize_tier(getattr(row, "vip_tier", None))
-        else:
-            tier = "free"
-
+        row = await cls._wallet_in_session(session, user_id, bot_id, vip_tier=vip_tier)
+        tier = normalize_tier(vip_tier if vip_tier is not None else row.vip_tier)
         quotas = get_tier_quotas(tier)
-
-        if row is None:
-            await cls.create_data(
-                user_id=user_id,
-                bot_id=bot_id,
-                vip_tier=tier,
-            )
-            row = await cls.select_data(user_id=user_id, bot_id=bot_id)
-            assert row is not None
-
-        if quotas.unlimited:
+        n = now_ts()
+        row.vip_tier = tier
+        if not quotas.unlimited:
             h5, day, week = cls._bucket_vals(row)
-            r5 = int(getattr(row, "refreshed_at_5h", 0) or 0)
-            rd = int(getattr(row, "refreshed_at_day", 0) or 0)
-            rw = int(getattr(row, "refreshed_at_week", 0) or 0)
-            stored_tier = str(getattr(row, "vip_tier", "") or "free")
-            if stored_tier != tier:
-                await cls.update_data(user_id=user_id, bot_id=bot_id, vip_tier=tier[:16])
-            return cls._status_dict(
-                available=cls._sync_available(h5, day, week),
-                h5=h5,
-                day=day,
-                week=week,
-                quotas=quotas,
-                r5=r5,
-                rd=rd,
-                rw=rw,
-                tier=tier,
-            )
+            r5, rd, rw = row.refreshed_at_5h, row.refreshed_at_day, row.refreshed_at_week
+            if rd <= 0 and rw <= 0 and h5 <= 0 and day <= 0 and week <= 0:
+                h5, day, week = quotas.h5, max(row.point, quotas.day), quotas.week
+                r5, rd, rw = 0, start_of_local_day(n), start_of_local_week(n)
+            else:
+                if h5 >= quotas.h5 and r5 > 0 and not force:
+                    r5 = 0
+                if force or needs_5h_refresh(r5, n):
+                    h5, r5 = quotas.h5, 0
+                if force or needs_day_refresh(rd, n):
+                    day, rd = quotas.day, start_of_local_day(n)
+                if force or needs_week_refresh(rw, n):
+                    week, rw = quotas.week, start_of_local_week(n)
+            row.point_5h, row.point_day, row.point_week = h5, day, week
+            row.refreshed_at_5h, row.refreshed_at_day, row.refreshed_at_week = r5, rd, rw
+            row.point = cls._sync_available(h5, day, week)
+        session.add(row)
+        await session.flush()
+        return cls._row_status(row, tier)
 
-        h5, day, week = cls._bucket_vals(row)
-        # r5 = 5h 计时起点(0=未开始)
-        r5 = int(getattr(row, "refreshed_at_5h", 0) or 0)
-        rd = int(getattr(row, "refreshed_at_day", 0) or 0)
-        rw = int(getattr(row, "refreshed_at_week", 0) or 0)
-        old_point = int(getattr(row, "point", 0) or 0)
-
-        # 旧行迁移:日/周戳全 0 → 初始化;5h 满额且 timer=0(闲置)
-        if rd <= 0 and rw <= 0 and h5 <= 0 and day <= 0 and week <= 0:
-            h5 = quotas.h5
-            day = max(old_point, quotas.day)
-            week = quotas.week
-            r5 = 0  # 满额未用,不计时
-            rd = start_of_local_day(n)
-            rw = start_of_local_week(n)
-            available = await cls._persist_buckets(
-                user_id,
-                bot_id,
-                h5=h5,
-                day=day,
-                week=week,
-                refreshed_at_5h=r5,
-                refreshed_at_day=rd,
-                refreshed_at_week=rw,
-                vip_tier=tier,
-            )
-            return cls._status_dict(
-                available=available,
-                h5=h5,
-                day=day,
-                week=week,
-                quotas=quotas,
-                r5=r5,
-                rd=rd,
-                rw=rw,
-                tier=tier,
-            )
-
-        # 已满额但还挂着旧版滚动计时 → 清零计时(符合「满额闲置不计时」)
-        if h5 >= quotas.h5 and r5 > 0 and not force:
-            r5 = 0
-            changed_idle = True
-        else:
-            changed_idle = False
-
-        changed = changed_idle
-        if force or needs_5h_refresh(r5, n):
-            h5 = quotas.h5
-            r5 = 0  # 补满后重新闲置,等下次首次消费再计时
-            changed = True
-        if force or needs_day_refresh(rd, n):
-            day = quotas.day
-            rd = start_of_local_day(n)
-            changed = True
-        if force or needs_week_refresh(rw, n):
-            week = quotas.week
-            rw = start_of_local_week(n)
-            changed = True
-
-        # 档位变更时仍保持余额,但 stamp vip_tier
-        stored_tier = str(getattr(row, "vip_tier", "") or "free")
-        if stored_tier != tier:
-            changed = True
-
-        if changed:
-            available = await cls._persist_buckets(
-                user_id,
-                bot_id,
-                h5=h5,
-                day=day,
-                week=week,
-                refreshed_at_5h=r5,
-                refreshed_at_day=rd,
-                refreshed_at_week=rw,
-                vip_tier=tier,
-            )
-        else:
-            available = cls._sync_available(h5, day, week)
-            # 兼容字段漂移时纠偏
-            if int(getattr(row, "point", 0) or 0) != available:
-                await cls.update_data(user_id=user_id, bot_id=bot_id, point=available)
-
-        return cls._status_dict(
-            available=available,
-            h5=h5,
-            day=day,
-            week=week,
-            quotas=quotas,
-            r5=r5,
-            rd=rd,
-            rw=rw,
-            tier=tier,
-        )
+    @classmethod
+    @with_session
+    async def ensure_refreshed(
+        cls,
+        session: AsyncSession,
+        user_id: str,
+        bot_id: str,
+        *,
+        vip_tier: str | None = None,
+        force: bool = False,
+    ) -> QuotaStatus:
+        await cls.begin_write(session)
+        return await cls.ensure_refreshed_in_session(session, user_id, bot_id, vip_tier=vip_tier, force=force)
 
     @classmethod
     def _status_dict(
@@ -287,12 +370,12 @@ class RHBind(Bind, table=True):
         h5: int,
         day: int,
         week: int,
-        quotas: Any,
+        quotas: TierQuotas,
         r5: int,
         rd: int,
         rw: int,
         tier: str,
-    ) -> dict[str, Any]:
+    ) -> QuotaStatus:
         from ...core.billing.tier_quota import (
             next_5h_refresh_at,
             next_day_refresh_at,
@@ -343,179 +426,103 @@ class RHBind(Bind, table=True):
         bot_id: str,
         *,
         vip_tier: Optional[str] = None,
-    ) -> dict[str, Any]:
+    ) -> QuotaStatus:
         return await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier)
 
     @classmethod
-    async def deduct_triple(
+    async def deduct_triple_in_session(
         cls,
+        session: AsyncSession,
         user_id: str,
         bot_id: str,
         amount: int,
         *,
-        vip_tier: Optional[str] = None,
-    ) -> tuple[bool, dict[str, Any]]:
-        """三桶同扣。返回 (ok, status_or_error_detail)。"""
-        if amount <= 0:
-            st = await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier)
-            return True, st
+        vip_tier: str | None = None,
+    ) -> tuple[bool, QuotaResult]:
+        from ...core.billing.tier_quota import now_ts
 
-        st = await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier)
-        from ...core.billing.tier_quota import now_ts, get_tier_quotas, is_unlimited_tier
-
-        tier = str(st["tier"]) if "tier" in st else "free"
-        if is_unlimited_tier(tier):
-            return True, st
-
-        h5 = int(st["buckets"]["h5"]["balance"])
-        day = int(st["buckets"]["day"]["balance"])
-        week = int(st["buckets"]["week"]["balance"])
-        if h5 < amount or day < amount or week < amount:
-            short = []
-            if h5 < amount:
-                short.append(f"5小时额度不足(剩{h5})")
-            if day < amount:
-                short.append(f"今日额度不足(剩{day})")
-            if week < amount:
-                short.append(f"本周额度不足(剩{week})")
-            detail = {
-                **st,
+        validate_wallet_points(amount)
+        status = await cls.ensure_refreshed_in_session(session, user_id, bot_id, vip_tier=vip_tier)
+        if amount == 0 or status["unlimited"]:
+            return True, {**status}
+        row = await cls._wallet_in_session(session, user_id, bot_id, create=False)
+        h5, day, week = cls._bucket_vals(row)
+        short = [name for name, balance in (("h5", h5), ("day", day), ("week", week)) if balance < amount]
+        if short:
+            return False, {
+                **status,
                 "ok": False,
                 "need": amount,
-                "reason": "；".join(short),
-                "short_buckets": [b for b, bal in (("h5", h5), ("day", day), ("week", week)) if bal < amount],
+                "reason": "额度不足",
+                "short_buckets": short,
             }
-            logger.warning(
-                f"[RHBind.deduct_triple] 不足 user={user_id} bot_id={bot_id} "
-                f"need={amount} h5={h5} day={day} week={week}"
-            )
-            return False, detail
-
-        h5 -= amount
-        day -= amount
-        week -= amount
-        # 5h:满额闲置(timer=0)时首次消费 → 启动计时
-        r5 = int(st["refreshed_at"]["h5"])
-        if r5 <= 0:
-            r5 = now_ts()
-        rd = int(st["refreshed_at"]["day"])
-        rw = int(st["refreshed_at"]["week"])
-        available = await cls._persist_buckets(
-            user_id,
-            bot_id,
-            h5=h5,
-            day=day,
-            week=week,
-            refreshed_at_5h=r5,
-            refreshed_at_day=rd,
-            refreshed_at_week=rw,
-            vip_tier=tier,
-        )
-
-        out = cls._status_dict(
-            available=available,
-            h5=h5,
-            day=day,
-            week=week,
-            quotas=get_tier_quotas(tier),
-            r5=r5,
-            rd=rd,
-            rw=rw,
-            tier=tier,
-        )
-        logger.info(
-            f"[RHBind.deduct_triple] ok user={user_id} bot_id={bot_id} -{amount} "
-            f"→ avail={available} (h5={h5},day={day},week={week})"
-        )
-        return True, out
+        await cls._atomic_deduct_buckets_in_session(session, row, amount, now_ts())
+        return True, {**cls._row_status(row)}
 
     @classmethod
-    async def add_triple(
+    @with_session
+    async def deduct_triple(
         cls,
+        session: AsyncSession,
         user_id: str,
         bot_id: str,
         amount: int,
         *,
-        vip_tier: Optional[str] = None,
+        vip_tier: str | None = None,
+    ) -> tuple[bool, QuotaResult]:
+        await cls.begin_write(session)
+        return await cls.deduct_triple_in_session(session, user_id, bot_id, amount, vip_tier=vip_tier)
+
+    @classmethod
+    async def add_triple_in_session(
+        cls,
+        session: AsyncSession,
+        user_id: str,
+        bot_id: str,
+        amount: int,
+        *,
+        vip_tier: str | None = None,
         cap_to_tier: bool = True,
-    ) -> dict[str, Any]:
-        """三桶同加;默认不超过档位 cap(退款场景)。"""
+        create: bool = True,
+    ) -> QuotaStatus:
         from ...core.billing.tier_quota import normalize_tier, get_tier_quotas
 
-        if amount <= 0:
-            return await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier)
-
-        # 退款不触发周期刷新,避免「失败退款却顺带把桶补满」
-        row = await cls.select_data(user_id=user_id, bot_id=bot_id)
-        if vip_tier is not None:
-            tier = normalize_tier(vip_tier)
-        elif row is not None:
-            tier = normalize_tier(getattr(row, "vip_tier", None))
-        else:
-            tier = "free"
+        validate_wallet_points(amount)
+        row = await cls._wallet_in_session(session, user_id, bot_id, vip_tier=vip_tier, create=create)
+        tier = normalize_tier(vip_tier if vip_tier is not None else row.vip_tier)
         quotas = get_tier_quotas(tier)
-        if quotas.unlimited:
-            if row is None:
-                await cls.create_data(user_id=user_id, bot_id=bot_id, vip_tier=tier)
-                row = await cls.select_data(user_id=user_id, bot_id=bot_id)
-                assert row is not None
-            h5, day, week = cls._bucket_vals(row)
-            r5 = int(getattr(row, "refreshed_at_5h", 0) or 0)
-            rd = int(getattr(row, "refreshed_at_day", 0) or 0)
-            rw = int(getattr(row, "refreshed_at_week", 0) or 0)
-            return cls._status_dict(
-                available=cls._sync_available(h5, day, week),
-                h5=h5,
-                day=day,
-                week=week,
-                quotas=quotas,
-                r5=r5,
-                rd=rd,
-                rw=rw,
-                tier=tier,
+        if amount > 0 and not quotas.unlimited:
+            await cls._atomic_add_buckets_in_session(
+                session,
+                row,
+                amount,
+                cap_h5=quotas.h5 if cap_to_tier else MAX_WALLET_POINTS,
+                cap_day=quotas.day if cap_to_tier else MAX_WALLET_POINTS,
+                cap_week=quotas.week if cap_to_tier else MAX_WALLET_POINTS,
             )
-        if row is None:
-            await cls.create_data(user_id=user_id, bot_id=bot_id, vip_tier=tier)
-            row = await cls.select_data(user_id=user_id, bot_id=bot_id)
-            assert row is not None
+        return cls._row_status(row, tier)
 
-        h5, day, week = cls._bucket_vals(row)
-        h5 += amount
-        day += amount
-        week += amount
-        if cap_to_tier:
-            h5 = min(h5, quotas.h5)
-            day = min(day, quotas.day)
-            week = min(week, quotas.week)
-
-        r5 = int(getattr(row, "refreshed_at_5h", 0) or 0)
-        rd = int(getattr(row, "refreshed_at_day", 0) or 0)
-        rw = int(getattr(row, "refreshed_at_week", 0) or 0)
-        available = await cls._persist_buckets(
+    @classmethod
+    @with_session
+    async def add_triple(
+        cls,
+        session: AsyncSession,
+        user_id: str,
+        bot_id: str,
+        amount: int,
+        *,
+        vip_tier: str | None = None,
+        cap_to_tier: bool = True,
+    ) -> QuotaStatus:
+        """退回三桶但不触发周期刷新；写入失败必须向外传播。"""
+        await cls.begin_write(session)
+        return await cls.add_triple_in_session(
+            session,
             user_id,
             bot_id,
-            h5=h5,
-            day=day,
-            week=week,
-            refreshed_at_5h=r5,
-            refreshed_at_day=rd,
-            refreshed_at_week=rw,
-            vip_tier=tier,
-        )
-        logger.info(
-            f"[RHBind.add_triple] user={user_id} bot_id={bot_id} +{amount} "
-            f"→ avail={available} (h5={h5},day={day},week={week})"
-        )
-        return cls._status_dict(
-            available=available,
-            h5=h5,
-            day=day,
-            week=week,
-            quotas=quotas,
-            r5=r5,
-            rd=rd,
-            rw=rw,
-            tier=tier,
+            amount,
+            vip_tier=vip_tier,
+            cap_to_tier=cap_to_tier,
         )
 
     @classmethod
@@ -524,178 +531,92 @@ class RHBind(Bind, table=True):
         user_id: str,
         bot_id: str,
         *,
-        vip_tier: Optional[str] = None,
-    ) -> dict[str, Any]:
-        """管理端:立刻把三桶补到当前档满额。"""
+        vip_tier: str | None = None,
+    ) -> QuotaStatus:
         return await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier, force=True)
 
     @classmethod
+    @with_session
     async def refill_buckets(
         cls,
+        session: AsyncSession,
         user_id: str,
         bot_id: str,
         buckets: list[str] | tuple[str, ...] | str = "all",
         *,
-        vip_tier: Optional[str] = None,
-    ) -> dict[str, Any]:
-        """管理端:只补满指定桶(h5 / day / week / all)。
+        vip_tier: str | None = None,
+    ) -> QuotaStatus:
+        from ...core.billing.tier_quota import now_ts, get_tier_quotas, start_of_local_day, start_of_local_week
 
-        补满 5h 时会清零 5h 计时(回到闲置)。
-        """
-        from ...core.billing.tier_quota import (
-            now_ts,
-            normalize_tier,
-            get_tier_quotas,
-            start_of_local_day,
-            start_of_local_week,
+        await cls.begin_write(session)
+        status = await cls.ensure_refreshed_in_session(session, user_id, bot_id, vip_tier=vip_tier)
+        if status["unlimited"]:
+            return status
+        raw_keys = (
+            (["h5", "day", "week"] if buckets in ("all", "*") else [buckets])
+            if isinstance(buckets, str)
+            else list(buckets)
         )
-
-        st = await cls.ensure_refreshed(user_id, bot_id, vip_tier=vip_tier, force=False)
-        raw_tier = vip_tier if vip_tier is not None else (st["tier"] if "tier" in st else None)
-        tier = normalize_tier(raw_tier)
-        quotas = get_tier_quotas(tier)
-        if quotas.unlimited:
-            return st
+        keys = {key.strip().lower() for key in raw_keys}
+        row = await cls._wallet_in_session(session, user_id, bot_id, create=False)
+        quotas = get_tier_quotas(status["tier"])
         n = now_ts()
-
-        if isinstance(buckets, str):
-            keys = ["h5", "day", "week"] if buckets in ("all", "*") else [buckets]
-        else:
-            keys = list(buckets)
-        keys = [k.strip().lower() for k in keys if k]
-        valid = {"h5", "day", "week"}
-        keys = [k for k in keys if k in valid]
-        if not keys:
-            return st
-
-        h5 = int(st["buckets"]["h5"]["balance"])
-        day = int(st["buckets"]["day"]["balance"])
-        week = int(st["buckets"]["week"]["balance"])
-        r5 = int(st["refreshed_at"]["h5"])
-        rd = int(st["refreshed_at"]["day"])
-        rw = int(st["refreshed_at"]["week"])
-
         if "h5" in keys:
-            h5 = quotas.h5
-            r5 = 0
+            row.point_5h, row.refreshed_at_5h = quotas.h5, 0
         if "day" in keys:
-            day = quotas.day
-            rd = start_of_local_day(n)
+            row.point_day, row.refreshed_at_day = quotas.day, start_of_local_day(n)
         if "week" in keys:
-            week = quotas.week
-            rw = start_of_local_week(n)
-
-        available = await cls._persist_buckets(
-            user_id,
-            bot_id,
-            h5=h5,
-            day=day,
-            week=week,
-            refreshed_at_5h=r5,
-            refreshed_at_day=rd,
-            refreshed_at_week=rw,
-            vip_tier=tier,
-        )
-        return cls._status_dict(
-            available=available,
-            h5=h5,
-            day=day,
-            week=week,
-            quotas=quotas,
-            r5=r5,
-            rd=rd,
-            rw=rw,
-            tier=tier,
-        )
+            row.point_week, row.refreshed_at_week = quotas.week, start_of_local_week(n)
+        row.point = cls._sync_available(*cls._bucket_vals(row))
+        session.add(row)
+        await session.flush()
+        return cls._row_status(row)
 
     @classmethod
+    @with_session
     async def set_vip_tier(
         cls,
+        session: AsyncSession,
         user_id: str,
         bot_id: str,
         tier: str,
         *,
         refill: bool = True,
-    ) -> dict[str, Any]:
-        """设置该 (user_id, bot_id) 池的额度档;默认立即按新档三桶补满。
-
-        与 bot_id 平台无关 — 任意 bot_id 一律可设 special/unlimited 等档。
-        """
+    ) -> QuotaStatus:
         from ...core.billing.tier_quota import normalize_tier
 
-        t = normalize_tier(tier)
-        row = await cls.select_data(user_id=user_id, bot_id=bot_id)
-        if row is None:
-            await cls.create_data(user_id=user_id, bot_id=bot_id, vip_tier=t)
-        else:
-            await cls.update_data(user_id=user_id, bot_id=bot_id, vip_tier=t[:16])
-        if refill:
-            return await cls.ensure_refreshed(user_id, bot_id, vip_tier=t, force=True)
-        return await cls.ensure_refreshed(user_id, bot_id, vip_tier=t, force=False)
+        await cls.begin_write(session)
+        return await cls.ensure_refreshed_in_session(
+            session,
+            user_id,
+            bot_id,
+            vip_tier=normalize_tier(tier),
+            force=refill,
+        )
 
     # ── 兼容旧 API ───────────────────────────────────────────────
 
     @classmethod
+    @with_session
     async def create_data(
         cls,
+        session: AsyncSession,
         user_id: str,
         bot_id: str,
-        point: Optional[int] = None,
+        point: int | None = None,
         *,
         vip_tier: str = "free",
-    ):
-        from ...core.billing.tier_quota import (
-            now_ts,
-            normalize_tier,
-            get_tier_quotas,
-            start_of_local_day,
-            start_of_local_week,
-        )
-
-        tier = normalize_tier(vip_tier)
-        quotas = get_tier_quotas(tier)
-        n = now_ts()
-        # point 参数仅作兼容:若显式传入,日桶至少这么多
-        day = quotas.day
+    ) -> RHBind:
         if point is not None:
-            day = max(int(point), quotas.day)
-        h5, week = quotas.h5, quotas.week
-        available = cls._sync_available(h5, day, week)
-        # 新建满额:5h 计时=0(闲置,首次消费才启动)
-        r5 = 0
-
-        await cls.insert_data(
-            group_id=None,
-            user_id=user_id,
-            bot_id=bot_id,
-            point=available,
-            point_5h=h5,
-            point_day=day,
-            point_week=week,
-            refreshed_at_5h=r5,
-            refreshed_at_day=start_of_local_day(n),
-            refreshed_at_week=start_of_local_week(n),
-            vip_tier=tier[:16],
+            validate_wallet_points(point)
+        await cls.begin_write(session)
+        return await cls._wallet_in_session(
+            session,
+            user_id,
+            bot_id,
+            vip_tier=vip_tier,
+            initial_point=point,
         )
-        bind_data = await cls.select_data(
-            user_id=user_id,
-            bot_id=bot_id,
-        )
-        if bind_data is None:
-            return cls(
-                group_id=None,
-                user_id=user_id,
-                bot_id=bot_id,
-                point=available,
-                point_5h=h5,
-                point_day=day,
-                point_week=week,
-                refreshed_at_5h=r5,
-                refreshed_at_day=start_of_local_day(n),
-                refreshed_at_week=start_of_local_week(n),
-                vip_tier=tier[:16],
-            )
-        return bind_data
 
     @classmethod
     async def add_point(
@@ -732,6 +653,325 @@ class RHBind(Bind, table=True):
         del initial_point  # 三重余额下建账由 ensure_refreshed/create_data 按档位初始化
         ok, _ = await cls.deduct_triple(user_id, bot_id, deduct_point_num, vip_tier=vip_tier)
         return ok
+
+
+class WalletReceipt(TypedDict):
+    schema_version: str
+    operation_key: str
+    job_key: str
+    external_ref: str
+    kind: str
+    operation_version: int
+    user_id: str
+    bot_id: str
+    request_hash: str
+    command_hash: str
+    price_revision: str
+    status: str
+    reason: str
+    requested_target_points: int
+    billed_delta_points: int
+    previous_net_points: int
+    net_after_points: int
+    quota_mode: str
+    bucket_before: dict[str, int]
+    bucket_after: dict[str, int]
+    bucket_deltas: dict[str, int]
+    available_snapshot: int
+    predecessor_operation_keys: list[str]
+    occurred_at: str
+
+
+class RHWalletOperation(BaseIDModel, table=True):
+    """原钱包事务的不可变操作凭证；不持有另一份余额。"""
+
+    __table_args__ = (
+        UniqueConstraint("operation_key", name="uq_rhwalletoperation_key"),
+        UniqueConstraint("job_key", "kind", "operation_version", name="uq_rhwalletoperation_job_kind_version"),
+        CheckConstraint("schema_version = 'rh-wallet-op/v1' AND operation_version = 1", name="ck_rh_wallet_version"),
+        CheckConstraint("kind IN ('charge','settle','refund')", name="ck_rh_wallet_kind"),
+        CheckConstraint("status IN ('committed','declined')", name="ck_rh_wallet_status"),
+        CheckConstraint("quota_mode IN ('capped','unlimited')", name="ck_rh_wallet_quota_mode"),
+        CheckConstraint("requested_target_points BETWEEN 0 AND 2000000000", name="ck_rh_wallet_target"),
+        CheckConstraint("billed_delta_points BETWEEN -2000000000 AND 2000000000", name="ck_rh_wallet_delta"),
+        CheckConstraint("net_after_points BETWEEN 0 AND 2000000000", name="ck_rh_wallet_net"),
+        CheckConstraint("previous_net_points BETWEEN 0 AND 2000000000", name="ck_rh_wallet_previous_net"),
+        CheckConstraint("net_after_points = previous_net_points + billed_delta_points", name="ck_rh_wallet_net_delta"),
+        CheckConstraint("status != 'declined' OR billed_delta_points = 0", name="ck_rh_wallet_declined"),
+        CheckConstraint("kind != 'charge' OR billed_delta_points >= 0", name="ck_rh_wallet_charge"),
+        CheckConstraint(
+            "kind != 'refund' OR (requested_target_points = 0 AND billed_delta_points <= 0)",
+            name="ck_rh_wallet_refund",
+        ),
+        CheckConstraint(
+            "length(request_hash) = 64 AND length(command_hash) = 64 AND length(receipt_digest) = 64",
+            name="ck_rh_wallet_digests",
+        ),
+        {"extend_existing": True},
+    )
+    schema_version: str = Field(default="rh-wallet-op/v1")
+    operation_key: str = Field(max_length=256)
+    job_key: str = Field(max_length=256, index=True)
+    external_ref: str = Field(max_length=256, index=True)
+    kind: str = Field(max_length=16)
+    operation_version: int = Field(default=1)
+    user_id: str = Field(max_length=256, index=True)
+    bot_id: str = Field(max_length=256)
+    request_hash: str = Field(max_length=64)
+    command_hash: str = Field(max_length=64)
+    price_revision: str = Field(max_length=128)
+    status: str = Field(max_length=16)
+    reason: str = Field(default="", max_length=64)
+    requested_target_points: int
+    billed_delta_points: int
+    previous_net_points: int
+    net_after_points: int
+    quota_mode: str = Field(max_length=16)
+    bucket_before: dict[str, int] = Field(sa_column=Column(JSON, nullable=False))
+    bucket_after: dict[str, int] = Field(sa_column=Column(JSON, nullable=False))
+    bucket_deltas: dict[str, int] = Field(sa_column=Column(JSON, nullable=False))
+    available_snapshot: int
+    predecessor_operation_keys: list[str] = Field(sa_column=Column(JSON, nullable=False))
+    occurred_at: str
+    receipt_digest: str = Field(max_length=64)
+
+    def receipt_body(self) -> WalletReceipt:
+        return {
+            "schema_version": self.schema_version,
+            "operation_key": self.operation_key,
+            "job_key": self.job_key,
+            "external_ref": self.external_ref,
+            "kind": self.kind,
+            "operation_version": self.operation_version,
+            "user_id": self.user_id,
+            "bot_id": self.bot_id,
+            "request_hash": self.request_hash,
+            "command_hash": self.command_hash,
+            "price_revision": self.price_revision,
+            "status": self.status,
+            "reason": self.reason,
+            "requested_target_points": self.requested_target_points,
+            "billed_delta_points": self.billed_delta_points,
+            "previous_net_points": self.previous_net_points,
+            "net_after_points": self.net_after_points,
+            "quota_mode": self.quota_mode,
+            "bucket_before": self.bucket_before,
+            "bucket_after": self.bucket_after,
+            "bucket_deltas": self.bucket_deltas,
+            "available_snapshot": self.available_snapshot,
+            "predecessor_operation_keys": self.predecessor_operation_keys,
+            "occurred_at": self.occurred_at,
+        }
+
+    @classmethod
+    @with_read_session
+    async def get_operation(cls, session: AsyncSession, operation_key: str) -> RHWalletOperation | None:
+        return (await session.execute(select(cls).where(col(cls.operation_key) == operation_key))).scalar_one_or_none()
+
+    @classmethod
+    @with_read_session
+    async def get_job_operations(cls, session: AsyncSession, job_key: str) -> list[RHWalletOperation]:
+        return list(
+            (await session.execute(select(cls).where(col(cls.job_key) == job_key).order_by(col(cls.id))))
+            .scalars()
+            .all()
+        )
+
+    @classmethod
+    @with_session
+    async def reconcile_record_once(
+        cls,
+        session: AsyncSession,
+        record_id: int,
+        actual: int,
+        *,
+        adjust_wallet: bool = True,
+    ) -> tuple[RHWalletOperation, bool] | None:
+        """新协议统计与差额共用原 settle；无回执旧行仍由旧维护路径处理。"""
+        validate_wallet_points(actual)
+        await RHBind.begin_write(session)
+        record = (
+            await session.execute(
+                select(RHComfyuiTaskRecord).where(col(RHComfyuiTaskRecord.id) == record_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if record is None or not record.trace_id:
+            return None
+        charges = list(
+            (
+                await session.execute(
+                    select(cls)
+                    .where(
+                        col(cls.external_ref) == record.trace_id,
+                        col(cls.kind) == "charge",
+                    )
+                    .limit(2)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if len(charges) > 1:
+            raise WalletIntegrityError("WALLET_REFERENCE_NOT_UNIQUE")
+        if not charges:
+            return None
+        charge = charges[0]
+        if charge.user_id != record.user_id or charge.bot_id != record.bot_id:
+            raise WalletOperationConflict("WALLET_BILLING_CONTEXT_CONFLICT")
+        if charge.status != "committed":
+            raise WalletOperationConflict("WALLET_COMMITTED_CHARGE_REQUIRED")
+        if not adjust_wallet:
+            current = (
+                await session.execute(
+                    select(cls)
+                    .where(col(cls.job_key) == charge.job_key, col(cls.status) == "committed")
+                    .order_by(col(cls.id).desc())
+                    .limit(1)
+                )
+            ).scalar_one()
+            return current, True
+        command = WalletOperationCommand(
+            operation_key=f"{charge.job_key}:settle:v1",
+            job_key=charge.job_key,
+            external_ref=charge.external_ref,
+            kind="settle",
+            user_id=charge.user_id,
+            bot_id=charge.bot_id,
+            request_hash=charge.request_hash,
+            price_revision=charge.price_revision,
+            requested_target_points=actual,
+        )
+        prior = (
+            await session.execute(select(cls).where(col(cls.operation_key) == command.operation_key))
+        ).scalar_one_or_none()
+        operation = await cls.apply_in_session(session, command)
+        record.point_cost = operation.net_after_points
+        session.add(record)
+        await session.flush()
+        return operation, prior is not None
+
+    @classmethod
+    @with_session
+    async def apply_once(cls, session: AsyncSession, command: WalletOperationCommand) -> RHWalletOperation:
+        await RHBind.begin_write(session)
+        return await cls.apply_in_session(session, command)
+
+    @classmethod
+    async def apply_in_session(cls, session: AsyncSession, command: WalletOperationCommand) -> RHWalletOperation:
+        """调用方须先取得写事务；本方法不提交、不发外部请求。"""
+        existing = (
+            await session.execute(select(cls).where(col(cls.operation_key) == command.operation_key))
+        ).scalar_one_or_none()
+        if existing is not None:
+            if existing.command_hash != command.command_hash:
+                raise WalletOperationConflict("WALLET_OPERATION_KEY_CONFLICT")
+            return existing
+
+        history = list(
+            (await session.execute(select(cls).where(col(cls.job_key) == command.job_key).order_by(col(cls.id))))
+            .scalars()
+            .all()
+        )
+        if any(op.kind == command.kind and op.operation_version == command.operation_version for op in history):
+            raise WalletOperationConflict("WALLET_JOB_OPERATION_CONFLICT")
+        charge = next((op for op in history if op.kind == "charge"), None)
+        if command.kind != "charge":
+            if charge is None or charge.status != "committed":
+                raise WalletOperationConflict("WALLET_COMMITTED_CHARGE_REQUIRED")
+            if (
+                charge.user_id != command.user_id
+                or charge.bot_id != command.bot_id
+                or charge.external_ref != command.external_ref
+                or charge.request_hash != command.request_hash
+                or charge.price_revision != command.price_revision
+            ):
+                raise WalletOperationConflict("WALLET_BILLING_CONTEXT_CONFLICT")
+        elif history:
+            raise WalletOperationConflict("WALLET_CHARGE_ALREADY_EXISTS")
+
+        committed = [op for op in history if op.status == "committed"]
+        previous = sum(op.billed_delta_points for op in committed)
+        validate_wallet_points(previous)
+        refunded = any(op.kind == "refund" for op in committed)
+        delta = command.requested_target_points - previous
+        status, reason = "committed", ""
+        if refunded and command.kind == "settle" and command.requested_target_points > 0:
+            status, reason, delta = "declined", "already_refunded", 0
+
+        if command.kind == "charge" or (delta > 0 and not refunded):
+            before_status = await RHBind.ensure_refreshed_in_session(
+                session,
+                command.user_id,
+                command.bot_id,
+                vip_tier=command.vip_tier if command.kind == "charge" else None,
+            )
+        else:
+            row = await RHBind._wallet_in_session(session, command.user_id, command.bot_id, create=False)
+            before_status = RHBind._row_status(row)
+        before = {key: before_status["buckets"][key]["balance"] for key in ("h5", "day", "week")}
+        after_status = before_status
+        if delta > 0:
+            ok, result = await RHBind.deduct_triple_in_session(
+                session,
+                command.user_id,
+                command.bot_id,
+                delta,
+                vip_tier=command.vip_tier if command.kind == "charge" else None,
+            )
+            after_status = result
+            if not ok:
+                status, reason, delta = "declined", "insufficient_points", 0
+        elif delta < 0:
+            after_status = await RHBind.add_triple_in_session(
+                session,
+                command.user_id,
+                command.bot_id,
+                -delta,
+                create=False,
+            )
+        after = {key: after_status["buckets"][key]["balance"] for key in ("h5", "day", "week")}
+        operation = cls(
+            operation_key=command.operation_key,
+            job_key=command.job_key,
+            external_ref=command.external_ref,
+            kind=command.kind,
+            operation_version=command.operation_version,
+            user_id=command.user_id,
+            bot_id=command.bot_id,
+            request_hash=command.request_hash,
+            command_hash=command.command_hash,
+            price_revision=command.price_revision,
+            status=status,
+            reason=reason,
+            requested_target_points=command.requested_target_points,
+            billed_delta_points=delta,
+            previous_net_points=previous,
+            net_after_points=previous + delta,
+            quota_mode="unlimited" if before_status["unlimited"] else "capped",
+            bucket_before=before,
+            bucket_after=after,
+            bucket_deltas={key: after[key] - before[key] for key in before},
+            available_snapshot=after_status["available"],
+            predecessor_operation_keys=[op.operation_key for op in committed],
+            occurred_at=datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z"),
+            receipt_digest="",
+        )
+        operation.receipt_digest = hashlib.sha256(
+            json.dumps(operation.receipt_body(), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        ).hexdigest()
+        session.add(operation)
+        await session.flush()
+        return operation
+
+
+# 同一份启动迁移定义也供隔离升级测试执行；新表由 Core create_all 建立。
+WALLET_OPERATION_MIGRATIONS = (
+    "CREATE TRIGGER IF NOT EXISTS rhwalletoperation_immutable_update BEFORE UPDATE ON rhwalletoperation "
+    "BEGIN SELECT RAISE(ABORT, 'WALLET_RECEIPT_IMMUTABLE'); END",
+    "CREATE TRIGGER IF NOT EXISTS rhwalletoperation_immutable_delete BEFORE DELETE ON rhwalletoperation "
+    "BEGIN SELECT RAISE(ABORT, 'WALLET_RECEIPT_IMMUTABLE'); END",
+)
+exec_list.extend(WALLET_OPERATION_MIGRATIONS)
 
 
 @site.register_admin

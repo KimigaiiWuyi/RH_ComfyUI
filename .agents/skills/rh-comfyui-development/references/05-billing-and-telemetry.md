@@ -116,3 +116,36 @@ token 用量** 的行,按 `settle_*_points` 算实扣,与当前 `point_cost` 只
 聚合出口是 `RHComfyuiTaskRecord.get_provider_summaries()`(按供应商聚合
 总单数/成功率/平均耗时/总积分,空 provider 的单通道历史记录不计入)+
 管理员命令 `rh 供应商统计 [最近N天]`(附本次运行期熔断快照;见 §10、§13.6)。
+
+## 5.7 逐任务操作回执（2026-08-31）
+
+- 唯一余额仍是 `RHBind`。新增 `RHWalletOperation` 只保存同一资金事务的不可变结果，
+  不保存第二份可修改余额。钱包实际主键是 `id`；操作前先拒绝重复 user/bot 候选，
+  再按该行主键更新，不给所有旧绑定强加复合唯一约束。
+- 公开 `WalletOperationCommand`、`charge_points_once`、`settle_points_once`、
+  `refund_points_once` 及相应 `*_in_session`；查询用 `get_wallet_operation` /
+  `get_wallet_job_operations`。共享事务调用方先保留写事务，再写自己的请求/job 与 RH 操作，
+  最后一次 commit；内部接口不 commit，不做网络。
+- 命令金额仅接受 0..2,000,000,000 的整数（不接受 bool/浮点）；相同键只认回原命令，
+  更改主体/请求/目标额冲突。`declined` 结果冻结，补充额度后不会自动追扣旧命令。
+- charge 预扣，settle 只做目标净额差，refund 的目标固定为 0，由已提交操作计算应退额。
+  refund 已提交后，晚到的 settle 不得重新扣款；无已提交 charge 不可退款。
+- `billed_delta_points` 是计费点数；三桶只是额度。unlimited、cap 或周期刷新导致的
+  额度变动不等于计费金额。退款不触发周期刷新，不得把降档后高于 cap 的旧余额压低。
+- 旧扣退、建钱包、查询刷新、改档和分桶补满复用同一事务内部方法；旧退款写失败向调用方抛出，
+  不再返回正常余额。无 job 的旧业务不伪造新操作回执。
+- 新表与唯一/金额约束由现有 Core metadata/create_all 建立；不可变触发器仅定义于
+  `WALLET_OPERATION_MIGRATIONS` 并接入 `exec_list`。请求内不建表。
+  旧维护回算按已冻结 external_ref + user/bot 识别新协议，在统计写入前复用同一个 settle；
+  补扣不足保留已确认金额。`adjust_wallet=False` 不绕过回执改写新订单。
+- 已发生新协议资金操作后，回滚不得覆盖数据库或让旧无回执代码处理新单。暂停新单也须保留
+  回执查询、既有操作重放和退款识别。
+- 真实 SQLAlchemy/SQLite 测试入口：`tests/test_wallet_operation_transactions.py`。
+  覆盖写入故障、跨进程重放、commit 后进程终止、退款/结算竞态及旧入口刷新竞争；
+  使用 pytest 临时库，拒绝生产 `GsData.db`；子进程禁用外网。
+- 已持久建单的宿主调用 `submit(strict_create_once=True)`：请求级 ContextVar
+  只约束该次执行，共用 HTTP client 的写请求只发一次，模型通道循环不重跑/切换。
+  GET 查询及下载仍沿用原重试，不修改全局 client 或模型单例。
+- `resume_poll` 缺少引用、查询网络异常及产物下载失败不再自动 finalize/refund；
+  只有 `ResumeFailedError.definitive=True` 或上游明确取消代表已确认终态。
+  无持久引用的 ACK 丢失由调用方自行保留不确定结果，不能重新 create。

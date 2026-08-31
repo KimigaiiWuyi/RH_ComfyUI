@@ -38,6 +38,58 @@ class _AlwaysStatus(httpx.AsyncBaseTransport):
         return httpx.Response(self.status, json={"error": "no"})
 
 
+def test_real_submit_opt_in_reaches_transport_and_posts_once() -> None:
+    from uuid import uuid4
+
+    from RH_ComfyUI.api import submit
+    from gsuid_core.utils.database import base_models
+    from RH_ComfyUI.core.schema.card import ModelCard
+    from RH_ComfyUI.core.schema.types import PortSpec, PortType, NodeOutput, ProgressCallback
+    from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
+    from RH_ComfyUI.core.base.generation import AIGCGenerationBase
+    from RH_ComfyUI.core.channels.channel import LocalChannel, ChannelBinding
+    from RH_ComfyUI.core.routing.registry import model_registry
+
+    transport = _FailNThenOk(fails=10)
+    model_name = "strict_transport_" + uuid4().hex
+
+    class FixtureModel(AIGCGenerationBase):
+        name = model_name
+        display_name = model_name
+        modality = TaskType.IMAGE
+        point_cost = 0
+        card = ModelCard(description="Synthetic transport fixture")
+
+        def input_schema(self) -> dict[str, PortSpec]:
+            return {"prompt": PortSpec(type=PortType.TEXT, required=True)}
+
+        def channel_bindings(self) -> list[ChannelBinding]:
+            return [ChannelBinding(LocalChannel("synthetic-transport"))]
+
+        async def execute_on_channel(
+            self,
+            request: GenerationRequest,
+            binding: ChannelBinding,
+            *,
+            on_progress: ProgressCallback | None = None,
+        ) -> NodeOutput:
+            async with RetryingAsyncClient(transport=transport, retry_wait_s=0) as client:
+                await client.post("https://isolated.test/create", json={"synthetic": True})
+            raise AssertionError("transport must fail")
+
+    async def run() -> None:
+        await base_models.init_database()
+        model_registry.register(FixtureModel())
+        with pytest.raises(httpx.ReadError):
+            await submit(
+                model=model_name, prompt="synthetic", task_type="image", strict_create_once=True, trace_id=model_name
+            )
+        assert transport.calls == 1
+        await base_models.engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_retry_then_success():
     transport = _FailNThenOk(fails=2)
 
@@ -95,6 +147,54 @@ def test_is_network_error():
     assert is_network_error(httpx.ConnectError("boom", request=req))
     assert not is_network_error(ValueError("no"))
     assert not is_network_error(httpx.HTTPStatusError("400", request=req, response=httpx.Response(400)))
+
+
+def test_strict_create_once_does_not_retry_post_but_keeps_query_retries() -> None:
+    from RH_ComfyUI.utils.backends.http_retry import strict_create_once_scope
+
+    async def run() -> None:
+        post_transport = _FailNThenOk(fails=20)
+        async with RetryingAsyncClient(transport=post_transport, retry_wait_s=0) as client:
+            with strict_create_once_scope(True), pytest.raises(httpx.ReadError):
+                await client.post("https://example.test/create", json={"request": "one"})
+        assert post_transport.calls == 1
+        get_transport = _FailNThenOk(fails=2)
+        async with RetryingAsyncClient(transport=get_transport, retry_wait_s=0) as client:
+            with strict_create_once_scope(True):
+                response = await client.get("https://example.test/query")
+        assert response.status_code == 200 and get_transport.calls == 3
+
+    asyncio.run(run())
+
+
+def test_strict_mode_is_request_scoped_not_a_shared_client_mutation() -> None:
+    from RH_ComfyUI.utils.backends.http_retry import is_strict_create_once, strict_create_once_scope
+
+    calls: dict[str, int] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls[path] = calls[path] + 1 if path in calls else 1
+        if calls[path] == 1:
+            raise httpx.ReadError("ack lost", request=request)
+        return httpx.Response(200, json={"ok": True})
+
+    async def run() -> None:
+        async with RetryingAsyncClient(transport=httpx.MockTransport(handler), retry_wait_s=0) as client:
+
+            async def strict_call() -> None:
+                with strict_create_once_scope(True), pytest.raises(httpx.ReadError):
+                    await client.post("https://example.test/strict")
+
+            async def legacy_call() -> None:
+                assert not is_strict_create_once()
+                assert (await client.post("https://example.test/legacy")).status_code == 200
+
+            await asyncio.gather(strict_call(), legacy_call())
+        assert calls == {"/strict": 1, "/legacy": 2}
+        assert not is_strict_create_once()
+
+    asyncio.run(run())
 
 
 def test_seedance_request_retries_readerror(monkeypatch):

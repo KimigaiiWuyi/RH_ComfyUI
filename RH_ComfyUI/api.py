@@ -61,6 +61,7 @@ async def submit(
     on_progress: Optional[ProgressCallback] = None,
     bot_id: Optional[str] = None,
     group_id: Optional[str] = None,
+    strict_create_once: bool = False,
     **kwargs: Any,
 ) -> GenerationResult:
     """提交生成任务:同步阻塞到完成。
@@ -75,6 +76,8 @@ async def submit(
                 `executor.execute_generation` 写入 `RHComfyuiTaskRecord.bot_id`。
                 不传则记为 ""(老行为,与 bot 命令路径不兼容时会丢失统计维度)。
         group_id: 触发者群号(私聊为空),同上。
+        strict_create_once: 新回执任务启用；共用 HTTP client 不重试写请求，
+                            模型错误不重跑或换通道。查询/下载重试不变。
         **kwargs: 组装进 GenerationRequest。已知字段进顶层;
                   未知键(frame_mode / image_size / task_mode 等)并入 params。
 
@@ -89,13 +92,16 @@ async def submit(
     # 延迟导入:避免 RH_ComfyUI 导入阶段就触发整个模型注册链。
     # 必须在 外部插件 等下游插件被加载前保证注册表已初始化
     # (由 RH_ComfyUI/__init__.py 的 @on_core_start 钩子负责)。
+    from .core.base.errors import ValidationError
     from .utils.core.request import TaskType
     from .core.routing.registry import model_registry
+
+    request_error = ValidationError if strict_create_once else ValueError
 
     # 1) 解析模型
     model_obj = model_registry.get(model)
     if model_obj is None:
-        raise ValueError(f"未知模型: {model!r}")
+        raise request_error(f"未知模型: {model!r}")
 
     # 2) 校验 task_type
     model_task_type = model_obj.modality.value
@@ -105,9 +111,9 @@ async def submit(
             TaskType(task_type)
         except ValueError:
             valid = [t.value for t in TaskType]
-            raise ValueError(f"未知 task_type: {task_type!r},合法值: {valid}") from None
+            raise request_error(f"未知 task_type: {task_type!r},合法值: {valid}") from None
         if task_type != model_task_type:
-            raise ValueError(f"模型 {model!r} 的 task_type={model_task_type} 与请求 {task_type!r} 不一致")
+            raise request_error(f"模型 {model!r} 的 task_type={model_task_type} 与请求 {task_type!r} 不一致")
         final_task_type = task_type
     else:
         final_task_type = model_task_type
@@ -145,7 +151,12 @@ async def submit(
         group_id=group_id or "",
         trace_id=request.trace_id or "",
     )
-    result = await dispatch(request, ctx)
+    from .utils.backends.http_retry import strict_create_once_scope
+
+    if type(strict_create_once) is not bool:
+        raise ValueError("strict_create_once must be a boolean")
+    with strict_create_once_scope(strict_create_once):
+        result = await dispatch(request, ctx)
 
     # 5) 包装为对外的 GenerationResult
     outputs_bytes: dict[str, bytes] = {}

@@ -378,17 +378,44 @@ async def _reconcile_locked(
                 skipped_no_usage += 1
                 continue
             with_usage += 1
-            if plan["delta"] == 0:
-                unchanged += 1
-                continue
             if cap is not None and len(changes) >= cap:
                 continue
             if not apply:
-                changes.append(plan)
+                if plan["delta"] == 0:
+                    unchanged += 1
+                else:
+                    changes.append(plan)
                 continue
 
             try:
-                # 先写消费记录 point_cost(列表/汇总都读这一列),再动钱包。
+                from ...utils.database.models import RHWalletOperation
+
+                managed = await RHWalletOperation.reconcile_record_once(
+                    plan["record_id"], plan["actual"], adjust_wallet=adjust_wallet,
+                )
+                if managed is not None:
+                    receipt, replayed = managed
+                    wallet_status = "receipt_managed"
+                    if adjust_wallet:
+                        wallet_status = "denied" if receipt.status == "declined" else "ok"
+                        if receipt.status == "declined":
+                            wallet_denied += 1
+                        elif not replayed:
+                            updated += 1
+                            charged_points += max(receipt.billed_delta_points, 0)
+                            refunded_points += max(-receipt.billed_delta_points, 0)
+                    if len(changes) < _MAX_CHANGES:
+                        changes.append({
+                            **plan, "actual": receipt.net_after_points,
+                            "delta": 0 if replayed else receipt.billed_delta_points,
+                            "wallet": wallet_status, "operation_key": receipt.operation_key,
+                            "receipt_digest": receipt.receipt_digest,
+                        })
+                    continue
+                # 只有未接入操作回执的历史记录继续走旧兼容路径。
+                if plan["delta"] == 0:
+                    unchanged += 1
+                    continue
                 # SQLite UPDATE rowcount 不可靠,必须走 ORM CAS。
                 ok = await _cas_point_cost(plan["record_id"], plan["prepaid"], plan["actual"])
                 if not ok:

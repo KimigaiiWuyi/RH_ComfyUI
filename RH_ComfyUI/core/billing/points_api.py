@@ -10,11 +10,83 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gsuid_core.logger import logger
 
 from .tier_quota import normalize_tier, list_tier_quotas
+
+if TYPE_CHECKING:
+    from ...utils.database.models import RHWalletOperation
+
+from ...utils.database.wallet_contract import (
+    WalletIntegrityError,
+    WalletOperationCommand,
+    WalletOperationConflict,
+    validate_wallet_points,
+)
+
+
+async def charge_points_in_session(session: AsyncSession, command: WalletOperationCommand) -> RHWalletOperation:
+    from ...utils.database.models import RHWalletOperation
+
+    if command.kind != "charge":
+        raise ValueError("charge command required")
+    return await RHWalletOperation.apply_in_session(session, command)
+
+
+async def settle_points_in_session(session: AsyncSession, command: WalletOperationCommand) -> RHWalletOperation:
+    from ...utils.database.models import RHWalletOperation
+
+    if command.kind != "settle":
+        raise ValueError("settle command required")
+    return await RHWalletOperation.apply_in_session(session, command)
+
+
+async def refund_points_in_session(session: AsyncSession, command: WalletOperationCommand) -> RHWalletOperation:
+    from ...utils.database.models import RHWalletOperation
+
+    if command.kind != "refund":
+        raise ValueError("refund command required")
+    return await RHWalletOperation.apply_in_session(session, command)
+
+
+async def charge_points_once(command: WalletOperationCommand) -> RHWalletOperation:
+    from ...utils.database.models import RHWalletOperation
+
+    if command.kind != "charge":
+        raise ValueError("charge command required")
+    return await RHWalletOperation.apply_once(command)
+
+
+async def settle_points_once(command: WalletOperationCommand) -> RHWalletOperation:
+    from ...utils.database.models import RHWalletOperation
+
+    if command.kind != "settle":
+        raise ValueError("settle command required")
+    return await RHWalletOperation.apply_once(command)
+
+
+async def refund_points_once(command: WalletOperationCommand) -> RHWalletOperation:
+    from ...utils.database.models import RHWalletOperation
+
+    if command.kind != "refund":
+        raise ValueError("refund command required")
+    return await RHWalletOperation.apply_once(command)
+
+
+async def get_wallet_operation(operation_key: str) -> RHWalletOperation | None:
+    from ...utils.database.models import RHWalletOperation
+
+    return await RHWalletOperation.get_operation(operation_key)
+
+
+async def get_wallet_job_operations(job_key: str) -> list[RHWalletOperation]:
+    from ...utils.database.models import RHWalletOperation
+
+    return await RHWalletOperation.get_job_operations(job_key)
 
 
 class PointsDeniedError(Exception):
@@ -78,23 +150,11 @@ async def refund_points(
     vip_tier: Optional[str] = None,
     reason: str = "",
 ) -> dict[str, Any]:
-    """三桶退回(封顶档位 cap)。失败只打日志并尽量返回当前 status。"""
+    """三桶退回；失败向调用方传播，不能以余额查询冒充成功。"""
     from ...utils.database.models import RHBind
 
-    if amount <= 0:
-        return await get_quota_status(user_id, bot_id, vip_tier=vip_tier)
-    try:
-        st = await RHBind.add_triple(user_id, bot_id, amount, vip_tier=vip_tier, cap_to_tier=True)
-        logger.info(
-            f"[refund_points] ok user={user_id} bot_id={bot_id} +{amount} avail={st.get('available')} ({reason})"
-        )
-        return st
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"[refund_points] fail user={user_id} bot_id={bot_id} amount={amount} ({reason}): {e}")
-        try:
-            return await get_quota_status(user_id, bot_id, vip_tier=vip_tier)
-        except Exception:  # noqa: BLE001
-            return {"available": -1, "error": str(e)}
+    validate_wallet_points(amount)
+    return await RHBind.add_triple(user_id, bot_id, amount, vip_tier=vip_tier, cap_to_tier=True)
 
 
 async def force_refill_points(
@@ -175,6 +235,17 @@ def get_all_tier_quotas() -> dict[str, Any]:
 
 
 __all__ = [
+    "get_wallet_operation",
+    "get_wallet_job_operations",
+    "WalletOperationCommand",
+    "WalletOperationConflict",
+    "WalletIntegrityError",
+    "charge_points_once",
+    "settle_points_once",
+    "refund_points_once",
+    "charge_points_in_session",
+    "settle_points_in_session",
+    "refund_points_in_session",
     "PointsDeniedError",
     "get_quota_status",
     "charge_points",

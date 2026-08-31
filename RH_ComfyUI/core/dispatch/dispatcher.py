@@ -110,7 +110,7 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
                 # 内部的 CancelledError 语义透传出去(那会被记成 cancelled)
                 raise GenerationError(
                     f"{model.name} 执行超过超时预算 {timeout_s:.0f}s",
-                    user_message="生成超时,积分已退回,请稍后重试。",
+                    user_message="生成超时，请查询原任务状态及积分回执，不要重复提交。",
                 ) from te
         else:
             output = await _run_slotted()

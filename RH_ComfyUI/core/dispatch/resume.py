@@ -39,9 +39,34 @@ class ResumeNotSupportedError(RuntimeError):
 class ResumeFailedError(RuntimeError):
     """上游终态失败或产物不可用。"""
 
+    def __init__(self, message: str, *, definitive: bool = False) -> None:
+        super().__init__(message)
+        self.definitive = definitive
+
 
 class ResumeCancelledError(ResumeFailedError):
     """上游任务已取消(非本进程 user cancel 的 CancelledError)。"""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, definitive=True)
+
+
+class ResumeUncertainError(ResumeFailedError):
+    """查询/下载未确定结果；保留原任务，不据此失败退款。"""
+
+
+def provider_terminal_error(error: BaseException) -> ResumeFailedError | None:
+    """只认已有 provider 类型的明确终态码；过期/unknown/网络不可猜失败。"""
+    from ...utils.backends.seedance.provider import SeedanceProviderError
+
+    cause = error if isinstance(error, SeedanceProviderError) else error.__cause__
+    if not isinstance(cause, SeedanceProviderError):
+        return None
+    if cause.code == "TASK_FAILED":
+        return ResumeFailedError(str(cause), definitive=True)
+    if cause.code in ("CANCELLED", "TASK_CANCELLED"):
+        return ResumeCancelledError(str(cause))
+    return None
 
 
 @runtime_checkable
@@ -567,7 +592,7 @@ async def _resume_seedance(
     final = await provider.poll_until_done(vendor_task_id, on_progress=None)
     if final.status == NormalizedStatus.FAILED:
         err = final.error if hasattr(final, "error") else None
-        raise ResumeFailedError(f"Seedance 任务失败: {err or final.raw}")
+        raise ResumeFailedError(f"Seedance 任务失败: {err or final.raw}", definitive=True)
     if final.status == NormalizedStatus.CANCELLED:
         raise ResumeCancelledError("Seedance 任务已取消")
     if not final.video_url:
@@ -652,7 +677,7 @@ async def _resume_happyhorse(
     await _emit(on_progress, "resuming", 10, f"恢复 HappyHorse 轮询({ch_name})")
     final = await provider.poll_until_done(vendor_task_id, on_progress=None)
     if final.status == NormalizedStatus.FAILED:
-        raise ResumeFailedError(f"HappyHorse 任务失败: {final.raw}")
+        raise ResumeFailedError(f"HappyHorse 任务失败: {final.raw}", definitive=True)
     if final.status == NormalizedStatus.CANCELLED:
         raise ResumeCancelledError("HappyHorse 任务已取消")
     if not final.video_url:
@@ -892,7 +917,7 @@ async def _resume_gateway_image(
             err = info.error or phase
         except AttributeError:
             err = phase
-        raise ResumeFailedError(f"网关图任务失败: {err}")
+        raise ResumeFailedError(f"网关图任务失败: {err}", definitive=True)
     try:
         result = info.result
     except AttributeError:
@@ -953,8 +978,9 @@ async def resume_poll(
         on_progress: 进度回调
 
     Raises:
-        ResumeNotSupportedError: 无法 resume(有 record_id 时引擎会先 finalize 再抛)
-        ResumeFailedError: 上游失败
+        ResumeNotSupportedError: 缺少可靠查询条件；不据此写失败或退款
+        ResumeFailedError: definitive=True 才表示已确认上游终态失败
+        ResumeUncertainError: 查询/下载不确定，保留原引用继续核查
         asyncio.CancelledError: 用户取消
     """
     start = time.monotonic()
@@ -1096,27 +1122,28 @@ async def resume_poll(
             elapsed_ms=elapsed_ms,
         )
         raise
-    except ResumeNotSupportedError as exc:
-        # 与 ResumeFailedError 一致:有 record_id 时落终态并条件退款,避免 running 悬挂
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        await _finalize_record(
-            record_id,
-            status="failed",
-            error=str(exc)[:2000],
-            elapsed_ms=elapsed_ms,
-        )
+    except ResumeNotSupportedError:
+        raise
+    except ResumeFailedError as exc:
+        if exc.definitive:
+            await _finalize_record(
+                record_id,
+                status="failed",
+                error=str(exc)[:2000],
+                elapsed_ms=int((time.monotonic() - start) * 1000),
+            )
         raise
     except Exception as exc:
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        await _finalize_record(
-            record_id,
-            status="failed",
-            error=str(exc)[:2000],
-            elapsed_ms=elapsed_ms,
-        )
-        if isinstance(exc, ResumeFailedError):
-            raise
-        raise ResumeFailedError(str(exc)) from exc
+        terminal = provider_terminal_error(exc)
+        if terminal is not None:
+            await _finalize_record(
+                record_id,
+                status="cancelled" if isinstance(terminal, ResumeCancelledError) else "failed",
+                error=str(terminal)[:2000],
+                elapsed_ms=int((time.monotonic() - start) * 1000),
+            )
+            raise terminal from exc
+        raise ResumeUncertainError(str(exc)) from exc
 
 
 async def _resume_seedance_with_cancel(**kwargs: Any) -> GenerationResult:
@@ -1247,7 +1274,7 @@ async def _resume_minimax_h3(
     await _emit(on_progress, "resuming", 10, f"恢复 MiniMax H3 轮询({ch_name})")
     final = await provider.poll_until_done(vendor_task_id, on_progress=None)
     if final.status == NormalizedStatus.FAILED:
-        raise ResumeFailedError(f"MiniMax H3 任务失败: {final.error or final.raw}")
+        raise ResumeFailedError(f"MiniMax H3 任务失败: {final.error or final.raw}", definitive=True)
     if final.status == NormalizedStatus.CANCELLED:
         raise ResumeCancelledError("MiniMax H3 任务已取消")
     if not final.video_url:
@@ -1467,6 +1494,8 @@ def can_resume(*, backend: str = "", model: str = "", channel: str = "", vendor_
 __all__ = [
     "ResumeNotSupportedError",
     "ResumeFailedError",
+    "ResumeUncertainError",
+    "provider_terminal_error",
     "ResumeCancelledError",
     "resume_poll",
     "can_resume",
