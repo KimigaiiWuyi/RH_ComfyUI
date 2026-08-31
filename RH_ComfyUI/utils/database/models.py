@@ -707,6 +707,8 @@ class RHWalletOperation(BaseIDModel, table=True):
             "length(request_hash) = 64 AND length(command_hash) = 64 AND length(receipt_digest) = 64",
             name="ck_rh_wallet_digests",
         ),
+        Index("ix_rhwalletoperation_bot_occurred", "bot_id", "occurred_at"),
+        Index("ix_rhwalletoperation_bot_user_occurred", "bot_id", "user_id", "occurred_at"),
         {"extend_existing": True},
     )
     schema_version: str = Field(default="rh-wallet-op/v1")
@@ -970,6 +972,9 @@ WALLET_OPERATION_MIGRATIONS = (
     "BEGIN SELECT RAISE(ABORT, 'WALLET_RECEIPT_IMMUTABLE'); END",
     "CREATE TRIGGER IF NOT EXISTS rhwalletoperation_immutable_delete BEFORE DELETE ON rhwalletoperation "
     "BEGIN SELECT RAISE(ABORT, 'WALLET_RECEIPT_IMMUTABLE'); END",
+    "CREATE INDEX IF NOT EXISTS ix_rhwalletoperation_bot_occurred ON rhwalletoperation (bot_id, occurred_at)",
+    "CREATE INDEX IF NOT EXISTS ix_rhwalletoperation_bot_user_occurred "
+    "ON rhwalletoperation (bot_id, user_id, occurred_at)",
 )
 exec_list.extend(WALLET_OPERATION_MIGRATIONS)
 
