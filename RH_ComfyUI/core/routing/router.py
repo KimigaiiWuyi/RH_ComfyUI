@@ -36,6 +36,16 @@ async def route(
     if registry is None:
         registry = model_registry
 
+    from ...utils.backends.http_retry import is_strict_create_once
+
+    if request.model and is_strict_create_once():
+        model = registry.get(request.model)
+        if model is None or model.modality != request.task_type or not model.supports(request):
+            raise ModelUnavailableError(f"指定模型 {request.model} 不支持当前请求，未切换模型")
+        if not await model.check_available():
+            raise ModelUnavailableError(f"指定模型 {request.model} 暂不可用，未切换模型")
+        return model
+
     # ── 1. 用户显式指定 model ──
     if request.model:
         model = registry.get(request.model)

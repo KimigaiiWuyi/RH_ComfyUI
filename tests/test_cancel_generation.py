@@ -867,8 +867,8 @@ def test_serialize_extra_params_keeps_vendor_keys_when_oversized():
     assert len(out) <= 2048
 
 
-def test_resume_not_supported_finalizes_record(monkeypatch):
-    """ResumeNotSupportedError + record_id 须 finalize,避免 running 悬挂。"""
+def test_resume_not_supported_does_not_invent_failure_or_refund(monkeypatch: pytest.MonkeyPatch) -> None:
+    """缺少引用只代表无法查询，不能据此把旧订单失败并退费。"""
     from RH_ComfyUI.core.dispatch import resume as resume_mod
 
     calls: list[dict] = []
@@ -894,10 +894,134 @@ def test_resume_not_supported_finalizes_record(monkeypatch):
             )
 
     asyncio.run(_run())
-    assert len(calls) == 1
-    assert calls[0]["record_id"] == 99
-    assert calls[0]["status"] == "failed"
-    assert "vendor_task_id" in calls[0]["error"]
+    assert calls == []
+
+
+@pytest.mark.parametrize("failure_kind", ["network", "artifact", "unsupported"])
+def test_resume_uncertain_does_not_finalize_a_record(monkeypatch: pytest.MonkeyPatch, failure_kind: str) -> None:
+    import httpx
+
+    from RH_ComfyUI.api import GenerationResult
+    from RH_ComfyUI.core.dispatch import resume as resume_mod
+    from RH_ComfyUI.utils.core.types import ProgressCallback
+
+    finals: list[tuple[int | None, str]] = []
+
+    async def capture(
+        record_id: int | None,
+        *,
+        status: str,
+        error: str = "",
+        elapsed_ms: int = 0,
+        actual_cost: int | None = None,
+    ) -> None:
+        finals.append((record_id, status))
+
+    async def fail(
+        *,
+        vendor_task_id: str,
+        channel: str,
+        model: str,
+        on_progress: ProgressCallback | None,
+        trace_id: str,
+        record_id: int | None,
+    ) -> GenerationResult:
+        if failure_kind == "network":
+            raise httpx.ReadError("query response lost")
+        if failure_kind == "artifact":
+            raise resume_mod.ResumeFailedError("provider succeeded but artifact unavailable")
+        raise resume_mod.ResumeNotSupportedError("query channel unavailable")
+
+    monkeypatch.setattr(resume_mod, "_finalize_record", capture)
+    monkeypatch.setattr(resume_mod, "_resume_seedance_with_cancel", fail)
+
+    async def run() -> None:
+        with pytest.raises((resume_mod.ResumeFailedError, resume_mod.ResumeNotSupportedError)):
+            await resume_mod.resume_poll(
+                model="seedance2.5",
+                vendor_task_id="synthetic-reference",
+                channel="synthetic-channel",
+                backend="seedance",
+                kind="video",
+                record_id=99,
+            )
+
+    asyncio.run(run())
+    assert finals == []
+
+
+@pytest.mark.parametrize("family", ["seedance", "happyhorse"])
+@pytest.mark.parametrize("outcome", ["failed", "cancelled", "network", "artifact", "expired"])
+def test_real_provider_poll_preserves_confirmed_and_uncertain_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+    family: str,
+) -> None:
+    import httpx
+
+    from RH_ComfyUI.core.dispatch import resume as resume_mod
+    from RH_ComfyUI.utils.backends.seedance.spec import VideoGenSpec
+    from RH_ComfyUI.utils.backends.seedance.provider import NormalizedTask, NormalizedStatus, SeedanceProvider
+    from RH_ComfyUI.utils.backends.happyhorse.provider import HappyHorseProvider
+
+    class FixtureProvider(SeedanceProvider):
+        name = "isolated-resume-fixture"
+        poll_interval = 0.01
+
+        async def render_create(
+            self, spec: VideoGenSpec, *, model: Optional[str]
+        ) -> tuple[str, str, dict[str, str], dict[str, Any]]:
+            raise AssertionError("resume must never create")
+
+        def parse_create(self, resp_json: dict[str, Any]) -> str:
+            raise AssertionError("resume must never create")
+
+        async def get(self, task_id: str) -> NormalizedTask:
+            assert task_id == "synthetic-vendor-reference"
+            if outcome == "network":
+                raise httpx.ReadError("synthetic query failure")
+            return NormalizedTask(
+                id=task_id,
+                status=NormalizedStatus.SUCCEEDED if outcome == "artifact" else NormalizedStatus(outcome),
+                error="synthetic confirmed status",
+            )
+
+    provider = FixtureProvider(api_key="synthetic-not-a-real-key")
+    if family == "happyhorse":
+        from types import MethodType
+
+        provider.poll_until_done = MethodType(HappyHorseProvider.poll_until_done, provider)
+    monkeypatch.setattr(resume_mod, "_resolve_seedance_channel", lambda channel, model: (provider, "fixture"))
+    monkeypatch.setattr(resume_mod, "_provider_from_channel", lambda channel, name: provider)
+    final_statuses: list[str] = []
+
+    async def capture(
+        record_id: Optional[int],
+        *,
+        status: str,
+        error: str = "",
+        elapsed_ms: int = 0,
+        actual_cost: Optional[int] = None,
+    ) -> None:
+        final_statuses.append(status)
+
+    monkeypatch.setattr(resume_mod, "_finalize_record", capture)
+
+    async def run() -> None:
+        with pytest.raises(resume_mod.ResumeFailedError) as failure:
+            await resume_mod.resume_poll(
+                model="seedance2.5",
+                vendor_task_id="synthetic-vendor-reference",
+                channel="fixture",
+                backend="seedance",
+                kind="video",
+            )
+        assert failure.value.definitive is (outcome in ("failed", "cancelled"))
+        assert final_statuses == (
+            ["cancelled" if outcome == "cancelled" else "failed"] if outcome in ("failed", "cancelled") else []
+        )
+
+    asyncio.run(run())
 
 
 def test_provider_supports_remote_cancel_fail_closed():

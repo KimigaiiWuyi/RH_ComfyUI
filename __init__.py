@@ -55,9 +55,20 @@ from .RH_ComfyUI.utils.database.models import (  # noqa: F401
 )
 from .RH_ComfyUI.core.billing.points_api import (
     PointsDeniedError,  # noqa: F401
+    WalletIntegrityError,  # noqa: F401
+    WalletOperationCommand,  # noqa: F401
+    WalletOperationConflict,  # noqa: F401
     set_vip_tier as set_points_vip_tier,  # noqa: F401
     refill_buckets,  # noqa: F401
+    charge_points_once,  # noqa: F401
+    refund_points_once,  # noqa: F401
+    settle_points_once,  # noqa: F401
+    get_wallet_operation,  # noqa: F401
     force_refill_bot_pool,  # noqa: F401
+    charge_points_in_session,  # noqa: F401
+    refund_points_in_session,  # noqa: F401
+    settle_points_in_session,  # noqa: F401
+    get_wallet_job_operations,  # noqa: F401
 )
 
 # 结构化查询入口:显式 re-export,外部无需依赖隐式子包路径
@@ -65,13 +76,24 @@ from .RH_ComfyUI.utils.database.consumption import (  # noqa: F401
     build_admin_daily_payload,
     resolve_record_saved_file,
     build_admin_records_payload,
-    build_filter_options_payload,
     build_record_detail_payload,
+    build_filter_options_payload,
     build_user_consumption_payload,
     build_admin_consumption_payload,
 )
 
 __all__ = [
+    "WalletIntegrityError",
+    "WalletOperationCommand",
+    "WalletOperationConflict",
+    "charge_points_once",
+    "settle_points_once",
+    "refund_points_once",
+    "charge_points_in_session",
+    "settle_points_in_session",
+    "refund_points_in_session",
+    "get_wallet_operation",
+    "get_wallet_job_operations",
     # 公开 API
     "submit",
     "cancel_generation",

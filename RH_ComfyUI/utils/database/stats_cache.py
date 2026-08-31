@@ -75,7 +75,7 @@ def make_cache_key(
         window = "all"
     else:
         window = f"{_iso(start_time)}|{_iso(end_time)}"
-    raw = "|".join([kind, bot_id or "", window, str(int(top_n or 0))])
+    raw = "|".join(["rh-receipt-aware-20260831-v1", kind, bot_id or "", window, str(int(top_n or 0))])
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
     return f"{kind}:{bot_id or '_'}:{digest}"[:256]
 

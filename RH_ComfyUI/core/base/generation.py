@@ -312,6 +312,10 @@ class AIGCGenerationBase(ABC):
                             output = await self.execute_on_channel(request, binding, on_progress=on_progress)
                 except ChannelError as e:
                     last_error = e
+                    from ...utils.backends.http_retry import is_strict_create_once
+
+                    if is_strict_create_once():
+                        raise
                     if not e.retryable:
                         # 参数类失败(换通道也没用)不计入熔断:通道本身是健康的,
                         # 用户反复提交坏请求不应把通道推入冷却期

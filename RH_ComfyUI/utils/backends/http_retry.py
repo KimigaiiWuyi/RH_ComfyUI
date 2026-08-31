@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, TypeVar
-from collections.abc import Callable, Awaitable
+from contextlib import contextmanager
+from contextvars import ContextVar
+from collections.abc import Callable, Iterator, Awaitable
 
 import httpx
 
@@ -23,6 +25,20 @@ T = TypeVar("T")
 
 NETWORK_RETRY_ATTEMPTS = 5
 NETWORK_RETRY_WAIT_S = 5.0
+_STRICT_CREATE_ONCE: ContextVar[bool] = ContextVar("rh_strict_create_once", default=False)
+
+
+def is_strict_create_once() -> bool:
+    return _STRICT_CREATE_ONCE.get()
+
+
+@contextmanager
+def strict_create_once_scope(enabled: bool) -> Iterator[None]:
+    token = _STRICT_CREATE_ONCE.set(enabled or _STRICT_CREATE_ONCE.get())
+    try:
+        yield
+    finally:
+        _STRICT_CREATE_ONCE.reset(token)
 
 
 def _aiohttp_network_exceptions() -> tuple[type[BaseException], ...]:
@@ -72,13 +88,9 @@ async def call_with_network_retry(
         except NETWORK_RETRY_EXC as exc:
             last = exc
             if i >= attempts:
-                logger.warning(
-                    f"{prefix} {type(exc).__name__}: {exc}; {i}/{attempts} 次均失败,向上抛出"
-                )
+                logger.warning(f"{prefix} {type(exc).__name__}: {exc}; {i}/{attempts} 次均失败,向上抛出")
                 break
-            logger.warning(
-                f"{prefix} {type(exc).__name__}: {exc}; {i}/{attempts} 次失败, {wait_s:.0f}s 后重试"
-            )
+            logger.warning(f"{prefix} {type(exc).__name__}: {exc}; {i}/{attempts} 次失败, {wait_s:.0f}s 后重试")
             await asyncio.sleep(wait_s)
     assert last is not None
     raise last
@@ -110,7 +122,9 @@ class RetryingAsyncClient(httpx.AsyncClient):
 
         return await call_with_network_retry(
             _once,
-            attempts=self._retry_attempts,
+            attempts=1
+            if is_strict_create_once() and method.upper() not in ("GET", "HEAD", "OPTIONS")
+            else self._retry_attempts,
             wait_s=self._retry_wait_s,
             label=f"{method} {url}",
         )
@@ -155,6 +169,8 @@ async def download_with_network_retry(
 
 
 __all__ = [
+    "is_strict_create_once",
+    "strict_create_once_scope",
     "NETWORK_RETRY_ATTEMPTS",
     "NETWORK_RETRY_EXC",
     "NETWORK_RETRY_WAIT_S",
