@@ -647,6 +647,13 @@ async def get_quota_status(user_id: str, bot_id: str, *, vip_tier=None):
     return await _status(user_id, bot_id, vip_tier=vip_tier)
 
 
+async def list_quota_statuses(user_ids, bot_id: str, *, vip_tiers=None):
+    """管理端批量只读三桶。不写库。"""
+    from .core.billing.points_api import list_quota_statuses as _list
+
+    return await _list(user_ids, bot_id, vip_tiers=vip_tiers)
+
+
 async def force_refill_points(user_id: str, bot_id: str, *, vip_tier=None):
     from .core.billing.points_api import force_refill_points as _refill
 
@@ -724,6 +731,7 @@ __all__ = [
     "charge_points",
     "refund_points",
     "get_quota_status",
+    "list_quota_statuses",
     "force_refill_points",
     "get_all_tier_quotas",
 ]

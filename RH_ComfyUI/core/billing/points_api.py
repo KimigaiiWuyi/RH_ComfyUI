@@ -109,6 +109,18 @@ async def get_quota_status(
     return await RHBind.get_quota_status(user_id, bot_id, vip_tier=vip_tier)
 
 
+async def list_quota_statuses(
+    user_ids: list[str] | tuple[str, ...],
+    bot_id: str,
+    *,
+    vip_tiers: Optional[dict[str, str]] = None,
+) -> dict[str, dict[str, Any]]:
+    """管理端列表：一次读出 bot 池钱包，按到期规则内存算出三桶。不写库、不建账。"""
+    from ...utils.database.models import RHBind
+
+    return await RHBind.snapshot_quota_statuses(bot_id, user_ids, vip_tiers=vip_tiers)
+
+
 async def charge_points(
     user_id: str,
     bot_id: str,
@@ -248,6 +260,7 @@ __all__ = [
     "refund_points_in_session",
     "PointsDeniedError",
     "get_quota_status",
+    "list_quota_statuses",
     "charge_points",
     "refund_points",
     "force_refill_points",

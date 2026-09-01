@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, Optional, Sequence, TypedDict
 from datetime import datetime, timezone
 
 from sqlmodel import Field, SQLModel, col
@@ -227,6 +227,141 @@ class RHBind(Bind, table=True):
         )
 
     @classmethod
+    def _apply_lazy_refresh(
+        cls,
+        *,
+        h5: int,
+        day: int,
+        week: int,
+        r5: int,
+        rd: int,
+        rw: int,
+        point: int,
+        quotas: TierQuotas,
+        now: int,
+        force: bool = False,
+    ) -> tuple[int, int, int, int, int, int]:
+        """周期补桶的纯计算。不写库。force=True 时三桶立刻补满。"""
+        from ...core.billing.tier_quota import (
+            needs_5h_refresh,
+            needs_day_refresh,
+            needs_week_refresh,
+            start_of_local_day,
+            start_of_local_week,
+        )
+
+        if quotas.unlimited:
+            return h5, day, week, r5, rd, rw
+        if rd <= 0 and rw <= 0 and h5 <= 0 and day <= 0 and week <= 0:
+            return (
+                quotas.h5,
+                max(point, quotas.day),
+                quotas.week,
+                0,
+                start_of_local_day(now),
+                start_of_local_week(now),
+            )
+        if h5 >= quotas.h5 and r5 > 0 and not force:
+            r5 = 0
+        if force or needs_5h_refresh(r5, now):
+            h5, r5 = quotas.h5, 0
+        if force or needs_day_refresh(rd, now):
+            day, rd = quotas.day, start_of_local_day(now)
+        if force or needs_week_refresh(rw, now):
+            week, rw = quotas.week, start_of_local_week(now)
+        return h5, day, week, r5, rd, rw
+
+    @classmethod
+    def snapshot_quota_status(
+        cls,
+        row: RHBind | None,
+        *,
+        vip_tier: str | None = None,
+        now: int | None = None,
+    ) -> QuotaStatus:
+        """管理端列表用：按行内数字 + 到期规则算出展示值，不建账、不 BEGIN IMMEDIATE。
+
+        无钱包行视为从未消费，展示当前档满额（与首次 ensure_refreshed 建账结果一致）。
+        """
+        from ...core.billing.tier_quota import now_ts, normalize_tier, get_tier_quotas
+
+        n = now if now is not None else now_ts()
+        if row is None:
+            tier = normalize_tier(vip_tier)
+            quotas = get_tier_quotas(tier)
+            h5, day, week, r5, rd, rw = cls._apply_lazy_refresh(
+                h5=0,
+                day=0,
+                week=0,
+                r5=0,
+                rd=0,
+                rw=0,
+                point=0,
+                quotas=quotas,
+                now=n,
+            )
+            return cls._status_dict(
+                available=cls._sync_available(h5, day, week),
+                h5=h5,
+                day=day,
+                week=week,
+                quotas=quotas,
+                r5=r5,
+                rd=rd,
+                rw=rw,
+                tier=tier,
+            )
+        tier = normalize_tier(vip_tier if vip_tier is not None else row.vip_tier)
+        quotas = get_tier_quotas(tier)
+        h5, day, week, r5, rd, rw = cls._apply_lazy_refresh(
+            h5=row.point_5h,
+            day=row.point_day,
+            week=row.point_week,
+            r5=row.refreshed_at_5h,
+            rd=row.refreshed_at_day,
+            rw=row.refreshed_at_week,
+            point=row.point,
+            quotas=quotas,
+            now=n,
+        )
+        return cls._status_dict(
+            available=cls._sync_available(h5, day, week),
+            h5=h5,
+            day=day,
+            week=week,
+            quotas=quotas,
+            r5=r5,
+            rd=rd,
+            rw=rw,
+            tier=tier,
+        )
+
+    @classmethod
+    @with_read_session
+    async def snapshot_quota_statuses(
+        cls,
+        session: AsyncSession,
+        bot_id: str,
+        user_ids: Sequence[str],
+        *,
+        vip_tiers: dict[str, str] | None = None,
+    ) -> dict[str, QuotaStatus]:
+        """一次读出 bot 池钱包并算展示值。必须在 session 内转成 dict,commit 后 ORM 行不可用。"""
+        ids = [str(uid) for uid in user_ids if str(uid)]
+        if not ids:
+            return {}
+        wanted = set(ids)
+        # 不按 user_id IN 绑参：SQLite 里该列可能是 TEXT 也可能被写成整数，IN ('12') 对不上 12。
+        rows = (await session.execute(select(cls).where(col(cls.bot_id) == bot_id))).scalars().all()
+        by_uid: dict[str, RHBind] = {}
+        for row in rows:
+            key = str(row.user_id)
+            if key in wanted and key not in by_uid:
+                by_uid[key] = row
+        tiers = vip_tiers or {}
+        return {uid: cls.snapshot_quota_status(by_uid.get(uid), vip_tier=tiers.get(uid)) for uid in dict.fromkeys(ids)}
+
+    @classmethod
     async def _atomic_deduct_buckets_in_session(
         cls,
         session: AsyncSession,
@@ -310,16 +445,7 @@ class RHBind(Bind, table=True):
         vip_tier: str | None = None,
         force: bool = False,
     ) -> QuotaStatus:
-        from ...core.billing.tier_quota import (
-            now_ts,
-            normalize_tier,
-            get_tier_quotas,
-            needs_5h_refresh,
-            needs_day_refresh,
-            needs_week_refresh,
-            start_of_local_day,
-            start_of_local_week,
-        )
+        from ...core.billing.tier_quota import now_ts, normalize_tier, get_tier_quotas
 
         row = await cls._wallet_in_session(session, user_id, bot_id, vip_tier=vip_tier)
         tier = normalize_tier(vip_tier if vip_tier is not None else row.vip_tier)
@@ -327,20 +453,18 @@ class RHBind(Bind, table=True):
         n = now_ts()
         row.vip_tier = tier
         if not quotas.unlimited:
-            h5, day, week = cls._bucket_vals(row)
-            r5, rd, rw = row.refreshed_at_5h, row.refreshed_at_day, row.refreshed_at_week
-            if rd <= 0 and rw <= 0 and h5 <= 0 and day <= 0 and week <= 0:
-                h5, day, week = quotas.h5, max(row.point, quotas.day), quotas.week
-                r5, rd, rw = 0, start_of_local_day(n), start_of_local_week(n)
-            else:
-                if h5 >= quotas.h5 and r5 > 0 and not force:
-                    r5 = 0
-                if force or needs_5h_refresh(r5, n):
-                    h5, r5 = quotas.h5, 0
-                if force or needs_day_refresh(rd, n):
-                    day, rd = quotas.day, start_of_local_day(n)
-                if force or needs_week_refresh(rw, n):
-                    week, rw = quotas.week, start_of_local_week(n)
+            h5, day, week, r5, rd, rw = cls._apply_lazy_refresh(
+                h5=row.point_5h,
+                day=row.point_day,
+                week=row.point_week,
+                r5=row.refreshed_at_5h,
+                rd=row.refreshed_at_day,
+                rw=row.refreshed_at_week,
+                point=row.point,
+                quotas=quotas,
+                now=n,
+                force=force,
+            )
             row.point_5h, row.point_day, row.point_week = h5, day, week
             row.refreshed_at_5h, row.refreshed_at_day, row.refreshed_at_week = r5, rd, rw
             row.point = cls._sync_available(h5, day, week)
@@ -2226,12 +2350,10 @@ exec_list.extend(
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_user_created ON rhcomfyuitaskrecord (user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_pipeline "
         "ON rhcomfyuitaskrecord (bot_id, task_name, task_type)",
-        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_bmodel "
-        "ON rhcomfyuitaskrecord (bot_id, backend_model)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_bmodel ON rhcomfyuitaskrecord (bot_id, backend_model)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_bmodel_type "
         "ON rhcomfyuitaskrecord (bot_id, backend_model, task_type)",
-        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_backend "
-        "ON rhcomfyuitaskrecord (bot_id, backend)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_backend ON rhcomfyuitaskrecord (bot_id, backend)",
         # 统计缓存表索引(表由 create_all 建出后补索引)
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuistatscache_bot_exp ON rhcomfyuistatscache (bot_id, expires_at)",
     ]
