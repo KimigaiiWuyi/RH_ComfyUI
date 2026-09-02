@@ -1144,7 +1144,19 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     # 旧库由文末 exec_list CREATE INDEX IF NOT EXISTS 补齐
     __table_args__ = (
         Index("ix_rhcomfyuitaskrecord_bot_created", "bot_id", "created_at"),
+        # covering: 时间窗聚合积分/状态/耗时/类型,避免回含 JSON 的宽行
+        Index(
+            "ix_rhcomfyuitaskrecord_bot_created_user_spend",
+            "bot_id",
+            "created_at",
+            "user_id",
+            "status",
+            "point_cost",
+            "elapsed_ms",
+            "task_type",
+        ),
         Index("ix_rhcomfyuitaskrecord_bot_user", "bot_id", "user_id"),
+        Index("ix_rhcomfyuitaskrecord_bot_user_created", "bot_id", "user_id", "created_at"),
         Index("ix_rhcomfyuitaskrecord_bot_status_created", "bot_id", "status", "created_at"),
         Index("ix_rhcomfyuitaskrecord_user_created", "user_id", "created_at"),
         # 筛选项 DISTINCT 覆盖索引,避免扫含 64KB JSON 的宽行
@@ -1152,6 +1164,8 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         Index("ix_rhcomfyuitaskrecord_bot_bmodel", "bot_id", "backend_model"),
         Index("ix_rhcomfyuitaskrecord_bot_bmodel_type", "bot_id", "backend_model", "task_type"),
         Index("ix_rhcomfyuitaskrecord_bot_backend", "bot_id", "backend"),
+        Index("ix_rhcomfyuitaskrecord_trace_id", "trace_id"),
+        Index("ix_rhcomfyuitaskrecord_bot_trace", "bot_id", "trace_id"),
         {"extend_existing": True},
     )
 
@@ -1783,54 +1797,58 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             "total_points": int,
           }
         backend_provider 为空的历史记录(单通道时代)不计入。
+        禁止 ``select(cls).subquery()`` 拖入大 JSON 列。
         """
         conds: list[ColumnElement[bool]] = [col(cls.backend_provider) != ""]
         if start_time is not None:
             conds.append(col(cls.created_at) >= start_time)
         if end_time is not None:
             conds.append(col(cls.created_at) <= end_time)
-        base_sub = select(cls).where(and_(*conds)).subquery()
-
+        ok_v = RHComfyuiTaskStatus.OK.value
+        failed_v = RHComfyuiTaskStatus.FAILED.value
+        cancelled_v = RHComfyuiTaskStatus.CANCELLED.value
         agg_stmt = (
             select(
-                base_sub.c.backend_provider.label("provider"),
+                col(cls.backend_provider).label("provider"),
                 func.count().label("total"),
-                func.coalesce(func.avg(base_sub.c.elapsed_ms), 0).label("avg_elapsed_ms"),
-                func.coalesce(func.sum(base_sub.c.point_cost), 0).label("total_points"),
+                func.coalesce(func.avg(col(cls.elapsed_ms)), 0).label("avg_elapsed_ms"),
+                func.coalesce(func.sum(col(cls.point_cost)), 0).label("total_points"),
+                func.coalesce(
+                    func.sum(case((col(cls.status) == ok_v, 1), else_=0)),
+                    0,
+                ).label("success"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (col(cls.status).in_((failed_v, cancelled_v)), 1),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("failed"),
             )
-            .group_by(base_sub.c.backend_provider)
-            .order_by(func.sum(base_sub.c.point_cost).desc())
+            .select_from(cls)
+            .where(and_(*conds))
+            .group_by(col(cls.backend_provider))
+            .order_by(func.sum(col(cls.point_cost)).desc())
         )
         agg_rows = (await session.execute(agg_stmt)).all()
 
-        success_stmt = (
-            select(base_sub.c.backend_provider, func.count())
-            .where(base_sub.c.status == RHComfyuiTaskStatus.OK.value)
-            .group_by(base_sub.c.backend_provider)
-        )
-        success_map = {p: int(cnt) for p, cnt in (await session.execute(success_stmt)).all()}
-        failed_stmt = (
-            select(base_sub.c.backend_provider, func.count())
-            .where(base_sub.c.status.in_((RHComfyuiTaskStatus.FAILED.value, RHComfyuiTaskStatus.CANCELLED.value)))
-            .group_by(base_sub.c.backend_provider)
-        )
-        failed_map = {p: int(cnt) for p, cnt in (await session.execute(failed_stmt)).all()}
-
         results: list[dict[str, Any]] = []
-        for provider, total, avg_elapsed, total_points in agg_rows:
-            total_i = int(total)
-            success = success_map.get(provider, 0)
-            failed = failed_map.get(provider, 0)
+        for r in agg_rows:
+            total_i = int(r.total or 0)
+            success = int(r.success or 0)
+            failed = int(r.failed or 0)
             terminal = success + failed
             results.append(
                 {
-                    "provider": str(provider),
+                    "provider": str(r.provider),
                     "total": total_i,
                     "success": success,
                     "failed": failed,
                     "success_rate": round(success / terminal, 4) if terminal else 0.0,
-                    "avg_elapsed_ms": int(float(avg_elapsed or 0)),
-                    "total_points": int(total_points),
+                    "avg_elapsed_ms": int(float(r.avg_elapsed_ms or 0)),
+                    "total_points": int(r.total_points or 0),
                 }
             )
         return results
@@ -2344,7 +2362,13 @@ exec_list.extend(
         'ALTER TABLE rhbind ADD COLUMN vip_tier VARCHAR(16) DEFAULT "free"',
         # ── admin stats 复合索引(与 SQLModel __table_args__ 对齐;旧库启动补齐) ──
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_created ON rhcomfyuitaskrecord (bot_id, created_at)",
+        # 同名 covering 加了 elapsed_ms/task_type;旧 5 列索引要先 DROP 再建
+        "DROP INDEX IF EXISTS ix_rhcomfyuitaskrecord_bot_created_user_spend",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_created_user_spend "
+        "ON rhcomfyuitaskrecord (bot_id, created_at, user_id, status, point_cost, elapsed_ms, task_type)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_user ON rhcomfyuitaskrecord (bot_id, user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_user_created "
+        "ON rhcomfyuitaskrecord (bot_id, user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_status_created "
         "ON rhcomfyuitaskrecord (bot_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_user_created ON rhcomfyuitaskrecord (user_id, created_at)",
@@ -2354,6 +2378,8 @@ exec_list.extend(
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_bmodel_type "
         "ON rhcomfyuitaskrecord (bot_id, backend_model, task_type)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_backend ON rhcomfyuitaskrecord (bot_id, backend)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_trace_id ON rhcomfyuitaskrecord (trace_id)",
+        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_trace ON rhcomfyuitaskrecord (bot_id, trace_id)",
         # 统计缓存表索引(表由 create_all 建出后补索引)
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuistatscache_bot_exp ON rhcomfyuistatscache (bot_id, expires_at)",
     ]
