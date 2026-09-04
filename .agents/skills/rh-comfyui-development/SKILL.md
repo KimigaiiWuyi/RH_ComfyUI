@@ -61,6 +61,7 @@ description: >
 | 加一个有跨字段约束的模型 | defs 类 + `overrides.py` 校验类 | 三 |
 | 加一个全新执行链的模型(新 HTTP 上游) | backends 客户端 + ProviderChannel + 继承模态 ABC + `@register_model` | 三、四 |
 | 给现有模型加一家供应商 | `channel_bindings()` 追加 `ChannelBinding` | 四 |
+| 调用方指定供应商通道 | `submit(..., channel="ark")`;空/`auto`=负载均衡;`resolve_channel_pin` | **四、六** |
 | 改模型积分价格 | defs 类的 `point_cost`(node_def 里) | 三 |
 | 排查"扣了积分没出图" | dispatch 失败语义 + 统计表 `status/refunded` | 五 |
 | **取消进行中任务 / 上游 DELETE** | `cancel_generation` + `bind_vendor_cancel` + 模型 cancel 标志 | **二十、五** |

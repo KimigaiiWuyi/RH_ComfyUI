@@ -15,7 +15,8 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 | `test_schema_validation.py` | PortSpec 通用校验 + Seedance/Wan 跨字段约束 |
 | `test_dispatcher_billing.py` | 成功 settle / 校验失败不扣费 / 失败退款幂等 / BaseException 退款 / estimate_cost / settle_cost 差额对齐(禁止双重扣费) / 超时退款 |
 | `test_seedance_usage_reconcile.py` | 历史单 raw usage → 实扣积分(含截断 JSON / content[] 参考视频) |
-| `test_channel_failover.py` | Adapter 错误翻译、多通道故障切换、非重试错误不计熔断不切换、transient(429/503)原通道退避重试一次 |
+| `test_channel_failover.py` | Adapter 错误翻译、多通道故障切换、非重试错误不计熔断不切换、transient(429/503)原通道退避重试一次、`channel` 钉扎不切其它名称 |
+| `test_channel_pin.py` | `channel` 归一化 / submit 顶层字段 / `resolve_channel_pin` |
 | `test_seedance_channel.py` | SeedanceProviderChannel 凭证热更新、异常翻译、Dry-Run 透传 |
 | `test_minimax_h3_model.py` / `test_minimax_h3_billing.py` | MiniMax H3 schema/分类/渲染/启用列表/按秒计费 |
 | `test_gemini_image.py` | Gemini 双模判定、steps 图片提取、banana2 接线、Vertex 无 key invoke、`Gemini_Enabled_Models` 闸门 |

@@ -43,7 +43,8 @@ Agent 智能选型的数据源(用户没指定模型时):
   `entry_point="http"` 走 dispatch(统计表 entry_point:
   command / agent / http);
   常用 re-export:`submit` / `get_point_cost` / `list_models` /
-  `cancel_generation` / `resume_poll` / `charge_points` / …;
+  `resolve_channel_pin` / `cancel_generation` / `resume_poll` /
+  `charge_points` / …;
 - `cancel_generation(trace_id=…|record_id=…)`:取消本进程进行中任务
   (先上游 cancel 再 Task.cancel);详见 [§二十](./20-cancel-resume-and-wire-audit.md);
 - `resume_poll(model=…, vendor_task_id=…, …)`:**不走 dispatch**、不二次扣费,
@@ -66,6 +67,9 @@ Agent 智能选型的数据源(用户没指定模型时):
 - 同名节点去重(`_deduplicate_by_name`,priority 高者胜)保留;
 - catalog-only 键(`frame_mode` / `image_size` / `task_mode` …)经 submit 未知
   kwargs 进入 `params`,见 [§6.6](#66-动态参数进-params新模型标准)。
+- `submit(..., channel=)` 钉扎 **`channels[].name` 实例名**(空/`auto`=负载均衡)。
+  家族 id(`gateway`)或未声明名 → `ValidationError`,扣费前拦截。
+  公开预校验:`resolve_channel_pin`。详见 [§四](./04-channels-and-providers.md)。
 
 ## 6.4 新增入口的标准姿势
 
@@ -101,7 +105,7 @@ Agent 智能选型的数据源(用户没指定模型时):
 
 | 键 | 落点 | 谁读 |
 |----|------|------|
-| `prompt` / `images` / `video_refs` / `audio_refs` / `ordered_content` / `ratio` / `width` / `height` / `resolution` / `duration` / `seed` / `generate_audio` / `watermark` / `model` / `omni_reference_task_type` / 语音字段 / `user_id` / `trace_id` / `params` 本身 | `GenerationRequest` 顶层 | 基类 validate / 路由 / 部分 mapper |
+| `prompt` / `images` / `video_refs` / `audio_refs` / `ordered_content` / `ratio` / `width` / `height` / `resolution` / `duration` / `seed` / `generate_audio` / `watermark` / `model` / `channel` / `omni_reference_task_type` / 语音字段 / `user_id` / `trace_id` / `params` 本身 | `GenerationRequest` 顶层 | 基类 validate / 路由 / 通道钉扎 / 部分 mapper |
 | **不在 dataclass 上的 catalog 键**(当前:`frame_mode` / `image_size` / `quality` / `size_mode` / `task_mode` / `output_format` / `input_video_duration`,以及以后每个新 enum) | **`request.params`** | 该模型的 `validate` / classify / mapper / `estimate_cost` |
 
 **禁止**每接一个模型就给 `GenerationRequest` 加同名字段。只有跨模态、多数模型共用、语义稳定的键才升顶层(现成例子:`ratio` / `duration` / `resolution`)。升顶层必须同时改 dataclass **和** `api._build_request` 的 `handled` 集合 —— 只改一边会 `TypeError`,或键被吞进 params。

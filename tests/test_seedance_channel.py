@@ -125,6 +125,21 @@ def test_pinned_provider_selects_single_channel():
     assert bindings[0].vendor_model == "doubao-seedance-1-5-pro-251215"
 
 
+def test_pinned_provider_ark_ignores_gateway_slots():
+    """provider=ark 仍只留内置,不把 gateway_slot* 收进来。"""
+    channel_registry.clear()
+    from dataclasses import replace
+
+    from RH_ComfyUI.core.channels.channel import LocalChannel
+    from RH_ComfyUI.models.video.overrides import SeedanceVideoModel
+
+    channel_registry.register_binding(
+        "seedance15_pro", LocalChannel("gateway_slot1_seedance"), vendor_model="doubao-seedance-1.5-pro"
+    )
+    model = SeedanceVideoModel(replace(Seedance15ProDef.node_def(), provider="ark"))
+    assert [b.channel.name for b in model.channel_bindings()] == ["ark"]
+
+
 # ── 异常翻译 ──
 
 

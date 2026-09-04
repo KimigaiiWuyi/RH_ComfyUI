@@ -80,12 +80,16 @@ async def submit(
                             模型错误不重跑或换通道。查询/下载重试不变。
         **kwargs: 组装进 GenerationRequest。已知字段进顶层;
                   未知键(frame_mode / image_size / task_mode 等)并入 params。
+                  ``channel``:对应 ``GET /models`` 的 ``channels[].name``;
+                  省略 / 空 / ``auto`` 由负载均衡分配;指定但不在该模型通道
+                  列表、或当前不可用,抛 ValidationError,且不切到其它通道名。
 
     Returns:
         GenerationResult: 主产物 + 附属产物 + 积分/用量信息。
 
     Raises:
         ValueError: 未知模型 / task_type 不匹配。
+        ValidationError: 钉扎的 ``channel`` 不在该模型通道列表,或当前不可用。
         RuntimeError: 后端 Adapter 未注册。
         Exception: Adapter 自身抛出的错误。
     """
@@ -237,6 +241,27 @@ def get_point_cost(model: str) -> Optional[int]:
     return m.point_cost if m else None
 
 
+async def resolve_channel_pin(model: str, channel: str | None = None) -> str | None:
+    """解析并校验通道钉扎。空 / ``auto`` 返回 None(由负载均衡分配)。
+
+    调用方可在预扣前调用本函数:未知模型、通道不在该模型 ``channels[]``、
+    或当前 ``check_available()`` 为 False 时抛 ``ValidationError``。
+    """
+    from .core.base.errors import ValidationError
+    from .utils.core.request import GenerationRequest
+    from .core.base.generation import normalize_channel_pin
+    from .core.routing.registry import model_registry
+
+    pin = normalize_channel_pin(channel)
+    if pin is None:
+        return None
+    model_obj = model_registry.get(model)
+    if model_obj is None:
+        raise ValidationError(f"未知模型: {model!r}")
+    await model_obj.ensure_channel_pin(GenerationRequest(task_type=model_obj.modality, prompt=".", channel=pin))
+    return pin
+
+
 def list_models(task_type: Optional[str] = None) -> list[dict[str, Any]]:
     """列出可用模型。
 
@@ -338,6 +363,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
         "speed",
         "language_boost",
         "model",
+        "channel",
         "params",
         # 上下文:由调用方注入,落到 GenerationRequest.user_id / trace_id,
         # 最终在 statistics.record_task() 写入 RHComfyuiTaskRecord.user_id。
@@ -725,6 +751,7 @@ __all__ = [
     "settle_model_cost",
     "reconcile_seedance_usage_billing",
     "get_point_cost",
+    "resolve_channel_pin",
     "list_models",
     "get_model_input_schema",
     "is_available",

@@ -18,14 +18,15 @@
 run(request)
   ├─ 1. validate(request)            # schema 通用校验 + 子类跨字段校验
   ├─ 2. normalize(request)           # 默认值填充/单位归一化(可覆盖)
-  ├─ 3. balancer.order_candidates()  # 负载均衡排序通道
-  ├─ 4. execute_on_channel(...)      # ★ 子类核心
+  ├─ 3. 钉扎 request.channel            # 空/auto=LB;未知或不存在可用实例 → ValidationError
+  ├─ 4. balancer.order_candidates()  # 负载均衡排序通道(钉扎后只含该通道名)
+  ├─ 5. execute_on_channel(...)      # ★ 子类核心
   │     ├─ ChannelError(transient=True,如 429/503)→ 原通道指数退避排队
   │     │   (初始 transient_retry_delay=2s,单次上限 60s,
   │     │    累计最长 transient_retry_max_wait=3600s=1h;超时放弃该通道;
   │     │    排队期间不计熔断)
-  │     └─ ChannelError(retryable=True)→ 记熔断 → 换下一通道
-  └─ 5. postprocess(output)          # 输出归一化(可覆盖)
+  │     └─ ChannelError(retryable=True)→ 记熔断 → 换下一通道(钉扎时不换名称)
+  └─ 6. postprocess(output)          # 输出归一化(可覆盖)
 ```
 
 同通道排队的动机:切换通道意味着整单重新生成(重复烧钱),而 429/503
@@ -76,7 +77,7 @@ run(request)
 
 | 类型 | 说明 |
 |---|---|
-| `GenerationRequest` | 统一请求:prompt / images / video_refs / audio_refs / reference_audio / ratio / resolution / duration / seed / params(自由字典)等。catalog 档位(`frame_mode` / `image_size` / `task_mode` …)走 **params**,不要给每个 enum 加字段,见 [§6.6](./06-entry-points.md) |
+| `GenerationRequest` | 统一请求:prompt / images / video_refs / audio_refs / reference_audio / ratio / resolution / duration / seed / **`channel`**(钉扎 `channels[].name`,空/auto=负载均衡) / params(自由字典)等。catalog 档位(`frame_mode` / `image_size` / `task_mode` …)走 **params**,不要给每个 enum 加字段,见 [§6.6](./06-entry-points.md) |
 | `PortSpec(type, required, default, values, min_items, max_items, minimum, maximum, item_type, title, description)` | 单端口声明;title=配置面板短标题(几个字),description=完整说明(Agent 消费,调用方缺 title 时回退用它) |
 | `PortType` | TEXT/INTEGER/NUMBER/BOOLEAN/ENUM/LIST/IMAGE/AUDIO/VIDEO/CONTENT/OUTPUT_* |
 | `NodeOutput` | 模型执行产物(data/mime_type/outputs/usage/metadata) |

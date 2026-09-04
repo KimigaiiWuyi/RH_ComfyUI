@@ -6,12 +6,13 @@
       ├─ 1. validate(request)            # schema 通用校验 + 子类跨字段校验
       ├─ 2. normalize(request)           # 默认值填充 / 单位归一化(可覆盖)
       ├─ 3. plugin_dry_run() 则抛 DryRunInterrupt
-      ├─ 4. balancer.order_candidates()  # 负载均衡选通道(多通道时)
-      ├─ 5. execute_on_channel(...)      # ★ 子类核心:组装请求并执行
+      ├─ 4. 钉扎 request.channel(空/auto=负载均衡;未知名称 ValidationError)
+      ├─ 5. balancer.order_candidates()  # 负载均衡选通道(多通道时)
+      ├─ 6. execute_on_channel(...)      # ★ 子类核心:组装请求并执行
       │     ├─ 瞬时失败(transient,如 429/503)→ 原通道指数退避排队
       │     │   (最长 transient_retry_max_wait=1h;超时放弃该通道)
       │     └─ 失败且可重试 → 记熔断 → 换下一个通道
-      └─ 5. postprocess(output)          # 输出归一化(可覆盖)
+      └─ 7. postprocess(output)          # 输出归一化(可覆盖)
 
 设计约束:
 - 本类不做计费、不做统计、不做全局限流 —— 那是 dispatcher 的职责。
@@ -27,7 +28,7 @@ from typing import TYPE_CHECKING, ClassVar, Optional
 
 from gsuid_core.logger import logger
 
-from .errors import ChannelError, DryRunInterrupt, AllChannelsFailedError
+from .errors import ChannelError, DryRunInterrupt, ValidationError, AllChannelsFailedError
 from ..schema.card import ModelCard
 from ..schema.types import PortSpec, PortType, NodeOutput, ProgressCallback
 from ..schema.request import TaskType, GenerationRequest
@@ -37,6 +38,48 @@ if TYPE_CHECKING:
     # 运行时延迟导入,避免 base ↔ routing 的循环(registry 依赖本模块)
     from ..routing.balancer import LoadBalancer
     from ...utils.core.pipeline import NodeDef
+
+
+def normalize_channel_pin(raw: object) -> str | None:
+    """空 / auto → None(由负载均衡分配);其它非空字符串原样(去首尾空白)返回。"""
+    if not isinstance(raw, str):
+        return None
+    name = raw.strip()
+    if not name or name.lower() == "auto":
+        return None
+    return name
+
+
+def requested_channel_name(request: GenerationRequest) -> str | None:
+    """读取调用方钉扎的通道名。顶层 ``channel`` 优先,其次 ``params.channel``。"""
+    candidates: list[object] = [request.channel]
+    params = request.params
+    if isinstance(params, dict) and "channel" in params:
+        candidates.append(params["channel"])
+    for raw in candidates:
+        pin = normalize_channel_pin(raw)
+        if pin is not None:
+            return pin
+    return None
+
+
+def _unique_channel_names(bindings: list[ChannelBinding]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for b in bindings:
+        n = b.channel.name
+        if n in seen:
+            continue
+        seen.add(n)
+        names.append(n)
+    return names
+
+
+def _unknown_channel_message(display_name: str, pin: str, bindings: list[ChannelBinding]) -> str:
+    names = _unique_channel_names(bindings)
+    if names:
+        return f"{display_name} 没有通道 {pin!r},可选: {'、'.join(names)}"
+    return f"{display_name} 没有通道 {pin!r}(该模型未声明任何通道)"
 
 
 class AIGCGenerationBase(ABC):
@@ -213,6 +256,32 @@ class AIGCGenerationBase(ABC):
 
         return get_default_balancer()
 
+    def bindings_for_request(self, request: GenerationRequest) -> list[ChannelBinding]:
+        """按请求钉扎过滤通道。未钉扎返回全部;名称不在声明列表则 ValidationError。"""
+        bindings = self.channel_bindings()
+        pin = requested_channel_name(request)
+        if pin is None:
+            return bindings
+        named = [b for b in bindings if b.channel.name == pin]
+        if not named:
+            raise ValidationError(_unknown_channel_message(self.display_name, pin, bindings))
+        return named
+
+    async def ensure_channel_pin(self, request: GenerationRequest) -> None:
+        """钉扎通道在扣费前校验:未知名称或不存在可用实例 → ValidationError。
+
+        auto 直接返回。``check_available`` 只读配置,禁止网络探测。
+        """
+        pin = requested_channel_name(request)
+        if pin is None:
+            return
+        named = self.bindings_for_request(request)
+        for b in named:
+            if await b.channel.check_available():
+                return
+        reason = await named[0].channel.unavailable_reason()
+        raise ValidationError(f"通道 {pin} 当前不可用: {reason}")
+
     # ═════════════════ 模板方法(不建议覆盖) ═════════════════
 
     async def run(
@@ -223,7 +292,9 @@ class AIGCGenerationBase(ABC):
     ) -> NodeOutput:
         """统一生命周期:校验 → 归一化 → 选通道 → 执行(带故障切换) → 后处理
 
-        通道选择拆成两步:
+        通道选择:
+        0. **钉扎** —— ``request.channel`` 非空且非 auto 时只保留该通道名
+           (同名多路仍可互切;不会切到其它名称)。未知名称 → ValidationError。
         1. **能力预过滤** —— 排除掉 ``supports_request()`` 返回 False
            的通道(典型:seedance2 模型同时挂 ark / 网关 / aifoundation,
            用户传 1080P 时 aifoundation 仅支持 720P,应在此被剔除,免得
@@ -237,16 +308,15 @@ class AIGCGenerationBase(ABC):
         from ...rh_config.comfyui_config import plugin_dry_run
 
         if plugin_dry_run():
-            logger.info(
-                f"[Dry-Run] 拦截 {self.name} ({self.display_name}) "
-                f"prompt={(request.prompt or '')[:80]!r}"
-            )
+            logger.info(f"[Dry-Run] 拦截 {self.name} ({self.display_name}) prompt={(request.prompt or '')[:80]!r}")
             raise DryRunInterrupt(f"[Dry-Run] 已启用,未发送上游请求: {self.name}")
         request = await self.prepare_request(request)
 
-        bindings = self.channel_bindings()
-        if not bindings:
+        declared = self.channel_bindings()
+        if not declared:
             raise ChannelError(f"{self.display_name} 未声明任何执行通道")
+        bindings = self.bindings_for_request(request)
+        pin = requested_channel_name(request)
 
         # ── 能力预过滤(2026-07-20 加入) ──
         capable = [b for b in bindings if b.channel.supports_request(request)]
@@ -256,11 +326,15 @@ class AIGCGenerationBase(ABC):
             # 之所以用 ValidationError 而非 ChannelError:这是请求参数与通道能力
             # 的不匹配,跟「channel 执行失败」是两件事 —— 后者交给 ChannelError
             # 让模板方法走「切换下一通道」逻辑,前者直接抛、不再尝试。
-            from .errors import ValidationError
-
             lines: list[str] = []
             for b in bindings:
                 lines.append(f"- {b.channel.name}: {await b.channel.unavailable_reason()}")
+            if pin is not None:
+                raise ValidationError(
+                    f"{self.display_name} 的通道 {pin} 无法处理该请求"
+                    f"(分辨率/宽高比/时长可能不在该通道能力范围内)"
+                    f"\n通道反馈:\n" + "\n".join(lines)
+                )
             raise ValidationError(
                 f"{self.display_name} 的所有通道均无法处理该请求"
                 f"(分辨率/宽高比/时长可能不在任一通道能力范围内)"
@@ -291,6 +365,10 @@ class AIGCGenerationBase(ABC):
                 reason = await b.channel.unavailable_reason()
                 skipped_notes.append(f"{b.channel.name}({reason})")
                 logger.info(f"[{self.name}] 跳过不可用通道 {b.channel.name}: {reason}")
+
+        if pin is not None and not available:
+            skipped = "; ".join(skipped_notes) if skipped_notes else "不可用"
+            raise ValidationError(f"通道 {pin} 当前不可用: {skipped}")
 
         for binding in ordered:
             if not any(b is binding for b in available):
@@ -368,14 +446,12 @@ class AIGCGenerationBase(ABC):
                     remain = ", ".join(b.channel.name for b in available)
                     if available:
                         logger.warning(
-                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),"
-                            f"切换下一通道(剩余 {remain})"
+                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),切换下一通道(剩余 {remain})"
                         )
                     else:
                         skipped = f"; 未尝试: {', '.join(skipped_notes)}" if skipped_notes else ""
                         logger.warning(
-                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),"
-                            f"无更多可用通道{skipped}"
+                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),无更多可用通道{skipped}"
                         )
                     break
             if output is None:
@@ -424,4 +500,8 @@ class AIGCGenerationBase(ABC):
             pass
 
 
-__all__ = ["AIGCGenerationBase"]
+__all__ = [
+    "AIGCGenerationBase",
+    "normalize_channel_pin",
+    "requested_channel_name",
+]

@@ -58,7 +58,9 @@ from .channels import (
     bind_config_resync,
     sync_owned_bindings,
     register_resync_hook,
+    channel_name_in_family,
     resync_channel_bindings,
+    lock_bindings_to_provider_family,
 )
 from .dispatch import DispatchContext, dispatch, cancel_generation
 from .media_host import (
@@ -106,6 +108,8 @@ __all__ = [
     "bind_config_resync",
     "sync_owned_bindings",
     "log_binding_diff",
+    "channel_name_in_family",
+    "lock_bindings_to_provider_family",
     "ProviderCredentials",
     "SeedanceProviderChannel",
     # 媒体外链化扩展点(宿主注册对象存储 publisher;本引擎零感知实现)

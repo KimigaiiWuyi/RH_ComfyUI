@@ -73,6 +73,9 @@
 }
 ```
 
+多通道模型的 `channels[]` 会有多条。Seedance 除 `ark` / `runninghub` 外,外部注入常见
+`gateway_slot1_seedance` 这类**实例名**;钉扎必须抄 `name`,不要传家族 `gateway`。
+
 ### 取消能力字段(2026-08) — 引擎与调用方统一契约
 
 调用方**必须以本清单决定能否取消**,禁止写死模型名单:
@@ -89,6 +92,18 @@
 2. 多通道(如 Seedance ark + runninghub):读**当前通道**的 `channels[]` 字段;顶层 true 仅表示「有的通道可以」
 3. `rh_app`:顶层与通道均为 **false**(不能 cancel,只能 resume 继续轮询)
 4. 后端 `cancel_generation` / `POST .../tasks/cancel` 与上述标志一致:false 时返回 `ok=false`
+
+调用方钉扎供应商:把 **`channels[].name` 实例名**传给 `submit(..., channel=...)`
+(空 / `""` / `"auto"` = 该模型已声明通道之间负载均衡;故障切换只在同名之间)。
+
+- 钉扎必须是清单里出现的 `name`。家族 id(`gateway`)或 Banana 计费别名
+  (`gemini-vertex` / `gemini-ai-studio`)不在列表里 → `ValidationError`,扣费前拦截。
+- 该实例当前 `available=false` 同样拒绝,不会改走其它名称。
+- 命名习惯:一家供应商时常 `name`=家族(`ark` / `dashscope` / `gemini`);
+  多实例外部通道为 `{家族}_{限定}`,如 `gateway_slot1_seedance`。
+- `/models/estimate` 不接受 `channel`(估价与通道无关)。
+
+公开预校验:`api.resolve_channel_pin(model, channel)`。详见 [§四](./04-channels-and-providers.md)。
 
 实现:`rh_models/api.py` 的 `_channel_supports_cancel` / `_channel_supports_remote_cancel` / `_aggregate_cancel_flags`。  
 **勿**因共用 `RH_apikey` 让 `rh_app` 与 `comfyui` 同值 —— 见 [§二十 §20.2](./20-cancel-resume-and-wire-audit.md)。
@@ -112,6 +127,8 @@
 | `generate_audio` | bool | Seedance 1.5 Pro 等 | `params["generate_audio"]` |
 | `num_input_images` | int | 按图计费的图片模型 | 占位 `images=[b""] * N` |
 | `num_video_refs` | int | 按视频计费的视频模型 | 占位 `video_refs=[object()] * N` |
+
+**没有** `channel` 参数:估价与通道无关,不要把钉扎名塞进 estimate Query。
 
 **响应结构**:
 

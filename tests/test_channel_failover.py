@@ -11,7 +11,7 @@ import pytest
 
 from RH_ComfyUI.models.bridge import AdapterChannel
 from RH_ComfyUI.utils.backends import backend_registry
-from RH_ComfyUI.core.base.errors import ChannelError
+from RH_ComfyUI.core.base.errors import ChannelError, ValidationError, AllChannelsFailedError
 from RH_ComfyUI.core.schema.card import ModelCard
 from RH_ComfyUI.core.schema.types import PortSpec, PortType, NodeOutput, CapabilityManifest
 from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
@@ -115,9 +115,9 @@ def test_strict_create_once_never_reexecutes_or_switches_channel(transient: bool
 
 @pytest.mark.parametrize("target_registered", [False, True])
 def test_strict_explicit_model_never_falls_back_to_other_version(target_registered: bool) -> None:
-    from RH_ComfyUI.core.routing.registry import ModelRegistry
-    from RH_ComfyUI.core.routing.router import route
     from RH_ComfyUI.core.base.errors import ModelUnavailableError
+    from RH_ComfyUI.core.routing.router import route
+    from RH_ComfyUI.core.routing.registry import ModelRegistry
     from RH_ComfyUI.utils.backends.http_retry import strict_create_once_scope
 
     registry = ModelRegistry()
@@ -366,3 +366,83 @@ def test_transient_queue_retries_multiple_times_within_budget():
     with pytest.raises(Exception):
         asyncio.run(model.run(GenerationRequest(task_type=TaskType.IMAGE, prompt="hi")))
     assert ch.calls >= 2  # 至少重试过
+
+
+def test_pinned_channel_does_not_failover_to_other_name():
+    model = _TwoChannelModel()
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="hi", channel="boom-backend")
+    with pytest.raises(AllChannelsFailedError) as ei:
+        asyncio.run(model.run(req))
+    cause = ei.value.cause
+    assert isinstance(cause, ChannelError)
+    assert "上游 500" in str(cause)
+
+
+def test_pinned_good_channel_skips_earlier_failure():
+    model = _TwoChannelModel()
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="hi", channel="good")
+    out = asyncio.run(model.run(req))
+    assert out.data == b"ok"
+
+
+def test_unknown_channel_pin_raises_validation():
+    model = _TwoChannelModel()
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="hi", channel="nope")
+    with pytest.raises(ValidationError, match="没有通道 'nope'"):
+        asyncio.run(model.run(req))
+
+
+def test_auto_channel_pin_still_failsover():
+    model = _TwoChannelModel()
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="hi", channel="auto")
+    out = asyncio.run(model.run(req))
+    assert out.data == b"ok"
+
+
+def test_params_channel_pin_is_honored():
+    model = _TwoChannelModel()
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="hi", params={"channel": "good"})
+    out = asyncio.run(model.run(req))
+    assert out.data == b"ok"
+
+
+class _DownChannel(ProviderChannel):
+    name = "down"
+
+    async def check_available(self) -> bool:
+        return False
+
+    async def unavailable_reason(self) -> str:
+        return "未配置密钥"
+
+    async def invoke(self, **kwargs: Any) -> NodeOutput:
+        raise AssertionError("不可用通道不应被 invoke")
+
+
+class _PinnedDownModel(AIGCGenerationBase):
+    modality = TaskType.IMAGE
+    card = ModelCard(description="x")
+
+    def __init__(self) -> None:
+        self.name = "pin_down"
+        self.display_name = "pin_down"
+
+    def input_schema(self) -> dict:
+        return {"prompt": PortSpec(type=PortType.TEXT, required=True)}
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        return [ChannelBinding(_DownChannel()), ChannelBinding(_GoodChannel())]
+
+    async def execute_on_channel(
+        self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+    ) -> NodeOutput:
+        return await binding.channel.invoke(request=request)
+
+
+def test_pinned_unavailable_channel_does_not_use_other_provider():
+    model = _PinnedDownModel()
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="hi", channel="down")
+    with pytest.raises(ValidationError, match="当前不可用"):
+        asyncio.run(model.run(req))
+    out = asyncio.run(model.run(GenerationRequest(task_type=TaskType.IMAGE, prompt="hi")))
+    assert out.data == b"ok"

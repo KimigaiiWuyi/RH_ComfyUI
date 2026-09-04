@@ -1,5 +1,6 @@
 """core.channels — 供应商无关的通道抽象"""
 
+from .family import channel_name_in_family, lock_bindings_to_provider_family
 from .resync import (
     log_binding_diff,
     bind_config_resync,
@@ -15,6 +16,8 @@ __all__ = [
     "ProviderChannel",
     "ChannelBinding",
     "LocalChannel",
+    "channel_name_in_family",
+    "lock_bindings_to_provider_family",
     "PollingChannelMixin",
     "channel_registry",
     "ChannelExtensionRegistry",

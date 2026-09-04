@@ -116,6 +116,24 @@ def registered_model():
     model_registry.unregister(model.name)
 
 
+def test_unknown_channel_pin_no_billing(registered_model, monkeypatch):
+    _mute_recording(monkeypatch)
+    policy = FakePolicy()
+    with pytest.raises(ValidationError, match="没有通道"):
+        asyncio.run(
+            dispatch(
+                GenerationRequest(
+                    task_type=TaskType.IMAGE,
+                    prompt="cat",
+                    model="fake_dispatch_model",
+                    channel="nope",
+                ),
+                _ctx(policy),
+            )
+        )
+    assert policy.reserved == 0 and policy.balance == 100
+
+
 def test_success_commits(registered_model, monkeypatch):
     _mute_recording(monkeypatch)
     policy = FakePolicy()
@@ -128,6 +146,24 @@ def test_success_commits(registered_model, monkeypatch):
     assert result.data == b"png"
     assert policy.commits == 1 and policy.refunds == 0
     assert policy.balance == 95
+
+
+def test_auto_channel_pin_still_dispatches(registered_model, monkeypatch):
+    _mute_recording(monkeypatch)
+    policy = FakePolicy()
+    result = asyncio.run(
+        dispatch(
+            GenerationRequest(
+                task_type=TaskType.IMAGE,
+                prompt="cat",
+                model="fake_dispatch_model",
+                channel="auto",
+            ),
+            _ctx(policy),
+        )
+    )
+    assert result.data == b"png"
+    assert policy.commits == 1
 
 
 def test_validation_error_no_billing(registered_model, monkeypatch):

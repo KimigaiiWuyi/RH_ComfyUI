@@ -66,6 +66,12 @@ Seedance 系列(`SeedanceVideoModel`)已改为多 ChannelBinding:
 `backend_models`(node_def)提供各家 vendor model id;加一家内置供应商就在
 这里加一个 `SeedanceProviderChannel`。
 
+`NodeDef.provider` 是**家族 id**(如 `ark` / `gateway` / `aifoundation`),
+不是通道实例名。锁死家族时:`lock_bindings_to_provider_family`
+(内置表命中只留该条;否则收 `name==家族` 或以 `{家族}_` 开头的外部通道)。
+钉扎 `GenerationRequest.channel` 仍必须是 `channels[].name` 实例名
+(如 `gateway_slot1_seedance`),传家族名 `gateway` 会 `ValidationError`。
+
 ### 4.3.1 外部插件为既有模型加一家供应商(通用扩展点)
 
 不改开源仓库、给任意已注册模型追加一条通道:外部插件构造自己的
@@ -88,13 +94,19 @@ channel_registry.register_binding("gpt-image-2", MyAzureChannel())
 - `LoadBalancer` 按 `(scope, member)` 二级 key 记状态,scope=模型名,
   member=通道名;同一模型的多个通道共享一套熔断计数;
 - `order_candidates()` 按策略(优先级/权重/随机)排序候选;
-- `record_failure()` 达到阈值触发熔断,冷却期内该通道被排到最后/跳过;
+- `record_failure()` 达到阈值触发熔断,  冷却期内该通道被排到最后/跳过;
   `record_success()` 恢复;
 - 策略与阈值读 PLUGIN_CONFIG 通用键 `Load_Balance_Mode` / `Failure_Threshold`;
   全局单例经 `config_resolver` **每次决策实时读取**,网页控制台改完即生效;
 - 熔断只由 `ChannelError(retryable=True)` 触发,业务校验错误不影响通道健康度
   —— `run()` 对 `retryable=False` 的失败**不记 record_failure、不切通道**,
   直接抛给用户(2026-07-10 修正,此前非重试错误也误计入熔断计数)。
+- **请求钉扎**:`GenerationRequest.channel`(或 `params.channel`)指定
+  `GET /models` 的 `channels[].name`。空 / `auto` = 上表负载均衡。
+  指定名称则只走该通道名(同名多路仍可互切),不切到其它名称;
+  名称不在该模型声明列表、或当前 `check_available()` 为 False
+  → `ValidationError`(dispatcher 在扣费前拦截)。
+  公开函数:`api.resolve_channel_pin(model, channel)` 供调用方预扣前校验。
 
 ## 4.5 轮询型上游
 

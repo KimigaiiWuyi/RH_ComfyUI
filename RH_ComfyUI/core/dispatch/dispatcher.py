@@ -2,7 +2,7 @@
 
 顺序(每一步的失败语义都已定义):
   1. route()           失败 → ModelUnavailableError(不扣费)
-  2. validate 前置     失败 → ValidationError(不扣费)★ 校验先于扣费
+  2. validate + ensure_channel_pin  失败 → ValidationError(不扣费)★ 校验先于扣费
   3. policy.reserve(model.estimate_cost(request))  失败 → BillingDeniedError
   3.5 begin_dispatch() 插入 RHComfyuiTaskRecord status=running(可查进行中)
   4. model.run() 内自带两层并发闸(供应商全局闸 + (model,channel) 闸),
@@ -57,6 +57,7 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
 
     # 2. 校验先于扣费:参数错误不应该产生任何扣费/退款流水
     model.validate(request)
+    await model.ensure_channel_pin(request)
 
     # 3. 计费预扣:金额由动态计费钩子决定(默认 = 静态 point_cost)
     cost = model.estimate_cost(request)

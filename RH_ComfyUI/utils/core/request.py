@@ -148,6 +148,7 @@ class GenerationRequest:
     return_last_frame       |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |        |
     service_tier            |     |     |      | ⭕  | ⭕  | ⭕    | ⭕   |        |        |
     model                   | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   | ⭕    | ⭕    | ⭕
+    channel                 | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   | ⭕    | ⭕    | ⭕
     speed                   |     |     |      |     |     |       |      |        | ⭕    |
     language_boost          |     |     |      |     |     |       |      |        | ⭕    | ⭕
     params                  | ⭕  | ⭕  | ⭕   | ⭕  | ⭕  | ⭕    | ⭕   | ⭕    | ⭕    | ⭕
@@ -233,6 +234,10 @@ class GenerationRequest:
 
     # ── 模型覆盖(用户显式指定 Pipeline 名) ──
     model: Optional[str] = None
+
+    # ── 通道钉扎(对应 GET /models 的 channels[].name) ──
+    #    省略 / 空 / "auto" = 负载均衡;指定名称则只走该通道,不切到其它通道名。
+    channel: Optional[str] = None
 
     # ── 通用任务级参数(替代旧的 extra:dict) ──
     #    约定:

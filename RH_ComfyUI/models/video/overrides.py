@@ -23,6 +23,7 @@ from ...core.schema.card import ModelCard
 from ...core.schema.types import NodeOutput, ProgressCallback
 from ...core.schema.request import GenerationRequest
 from ...utils.core.pipeline import NodeDef
+from ...core.channels.family import lock_bindings_to_provider_family
 from ...core.channels.channel import ChannelBinding
 from ...core.channels.registry import channel_registry
 from ...utils.backends.wan30.channel import builtin_wan30_channels
@@ -463,14 +464,16 @@ class SeedanceVideoModel(VideoPipelineModel):
         builtins = builtin_seedance_channels()
         external = channel_registry.bindings_for(node.name)
 
-        # 节点级固定供应商 → 只走该供应商的通道
+        # 节点锁死供应商家族:内置 key 命中只留该条,否则按家族收外部实例
         if node.provider:
             if not is_seedance_model_enabled_on(node.name, node.provider):
                 return []
-            ch = builtins.get(node.provider)
-            if ch is not None:
-                return [ChannelBinding(ch, vendor_model=self._vendor_model_for(node.provider))]
-            return [b for b in external if b.channel.name == node.provider]
+            return lock_bindings_to_provider_family(
+                node.provider,
+                builtins,
+                external,
+                builtin_vendor_model=self._vendor_model_for(node.provider),
+            )
 
         bindings: list[ChannelBinding] = []
         for name, ch in builtins.items():
@@ -777,10 +780,12 @@ class HappyHorseVideoModel(VideoPipelineModel):
         external = channel_registry.bindings_for(node.name)
 
         if node.provider:
-            ch = builtins.get(node.provider)
-            if ch is not None:
-                return [ChannelBinding(ch, vendor_model=None)]
-            return [b for b in external if b.channel.name == node.provider]
+            return lock_bindings_to_provider_family(
+                node.provider,
+                builtins,
+                external,
+                builtin_vendor_model=None,
+            )
 
         bindings: list[ChannelBinding] = []
         for _name, ch in builtins.items():
@@ -985,10 +990,12 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
         builtins = builtin_minimax_h3_channels()
         external = channel_registry.bindings_for(node.name)
         if node.provider:
-            ch = builtins.get(node.provider)
-            if ch is not None:
-                return [ChannelBinding(ch, vendor_model="MiniMax-H3")]
-            return [b for b in external if b.channel.name == node.provider]
+            return lock_bindings_to_provider_family(
+                node.provider,
+                builtins,
+                external,
+                builtin_vendor_model="MiniMax-H3",
+            )
         bindings: list[ChannelBinding] = [
             ChannelBinding(ch, vendor_model="MiniMax-H3") for ch in builtins.values()
         ]
@@ -1118,10 +1125,12 @@ class Wan30VideoModel(VideoPipelineModel):
         builtins = builtin_wan30_channels()
         external = channel_registry.bindings_for(node.name)
         if node.provider:
-            ch = builtins.get(node.provider)
-            if ch is not None:
-                return [ChannelBinding(ch, vendor_model="wan3.0-video")]
-            return [b for b in external if b.channel.name == node.provider]
+            return lock_bindings_to_provider_family(
+                node.provider,
+                builtins,
+                external,
+                builtin_vendor_model="wan3.0-video",
+            )
         bindings: list[ChannelBinding] = [
             ChannelBinding(ch, vendor_model="wan3.0-video") for ch in builtins.values()
         ]

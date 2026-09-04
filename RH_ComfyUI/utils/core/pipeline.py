@@ -72,7 +72,8 @@ class NodeDef:
     # 外部插件还可通过 channel_registry.register_binding() 追加自带 vendor_model 的通道。
     backend_models: dict[str, str] = field(default_factory=dict)
 
-    # 节点级供应商覆盖(可选):固定该节点走某家,忽略全局启用开关与负载均衡
+    # 节点级供应商家族(可选):只走该家族,实例名等于家族或以 {家族}_ 开头
+    # 钉扎仍用 channel.name,不把家族 id 当成实例名
     provider: Optional[str] = None
 
     # 映射
