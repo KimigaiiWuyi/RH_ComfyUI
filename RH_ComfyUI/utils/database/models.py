@@ -91,7 +91,7 @@ class TaskSummary(TypedDict):
 
     字段:
       total / success / failed / success_rate / avg_elapsed_ms — 任务量与质量
-      total_points — 时间窗内 point_cost 合计
+      total_points — 成功任务(status=ok)的 point_cost 合计;失败/取消/进行中不计
       active_users — 去重 user_id 数
       avg_points — total_points / total(无任务时为 0)
       by_task_type — 各 task_type 计数
@@ -1300,6 +1300,19 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         return list(rows)
 
     @classmethod
+    def sum_success_points(cls) -> ColumnElement[int]:
+        """只加 status=ok 的 point_cost;失败/取消/进行中的预扣不算消耗。"""
+        return func.coalesce(
+            func.sum(
+                case(
+                    (col(cls.status) == RHComfyuiTaskStatus.OK.value, col(cls.point_cost)),
+                    else_=0,
+                )
+            ),
+            0,
+        )
+
+    @classmethod
     @with_read_session
     async def get_summary(
         cls,
@@ -1360,7 +1373,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
                         else_=None,
                     )
                 ).label("avg_elapsed"),
-                func.coalesce(func.sum(col(cls.point_cost)), 0).label("total_points"),
+                cls.sum_success_points().label("total_points"),
                 func.count(func.distinct(col(cls.user_id))).label("active_users"),
             ).select_from(cls)
         )
@@ -1629,12 +1642,13 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         failed_v = RHComfyuiTaskStatus.FAILED.value
         cancelled_v = RHComfyuiTaskStatus.CANCELLED.value
 
-        # 主榜: total / points / success / failed 一次 GROUP BY
+        # 主榜: total / 成功积分 / success / failed 一次 GROUP BY
+        success_points = cls.sum_success_points()
         agg_stmt = _where(
             select(
                 col(cls.user_id).label("user_id"),
                 func.count().label("total"),
-                func.coalesce(func.sum(col(cls.point_cost)), 0).label("total_points"),
+                success_points.label("total_points"),
                 func.coalesce(
                     func.sum(case((col(cls.status) == ok_v, 1), else_=0)),
                     0,
@@ -1651,7 +1665,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             )
             .select_from(cls)
             .group_by(col(cls.user_id))
-            .order_by(func.sum(col(cls.point_cost)).desc())
+            .order_by(success_points.desc())
             .limit(top_n)
         )
         agg_rows = (await session.execute(agg_stmt)).all()
@@ -1717,6 +1731,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         created_at 存 UTC;SQLite 用 ``strftime(..., '+8 hours')`` 切到 UTC+8 的日期。
         返回 ``[{date, requests, failed, points, users}, ...]``,按 date 升序。缺日由上层补零。
         failed 口径与 get_summary 一致:status 为 failed 或 cancelled。
+        points 只计 status=ok。
         """
         conds: list[ColumnElement[bool]] = []
         cls._append_user_conds(conds, user_id=user_id, user_ids=user_ids)
@@ -1753,7 +1768,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
                 ),
                 0,
             ).label("failed"),
-            func.coalesce(func.sum(col(cls.point_cost)), 0).label("points"),
+            cls.sum_success_points().label("points"),
             func.count(func.distinct(col(cls.user_id))).label("users"),
         ).select_from(cls)
         if conds:
@@ -1807,12 +1822,13 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         ok_v = RHComfyuiTaskStatus.OK.value
         failed_v = RHComfyuiTaskStatus.FAILED.value
         cancelled_v = RHComfyuiTaskStatus.CANCELLED.value
+        success_points = cls.sum_success_points()
         agg_stmt = (
             select(
                 col(cls.backend_provider).label("provider"),
                 func.count().label("total"),
                 func.coalesce(func.avg(col(cls.elapsed_ms)), 0).label("avg_elapsed_ms"),
-                func.coalesce(func.sum(col(cls.point_cost)), 0).label("total_points"),
+                success_points.label("total_points"),
                 func.coalesce(
                     func.sum(case((col(cls.status) == ok_v, 1), else_=0)),
                     0,
@@ -1830,7 +1846,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             .select_from(cls)
             .where(and_(*conds))
             .group_by(col(cls.backend_provider))
-            .order_by(func.sum(col(cls.point_cost)).desc())
+            .order_by(success_points.desc())
         )
         agg_rows = (await session.execute(agg_stmt)).all()
 

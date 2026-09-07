@@ -91,16 +91,24 @@ def _record_to_dict(r: RHComfyuiTaskRecord) -> dict[str, Any]:
     }
 
 
+def _consumed_points(status: str, point_cost: int | None) -> int:
+    """消费合计只认成功单;失败/取消/进行中的预扣分记 0。"""
+    if status != "ok":
+        return 0
+    return int(point_cost or 0)
+
+
 def _aggregate_by_task_type(records: list[RHComfyuiTaskRecord]) -> list[TaskTypeBreakdown]:
-    """基于 records 列表聚合任务类型分布(按总积分降序)。
+    """基于 records 列表聚合任务类型分布(按成功积分降序)。
 
     返回 `[{task_type, count, points}, ...]`,空 records 时返回 `[]`。
+    count 含全部状态;points 只加 status=ok。
     """
     counts: dict[str, int] = {}
     points: dict[str, int] = {}
     for r in records:
         counts[r.task_type] = counts.get(r.task_type, 0) + 1
-        points[r.task_type] = points.get(r.task_type, 0) + int(r.point_cost or 0)
+        points[r.task_type] = points.get(r.task_type, 0) + _consumed_points(r.status, r.point_cost)
     # 按积分降序;同分时按出现频次降序兜底
     return [
         {
@@ -284,7 +292,7 @@ async def build_user_consumption_payload(
             "prompt_search": prompt_search,
         },
         "total_count": len(records),
-        "total_points": sum(int(r.point_cost or 0) for r in records),
+        "total_points": sum(_consumed_points(r.status, r.point_cost) for r in records),
         "success_count": success_count,
         "running_count": running_count,
         # 失败含 cancelled;不含 running(旧口径 total-success 会把进行中算失败)
