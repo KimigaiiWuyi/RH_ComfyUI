@@ -1322,9 +1322,21 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         bot_id: Optional[str] = None,
         user_id: Optional[str] = None,
         user_ids: Optional[list[str]] = None,
+        group_id: Optional[str] = None,
+        status: Optional[str] = None,
+        task_type: Optional[str] = None,
+        task_name: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        backend: Optional[str] = None,
+        backend_model: Optional[str] = None,
+        is_refunded: Optional[bool] = None,
+        min_points: Optional[int] = None,
+        max_points: Optional[int] = None,
+        prompt_search: Optional[str] = None,
     ) -> TaskSummary:
         """聚合统计:任务量 / 质量 / 积分 / 活跃用户 / 类型分布。
 
+        WHERE 与 get_daily_series / list_all 同一套。带列表筛选时不要走全员缓存。
         ⚠️ 性能:
           - 禁止 ``select(cls).subquery()`` 拖入大 JSON 列;
           - 主指标合并为 **1 条** 条件聚合 SQL(旧 5 次 COUNT/AVG 串行);
@@ -1332,13 +1344,25 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
           - 上层 ``stats_cache`` 表缓存 + 写路径失效。
         """
         conds: list[ColumnElement[bool]] = []
-        if bot_id is not None:
-            conds.append(col(cls.bot_id) == bot_id)
-        cls._append_user_conds(conds, user_id=user_id, user_ids=user_ids)
-        if start_time is not None:
-            conds.append(col(cls.created_at) >= start_time)
-        if end_time is not None:
-            conds.append(col(cls.created_at) <= end_time)
+        cls._append_agg_filters(
+            conds,
+            start_time=start_time,
+            end_time=end_time,
+            bot_id=bot_id,
+            user_id=user_id,
+            user_ids=user_ids,
+            group_id=group_id,
+            status=status,
+            task_type=task_type,
+            task_name=task_name,
+            trace_id=trace_id,
+            backend=backend,
+            backend_model=backend_model,
+            is_refunded=is_refunded,
+            min_points=min_points,
+            max_points=max_points,
+            prompt_search=prompt_search,
+        )
 
         def _where(stmt):  # type: ignore[no-untyped-def]
             return stmt.where(and_(*conds)) if conds else stmt
@@ -1483,6 +1507,48 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             conds.append(col(cls.created_at) <= end_time)
 
     @classmethod
+    def _append_agg_filters(
+        cls,
+        conds: list[ColumnElement[bool]],
+        *,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        bot_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_ids: Optional[list[str]] = None,
+        group_id: Optional[str] = None,
+        status: Optional[str] = None,
+        task_type: Optional[str] = None,
+        task_name: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        backend: Optional[str] = None,
+        backend_model: Optional[str] = None,
+        is_refunded: Optional[bool] = None,
+        min_points: Optional[int] = None,
+        max_points: Optional[int] = None,
+        prompt_search: Optional[str] = None,
+    ) -> None:
+        """汇总 / 用户榜 / 组别与日趋势共用 WHERE。"""
+        cls._append_user_conds(conds, user_id=user_id, user_ids=user_ids)
+        cls._append_list_filters(
+            conds,
+            bot_id=bot_id,
+            group_id=group_id,
+            task_type=task_type,
+            task_name=task_name,
+            status=status,
+            trace_id=trace_id,
+            backend=backend,
+            backend_model=backend_model,
+            is_refunded=is_refunded,
+            min_points=min_points,
+            max_points=max_points,
+            prompt_search=prompt_search,
+            start_time=start_time,
+            end_time=end_time,
+        )
+
+    @classmethod
     @with_read_session
     async def list_filter_options(
         cls,
@@ -1610,6 +1676,17 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         bot_id: Optional[str] = None,
         user_id: Optional[str] = None,
         user_ids: Optional[list[str]] = None,
+        group_id: Optional[str] = None,
+        status: Optional[str] = None,
+        task_type: Optional[str] = None,
+        task_name: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        backend: Optional[str] = None,
+        backend_model: Optional[str] = None,
+        is_refunded: Optional[bool] = None,
+        min_points: Optional[int] = None,
+        max_points: Optional[int] = None,
+        prompt_search: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """按用户聚合消费摘要(供管理员查看"谁花了多少")
 
@@ -1627,13 +1704,25 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         by_task_type 仅对 TOP user 再 1 条查询;禁止 select(cls) 子查询。
         """
         conds: list[ColumnElement[bool]] = []
-        if bot_id is not None:
-            conds.append(col(cls.bot_id) == bot_id)
-        cls._append_user_conds(conds, user_id=user_id, user_ids=user_ids)
-        if start_time is not None:
-            conds.append(col(cls.created_at) >= start_time)
-        if end_time is not None:
-            conds.append(col(cls.created_at) <= end_time)
+        cls._append_agg_filters(
+            conds,
+            start_time=start_time,
+            end_time=end_time,
+            bot_id=bot_id,
+            user_id=user_id,
+            user_ids=user_ids,
+            group_id=group_id,
+            status=status,
+            task_type=task_type,
+            task_name=task_name,
+            trace_id=trace_id,
+            backend=backend,
+            backend_model=backend_model,
+            is_refunded=is_refunded,
+            min_points=min_points,
+            max_points=max_points,
+            prompt_search=prompt_search,
+        )
 
         def _where(stmt):  # type: ignore[no-untyped-def]
             return stmt.where(and_(*conds)) if conds else stmt

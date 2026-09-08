@@ -120,6 +120,51 @@ def _aggregate_by_task_type(records: list[RHComfyuiTaskRecord]) -> list[TaskType
     ]
 
 
+def _bound_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """查询界对齐 UTC。带 +08 的本月 0 点必须先转，不能直接丢掉 tz。"""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _query_window(
+    days: Optional[int],
+    date_from: Optional[datetime],
+    date_to: Optional[datetime],
+) -> tuple[Optional[datetime], Optional[datetime]]:
+    if date_from is not None or date_to is not None:
+        return _bound_utc(date_from), _bound_utc(date_to)
+    return _now_window(days)
+
+
+def _has_list_filters(
+    *,
+    group_id: Optional[str] = None,
+    status: Optional[str] = None,
+    task_type: Optional[str] = None,
+    task_name: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    backend: Optional[str] = None,
+    backend_model: Optional[str] = None,
+    is_refunded: Optional[bool] = None,
+    min_points: Optional[int] = None,
+    max_points: Optional[int] = None,
+    prompt_search: Optional[str] = None,
+) -> bool:
+    """有列表筛选就不能用全员 stats 缓存,否则页顶数字对不上表格。"""
+    if status is not None or task_type is not None or group_id is not None:
+        return True
+    if trace_id is not None or backend is not None or is_refunded is not None:
+        return True
+    if min_points is not None or max_points is not None:
+        return True
+    if (task_name or "").strip() or (backend_model or "").strip():
+        return True
+    return bool(prompt_search)
+
+
 def _now_window(days: Optional[int]) -> tuple[Optional[datetime], Optional[datetime]]:
     """根据 days 计算时间窗。
 
@@ -241,10 +286,7 @@ async def build_user_consumption_payload(
         dict(JSON 可序列化),字段见函数体。
     """
     # days 与 date_from/date_to 互斥(同给值优先 date_from)
-    if date_from is not None or date_to is not None:
-        start, end = date_from, date_to
-    else:
-        start, end = _now_window(days)
+    start, end = _query_window(days, date_from, date_to)
     records = await RHComfyuiTaskRecord.list_by_user(
         user_id=user_id,
         bot_id=bot_id,
@@ -389,10 +431,7 @@ async def build_admin_consumption_payload(
         }
 
     # days 与 date_from/date_to 互斥(同给值优先 date_from)
-    if date_from is not None or date_to is not None:
-        start, end = date_from, date_to
-    else:
-        start, end = _now_window(days)
+    start, end = _query_window(days, date_from, date_to)
 
     if user_ids is not None and len(user_ids) == 0:
         return {
@@ -410,14 +449,38 @@ async def build_admin_consumption_payload(
     from .stats_cache import get_summary_cached, get_user_summaries_cached
 
     has_user_filter = bool(user_id) or bool(user_ids)
-    if has_user_filter:
-        # 用户筛选是管理员钻取,不进全员 stats 缓存,避免污染 key。
+    has_extra = _has_list_filters(
+        group_id=group_id,
+        status=status,
+        task_type=task_type,
+        task_name=task_name,
+        trace_id=trace_id,
+        backend=backend,
+        backend_model=backend_model,
+        is_refunded=is_refunded,
+        min_points=min_points,
+        max_points=max_points,
+        prompt_search=prompt_search,
+    )
+    if has_user_filter or has_extra:
+        # 用户/列表筛选是管理员钻取,不进全员 stats 缓存,避免污染 key。
         summary = await RHComfyuiTaskRecord.get_summary(
             start_time=start,
             end_time=end,
             bot_id=bot_id,
             user_id=user_id,
             user_ids=user_ids,
+            group_id=group_id,
+            status=status,
+            task_type=task_type,
+            task_name=task_name,
+            trace_id=trace_id,
+            backend=backend,
+            backend_model=backend_model,
+            is_refunded=is_refunded,
+            min_points=min_points,
+            max_points=max_points,
+            prompt_search=prompt_search,
         )
         user_summaries = await RHComfyuiTaskRecord.get_user_summaries(
             start_time=start,
@@ -426,6 +489,17 @@ async def build_admin_consumption_payload(
             bot_id=bot_id,
             user_id=user_id,
             user_ids=user_ids,
+            group_id=group_id,
+            status=status,
+            task_type=task_type,
+            task_name=task_name,
+            trace_id=trace_id,
+            backend=backend,
+            backend_model=backend_model,
+            is_refunded=is_refunded,
+            min_points=min_points,
+            max_points=max_points,
+            prompt_search=prompt_search,
         )
     else:
         # 1) 全局汇总 — 合并 SQL + 表缓存(L1/L2)
@@ -554,10 +628,7 @@ async def build_admin_records_payload(
             "has_more": False,
         }
     # days 与 date_from/date_to 互斥
-    if date_from is not None or date_to is not None:
-        start, end = date_from, date_to
-    else:
-        start, end = _now_window(days)
+    start, end = _query_window(days, date_from, date_to)
     records = await RHComfyuiTaskRecord.list_all(
         bot_id=bot_id,
         user_id=user_id,
@@ -620,6 +691,8 @@ async def build_admin_daily_payload(
     """
     defaulted = False
     if date_from is not None or date_to is not None:
+        date_from = _bound_utc(date_from)
+        date_to = _bound_utc(date_to)
         if date_from is None:
             date_from = (date_to or datetime.now(timezone.utc)) - timedelta(days=DEFAULT_DAILY_DAYS)
         if date_to is None:

@@ -40,3 +40,19 @@ def test_append_list_filters_skips_blank_pipeline_and_model():
     conds: list = []
     RHComfyuiTaskRecord._append_list_filters(conds, task_name="  ", backend_model="")
     assert conds == []
+
+
+def test_append_agg_filters_includes_status_and_user():
+    conds: list = []
+    RHComfyuiTaskRecord._append_agg_filters(
+        conds,
+        bot_id="canvas",
+        user_id="42",
+        status="ok",
+        task_type="image",
+    )
+    sql = " ".join(_sql(expr) for expr in conds).upper()
+    assert "BOT_ID" in sql
+    assert "USER_ID" in sql
+    assert "STATUS" in sql
+    assert "TASK_TYPE" in sql
