@@ -267,7 +267,7 @@ async def build_user_consumption_payload(
     Args:
         user_id: 目标用户 ID(字符串)。外部插件 直接传 `str(ctx.id)`。
         bot_id: Bot 平台 ID(如 "qq")。
-        limit: 最多返回条数。
+        limit: 最多返回明细条数。页顶 ``total_*`` 走全量 ``get_summary``,不受 limit 截断。
         days: 仅统计最近 N 天,None 表示不限制(与 date_from/date_to 互斥)。
         status: 任务状态过滤(running / ok / failed / cancelled)。
         task_type: 任务类型过滤(image / video / music / speech)。
@@ -308,9 +308,27 @@ async def build_user_consumption_payload(
     # 本身不会,但表未建/数据库失败时整链路会 swallow),统一兜成空列表。
     records = records or []
     record_dicts = [_record_to_dict(r) for r in records]
-    success_count = sum(1 for r in records if r.is_success)
-    running_count = sum(1 for r in records if r.status == "running")
-    failed_count = sum(1 for r in records if r.status in ("failed", "cancelled"))
+    # 列表只 LIMIT;页顶合计必须另走 get_summary,否则「全部时间」只等于当前页。
+    summary = await RHComfyuiTaskRecord.get_summary(
+        start_time=start,
+        end_time=end,
+        bot_id=bot_id,
+        user_id=user_id,
+        status=status,
+        task_type=task_type,
+        task_name=task_name,
+        trace_id=trace_id,
+        backend=backend,
+        backend_model=backend_model,
+        is_refunded=is_refunded,
+        min_points=min_points,
+        max_points=max_points,
+        prompt_search=prompt_search,
+    )
+    total_count = summary["total"]
+    success_count = summary["success"]
+    failed_count = summary["failed"]
+    running_count = max(0, total_count - success_count - failed_count)
 
     return {
         "view": "user",
@@ -333,8 +351,8 @@ async def build_user_consumption_payload(
             "max_points": max_points,
             "prompt_search": prompt_search,
         },
-        "total_count": len(records),
-        "total_points": sum(_consumed_points(r.status, r.point_cost) for r in records),
+        "total_count": total_count,
+        "total_points": summary["total_points"],
         "success_count": success_count,
         "running_count": running_count,
         # 失败含 cancelled;不含 running(旧口径 total-success 会把进行中算失败)
