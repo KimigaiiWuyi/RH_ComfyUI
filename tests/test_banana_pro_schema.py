@@ -50,9 +50,9 @@ def test_gpt_image_family_schema_has_background_and_output_format():
         assert bg.default == "auto"
         assert bg.values == ["transparent", "opaque", "auto"]
         assert bg.value_titles == {"transparent": "透明", "opaque": "不透明", "auto": "自动"}
-        assert fmt.default == "webp"
-        assert fmt.values == ["png", "jpeg", "webp"]
-        assert fmt.value_titles == {"png": "PNG", "jpeg": "JPEG", "webp": "WebP"}
+        assert fmt.default == "png"
+        assert fmt.values == ["png", "jpeg"]
+        assert fmt.value_titles == {"png": "PNG", "jpeg": "JPEG"}
 
 
 def test_banana_pro_schema_has_no_background_or_output_format():

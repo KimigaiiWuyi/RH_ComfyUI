@@ -1,7 +1,7 @@
 """gpt-image 家族 catalog 档位:background / output_format + 共享端口。
 
 PortSpec 名 = params 键,不升 GenerationRequest 字段(见 skill §6.6)。
-透明背景只能配 png / webp;jpeg 会在 validate 拦截。
+透明背景只能配 png;jpeg 会在 validate 拦截。旧值 webp 回落 png。
 2.5 与 2.0 同协议,仅上游 model id 与 quality 枚举不同(2.5 多 xhigh/max)。
 """
 
@@ -14,10 +14,10 @@ if TYPE_CHECKING:
     from ..core.request import GenerationRequest
 
 GPT_IMAGE2_BACKGROUNDS: tuple[str, ...] = ("transparent", "opaque", "auto")
-GPT_IMAGE2_OUTPUT_FORMATS: tuple[str, ...] = ("png", "jpeg", "webp")
+GPT_IMAGE2_OUTPUT_FORMATS: tuple[str, ...] = ("png", "jpeg")
 
 DEFAULT_GPT_IMAGE2_BACKGROUND: str = "auto"
-DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT: str = "webp"
+DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT: str = "png"
 
 GPT_IMAGE2_BACKGROUND_TITLES: dict[str, str] = {
     "transparent": "透明",
@@ -27,7 +27,6 @@ GPT_IMAGE2_BACKGROUND_TITLES: dict[str, str] = {
 GPT_IMAGE2_OUTPUT_FORMAT_TITLES: dict[str, str] = {
     "png": "PNG",
     "jpeg": "JPEG",
-    "webp": "WebP",
 }
 
 _OUTPUT_FORMAT_MIME: dict[str, str] = {
@@ -58,13 +57,15 @@ def resolve_gpt_image2_background(params: Mapping[str, object] | None) -> str:
 
 
 def resolve_gpt_image2_output_format(params: Mapping[str, object] | None) -> str:
-    """缺省 webp;jpg → jpeg。"""
+    """缺省 png;jpg → jpeg;遗留 webp → png。"""
     raw = _param_str(params, "output_format")
     if raw is None:
         return DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT
     key = raw.lower()
     if key == "jpg":
         return "jpeg"
+    if key == "webp":
+        return DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT
     if key in GPT_IMAGE2_OUTPUT_FORMATS:
         return key
     return DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT
@@ -163,7 +164,7 @@ def gpt_image_family_inputs(
             default=DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT,
             values=list(GPT_IMAGE2_OUTPUT_FORMATS),
             title="输出格式",
-            description="产物编码:png / jpeg / webp。透明背景不能使用 jpeg",
+            description="产物编码:png / jpeg。透明背景不能使用 jpeg",
             value_titles=dict(GPT_IMAGE2_OUTPUT_FORMAT_TITLES),
         ),
     }

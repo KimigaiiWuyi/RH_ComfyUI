@@ -165,15 +165,22 @@ def test_gpt_image_family_rejects_transparent_jpeg(cls):
 
 
 @pytest.mark.parametrize("cls", [GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef])
-def test_gpt_image_family_accepts_transparent_webp_and_omitted_defaults(cls):
+def test_gpt_image_family_accepts_transparent_png_and_omitted_defaults(cls):
     m = cls()
     m.validate(
         GenerationRequest(
             task_type=TaskType.IMAGE,
             prompt="x",
-            params={"background": "transparent", "output_format": "webp"},
+            params={"background": "transparent", "output_format": "png"},
         )
     )
+    leftover = GenerationRequest(
+        task_type=TaskType.IMAGE,
+        prompt="x",
+        params={"output_format": "webp"},
+    )
+    m.validate(leftover)
+    assert leftover.params["output_format"] == "png"
     m.validate(GenerationRequest(task_type=TaskType.IMAGE, prompt="x"))
 
 
@@ -182,4 +189,4 @@ def test_gpt_image_family_normalize_fills_background_and_output_format(cls):
     m = cls()
     req = m.normalize(GenerationRequest(task_type=TaskType.IMAGE, prompt="x"))
     assert req.params["background"] == "auto"
-    assert req.params["output_format"] == "webp"
+    assert req.params["output_format"] == "png"

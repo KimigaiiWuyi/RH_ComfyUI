@@ -77,10 +77,10 @@ def test_edits_fields_include_background_and_output_format():
         quality="medium",
         image_list=[],
         background="transparent",
-        output_format="webp",
+        output_format="png",
     )
     assert ("background", "transparent") in fields
-    assert ("output_format", "webp") in fields
+    assert ("output_format", "png") in fields
     omitted = oapi._edits_fields(model="m", prompt="p", n=1, size=None, quality="low", image_list=[])
     names = [name for name, _ in omitted]
     assert "background" not in names and "output_format" not in names

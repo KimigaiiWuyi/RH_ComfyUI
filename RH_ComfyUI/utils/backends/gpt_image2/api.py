@@ -16,6 +16,7 @@ from gsuid_core.logger import logger
 
 from ..http_retry import is_network_error, call_with_network_retry
 from ....rh_config.comfyui_config import SERVICE_CONFIG
+from ....utils.mappers.gpt_image2_params import DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT
 
 
 @dataclass
@@ -272,7 +273,7 @@ class GPTImage2API:
         image_size: Optional[str] = "2K",
         quality: Optional[str] = "medium",
         background: Optional[str] = "auto",
-        output_format: Optional[str] = "webp",
+        output_format: Optional[str] = DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT,
         image_list: Optional[List[bytes]] = None,
     ) -> Union[GPTImageDrawResult, Image.Image, int]:
         """通过 DALL-E 格式 API 生图 (/v1/images/generations)

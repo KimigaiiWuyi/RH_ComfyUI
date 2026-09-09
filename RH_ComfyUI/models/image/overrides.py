@@ -86,11 +86,17 @@ class GptImageFamilyModel(ImagePipelineModel):
     """gpt-image-2 / 2.5-sunburst / 2.5-flare:同协议;2.5 多 xhigh/max。"""
 
     def validate(self, request: GenerationRequest) -> None:
-        super().validate(request)
-        from ...utils.mappers.gpt_image2_params import gpt_image2_transparent_jpeg
+        from ...utils.mappers.gpt_image2_params import (
+            gpt_image2_transparent_jpeg,
+            resolve_gpt_image2_output_format,
+        )
 
+        params = dict(request.params or {})
+        params["output_format"] = resolve_gpt_image2_output_format(params)
+        request.params = params
+        super().validate(request)
         if gpt_image2_transparent_jpeg(request.params):
-            raise ValidationError(f"{self.display_name}:透明背景不能使用 jpeg,请改用 png 或 webp")
+            raise ValidationError(f"{self.display_name}:透明背景不能使用 jpeg,请改用 png")
 
     def normalize(self, request: GenerationRequest) -> GenerationRequest:
         from ...utils.mappers.gpt_image2_params import (

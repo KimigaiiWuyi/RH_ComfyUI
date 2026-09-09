@@ -23,14 +23,15 @@ def _rgb_png() -> bytes:
 
 def test_resolve_defaults_and_aliases():
     assert resolve_gpt_image2_background(None) == "auto"
-    assert resolve_gpt_image2_output_format(None) == "webp"
+    assert resolve_gpt_image2_output_format(None) == "png"
     assert resolve_gpt_image2_output_format({"output_format": "JPG"}) == "jpeg"
+    assert resolve_gpt_image2_output_format({"output_format": "webp"}) == "png"
     assert resolve_gpt_image2_background({"background": "TRANSPARENT"}) == "transparent"
 
 
 def test_transparent_jpeg_combo():
     assert gpt_image2_transparent_jpeg({"background": "transparent", "output_format": "jpeg"}) is True
-    assert gpt_image2_transparent_jpeg({"background": "transparent", "output_format": "webp"}) is False
+    assert gpt_image2_transparent_jpeg({"background": "transparent", "output_format": "png"}) is False
     assert gpt_image2_transparent_jpeg({}) is False
 
 

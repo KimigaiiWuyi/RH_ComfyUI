@@ -63,7 +63,8 @@ def test_family_share_ports_not_generation_request_fields():
         node = cls.node_def()
         assert set(node.inputs) == set(ports)
         assert node.inputs["background"].values == ports["background"].values
-        assert node.inputs["output_format"].default == "webp"
+        assert node.inputs["output_format"].default == "png"
+        assert node.inputs["output_format"].values == ["png", "jpeg"]
         assert "width" not in node.inputs and "height" not in node.inputs
     assert GptImage2Def.node_def().inputs["quality"].values == list(GPT_IMAGE2_QUALITIES)
     assert GptImage25FlareDef.node_def().inputs["quality"].values == list(GPT_IMAGE25_QUALITIES)
@@ -103,7 +104,7 @@ def test_family_normalize_and_estimate_align(cls: type[GptImageFamilyModel]):
     m = cls()
     req = m.normalize(GenerationRequest(task_type=TaskType.IMAGE, prompt="x"))
     assert req.params["background"] == "auto"
-    assert req.params["output_format"] == "webp"
+    assert req.params["output_format"] == "png"
     priced = GenerationRequest(
         task_type=TaskType.IMAGE,
         prompt="x",
@@ -135,7 +136,7 @@ class _FakeGptApi:
         image_size: str | None = "2K",
         quality: str | None = "medium",
         background: str | None = "auto",
-        output_format: str | None = "webp",
+        output_format: str | None = "png",
         image_list: list[bytes] | None = None,
     ) -> Image.Image:
         self.calls.append({"model": model, "prompt": prompt, "image_size": image_size, "quality": quality})
