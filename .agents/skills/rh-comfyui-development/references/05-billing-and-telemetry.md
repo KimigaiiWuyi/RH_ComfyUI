@@ -33,7 +33,8 @@
 `point_cost`):校验通过后调用一次,用于 reserve。成功后
 `model.settle_cost(request, usage)` 若返回正整数,`policy.settle` **只补/退
 与预扣的差额**,`result.cost_points` 与统计 `point_cost` 写成实扣。
-`settle_cost` 返回 None(默认)则预扣即终扣。
+`settle_cost` 返回 None(默认)则预扣即终扣。Seedance 2.x 用供应商 token;
+gpt-image-2/2.5 用分项 token(见 [§15.2.1](./15-billing-pricing-formulas.md))。
 
 **禁止双重扣费**:settle 绝不能按 actual 再全额扣一次。HTTP 入口
 `ExternalPrepaidPolicy` 不碰 RHBind,只把实扣写进 result;调用方

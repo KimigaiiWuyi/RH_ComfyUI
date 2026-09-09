@@ -25,7 +25,7 @@ class NewImageDef(ImagePipelineModel):
             task_type=TaskType("image"),
             backend="comfyui",                   # 对应 utils/backends 注册名
             point_cost=2,                        # 积分价格
-            description="一句话简介(HTTP 清单展示)",
+            description="一句话简介(HTTP 清单 / 画布下拉,十几个字内单行)",
             knowledge_content=(                  # AI 知识库:Agent 选型的依据
                 "优势:...\n"
                 "适用场景:...\n"

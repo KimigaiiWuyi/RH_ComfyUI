@@ -29,7 +29,33 @@ def test_banana_pro_schema_has_ratio_and_image_size():
 
 def test_gpt_image2_still_has_quality():
     """回归保护:gpt-image-2 的 quality 字段不应被误删(它有计费差异)"""
-    from RH_ComfyUI.models.image.defs import GptImage2Def
+    from RH_ComfyUI.models.image.defs import GptImage2Def, GptImage25FlareDef, GptImage25SunburstDef
+    from RH_ComfyUI.utils.mappers.gpt_image2_params import GPT_IMAGE2_QUALITIES, GPT_IMAGE25_QUALITIES
 
-    inputs = GptImage2Def.node_def().inputs
-    assert "quality" in inputs, "gpt-image-2 计费按 quality_factor 分档,quality 字段必须保留"
+    gpt = GptImage2Def.node_def().inputs
+    assert "quality" in gpt, "gpt-image-2 计费按 quality_factor 分档,quality 字段必须保留"
+    assert gpt["quality"].values == list(GPT_IMAGE2_QUALITIES)
+    for cls in (GptImage25FlareDef, GptImage25SunburstDef):
+        values = cls.node_def().inputs["quality"].values
+        assert values == list(GPT_IMAGE25_QUALITIES)
+
+
+def test_gpt_image_family_schema_has_background_and_output_format():
+    from RH_ComfyUI.models.image.defs import GptImage2Def, GptImage25FlareDef, GptImage25SunburstDef
+
+    for cls in (GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef):
+        inputs = cls.node_def().inputs
+        bg = inputs["background"]
+        fmt = inputs["output_format"]
+        assert bg.default == "auto"
+        assert bg.values == ["transparent", "opaque", "auto"]
+        assert bg.value_titles == {"transparent": "透明", "opaque": "不透明", "auto": "自动"}
+        assert fmt.default == "webp"
+        assert fmt.values == ["png", "jpeg", "webp"]
+        assert fmt.value_titles == {"png": "PNG", "jpeg": "JPEG", "webp": "WebP"}
+
+
+def test_banana_pro_schema_has_no_background_or_output_format():
+    inputs = BananaProDef.node_def().inputs
+    assert "background" not in inputs
+    assert "output_format" not in inputs

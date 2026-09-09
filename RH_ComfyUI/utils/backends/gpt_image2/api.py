@@ -10,11 +10,21 @@ from typing import Any, Dict, List, Union, Literal, Optional
 
 import aiohttp
 from PIL import Image
+from dataclasses import dataclass, field
 
 from gsuid_core.logger import logger
 
 from ..http_retry import is_network_error, call_with_network_retry
 from ....rh_config.comfyui_config import SERVICE_CONFIG
+
+
+@dataclass
+class GPTImageDrawResult:
+    """官方 /v1/images/generations 解析结果(含 usage 供后结算)。"""
+
+    image: Image.Image
+    usage: dict[str, object] = field(default_factory=dict)
+    raw: dict[str, object] = field(default_factory=dict)
 
 
 class GPTImage2API:
@@ -261,14 +271,19 @@ class GPTImage2API:
         aspect_ratio: Optional[str] = "1:1",
         image_size: Optional[str] = "2K",
         quality: Optional[str] = "medium",
+        background: Optional[str] = "auto",
+        output_format: Optional[str] = "webp",
         image_list: Optional[List[bytes]] = None,
-    ) -> Union[Image.Image, int]:
+    ) -> Union[GPTImageDrawResult, Image.Image, int]:
         """通过 DALL-E 格式 API 生图 (/v1/images/generations)
 
-        aspect_ratio + image_size → size 像素值;quality 直接透传给上游。
+        aspect_ratio + image_size → size 像素值;quality / background / output_format 透传。
         """
         size = self.resolve_size(aspect_ratio, image_size)
-        logger.info(f"[GPT-Image2] Dall-e生图: model={model}, prompt={prompt}, size={size}, quality={quality}")
+        logger.info(
+            f"[GPT-Image2] Dall-e生图: model={model}, prompt={prompt}, size={size}, "
+            f"quality={quality}, background={background}, output_format={output_format}"
+        )
 
         headers = {
             "Content-Type": "application/json",
@@ -282,8 +297,14 @@ class GPTImage2API:
         }
 
         request_body["size"] = size
-        if quality and quality in ("low", "medium", "high"):
+        from ....utils.mappers.gpt_image2_params import GPT_IMAGE_WIRE_QUALITIES
+
+        if quality and quality in GPT_IMAGE_WIRE_QUALITIES:
             request_body["quality"] = quality
+        if background:
+            request_body["background"] = background
+        if output_format:
+            request_body["output_format"] = output_format
         if image_list is not None:
             request_body["image"] = [base64.b64encode(img_bytes).decode() for img_bytes in image_list]
 
@@ -304,7 +325,17 @@ class GPTImage2API:
             if not image_content:
                 return 500
 
-            return await self._parse_image_from_content(image_content)
+            image = await self._parse_image_from_content(image_content)
+            from ....utils.mappers.gpt_image2_billing import (
+                normalize_gpt_image_usage,
+                sanitize_gpt_image_raw,
+            )
+
+            return GPTImageDrawResult(
+                image=image,
+                usage=normalize_gpt_image_usage(resp),
+                raw=sanitize_gpt_image_raw(resp),
+            )
 
         except Exception as e:
             logger.error(f"[GPT-Image2] 解析 Dall-e API 失败: {e}")

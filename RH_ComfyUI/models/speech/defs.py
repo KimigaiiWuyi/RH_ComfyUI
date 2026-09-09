@@ -34,7 +34,7 @@ class IndexTTS2Def(IndexTTS2Model):
             task_type=TaskType("speech"),
             backend="comfyui",
             point_cost=2,
-            description="语音合成模型，语音自然，中文发音准确",
+            description="中文发音自然",
             knowledge_content=(
                 "语音合成模型。"
                 "\n"
@@ -105,7 +105,7 @@ class IndexTTS25Def(IndexTTS25Model):
             task_type=TaskType("speech"),
             backend="rh_app",
             point_cost=2,
-            description="IndexTTS2.5 云端语音合成，语音自然，中文发音准确，支持音色克隆与情绪",
+            description="克隆音色，带情绪",
             knowledge_content=(
                 "IndexTTS2.5 是 RunningHub 上的 IndexTTS 2.5 语音合成应用。"
                 "\n"
@@ -190,7 +190,7 @@ class MimoTtsDef(SpeechPipelineModel):
             task_type=TaskType("speech"),
             backend="mimo",
             point_cost=3,
-            description="XiaoMi MiMo-V2.5-TTS 系列语音合成，支持预置音色、音色设计、音色复刻，风格控制丰富",
+            description="预置音色与复刻",
             knowledge_content=(
                 "XiaoMi MiMo-V2.5-TTS 是小米推出的高质量语音合成系列模型。"
                 "\n"
@@ -277,7 +277,7 @@ class MinimaxT2aSpeechDef(MinimaxSpeechModel):
             task_type=TaskType("speech"),
             backend="minimax",
             point_cost=3,
-            description="MiniMax 异步语音合成模型，支持多种情绪、语速调节、音色克隆，语音自然度高",
+            description="情绪语速可调",
             knowledge_content=(
                 "MiniMax T2A Async V2 是 MiniMax 推出的高质量异步语音合成模型。"
                 "\n"
@@ -366,7 +366,7 @@ class FishTtsDef(FishTtsModel):
             task_type=TaskType("speech"),
             backend="fishaudio",
             point_cost=2,
-            description="Fish Audio S2 语音合成，多语言、韵律自然，情绪可句中定位，支持自动音色克隆；配音/口播首选",
+            description="多语言口播首选",
             knowledge_content=(
                 "Fish Audio S2 系列语音合成模型 —— 配音 / 口播 / 有声内容的**首选**模型。"
                 "\n"

@@ -121,7 +121,7 @@
 | `model` | str | **必填** | — |
 | `ratio` | str | 图片/视频(宽高比) | `request.ratio`(顶层)+ `params["ratio"]` |
 | `image_size` | str | 图片(1K/2K/4K) | `params["image_size"]` |
-| `quality` | str | 图片(low/medium/high) | `params["quality"]` |
+| `quality` | str | 图片(low/medium/high;gpt-image-2.5 另有 xhigh/max) | `params["quality"]` |
 | `resolution` | str | 视频(480p/720p/1080p) | `params["resolution"]` + `request.resolution`(顶层) |
 | `duration` | int | 视频/音频(秒) | `params["duration"]` + `request.duration`(顶层) |
 | `generate_audio` | bool | Seedance 1.5 Pro 等 | `params["generate_audio"]` |

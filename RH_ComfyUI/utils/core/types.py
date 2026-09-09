@@ -50,6 +50,17 @@ class PortType(str, Enum):
     OUTPUT_TEXT = "output_text"
 
 
+def _port_value_titles(raw: object) -> Optional[dict[str, str]]:
+    """YAML/JSON 的 value_titles 收成 dict[str, str];非法形态丢弃。"""
+    if not isinstance(raw, dict) or not raw:
+        return None
+    titles: dict[str, str] = {}
+    for key, title in raw.items():
+        if isinstance(key, str) and isinstance(title, str) and key and title:
+            titles[key] = title
+    return titles or None
+
+
 def _to_port_type(value: Union[PortType, str]) -> PortType:
     if isinstance(value, PortType):
         return value
@@ -75,6 +86,7 @@ class PortSpec:
     - title: 配置面板的短标题(几个字,无括号补充说明)
     - description: 完整语义说明,Agent/LLM 依赖它理解端口用法;
       缺 title 时调用方回退用 description 当标题
+    - value_titles: 枚举值的展示名(如 transparent→透明);调用方缺省回退原值
     """
 
     type: PortType
@@ -99,6 +111,9 @@ class PortSpec:
 
     # 媒体类型白名单(IMAGE/VIDEO/AUDIO)
     mime_types: Optional[list[str]] = None
+
+    # 枚举展示名(调用方面板;键必须落在 values 内。缺省时调用方回退用原值)
+    value_titles: Optional[dict[str, str]] = None
 
     def __post_init__(self) -> None:
         # 自动把 str 转为 PortType enum(运行时容错,但类型注解仍是 enum)
@@ -131,6 +146,7 @@ class PortSpec:
             min_items=data.get("min_items"),
             max_items=data.get("max_items"),
             mime_types=data.get("mime_types"),
+            value_titles=_port_value_titles(data.get("value_titles")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -158,6 +174,8 @@ class PortSpec:
             out["max_items"] = self.max_items
         if self.mime_types is not None:
             out["mime_types"] = list(self.mime_types)
+        if self.value_titles:
+            out["value_titles"] = dict(self.value_titles)
         return out
 
 

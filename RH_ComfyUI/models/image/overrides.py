@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from ..bridge import ImagePipelineModel
 from ...core.base.errors import ValidationError
 from ...core.schema.request import GenerationRequest
@@ -80,4 +82,61 @@ class Seedream5ProImageModel(ImagePipelineModel):
             )
 
 
-__all__ = ["Seedream5ProImageModel"]
+class GptImageFamilyModel(ImagePipelineModel):
+    """gpt-image-2 / 2.5-sunburst / 2.5-flare:同协议;2.5 多 xhigh/max。"""
+
+    def validate(self, request: GenerationRequest) -> None:
+        super().validate(request)
+        from ...utils.mappers.gpt_image2_params import gpt_image2_transparent_jpeg
+
+        if gpt_image2_transparent_jpeg(request.params):
+            raise ValidationError(f"{self.display_name}:透明背景不能使用 jpeg,请改用 png 或 webp")
+
+    def normalize(self, request: GenerationRequest) -> GenerationRequest:
+        from ...utils.mappers.gpt_image2_params import (
+            resolve_gpt_image2_background,
+            resolve_gpt_image2_output_format,
+        )
+
+        params = dict(request.params or {})
+        params["background"] = resolve_gpt_image2_background(params)
+        params["output_format"] = resolve_gpt_image2_output_format(params)
+        request.params = params
+        return super().normalize(request)
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按 quality + ratio + image_size 折算 tokens。
+
+        210 元 / 1M tokens;2.5 与 2.0 同单价。缺省 medium + 1024x1024。
+        2.5 high 对齐 2.0 medium;2.5 max 对齐 2.0 high。
+        """
+        from ...utils.mappers.gpt_image2_billing import estimate_gpt_image2_points
+
+        params = request.params
+        raw_q = params["quality"] if "quality" in params else None
+        quality = raw_q if isinstance(raw_q, str) else None
+        raw_sz = params["image_size"] if "image_size" in params else None
+        image_size = raw_sz if isinstance(raw_sz, str) else None
+        return estimate_gpt_image2_points(quality, request.ratio, image_size, model=self.name)
+
+    def settle_cost(self, request: GenerationRequest, usage: dict) -> Optional[int]:
+        """供应商 usage 实扣;无法解析则维持预扣。"""
+        from ...utils.mappers.gpt_image2_billing import settle_gpt_image2_points
+
+        del request
+        return settle_gpt_image2_points(usage)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(low + 1K) ~ 最大(2.5 max / 2.0 high + 4K)。"""
+        from ...utils.mappers.gpt_image2_billing import IMAGE_MODEL_SPECS, estimate_gpt_image2_points
+
+        spec_name = self.name if self.name in IMAGE_MODEL_SPECS else "gpt-image-2"
+        factors = IMAGE_MODEL_SPECS[spec_name]["quality_axis_factors"]
+        q_hi = "max" if "max" in factors else "high"
+        return (
+            estimate_gpt_image2_points("low", "1:1", "1K", model=self.name),
+            estimate_gpt_image2_points(q_hi, "1:1", "4K", model=self.name),
+        )
+
+
+__all__ = ["Seedream5ProImageModel", "GptImageFamilyModel"]

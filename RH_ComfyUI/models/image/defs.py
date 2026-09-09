@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from ..bridge import ImagePipelineModel
-from .overrides import Seedream5ProImageModel
+from .overrides import GptImageFamilyModel, Seedream5ProImageModel
 from ...core.base.errors import ValidationError
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType, GenerationRequest
@@ -20,6 +20,11 @@ from ...utils.mappers.image_edit import qwen_edit_mapper as _qwen_edit_mapper
 from ...utils.backends.minimax.config import (
     minimax_disabled_reason,
     is_minimax_model_enabled,
+)
+from ...utils.mappers.gpt_image2_params import (
+    GPT_IMAGE2_QUALITIES,
+    GPT_IMAGE25_QUALITIES,
+    gpt_image_family_inputs,
 )
 from ...utils.mappers.banana_pro_billing import estimate_banana_pro_points
 from ...utils.mappers.gpt_image2_billing import ratio_enum_values as _gpt_image2_ratio_values
@@ -65,7 +70,7 @@ class AnimaDef(ImagePipelineModel):
             task_type=TaskType("image"),
             backend="rh_app",
             point_cost=2,
-            description="专精于二次元风格图像生成的 RunningHub AI 应用，擅长动漫角色、插画、场景等",
+            description="二次元角色与插画",
             knowledge_content=(
                 "Anima 是一款专精于二次元风格图像生成的 AI 应用。"
                 "\n"
@@ -129,7 +134,7 @@ class CameraAngleDef(ImagePipelineModel):
             catalog_group="tool",
             backend="rh_app",
             point_cost=5,
-            description="基于 RunningHub 工作流的图片摄像机多角度生成,支持水平旋转、垂直俯仰、景别缩放",
+            description="旋转俯仰换机位",
             knowledge_content=(
                 "RH 多角度是基于 RunningHub 工作流 2080138749291356162 实现的图片多视角生成节点。"
                 "\n"
@@ -261,7 +266,7 @@ class ImageMattingDef(ImagePipelineModel):
             catalog_group="tool",
             backend="rh_app",
             point_cost=2,
-            description="基于 RunningHub AI 应用的图片抠图，去除背景输出透明底主体",
+            description="抠图出透明底",
             knowledge_content=(
                 "RH 抠图基于 RunningHub AI App 2084821698574114817 实现主体抠图。"
                 "\n"
@@ -330,7 +335,7 @@ class ImageUpscaleDef(ImagePipelineModel):
             catalog_group="tool",
             backend="rh_app",
             point_cost=3,
-            description="基于 RunningHub AI 应用的图片高清放大",
+            description="提升清晰度",
             knowledge_content=(
                 "RH 高清放大基于 RunningHub AI App 2084945150656212993 实现图片超分放大。"
                 "\n"
@@ -400,7 +405,7 @@ class ImageOutpaintDef(ImagePipelineModel):
             catalog_group="tool",
             backend="rh_app",
             point_cost=2,
-            description="基于 RunningHub AI 应用的图片扩图,按四向扩展像素向外补全画面",
+            description="四向扩展补全画面",
             knowledge_content=(
                 "RH 扩图基于 RunningHub AI App 2089261625797861377 实现四向扩图。"
                 "\n"
@@ -724,7 +729,7 @@ class TxImageOutpaintDef(ImagePipelineModel):
             catalog_group="tool",
             backend="tx_aiart",
             point_cost=2,
-            description="基于腾讯云混元 ImageOutpainting 的图片扩图,按官方画幅比例向外补全画面",
+            description="按比例向外扩图",
             knowledge_content=(
                 "腾讯云混元扩图走 ImageOutpainting(aiart.tencentcloudapi.com)。"
                 "\n"
@@ -878,7 +883,7 @@ class Banana2Def(ImagePipelineModel):
             task_type=TaskType("image"),
             backend="gemini-image",
             point_cost=2,
-            description="Gemini 3.1 Flash 图像生成/编辑模型(原生 generate_content),速度快",
+            description="速度快，支持多图参考",
             knowledge_content=(
                 "Nano Banana 2 图像生成/编辑模型(Gemini 3.1 Flash,原生 generate_content)。"
                 "\n"
@@ -990,7 +995,7 @@ class Banana1Def(ImagePipelineModel):
             task_type=TaskType("image"),
             backend="gemini-image",
             point_cost=1,
-            description="Gemini 2.5 Flash 图像生成/编辑模型(一代 Nano Banana),轻量快速",
+            description="轻量快速，适合预览",
             knowledge_content=(
                 "Nano Banana 1 图像生成/编辑模型(Gemini 2.5 Flash,一代)。"
                 "\n"
@@ -1098,7 +1103,7 @@ class BananaProDef(ImagePipelineModel):
             task_type=TaskType("image"),
             backend="gpt-image-2",
             point_cost=3,
-            description="Nano Banana Pro 高质量图像生成/编辑模型(Gemini 3 Pro Image + 兼容通道)",
+            description="高质量精修，适合成片",
             knowledge_content=(
                 "Nano Banana Pro 高质量图像生成/编辑模型。"
                 "\n"
@@ -1200,117 +1205,122 @@ class BananaProDef(ImagePipelineModel):
         )
 
 
-class GptImage2Def(ImagePipelineModel):
-    """GPT-Image2 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)
+def _gpt_image_family_node(
+    *,
+    name: str,
+    display_name: str,
+    description: str,
+    knowledge_content: str,
+    priority: int,
+    qualities: tuple[str, ...] = GPT_IMAGE2_QUALITIES,
+) -> NodeDef:
+    """gpt-image 家族 NodeDef:catalog name = 上游 model;端口/mapper 共用。"""
+    return NodeDef(
+        name=name,
+        display_name=display_name,
+        task_type=TaskType("image"),
+        backend="gpt-image-2",
+        backend_model=name,
+        point_cost=2,
+        description=description,
+        knowledge_content=knowledge_content,
+        requirements=["gpt_image2_apikey"],
+        mode="programmatic",
+        mapper_func=_gpt_image2_mapper,
+        inputs=gpt_image_family_inputs(qualities=qualities),
+        outputs={
+            "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
+        },
+        capabilities=CapabilityManifest(
+            supported_tasks=["image"],
+            mode="sync",
+            priority=priority,
+        ),
+    )
 
-    动态计费:按 quality + 输出像素面积折算 tokens,210 元/1M tokens。
-    point_cost 仅作未知参数时的兜底。
-    """
+
+class GptImage2Def(GptImageFamilyModel):
+    """GPT-Image-2 — OpenAI Images API 2.0。动态计费同家族。"""
 
     def __init__(self) -> None:
         super().__init__(self.node_def())
 
     @staticmethod
     def node_def() -> NodeDef:
-        return NodeDef(
+        return _gpt_image_family_node(
             name="gpt-image-2",
             display_name="GPT-Image2",
-            task_type=TaskType("image"),
-            backend="gpt-image-2",
-            point_cost=2,
-            description=(
-                "OpenAI 兼容协议的 GPT-Image2 生图模型。\n"
-                "一个物理模型同时支持文生图、图生图、图片编辑,根据 request.images 自适应切换。\n"
-                "凭证可指向任何兼容 OpenAI 协议的网关(OneAPI / NewAPI / OpenRouter / Local Ollama 等),\n"
-                "也能直接使用 OpenAI 官方接口。"
-            ),
+            description="文生图与编辑一体",
             knowledge_content=(
-                "GPT-Image2 是 OpenAI 兼容协议的生图模型,具备完整的多模态生成能力。"
+                "GPT-Image-2 是 OpenAI Images API 2.0 生图模型。"
                 "\n"
-                "优势："
+                "优势:文生图 / 图生图 / 编辑同一节点;兼容 /v1/images/generations。"
                 "\n"
-                "- 单端点覆盖文生图 / 图生图 / 图片编辑三种模式,无需切换模型或复制配置"
+                "适用:统一生图、按上传图切换模式、画风转变。"
                 "\n"
-                "- 自适应输入:有图片时自动进入图生图 / 编辑模式,无图片时进入文生图模式"
-                "\n"
-                "- 兼容任何暴露 /v1/images/generations 的 OpenAI 兼容服务(官方 / 第三方聚合 / 本地)"
-                "\n"
-                "适用场景："
-                "\n"
-                "- 需要统一生图能力、简化配置的对话机器人与 Web 应用"
-                "\n"
-                "- 希望根据用户上传图片动态切换生成模式"
-                "\n"
-                "- 复杂的图片编辑 / 画风转变等功能"
-                "\n"
-                "不适用场景："
-                "\n"
-                "- 无"
+                "不要跟 gpt-image-2.5-flare / gpt-image-2.5-sunburst 混淆:"
+                "2.0 更慢、画质与编辑一致性弱于 2.5;未点名 2.5 时才用本模型。"
                 "\n"
             ),
-            requirements=["gpt_image2_apikey"],
-            mode="programmatic",
-            mapper_func=_gpt_image2_mapper,
-            inputs={
-                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述"),
-                "images": PortSpec(
-                    type=PortType.LIST,
-                    item_type=PortType.IMAGE,
-                    title="参考图片",
-                    description="参考图片,可选。上传即自动进入图生图/编辑模式,留空即为文生图",
-                ),
-                # OpenAI images API 接受 size(由 ratio + image_size 共同映射) + quality
-                # ratio 枚举来自计费/像素真源表(含 1:2 / 2:1)
-                "ratio": PortSpec(
-                    type=PortType.ENUM,
-                    default="auto",
-                    values=_gpt_image2_ratio_values(),
-                    title="宽高比",
-                    description="输出宽高比,与分辨率组合映射为 size 参数",
-                ),
-                "image_size": PortSpec(
-                    type=PortType.ENUM,
-                    default="2K",
-                    values=["1K", "2K", "4K"],
-                    title="分辨率",
-                    description="输出分辨率档位,与宽高比组合映射为 size 参数",
-                ),
-                "quality": PortSpec(
-                    type=PortType.ENUM,
-                    default="medium",
-                    values=["low", "medium", "high"],
-                    title="生成质量",
-                    description="生成质量档位",
-                ),
-            },
-            outputs={
-                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
-            },
-            capabilities=CapabilityManifest(
-                supported_tasks=["image"],
-                mode="sync",
-                priority=65,
-            ),
+            priority=65,
         )
 
-    def estimate_cost(self, request: GenerationRequest) -> int:
-        """动态计费:按 quality + ratio + image_size 折算 tokens。
 
-        210 元 / 1M tokens,1 元 = 100 积分。参数缺失时按 medium + 1024x1024 估算。
-        """
-        from ...utils.mappers.gpt_image2_billing import estimate_gpt_image2_points
+class GptImage25SunburstDef(GptImageFamilyModel):
+    """GPT-Image-2.5 Sunburst — 高精度编辑,耗时更长。"""
 
-        quality = request.params.get("quality")
-        image_size = request.params.get("image_size")
-        return estimate_gpt_image2_points(quality, request.ratio, image_size)
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
 
-    def point_range(self) -> tuple[int, int]:
-        """积分范围:最小(low + 1K) ~ 最大(high + 4K)。"""
-        from ...utils.mappers.gpt_image2_billing import estimate_gpt_image2_points
+    @staticmethod
+    def node_def() -> NodeDef:
+        return _gpt_image_family_node(
+            name="gpt-image-2.5-sunburst",
+            display_name="GPT-Image-2.5 Sunburst",
+            description="高精度编辑，成片更稳",
+            knowledge_content=(
+                "GPT-Image-2.5 Sunburst(上游 model=gpt-image-2.5-sunburst)。"
+                "\n"
+                "优势:多轮编辑时主体/构图/背景更稳,适合成片级精修。"
+                "\n"
+                "适用:活动主视觉、商品精修、需要反复改局部且其余区域不能跑偏。"
+                "\n"
+                "不适用:要快、要量大(改用 gpt-image-2.5-flare);只要 2.0 兼容(用 gpt-image-2)。"
+                "\n"
+                "协议与 gpt-image-2 相同,禁止当成 gpt-image-2 的通道或 quality 档。"
+                "\n"
+            ),
+            priority=67,
+            qualities=GPT_IMAGE25_QUALITIES,
+        )
 
-        return (
-            estimate_gpt_image2_points("low", "1:1", "1K"),
-            estimate_gpt_image2_points("high", "1:1", "4K"),
+
+class GptImage25FlareDef(GptImageFamilyModel):
+    """GPT-Image-2.5 Flare — 日常高速档,默认 2.5。"""
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return _gpt_image_family_node(
+            name="gpt-image-2.5-flare",
+            display_name="GPT-Image-2.5 Flare",
+            description="日常高质量，比 2.0 更快",
+            knowledge_content=(
+                "GPT-Image-2.5 Flare(上游 model=gpt-image-2.5-flare)。"
+                "\n"
+                "优势:画质优于 gpt-image-2,延迟约低一半;2.5 系列默认选型。"
+                "\n"
+                "适用:社交图、产品体验图、快速打样、大批量生图。"
+                "\n"
+                "不适用:成片级精细多轮编辑(改用 gpt-image-2.5-sunburst)。"
+                "\n"
+                "协议与 gpt-image-2 相同,禁止当成 gpt-image-2 的通道或 quality 档。"
+                "\n"
+            ),
+            priority=68,
+            qualities=GPT_IMAGE25_QUALITIES,
         )
 
 
@@ -1339,7 +1349,7 @@ class MinimaxImage01Def(ImagePipelineModel):
             task_type=TaskType("image"),
             backend="minimax",
             point_cost=3,
-            description="MiniMax image-01 文生图模型，支持多种宽高比，生成质量高，适合人像、场景等",
+            description="人像与场景，画质高",
             knowledge_content=(
                 "MiniMax image-01 是 MiniMax 推出的高质量文生图模型。"
                 "\n"
@@ -1394,7 +1404,7 @@ class Qwen2511Def(ImagePipelineModel):
             task_type=TaskType("image"),
             backend="comfyui",
             point_cost=15,
-            description="专业的图像编辑模型,支持中文指令和多图输入",
+            description="中文指令改图",
             knowledge_content=(
                 "专业的图像编辑模型(Qwen-Image-Edit 2511)。"
                 "\n"
@@ -1450,7 +1460,7 @@ class Qwen2512Def(ImagePipelineModel):
             task_type=TaskType("image"),
             backend="comfyui",
             point_cost=15,
-            description="千问Image2512模型，擅长中文提示词理解，适合各种风格的图像生成",
+            description="中文提示词，多风格",
             knowledge_content=(
                 "千问Image2512模型，擅长中文提示词理解，适合各种风格的图像生成。"
                 "\n"
@@ -1515,11 +1525,7 @@ class Seedream5Def(ImagePipelineModel):
             task_type=TaskType("image"),
             backend="seedream",
             point_cost=22,
-            description=(
-                "火山方舟 Doubao Seedream 5.0 Lite 图片生成/编辑模型。"
-                "支持文生图 / 单图编辑 / 多图参考(0~14 张),"
-                "提供 2K/3K/4K 三档分辨率与自然语言宽高比描述。"
-            ),
+            description="中文理解强，2K–4K",
             knowledge_content=(
                 "Seedream 5.0 Lite 是字节跳动火山方舟推出的图片生成/编辑模型(Lite 版)。"
                 "\n"
@@ -1633,11 +1639,7 @@ class Seedream5ProDef(Seedream5ProImageModel):
             task_type=TaskType("image"),
             backend="seedream",
             point_cost=4,
-            description=(
-                "火山方舟 Doubao Seedream 5.0 Pro 图片生成/编辑模型(高质量档)。"
-                "支持文生图 / 单图编辑 / 多图参考(0~10 张),1K/2K 两档,"
-                "出图质量与细节优于 Lite。"
-            ),
+            description="中文理解强，细节更好",
             knowledge_content=(
                 "Seedream 5.0 Pro 是字节跳动火山方舟的高质量图片生成/编辑模型(Pro 版)。"
                 "\n"
@@ -1760,6 +1762,8 @@ ALL_MODELS = [
     ImageOutpaintDef,
     TxImageOutpaintDef,
     GptImage2Def,
+    GptImage25SunburstDef,
+    GptImage25FlareDef,
     MinimaxImage01Def,
     Qwen2511Def,
     Qwen2512Def,

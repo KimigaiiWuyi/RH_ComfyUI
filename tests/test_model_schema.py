@@ -10,6 +10,8 @@ from RH_ComfyUI.models.image.defs import (
     BananaProDef,
     GptImage2Def,
     MinimaxImage01Def,
+    GptImage25FlareDef,
+    GptImage25SunburstDef,
 )
 from RH_ComfyUI.models.video.defs import (
     Wan30Def,
@@ -107,7 +109,10 @@ def test_seedance25_declares_task_mode_and_output_format():
     assert node.inputs["duration"].maximum == 30
 
 
-@pytest.mark.parametrize("cls", [BananaProDef, GptImage2Def, MinimaxImage01Def])
+@pytest.mark.parametrize(
+    "cls",
+    [BananaProDef, GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef, MinimaxImage01Def],
+)
 def test_ratio_based_image_models_expose_ratio_not_wh(cls):
     # 这些模型的真实请求参数是宽高比(aspect_ratio / aspect_ratio+image_size→size),
     # 不吃宽高像素 —— schema 必须暴露 ratio 枚举,不得假装接受 width/height。
@@ -124,7 +129,7 @@ def test_ratio_based_image_models_expose_ratio_not_wh(cls):
     assert ratio.default in ratio.values
 
 
-@pytest.mark.parametrize("cls", [BananaProDef, GptImage2Def])
+@pytest.mark.parametrize("cls", [BananaProDef, GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef])
 def test_gpt_image2_family_exposes_all_billing_ratios_including_1_2(cls):
     """计费/像素真源表中的 ratio(含 1:2、2:1)必须完整暴露到 /models schema。"""
     from RH_ComfyUI.utils.mappers.gpt_image2_billing import _RATIO_SIZE_MAP
@@ -145,3 +150,36 @@ def test_pixel_based_models_keep_wh(cls):
     # ComfyUI 工作流 / rh_app 是真实消费像素宽高的,width/height 端口保留
     node = cls.node_def()
     assert "width" in node.inputs and "height" in node.inputs
+
+
+@pytest.mark.parametrize("cls", [GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef])
+def test_gpt_image_family_rejects_transparent_jpeg(cls):
+    m = cls()
+    req = GenerationRequest(
+        task_type=TaskType.IMAGE,
+        prompt="x",
+        params={"background": "transparent", "output_format": "jpeg"},
+    )
+    with pytest.raises(ValidationError, match="透明背景"):
+        m.validate(req)
+
+
+@pytest.mark.parametrize("cls", [GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef])
+def test_gpt_image_family_accepts_transparent_webp_and_omitted_defaults(cls):
+    m = cls()
+    m.validate(
+        GenerationRequest(
+            task_type=TaskType.IMAGE,
+            prompt="x",
+            params={"background": "transparent", "output_format": "webp"},
+        )
+    )
+    m.validate(GenerationRequest(task_type=TaskType.IMAGE, prompt="x"))
+
+
+@pytest.mark.parametrize("cls", [GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef])
+def test_gpt_image_family_normalize_fills_background_and_output_format(cls):
+    m = cls()
+    req = m.normalize(GenerationRequest(task_type=TaskType.IMAGE, prompt="x"))
+    assert req.params["background"] == "auto"
+    assert req.params["output_format"] == "webp"

@@ -68,6 +68,24 @@ def test_edits_fields_protocol_shape():
     assert ("quality", "high") in multi
 
 
+def test_edits_fields_include_background_and_output_format():
+    fields = oapi._edits_fields(
+        model="gpt-image-2",
+        prompt="p",
+        n=1,
+        size="1024x1024",
+        quality="medium",
+        image_list=[],
+        background="transparent",
+        output_format="webp",
+    )
+    assert ("background", "transparent") in fields
+    assert ("output_format", "webp") in fields
+    omitted = oapi._edits_fields(model="m", prompt="p", n=1, size=None, quality="low", image_list=[])
+    names = [name for name, _ in omitted]
+    assert "background" not in names and "output_format" not in names
+
+
 class _FakeResp:
     status = 200
 
@@ -153,12 +171,26 @@ def test_channel_availability():
 
 
 def test_channel_invoke_returns_output(monkeypatch):
-    async def _fake_generate(**kwargs) -> bytes:
+    from RH_ComfyUI.utils.backends.openai_image.api import OpenAIImageResult
+
+    async def _fake_generate_result(**kwargs) -> OpenAIImageResult:
         assert kwargs["model"] == "qwen-image"
         assert kwargs["base_url"] == "https://qianfan.baidubce.com/v2"
-        return b"PNGBYTES"
+        return OpenAIImageResult(
+            data=b"PNGBYTES",
+            raw={
+                "created": 1,
+                "data": [{"b64_json": "AAA"}],
+                "usage": {
+                    "total_tokens": 100,
+                    "input_tokens": 50,
+                    "output_tokens": 50,
+                    "input_tokens_details": {"text_tokens": 10, "image_tokens": 40},
+                },
+            },
+        )
 
-    monkeypatch.setattr(ochan, "generate_image", _fake_generate)
+    monkeypatch.setattr(ochan, "generate_image_result", _fake_generate_result)
 
     ch = OpenAIImageChannel(
         "baidu",
@@ -168,6 +200,11 @@ def test_channel_invoke_returns_output(monkeypatch):
     out = asyncio.run(ch.invoke(request=req, vendor_model="qwen-image"))
     assert out.status == "ok" and out.data == b"PNGBYTES"
     assert out.metadata["channel"] == "baidu"
+    assert out.usage["output_tokens"] == 50
+    assert out.raw["data"][0]["b64_json"] == "<omitted>"
+    from RH_ComfyUI.utils.mappers.gpt_image2_billing import settle_gpt_image2_points
+
+    assert settle_gpt_image2_points(out.usage) == 2
 
 
 class _FakeServiceConfig:

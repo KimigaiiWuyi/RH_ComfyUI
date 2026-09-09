@@ -3,26 +3,26 @@
 每次请求由 channel 传入 base_url + api_key(实时解析,支持热更新)。
 统一走 ``POST {base_url}/images/edits``(标准 OpenAI multipart 协议):
 - ``image`` 为文件字段(纯文生图时不传);多图时按官方 SDK 惯例用 ``image[]``
-- ``quality`` 必传(low/medium/high),始终透传给上游
+- ``quality`` 必传(low/medium/high/xhigh/max),始终透传给上游
 
-响应解析 ``data[0].url | b64_json`` 为 PNG 字节。
+响应解析 ``data[0].url | b64_json`` 为请求的编码格式字节(缺省仍转 PNG)。
 百度千帆 / OpenAI 官方 / 各类兼容网关通用。
 """
 
 from __future__ import annotations
 
-import io
 import base64
 import asyncio
 from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
 
 import httpx
 import aiohttp
-from PIL import Image
 
 from gsuid_core.logger import logger
 
 from ..http_retry import call_with_network_retry, download_with_network_retry
+from ...image_process import encode_image_bytes_async
 
 # 像素真源:gpt_image2_billing._RATIO_SIZE_MAP(计费 / 生图 / schema 共用)
 from ...mappers.gpt_image2_billing import (
@@ -91,17 +91,9 @@ def _to_png_bytes(raw: bytes) -> bytes:
 
     同步 CPU 重活:大图勿在事件循环直接调用,见 ``_to_png_bytes_async``。
     """
-    if raw[:8] == b"\x89PNG\r\n\x1a\n":
-        try:
-            with Image.open(io.BytesIO(raw)) as img:
-                if img.mode not in ("P", "LA"):
-                    return raw
-        except Exception:  # noqa: BLE001
-            pass
-    with Image.open(io.BytesIO(raw)) as img:
-        buf = io.BytesIO()
-        img.convert("RGBA" if img.mode in ("RGBA", "LA", "P") else "RGB").save(buf, format="PNG")
-        return buf.getvalue()
+    from ...image_process import encode_image_bytes
+
+    return encode_image_bytes(raw, "png")
 
 
 async def _to_png_bytes_async(raw: bytes) -> bytes:
@@ -127,12 +119,15 @@ def _edits_fields(
     size: Optional[str],
     quality: str,
     image_list: List[bytes],
+    background: Optional[str] = None,
+    output_format: Optional[str] = None,
 ) -> List[tuple]:
     """/images/edits 的 multipart 字段表(纯函数,供单测断言协议形状)。
 
     字段名遵循官方 SDK 惯例:
     - 单图用 ``image``,多图每张一个 ``image[]`` 部件;
-    - ``quality`` 必传,始终透传上游。
+    - ``quality`` 必传,始终透传上游;
+    - ``background`` / ``output_format`` 仅 gpt-image 系有,缺省不发以免其它模型拒收。
     """
     fields: List[tuple] = [
         ("model", model),
@@ -142,9 +137,19 @@ def _edits_fields(
     ]
     if size:
         fields.append(("size", size))
+    if background:
+        fields.append(("background", background))
+    if output_format:
+        fields.append(("output_format", output_format))
     image_field = "image" if len(image_list) == 1 else "image[]"
     fields.extend((image_field, raw) for raw in image_list)
     return fields
+
+
+@dataclass
+class OpenAIImageResult:
+    data: bytes
+    raw: dict[str, object] = field(default_factory=dict)
 
 
 async def generate_image(
@@ -157,12 +162,44 @@ async def generate_image(
     n: int = 1,
     size: Optional[str] = None,
     image_list: Optional[List[bytes]] = None,
+    background: Optional[str] = None,
+    output_format: Optional[str] = None,
 ) -> bytes:
-    """生成/编辑一张图,返回 PNG 字节。失败抛 OpenAIImageError。
+    """生成/编辑一张图。失败抛 OpenAIImageError。
 
     统一走 /images/edits(multipart):纯文生图时不传 image 字段,带参考图时
-    走 image / image[] 文件字段。quality 必传,始终透传给上游。
+    走 image / image[] 文件字段。quality 必传。
+    指定 output_format 时按该格式落盘;否则转 PNG(千帆等旧模型兼容)。
     """
+    packed = await generate_image_result(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        prompt=prompt,
+        quality=quality,
+        n=n,
+        size=size,
+        image_list=image_list,
+        background=background,
+        output_format=output_format,
+    )
+    return packed.data
+
+
+async def generate_image_result(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    prompt: str,
+    quality: str,
+    n: int = 1,
+    size: Optional[str] = None,
+    image_list: Optional[List[bytes]] = None,
+    background: Optional[str] = None,
+    output_format: Optional[str] = None,
+) -> OpenAIImageResult:
+    """同 generate_image,额外带回上游 JSON(含 usage)。"""
     headers: Dict[str, str] = {"Accept": "application/json"}
     if api_key:  # 空 key 不拼 Bearer, 避免 httpx/aiohttp 非法头
         headers["Authorization"] = f"Bearer {api_key}"
@@ -170,7 +207,16 @@ async def generate_image(
     root = base_url.rstrip("/")
     url = f"{root}/images/edits"
     form = aiohttp.FormData()
-    fields = _edits_fields(model=model, prompt=prompt, n=n, size=size, quality=quality, image_list=image_list or [])
+    fields = _edits_fields(
+        model=model,
+        prompt=prompt,
+        n=n,
+        size=size,
+        quality=quality,
+        image_list=image_list or [],
+        background=background,
+        output_format=output_format,
+    )
     for i, (name, value) in enumerate(fields):
         if isinstance(value, bytes):
             form.add_field(name, value, filename=f"image_{i}.png", content_type="image/png")
@@ -179,7 +225,10 @@ async def generate_image(
     request_kwargs: Dict[str, Any] = {"data": form}
 
     n_refs = len(image_list or [])
-    logger.info(f"[OpenAIImage] 请求 {url} model={model} n={n} size={size or '-'} quality={quality} 参考图={n_refs}")
+    logger.info(
+        f"[OpenAIImage] 请求 {url} model={model} n={n} size={size or '-'} "
+        f"quality={quality} background={background or '-'} output_format={output_format or '-'} 参考图={n_refs}"
+    )
     from ....core.telemetry.wire_capture import set_wire_audit
 
     set_wire_audit(
@@ -191,9 +240,12 @@ async def generate_image(
             "quality": quality,
             "n": n,
             "size": size,
+            "background": background,
+            "output_format": output_format,
             "num_images": n_refs,
         },
     )
+
     async def _once() -> Any:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, **request_kwargs) as resp:
@@ -208,10 +260,12 @@ async def generate_image(
                 return await resp.json()
 
     data = await call_with_network_retry(_once, label=f"POST {url}")
-    return await _extract_image(data, model)
+    image = await _extract_image(data, model, output_format=output_format)
+    raw: dict[str, object] = data if isinstance(data, dict) else {}
+    return OpenAIImageResult(data=image, raw=raw)
 
 
-async def _extract_image(data: Any, model: str) -> bytes:
+async def _extract_image(data: Any, model: str, *, output_format: Optional[str] = None) -> bytes:
     if not isinstance(data, dict):
         raise OpenAIImageError(f"{model} 返回非 JSON 对象: {type(data).__name__}")
     items = data.get("data")
@@ -221,13 +275,19 @@ async def _extract_image(data: Any, model: str) -> bytes:
     if not isinstance(first, dict):
         raise OpenAIImageError(f"{model} data[0] 非对象")
 
+    raw: Optional[bytes] = None
     b64 = first.get("b64_json")
     if isinstance(b64, str) and b64:
-        return await _to_png_bytes_async(base64.b64decode(b64))
-    result_url = first.get("url")
-    if isinstance(result_url, str) and result_url:
-        return await _to_png_bytes_async(await _download(result_url))
-    raise OpenAIImageError(f"{model} data[0] 无 url/b64_json", user_message="生图服务未返回可用图片。")
+        raw = base64.b64decode(b64)
+    else:
+        result_url = first.get("url")
+        if isinstance(result_url, str) and result_url:
+            raw = await _download(result_url)
+    if raw is None:
+        raise OpenAIImageError(f"{model} data[0] 无 url/b64_json", user_message="生图服务未返回可用图片。")
+    if output_format:
+        return await encode_image_bytes_async(raw, output_format)
+    return await _to_png_bytes_async(raw)
 
 
-__all__ = ["OpenAIImageError", "generate_image", "size_for", "ratio_from_wh"]
+__all__ = ["OpenAIImageError", "OpenAIImageResult", "generate_image", "generate_image_result", "size_for", "ratio_from_wh"]

@@ -13,11 +13,13 @@ from collections.abc import Callable
 
 import aiohttp
 
-from .api import OpenAIImageError, size_for, generate_image
+from .api import OpenAIImageError, size_for, generate_image_result
 from ...core.types import NodeOutput
 from ...core.request import GenerationRequest
 from ....core.base.errors import ChannelError
 from ....core.channels.channel import ProviderChannel
+from ...mappers.gpt_image2_billing import normalize_gpt_image_usage, sanitize_gpt_image_raw
+from ...mappers.gpt_image2_params import mime_for_output_format
 
 
 @dataclass(frozen=True)
@@ -89,8 +91,12 @@ class OpenAIImageChannel(ProviderChannel):
             image_size=request.params.get("image_size"),
         )
         quality = str(request.params.get("quality") or "medium")
+        background_raw = request.params.get("background")
+        format_raw = request.params.get("output_format")
+        background = str(background_raw) if isinstance(background_raw, str) and background_raw else None
+        output_format = str(format_raw) if isinstance(format_raw, str) and format_raw else None
         try:
-            data = await generate_image(
+            packed = await generate_image_result(
                 base_url=creds.base_url,
                 api_key=creds.api_key,
                 model=model,
@@ -98,6 +104,8 @@ class OpenAIImageChannel(ProviderChannel):
                 quality=quality,
                 image_list=request.images or None,
                 size=size,
+                background=background,
+                output_format=output_format,
             )
         except OpenAIImageError as exc:
             # 429/503 是瞬时限流/过载:标 transient,run() 先在原通道退避重试一次
@@ -119,9 +127,11 @@ class OpenAIImageChannel(ProviderChannel):
         output = NodeOutput(
             status="ok",
             output_type="image",
-            data=data,
-            mime_type="image/png",
-            outputs={"image": data},
+            data=packed.data,
+            mime_type=mime_for_output_format(output_format) if output_format else "image/png",
+            outputs={"image": packed.data},
+            usage=normalize_gpt_image_usage(packed.raw),
+            raw=sanitize_gpt_image_raw(packed.raw),
         )
         output.metadata.setdefault("channel", self.name)
         return output

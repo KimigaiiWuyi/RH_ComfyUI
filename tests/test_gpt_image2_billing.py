@@ -2,15 +2,19 @@
 
 import pytest
 
-from RH_ComfyUI.models.image.defs import BananaProDef, GptImage2Def
+from RH_ComfyUI.models.image.defs import BananaProDef, GptImage2Def, GptImage25FlareDef, GptImage25SunburstDef
 from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.gpt_image2_billing import (
+    IMAGE_MODEL_SPECS,
     POINTS_PER_MILLION_TOKENS,
     resolve_dimensions,
     resolve_size_string,
     calculate_image_points,
     calculate_image_tokens,
     estimate_gpt_image2_points,
+    normalize_gpt_image_usage,
+    sanitize_gpt_image_raw,
+    settle_gpt_image2_points,
 )
 
 # ── 常量 ──
@@ -98,6 +102,35 @@ def test_quality_ordering():
     assert low < med < high
 
 
+def test_gpt_image25_quality_axis_matches_20_anchors():
+    """2.5 max 输出 token = 2.0 high;2.5 high = 2.0 medium。单价相同。"""
+    w, h = 1024, 1024
+    for model_25 in ("gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
+        assert calculate_image_tokens("max", w, h, model_25) == calculate_image_tokens("high", w, h, "gpt-image-2")
+        assert calculate_image_tokens("high", w, h, model_25) == calculate_image_tokens("medium", w, h, "gpt-image-2")
+        assert calculate_image_tokens("low", w, h, model_25) == calculate_image_tokens("low", w, h, "gpt-image-2")
+        assert calculate_image_points("max", w, h, model_25) == calculate_image_points("high", w, h, "gpt-image-2")
+
+
+def test_gpt_image25_quality_monotonic():
+    toks = [
+        calculate_image_tokens(q, 2048, 2048, "gpt-image-2.5-flare")
+        for q in ("low", "medium", "high", "xhigh", "max")
+    ]
+    assert toks == sorted(toks)
+    assert len(set(toks)) == 5
+
+
+def test_family_specs_share_unit_price_and_pixel_table():
+    gpt = IMAGE_MODEL_SPECS["gpt-image-2"]
+    for name in ("gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
+        spec = IMAGE_MODEL_SPECS[name]
+        assert spec["size_limits"] == gpt["size_limits"]
+        assert spec["token_area_offset_pixels"] == gpt["token_area_offset_pixels"]
+        assert spec["token_area_scale_denominator"] == gpt["token_area_scale_denominator"]
+    assert POINTS_PER_MILLION_TOKENS == 21_000
+
+
 def test_size_ordering_same_ratio():
     """同 quality + 同 aspect ratio 下,像素面积越大 token 越多。
 
@@ -145,6 +178,14 @@ def test_estimate_explicit():
     assert estimate_gpt_image2_points("low", "16:9", "2K") == calculate_image_points("low", 2560, 1440)
 
 
+def test_estimate_unknown_quality_falls_back_medium_for_that_model():
+    assert estimate_gpt_image2_points("xhigh", "1:1", "1K") == estimate_gpt_image2_points("medium", "1:1", "1K")
+    flare_xhigh = estimate_gpt_image2_points("xhigh", "1:1", "1K", model="gpt-image-2.5-flare")
+    flare_med = estimate_gpt_image2_points("medium", "1:1", "1K", model="gpt-image-2.5-flare")
+    assert flare_xhigh != flare_med
+    assert flare_xhigh == calculate_image_points("xhigh", 1024, 1024, "gpt-image-2.5-flare")
+
+
 # ── 模型 estimate_cost 钩子 ──
 
 
@@ -171,6 +212,21 @@ def test_gpt_image2_estimate_cost_dynamic():
     assert cost_low < cost_default
 
 
+@pytest.mark.parametrize("cls", [GptImage25SunburstDef, GptImage25FlareDef])
+def test_gpt_image25_equivalent_quality_pairs(cls):
+    """2.5 max=2.0 high;2.5 high=2.0 medium。同 label medium 不再同价。"""
+    gpt = GptImage2Def()
+    other = cls()
+    req_20_high = _make_request(ratio="16:9", quality="high", image_size="2K")
+    req_25_max = _make_request(ratio="16:9", quality="max", image_size="2K")
+    req_20_med = _make_request(ratio="16:9", quality="medium", image_size="2K")
+    req_25_high = _make_request(ratio="16:9", quality="high", image_size="2K")
+    req_med = _make_request(ratio="16:9", quality="medium", image_size="2K")
+    assert other.estimate_cost(req_25_max) == gpt.estimate_cost(req_20_high)
+    assert other.estimate_cost(req_25_high) == gpt.estimate_cost(req_20_med)
+    assert other.estimate_cost(req_med) != gpt.estimate_cost(req_med)
+
+
 def test_banana_pro_estimate_cost_independent():
     """BananaProDef 已独立计费(不再与 GptImage2Def 共享计费逻辑)。
 
@@ -192,3 +248,103 @@ def test_gpt_image2_estimate_cost_never_below_minimum():
             for sz in ("1K", "2K", "4K"):
                 req = _make_request(ratio=ratio, quality=q, image_size=sz)
                 assert m.estimate_cost(req) >= 1
+    flare = GptImage25FlareDef()
+    for q in ("low", "medium", "high", "xhigh", "max"):
+                req = _make_request(ratio="1:1", quality=q, image_size="2K")
+                assert flare.estimate_cost(req) >= 1
+
+
+_OFFICIAL_USAGE = {
+    "created": 1713833628,
+    "data": [{"b64_json": "..."}],
+    "usage": {
+        "total_tokens": 100,
+        "input_tokens": 50,
+        "output_tokens": 50,
+        "input_tokens_details": {"text_tokens": 10, "image_tokens": 40},
+    },
+}
+
+_GATEWAY_USAGE = {
+    "taskId": "task_kfSpJuEXUteHLV0V3f87c4LOpvEzYsti",
+    "status": "SUCCESS",
+    "usage": {
+        "taskId": "task_kfSpJuEXUteHLV0V3f87c4LOpvEzYsti",
+        "model": None,
+        "imageCount": 1,
+        "rawUsage": {
+            "cached_tokens": 0,
+            "image_count": 1,
+            "images": 1,
+            "input_tokens": 1836,
+            "input_tokens_details": {"image_tokens": 1508, "text_tokens": 328},
+            "output_tokens": 7370,
+            "output_tokens_details": {"image_tokens": 7370, "text_tokens": 0},
+            "total_tokens": 9206,
+        },
+    },
+}
+
+
+def test_settle_official_usage_splits_input_output():
+    """官方样例:50 out × $30 + 40 image in × $8 + 10 text in × $5。"""
+    assert settle_gpt_image2_points(_OFFICIAL_USAGE) == 2
+    wrapped = {"raw_task": _OFFICIAL_USAGE}
+    assert settle_gpt_image2_points(wrapped) == 2
+
+
+def test_settle_gateway_raw_usage():
+    """网关 rawUsage:7370 out + 1508 image in + 328 text in。"""
+    assert settle_gpt_image2_points(_GATEWAY_USAGE) == 165
+    assert settle_gpt_image2_points({"raw_task": _GATEWAY_USAGE}) == 165
+
+
+def test_settle_missing_usage_returns_none():
+    assert settle_gpt_image2_points({}) is None
+    assert settle_gpt_image2_points(None) is None
+
+
+def test_family_settle_cost_matches_mapper():
+    req = _make_request(ratio="1:1", quality="medium", image_size="2K")
+    for cls in (GptImage2Def, GptImage25FlareDef, GptImage25SunburstDef):
+        assert cls().settle_cost(req, _OFFICIAL_USAGE) == 2
+        assert cls().settle_cost(req, _GATEWAY_USAGE) == 165
+        assert cls().settle_cost(req, {}) is None
+
+
+def test_settle_uses_normalized_usage_and_raw_task():
+    """dispatcher:usage + raw_task 与官方/网关原文同价。"""
+    official_u = normalize_gpt_image_usage(_OFFICIAL_USAGE)
+    gateway_u = normalize_gpt_image_usage(_GATEWAY_USAGE)
+    assert settle_gpt_image2_points(official_u) == 2
+    assert settle_gpt_image2_points(gateway_u) == 165
+    assert settle_gpt_image2_points({**official_u, "raw_task": _OFFICIAL_USAGE}) == 2
+    assert settle_gpt_image2_points({**gateway_u, "raw_task": _GATEWAY_USAGE}) == 165
+    aif_wrapped = {"result": _OFFICIAL_USAGE, "status": "已完成"}
+    assert settle_gpt_image2_points(aif_wrapped) == 2
+
+
+def test_settle_ignores_total_tokens_without_split():
+    """禁止把 total_tokens 当 image output 整档 $30 计。"""
+    assert settle_gpt_image2_points({"total_tokens": 9206}) is None
+    assert settle_gpt_image2_points(_GATEWAY_USAGE) == 165
+
+
+def test_settle_cached_tokens_prefer_image_input():
+    uncached = {
+        "output_tokens": 10_000,
+        "input_tokens": 6_000,
+        "input_tokens_details": {"image_tokens": 5_000, "text_tokens": 1_000},
+    }
+    cached = {
+        **uncached,
+        "cached_tokens": 5_000,
+    }
+    assert settle_gpt_image2_points(uncached) == 242
+    assert settle_gpt_image2_points(cached) == 221
+
+
+def test_sanitize_omits_b64_json():
+    cleaned = sanitize_gpt_image_raw(_OFFICIAL_USAGE)
+    assert cleaned["data"][0]["b64_json"] == "<omitted>"
+    assert _OFFICIAL_USAGE["data"][0]["b64_json"] == "..."

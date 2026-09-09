@@ -15,12 +15,24 @@ token 计算公式由上游 OpenAI 兼容网关公开,按 quality 档位 + 输�
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Mapping, Optional
 
 # ── 模型 spec(取自网关公开文档) ──
 
-IMAGE_MODEL_SPECS: dict[str, dict] = {
-    "gpt-image-2": {
+# 2.0 / 2.5 同 $/1M token(image out $30 → POINTS_PER_MILLION_TOKENS)。
+# 2.5 high 对齐 2.0 medium;2.5 max 对齐 2.0 high;low 对齐 2.0;medium/xhigh 插值。
+_GPT_IMAGE2_QUALITY_AXIS: dict[str, int] = {"low": 16, "medium": 48, "high": 96}
+_GPT_IMAGE25_QUALITY_AXIS: dict[str, int] = {
+    "low": 16,
+    "medium": 32,
+    "high": 48,
+    "xhigh": 72,
+    "max": 96,
+}
+
+
+def _gpt_image_family_spec(quality_axis_factors: dict[str, int]) -> dict:
+    return {
         "size_limits": {
             "step_px": 16,
             "min_pixels": 655_360,
@@ -28,16 +40,28 @@ IMAGE_MODEL_SPECS: dict[str, dict] = {
             "max_dimension_px": 3_840,
             "max_aspect_ratio": 3.0,
         },
-        "quality_axis_factors": {"low": 16, "medium": 48, "high": 96},
+        "quality_axis_factors": dict(quality_axis_factors),
         "token_area_offset_pixels": 2_000_000,
         "token_area_scale_denominator": 4_000_000,
-    },
+    }
+
+
+IMAGE_MODEL_SPECS: dict[str, dict] = {
+    "gpt-image-2": _gpt_image_family_spec(_GPT_IMAGE2_QUALITY_AXIS),
+    "gpt-image-2.5-sunburst": _gpt_image_family_spec(_GPT_IMAGE25_QUALITY_AXIS),
+    "gpt-image-2.5-flare": _gpt_image_family_spec(_GPT_IMAGE25_QUALITY_AXIS),
 }
 
 # ── 计费常量 ──
 
 # 210 元 / 1M tokens,1 元 = 100 积分 → 210 * 100 = 21_000 积分 / 1M tokens
+# 预扣按输出 token 估;实扣按官方 USD/1M × 7 元 × 100 分项(2.0/2.5 同价)。
 POINTS_PER_MILLION_TOKENS: int = 21_000
+POINTS_PER_MILLION_IMAGE_OUTPUT: int = POINTS_PER_MILLION_TOKENS  # $30
+POINTS_PER_MILLION_IMAGE_INPUT: int = 5_600  # $8
+POINTS_PER_MILLION_IMAGE_CACHED: int = 1_400  # $2
+POINTS_PER_MILLION_TEXT_INPUT: int = 3_500  # $5
+POINTS_PER_MILLION_TEXT_CACHED: int = 875  # $1.25
 
 # ratio + image_size → 像素尺寸(计费 / 实际上游 size / schema 共用)
 #
@@ -153,7 +177,8 @@ def calculate_image_tokens(
              + token_area_scale_denominator - 1)
             // token_area_scale_denominator
     """
-    spec = IMAGE_MODEL_SPECS[model]
+    resolved = model if model in IMAGE_MODEL_SPECS else "gpt-image-2"
+    spec = IMAGE_MODEL_SPECS[resolved]
     quality_axis_factor = spec["quality_axis_factors"][quality]
     long_edge = max(width, height)
     short_edge = min(width, height)
@@ -186,19 +211,201 @@ def estimate_gpt_image2_points(
     quality: Optional[str],
     ratio: Optional[str],
     image_size: Optional[str],
+    model: str = "gpt-image-2",
 ) -> int:
     """从请求参数直接估算积分(供 estimate_cost 调用)。
 
-    quality 缺失 → 'medium';ratio 缺失 / 'auto' → 1024x1024。
+    quality 不在该 model 的档位表 → medium;ratio 缺失 / auto → 1024x1024。
+    model 未登记 → gpt-image-2。2.5 与 2.0 同单价,轴因子不同。
     """
-    q = quality if quality in ("low", "medium", "high") else "medium"
+    resolved = model if model in IMAGE_MODEL_SPECS else "gpt-image-2"
+    factors = IMAGE_MODEL_SPECS[resolved]["quality_axis_factors"]
+    q = quality if isinstance(quality, str) and quality in factors else "medium"
     w, h = resolve_dimensions(ratio, image_size)
-    return calculate_image_points(q, w, h)
+    return calculate_image_points(q, w, h, resolved)
+
+
+_TOKEN_BLOB_KEYS: tuple[str, ...] = ("input_tokens", "output_tokens", "total_tokens")
+# result: AI 基座 task/info 把上游 JSON 放在 data.result
+_USAGE_NEST_KEYS: tuple[str, ...] = (
+    "rawUsage",
+    "raw_usage",
+    "usage",
+    "raw_task",
+    "raw",
+    "result",
+)
+
+
+def _nonneg_int(val: object) -> int:
+    if val is None or isinstance(val, bool):
+        return 0
+    try:
+        n = int(val)
+    except (TypeError, ValueError):
+        return 0
+    return n if n > 0 else 0
+
+
+def _mapping_int(blob: Mapping[str, object], key: str) -> int:
+    if key not in blob:
+        return 0
+    return _nonneg_int(blob[key])
+
+
+def _child_mapping(blob: Mapping[str, object], key: str) -> Mapping[str, object]:
+    if key not in blob:
+        return {}
+    val = blob[key]
+    return val if isinstance(val, Mapping) else {}
+
+
+def _looks_like_token_blob(blob: Mapping[str, object]) -> bool:
+    if any(key in blob for key in _TOKEN_BLOB_KEYS):
+        return True
+    return "input_tokens_details" in blob or "output_tokens_details" in blob
+
+
+def _blob_score(blob: Mapping[str, object]) -> int:
+    score = 0
+    if "input_tokens_details" in blob:
+        score += 8
+    if "output_tokens" in blob:
+        score += 4
+    if "input_tokens" in blob:
+        score += 4
+    if "output_tokens_details" in blob:
+        score += 2
+    if "total_tokens" in blob:
+        score += 1
+    return score
+
+
+def extract_gpt_image_token_blob(usage: object) -> dict[str, object] | None:
+    """从官方 usage / 网关 rawUsage / dispatcher raw_task 取出 token 对象。"""
+    if not isinstance(usage, dict):
+        return None
+    found: list[dict[str, object]] = []
+    stack: list[object] = [usage]
+    seen: set[int] = set()
+    while stack:
+        cur = stack.pop()
+        if not isinstance(cur, dict):
+            continue
+        oid = id(cur)
+        if oid in seen:
+            continue
+        seen.add(oid)
+        if _looks_like_token_blob(cur):
+            found.append(cur)
+        for key in _USAGE_NEST_KEYS:
+            if key in cur:
+                stack.append(cur[key])
+    if not found:
+        return None
+    return max(found, key=_blob_score)
+
+
+def split_gpt_image_tokens(blob: Mapping[str, object]) -> dict[str, int] | None:
+    """拆成 image/text × input/cached/output。无法识别时 None。"""
+    in_details = _child_mapping(blob, "input_tokens_details")
+    out_details = _child_mapping(blob, "output_tokens_details")
+    output_total = _mapping_int(blob, "output_tokens")
+    input_total = _mapping_int(blob, "input_tokens")
+    cached_total = _mapping_int(blob, "cached_tokens")
+    if cached_total == 0:
+        cached_total = _mapping_int(in_details, "cached_tokens")
+
+    image_out = _mapping_int(out_details, "image_tokens")
+    if image_out == 0 and output_total > 0:
+        image_out = output_total
+
+    image_in = _mapping_int(in_details, "image_tokens")
+    text_in = _mapping_int(in_details, "text_tokens")
+    if image_in == 0 and text_in == 0:
+        image_in = input_total
+
+    image_cached = min(cached_total, image_in)
+    text_cached = min(max(cached_total - image_cached, 0), text_in)
+    image_uncached = max(image_in - image_cached, 0)
+    text_uncached = max(text_in - text_cached, 0)
+    if image_out + image_uncached + image_cached + text_uncached + text_cached <= 0:
+        return None
+    return {
+        "image_output": image_out,
+        "image_input": image_uncached,
+        "image_cached": image_cached,
+        "text_input": text_uncached,
+        "text_cached": text_cached,
+    }
+
+
+def _points_from_token_rates(parts: Mapping[str, int]) -> int:
+    weighted = (
+        parts["image_output"] * POINTS_PER_MILLION_IMAGE_OUTPUT
+        + parts["image_input"] * POINTS_PER_MILLION_IMAGE_INPUT
+        + parts["image_cached"] * POINTS_PER_MILLION_IMAGE_CACHED
+        + parts["text_input"] * POINTS_PER_MILLION_TEXT_INPUT
+        + parts["text_cached"] * POINTS_PER_MILLION_TEXT_CACHED
+    )
+    if weighted <= 0:
+        return 0
+    return max((weighted + 999_999) // 1_000_000, 1)
+
+
+def settle_gpt_image2_points(usage: object) -> Optional[int]:
+    """供应商 usage → 实扣积分;无法解析时 None(维持预扣)。"""
+    blob = extract_gpt_image_token_blob(usage)
+    if blob is None:
+        return None
+    parts = split_gpt_image_tokens(blob)
+    if parts is None:
+        return None
+    points = _points_from_token_rates(parts)
+    return points if points > 0 else None
+
+
+def normalize_gpt_image_usage(payload: object) -> dict[str, object]:
+    """通道 NodeOutput.usage:带 raw_usage 供 settle;无 token 则空 dict。"""
+    blob = extract_gpt_image_token_blob(payload)
+    if blob is None:
+        return {}
+    return {
+        "vendor_unit": "tokens",
+        "raw_usage": blob,
+        "input_tokens": _mapping_int(blob, "input_tokens"),
+        "output_tokens": _mapping_int(blob, "output_tokens"),
+        "total_tokens": _mapping_int(blob, "total_tokens"),
+    }
+
+
+def sanitize_gpt_image_raw(payload: object) -> dict[str, object]:
+    """落 raw 时丢掉 b64_json,避免统计表被整图撑爆。"""
+    if not isinstance(payload, dict):
+        return {}
+    out: dict[str, object] = dict(payload)
+    if "data" not in out or not isinstance(out["data"], list):
+        return out
+    cleaned: list[object] = []
+    for item in out["data"]:
+        if isinstance(item, dict) and "b64_json" in item:
+            slim = dict(item)
+            slim["b64_json"] = "<omitted>"
+            cleaned.append(slim)
+        else:
+            cleaned.append(item)
+    out["data"] = cleaned
+    return out
 
 
 __all__ = [
     "IMAGE_MODEL_SPECS",
     "POINTS_PER_MILLION_TOKENS",
+    "POINTS_PER_MILLION_IMAGE_OUTPUT",
+    "POINTS_PER_MILLION_IMAGE_INPUT",
+    "POINTS_PER_MILLION_IMAGE_CACHED",
+    "POINTS_PER_MILLION_TEXT_INPUT",
+    "POINTS_PER_MILLION_TEXT_CACHED",
     "_RATIO_SIZE_MAP",
     "ratio_enum_values",
     "resolve_size_string",
@@ -206,4 +413,8 @@ __all__ = [
     "calculate_image_tokens",
     "calculate_image_points",
     "estimate_gpt_image2_points",
+    "extract_gpt_image_token_blob",
+    "settle_gpt_image2_points",
+    "normalize_gpt_image_usage",
+    "sanitize_gpt_image_raw",
 ]

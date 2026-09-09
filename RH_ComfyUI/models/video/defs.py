@@ -70,7 +70,7 @@ class Seedance15ProDef(SeedanceVideoModel):
             task_type=TaskType("video"),
             backend="seedance",
             point_cost=18,
-            description="Seedance 1.5 Pro 视频生成,支持离线推理(flex)",
+            description="支持离线推理",
             knowledge_content=(
                 "Seedance 1.5 Pro 视频生成。"
                 "\n"
@@ -231,7 +231,7 @@ class Seedance2Def(SeedanceVideoModel):
             task_type=TaskType("video"),
             backend="seedance",
             point_cost=20,
-            description="Seedance 2.0 统一视频生成,按输入自动切换 文生/图生/首尾帧/多模态,无需手动区分",
+            description="文生/图生/多模态一体",
             knowledge_content=(
                 "字节跳动 Seedance 2.0 统一视频生成节点。"
                 "\n"
@@ -406,10 +406,7 @@ class Seedance25Def(Seedance25VideoModel):
             backend="seedance",
             # 静态兜底 ≈ 720p 5s 无输入视频(官方示例 7.56 元 = 756 积分)
             point_cost=756,
-            description=(
-                "Seedance 2.5 统一视频生成:最长 30 秒、最多 50 多模态参考,"
-                "支持文生/图生/首尾帧/多模态/编辑/延长;复用火山方舟 Key"
-            ),
+            description="最长 30 秒，可编辑延长",
             knowledge_content=(
                 "字节跳动 Seedance 2.5(Model ID: doubao-seedance-2-5-260628)。"
                 "\n"
@@ -625,7 +622,7 @@ class Seedance2MiniDef(SeedanceVideoModel):
             task_type=TaskType("video"),
             backend="seedance",
             point_cost=10,
-            description="Seedance 2.0 Mini 视频生成,轻量低成本版(请求规范与 Seedance 2.0 一致)",
+            description="轻量低成本",
             knowledge_content=(
                 "Seedance 2.0 Mini 是 Seedance 2.0 的轻量低成本版本。"
                 "\n"
@@ -697,7 +694,7 @@ class Seedance2FastDef(SeedanceVideoModel):
             task_type=TaskType("video"),
             backend="seedance",
             point_cost=15,
-            description="Seedance 2.0 Fast 视频生成,速度更快、价格更低(不支持 1080p)",
+            description="更快更便宜，无 1080p",
             knowledge_content=(
                 "Seedance 2.0 Fast 是 Seedance 2.0 的快速版本,价格更低、生成更快。"
                 "\n"
@@ -842,9 +839,7 @@ class HappyHorse11Def(HappyHorseVideoModel):
             task_type=TaskType("video"),
             backend="happyhorse",
             point_cost=500,
-            description=(
-                "HappyHorse 1.1 统一视频生成:按输入自动切换 文生 / 图生(首帧) / 多图参考 / 视频编辑,无需手动选子模型"
-            ),
+            description="文生/图生/视频编辑",
             knowledge_content=(
                 "阿里云 DashScope HappyHorse 1.1 统一视频节点。"
                 "\n"
@@ -1029,13 +1024,7 @@ class Wan22VideogenDef(Wan22VideoModel):
             task_type=TaskType("video"),
             backend="comfyui",
             point_cost=15,
-            description=(
-                "Wan 2.2 视频生成节点,按输入自动切换:\n"
-                "  - 不传图    → 文生视频\n"
-                "  - 传 1 张图  → 图生视频(该图作为首帧)\n"
-                "  - 传 2 张图  → 首尾帧生视频(图片1=首帧,图片2=尾帧)\n"
-                '可在 prompt 中用 "图片1" / "图片2" 引用首/尾帧(支持位置插值)。'
-            ),
+            description="文生或首尾帧生视频",
             knowledge_content=(
                 "Wan 2.2 本地 ComfyUI 视频生成。"
                 "\n"
@@ -1127,10 +1116,7 @@ class Wan30Def(Wan30VideoModel):
             task_type=TaskType("video"),
             backend="wan30",
             point_cost=600,
-            description=(
-                "万相 3.0 统一视频生成:按输入自动切换 文生/首帧/首尾帧/多参考,"
-                "另支持 PDF 等参考文件或网页生视频;复用 DashScope Key"
-            ),
+            description="多参考与网页生视频",
             knowledge_content=(
                 "阿里云 DashScope 万相 3.0(model: wan3.0-video)。"
                 "\n"
@@ -1296,10 +1282,7 @@ class MiniMaxH3Def(MiniMaxH3VideoModel):
             task_type=TaskType("video"),
             backend="minimax-h3",
             point_cost=400,
-            description=(
-                "MiniMax H3 四种模式:文生 / 图生(首帧或尾帧) / 首尾帧 / 全能参考,"
-                "768P 或 2K 直出,4~15 秒,原生有声;复用 MiniMax API Key"
-            ),
+            description="有声视频，768P/2K",
             knowledge_content=(
                 "MiniMax H3(官方 Model ID: MiniMax-H3)统一视频节点,四种模式与 Seedance 2.0/2.5 同构。"
                 "\n"

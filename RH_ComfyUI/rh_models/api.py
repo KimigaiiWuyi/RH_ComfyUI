@@ -723,7 +723,7 @@ async def estimate_model_points(
         ratio: 输出宽高比,如 "1:1" / "16:9" / "auto"。透传到 GenerationRequest.ratio
             (顶层字段)和 params['ratio'](双轨,因不同模型读法不一)。
         image_size: 图片分辨率档位,如 "1K" / "2K" / "4K"。塞 params['image_size']。
-        quality: 生成质量档位,如 "low" / "medium" / "high"。塞 params['quality']。
+        quality: 生成质量档位,如 "low" / "medium" / "high"(2.5 另有 xhigh/max)。塞 params['quality']。
         resolution: 视频分辨率,如 "480p" / "720p" / "1080p"。塞 params['resolution']。
         duration: 视频时长(秒)。塞 GenerationRequest.duration(顶层字段,
             Seedance 等视频模型从顶层读)和 params['duration'](双轨)。

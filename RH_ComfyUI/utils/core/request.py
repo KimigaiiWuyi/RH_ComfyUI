@@ -356,6 +356,8 @@ class GenerationResult:
             output_type=OutputType(node_output.output_type),
             data=node_output.data,
             mime_type=node_output.mime_type,
-            cost_points=int(node_output.usage.get("points", 0)),
+            cost_points=int(node_output.usage.get("points", 0)) if isinstance(node_output.usage, dict) else 0,
             metadata=node_output.metadata,
+            usage=dict(node_output.usage) if isinstance(node_output.usage, dict) else {},
+            raw=dict(node_output.raw) if isinstance(node_output.raw, dict) else {},
         )

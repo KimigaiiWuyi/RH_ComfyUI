@@ -34,6 +34,21 @@ def test_enum_and_range():
         validate_against_schema(_req(prompt="x", duration=99), schema, model_name="m")
 
 
+def test_portspec_value_titles_roundtrip():
+    spec = PortSpec(
+        type=PortType.ENUM,
+        values=["transparent", "opaque", "auto"],
+        default="auto",
+        title="背景",
+        value_titles={"transparent": "透明", "opaque": "不透明", "auto": "自动"},
+    )
+    dumped = spec.to_dict()
+    assert dumped["value_titles"]["transparent"] == "透明"
+    restored = PortSpec.from_dict(dumped)
+    assert restored.value_titles == spec.value_titles
+    assert PortSpec.from_dict({"type": "enum", "values": ["a"]}).value_titles is None
+
+
 def test_list_cardinality():
     schema = {"images": PortSpec(type=PortType.LIST, item_type=PortType.IMAGE, max_items=2)}
     with pytest.raises(ValidationError):

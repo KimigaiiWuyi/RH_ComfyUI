@@ -28,7 +28,7 @@ class FishAsrDef(FishAsrModel):
             task_type=TaskType("asr"),
             backend="fishaudio",
             point_cost=2,
-            description="Fish Audio ASR 语音识别:多语言自动识别,带时间戳分段,适合口播/字幕/转写场景",
+            description="多语言转写字幕",
             knowledge_content=(
                 "Fish Audio ASR 语音识别模型。"
                 "\n"

@@ -239,12 +239,18 @@ _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _JPEG_MAGIC = b"\xff\xd8\xff"
 
 
+def _is_webp_bytes(data: bytes) -> bool:
+    return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+
+
 def image_mime_from_bytes(data: bytes) -> str:
-    """按文件头猜 PNG / JPEG mime;其它回落 image/png。"""
+    """按文件头猜 PNG / JPEG / WebP mime;其它回落 image/png。"""
     if data.startswith(_PNG_MAGIC):
         return "image/png"
     if data.startswith(_JPEG_MAGIC):
         return "image/jpeg"
+    if _is_webp_bytes(data):
+        return "image/webp"
     return "image/png"
 
 
@@ -356,7 +362,7 @@ async def prepare_seedance_image_ref(ref: Any) -> Any:
     宽高与比例时原样返回。调用方应在 materialize / 上传之前走本函数,避免
     http URL 把小图或超比例原图交给上游。
     """
-    from .core.types import MediaKind, MediaRef
+    from .core.types import MediaRef, MediaKind
     from .video_process import ensure_media_bytes
 
     if not isinstance(ref, MediaRef) or ref.kind != MediaKind.IMAGE:
@@ -1122,6 +1128,85 @@ async def compress_to_max_pixels_async(
     )
 
 
+def _normalize_encode_format(output_format: str) -> str:
+    key = output_format.strip().lower()
+    if key == "jpg":
+        return "jpeg"
+    if key in ("png", "jpeg", "webp"):
+        return key
+    return "webp"
+
+
+def _save_pil_as(image: Any, output_format: str) -> bytes:
+    """把已打开的 PIL 图编成 png / jpeg / webp。jpeg 透明通道铺白底。"""
+    from PIL import Image
+
+    fmt = _normalize_encode_format(output_format)
+    buf = BytesIO()
+    if fmt == "jpeg":
+        if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+            rgba = image.convert("RGBA")
+            canvas = Image.new("RGB", rgba.size, (255, 255, 255))
+            canvas.paste(rgba, mask=rgba.split()[-1])
+            canvas.save(buf, format="JPEG", quality=_JPEG_QUALITY)
+        else:
+            image.convert("RGB").save(buf, format="JPEG", quality=_JPEG_QUALITY)
+        return buf.getvalue()
+    if fmt == "webp":
+        ready = image.convert("RGBA") if image.mode in ("RGBA", "LA", "P") else image.convert("RGB")
+        ready.save(buf, format="WEBP", quality=_WEBP_QUALITY)
+        return buf.getvalue()
+    ready = image.convert("RGBA") if image.mode in ("RGBA", "LA", "P") else image.convert("RGB")
+    ready.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+_ENCODE_FORMAT_MIME: dict[str, str] = {
+    "png": "image/png",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+}
+
+
+def encode_pil_image(image: object, output_format: str) -> tuple[bytes, str]:
+    """PIL.Image → (bytes, mime)。"""
+    from PIL import Image
+
+    if not isinstance(image, Image.Image):
+        raise TypeError(f"encode_pil_image 需要 PIL.Image,得到 {type(image).__name__}")
+    fmt = _normalize_encode_format(output_format)
+    return _save_pil_as(image, fmt), _ENCODE_FORMAT_MIME[fmt]
+
+
+def encode_image_bytes(raw: bytes, output_format: str) -> bytes:
+    """把图片字节转成 png / jpeg / webp。已是目标格式则尽量透传。"""
+    from PIL import Image
+
+    fmt = _normalize_encode_format(output_format)
+    if fmt == "png" and raw.startswith(_PNG_MAGIC):
+        try:
+            with Image.open(BytesIO(raw)) as img:
+                if img.mode not in ("P", "LA"):
+                    return raw
+        except Exception:  # noqa: BLE001 — 嗅探失败则走完整转码
+            pass
+    elif fmt == "jpeg" and raw.startswith(_JPEG_MAGIC):
+        return raw
+    elif fmt == "webp" and _is_webp_bytes(raw):
+        return raw
+
+    with Image.open(BytesIO(raw)) as img:
+        img.load()
+        return _save_pil_as(img, fmt)
+
+
+async def encode_image_bytes_async(raw: bytes, output_format: str) -> bytes:
+    """``encode_image_bytes`` 的线程池封装,避免阻塞事件循环。"""
+    import asyncio
+
+    return await asyncio.to_thread(encode_image_bytes, raw, output_format)
+
+
 __all__ = [
     "SEEDANCE_IMAGE_MIN_EDGE",
     "SEEDANCE_ASPECT_MIN",
@@ -1157,6 +1242,9 @@ __all__ = [
     "pick_tx_outpaint_ratio",
     "compress_to_max_pixels",
     "compress_to_max_pixels_async",
+    "encode_pil_image",
+    "encode_image_bytes",
+    "encode_image_bytes_async",
     "DEFAULT_MAX_PIXELS",
 ]
 

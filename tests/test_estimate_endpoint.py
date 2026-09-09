@@ -34,13 +34,41 @@ def test_estimate_gpt_image2_dynamic():
     assert r_low["point_cost"] < r_default["point_cost"]
 
 
-def test_estimate_gpt_image2_auto_ratio():
+def test_estimate_gpt_image25_token_anchors_and_keeps_own_name():
+    """2.5 max=2.0 high;2.5 high=2.0 medium;estimate 回显各自 catalog name。"""
+    r2_high = asyncio.run(estimate_model_points("gpt-image-2", ratio="1:1", image_size="2K", quality="high"))
+    r2_med = asyncio.run(estimate_model_points("gpt-image-2", ratio="1:1", image_size="2K", quality="medium"))
+    r_sun_max = asyncio.run(
+        estimate_model_points("gpt-image-2.5-sunburst", ratio="1:1", image_size="2K", quality="max")
+    )
+    r_flare_max = asyncio.run(
+        estimate_model_points("gpt-image-2.5-flare", ratio="1:1", image_size="2K", quality="max")
+    )
+    r_sun_high = asyncio.run(
+        estimate_model_points("gpt-image-2.5-sunburst", ratio="1:1", image_size="2K", quality="high")
+    )
+    r_flare_high = asyncio.run(
+        estimate_model_points("gpt-image-2.5-flare", ratio="1:1", image_size="2K", quality="high")
+    )
+    assert r_sun_max["model"] == "gpt-image-2.5-sunburst"
+    assert r_flare_max["model"] == "gpt-image-2.5-flare"
+    assert r_sun_max["point_cost"] == r2_high["point_cost"]
+    assert r_flare_max["point_cost"] == r2_high["point_cost"]
+    assert r_sun_high["point_cost"] == r2_med["point_cost"]
+    assert r_flare_high["point_cost"] == r2_med["point_cost"]
+    assert r_sun_max["is_dynamic"] is True and r_flare_max["is_dynamic"] is True
+    r2_label_med = asyncio.run(estimate_model_points("gpt-image-2", ratio="1:1", image_size="2K", quality="medium"))
+    r25_label_med = asyncio.run(
+        estimate_model_points("gpt-image-2.5-flare", ratio="1:1", image_size="2K", quality="medium")
+    )
+    assert r25_label_med["point_cost"] != r2_label_med["point_cost"]
+
+
+def test_estimate_gpt_image2_auto_ratio_uses_default_square():
     """ratio=auto → 1024x1024 估算,与显式 1:1 1K 同尺寸应相同"""
     r_auto = asyncio.run(estimate_model_points("gpt-image-2", ratio="auto", image_size="4K", quality="high"))
-    # auto 回落 1024x1024,与 1:1 1K (也是 1024x1024) 同尺寸
     r_1k = asyncio.run(estimate_model_points("gpt-image-2", ratio="1:1", image_size="1K", quality="high"))
     assert r_auto["point_cost"] == r_1k["point_cost"]
-    # 但 auto(1024x1024) 与 4K 1:1 (3840x2160) 应不同
     r_4k = asyncio.run(estimate_model_points("gpt-image-2", ratio="1:1", image_size="4K", quality="high"))
     assert r_auto["point_cost"] != r_4k["point_cost"]
 

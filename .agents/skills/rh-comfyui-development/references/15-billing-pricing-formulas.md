@@ -37,12 +37,16 @@ billing mapper (utils/mappers/<model>_billing.py)
 
 ### 15.2.1 图片 — 按 quality + 输出像素面积分档
 
-**代表模型**:`gpt-image-2`
+**代表模型**:`gpt-image-2`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`
 
-**公式**(取自上游公开网关):
+**公式**(取自上游公开网关;2.5 与 2.0 **同** `POINTS_PER_MILLION_TOKENS=21_000`,不要另造 2.5 单价):
 
 ```
+# 2.0
 quality_axis_factor = {"low": 16, "medium": 48, "high": 96}
+# 2.5:high 对齐 2.0 medium;max 对齐 2.0 high;low 对齐 2.0 low;
+# medium/xhigh 在相邻锚点之间插值
+quality_axis_factor = {"low": 16, "medium": 32, "high": 48, "xhigh": 72, "max": 96}
 short_axis_factor  = (2 * quality_axis_factor * short_edge + long_edge) // (2 * long_edge)
 tokens             = (quality_axis_factor * short_axis_factor * (offset + w*h) + scale - 1) // scale
                     其中 offset = 2_000_000, scale = 4_000_000
@@ -70,6 +74,21 @@ points             = (tokens * 21_000 + 999_999) // 1_000_000
 - 像素 ∈ [655_360, 8_294_400]
 
 **回归测试**:`tests/test_ratio_size_map_correctness.py` 校验每个 cell 满足 4 条约束、单调性。
+
+**后结算**(与 Seedance 2.x 同路径:`settle_cost` → `BillingPolicy.settle` 只补/退差额):
+预扣仍用上式(输出像素 token)。成功后若 usage 能解析出 token,按官方 **USD/1M × 7 元 × 100** 分项实扣:
+
+| 档 | USD/1M | 积分/1M |
+|---|---|---|
+| image output | $30 | 21_000 |
+| image input | $8 | 5_600 |
+| image cached input | $2 | 1_400 |
+| text input | $5 | 3_500 |
+| text cached input | $1.25 | 875 |
+
+官方响应读顶层 `usage`(input/output + `input_tokens_details`);聚合网关读 `usage.rawUsage`。
+`cached_tokens` 优先从 image input 扣,余量再扣 text。无法解析 → 维持预扣。
+通道须把 usage 挂到 `NodeOutput.usage`(官方 mapper / openai_image / gateway / AIF)。
 
 ### 15.2.2 图片 — 按 image_size 档位固定 token + 输入图数
 

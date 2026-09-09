@@ -28,7 +28,7 @@ class AceStep15Def(MusicPipelineModel):
             task_type=TaskType("music"),
             backend="comfyui",
             point_cost=2,
-            description="音乐生成模型，支持多种风格和歌词输入",
+            description="多风格，可填歌词",
             knowledge_content=(
                 "音乐生成模型。"
                 "\n"
