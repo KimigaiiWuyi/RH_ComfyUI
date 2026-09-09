@@ -23,9 +23,10 @@ from RH_ComfyUI.core.schema.types import (
 )
 from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
 from RH_ComfyUI.core.channels.channel import LocalChannel, ChannelBinding
+from RH_ComfyUI.utils.image_process import VIDEO_REF_MAX_LONG_EDGE
 
 
-def _big_png(width: int = 2000, height: int = 1000) -> bytes:
+def _big_png(width: int = 4000, height: int = 2000) -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", (width, height), (1, 2, 3)).save(buf, format="PNG")
     return buf.getvalue()
@@ -72,12 +73,12 @@ def test_normalize_shrinks_images_and_ordered_content():
 
     assert out.resolution == "1080p"  # 大小写归一
     w, h = _size_of(out.images[0])
-    assert max(w, h) <= 800  # 参考图等比缩放
+    assert max(w, h) <= VIDEO_REF_MAX_LONG_EDGE  # 参考图等比缩放
 
     img_item = out.ordered_content[0]
     assert img_item.media is not None and img_item.media.data is not None
     w2, h2 = _size_of(img_item.media.data)
-    assert max(w2, h2) <= 800  # ordered_content 图片项同样被预处理
+    assert max(w2, h2) <= VIDEO_REF_MAX_LONG_EDGE  # ordered_content 图片项同样被预处理
     assert img_item.media.role == "first_frame"  # role 等元数据不丢
 
     assert out.ordered_content[1].text == "镜头拉远"  # 非图片项原样保留

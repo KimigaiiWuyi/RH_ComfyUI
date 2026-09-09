@@ -98,6 +98,23 @@ def test_family_rejects_transparent_jpeg(cls: type[GptImageFamilyModel]):
 
 
 @pytest.mark.parametrize("cls", _FAMILY)
+def test_family_validate_omitted_or_webp_becomes_png(cls: type[GptImageFamilyModel]):
+    """image_pack 扩图不传 / 遗留 webp 必须过校验并落到 png。"""
+    m = cls()
+    omitted = GenerationRequest(task_type=TaskType.IMAGE, prompt="x", ratio="16:9")
+    m.validate(omitted)
+    assert omitted.params["output_format"] == "png"
+    leftover = GenerationRequest(
+        task_type=TaskType.IMAGE,
+        prompt="x",
+        ratio="16:9",
+        params={"output_format": "webp"},
+    )
+    m.validate(leftover)
+    assert leftover.params["output_format"] == "png"
+
+
+@pytest.mark.parametrize("cls", _FAMILY)
 def test_family_normalize_and_estimate_align(cls: type[GptImageFamilyModel]):
     from RH_ComfyUI.utils.mappers.gpt_image2_billing import estimate_gpt_image2_points
 

@@ -5,6 +5,7 @@ from .image_process import (
     SEEDANCE_ASPECT_MAX,
     SEEDANCE_ASPECT_MIN,
     SEEDANCE_IMAGE_MIN_EDGE,
+    VIDEO_REF_MAX_LONG_EDGE,
     crop_to_seedance_aspect,
     ensure_min_edge,
     image_mime_from_bytes,
@@ -25,6 +26,7 @@ from .image_process import (
 )
 
 __all__ = [
+    "VIDEO_REF_MAX_LONG_EDGE",
     "SEEDANCE_IMAGE_MIN_EDGE",
     "SEEDANCE_ASPECT_MIN",
     "SEEDANCE_ASPECT_MAX",

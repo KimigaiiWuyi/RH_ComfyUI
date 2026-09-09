@@ -87,7 +87,7 @@ class VideoGenerationBase(AIGCGenerationBase):
         prompt 带结构化代号也不冲突。
 
         images 与 ordered_content 里的图片项统一走 preprocess_for_video
-        (等比缩放最长边 ≤ 800px),再收成标准 JPEG(透明铺灰底);入口层
+        (等比缩放最长边 ≤ 2048px),再收成标准 JPEG(透明铺灰底);入口层
         (api.submit / bot 命令)不再各自预处理,run() 是唯一执行路径。
         """
         from ...utils.core.media_labels import ensure_media_ref_labels

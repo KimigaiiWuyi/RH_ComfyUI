@@ -19,6 +19,9 @@ from __future__ import annotations
 from io import BytesIO
 from typing import Any, Callable
 
+# 视频参考图最长边上限(2K)。超过才等比缩小,小图不放大。
+VIDEO_REF_MAX_LONG_EDGE = 2048
+
 # Seedance 官方硬限:参考图宽、高均须 ≥ 此像素,否则上游拒收。
 SEEDANCE_IMAGE_MIN_EDGE = 300
 
@@ -392,7 +395,7 @@ async def prepare_seedance_image_ref(ref: Any) -> Any:
     )
 
 
-def resize_long_edge(data: bytes, max_long_edge: int = 800) -> bytes:
+def resize_long_edge(data: bytes, max_long_edge: int = VIDEO_REF_MAX_LONG_EDGE) -> bytes:
     """对图片进行等比缩放,最长边不超过 max_long_edge 像素。
 
     如果图片本身已经满足条件,直接返回原始数据不处理。
@@ -400,7 +403,7 @@ def resize_long_edge(data: bytes, max_long_edge: int = 800) -> bytes:
 
     Args:
         data: 原始图片字节
-        max_long_edge: 最长边上限(px),默认 800
+        max_long_edge: 最长边上限(px),默认 ``VIDEO_REF_MAX_LONG_EDGE``(2048)
 
     Returns:
         处理后的图片字节;异常时返回原始数据
@@ -502,7 +505,7 @@ def build_process_pipeline(
     示例::
 
         pipeline = build_process_pipeline(
-            lambda d: resize_long_edge(d, max_long_edge=800),
+            lambda d: resize_long_edge(d, max_long_edge=VIDEO_REF_MAX_LONG_EDGE),
             correct_orientation,
         )
         result = pipeline(image_bytes)
@@ -519,7 +522,7 @@ def build_process_pipeline(
 # ── 预设管道 ───────────────────────────────────────────────────────
 
 
-def preprocess_for_video(data: bytes, max_long_edge: int = 800) -> bytes:
+def preprocess_for_video(data: bytes, max_long_edge: int = VIDEO_REF_MAX_LONG_EDGE) -> bytes:
     """视频生成前的标准图片预处理管道。
 
     当前步骤:
@@ -528,7 +531,7 @@ def preprocess_for_video(data: bytes, max_long_edge: int = 800) -> bytes:
 
     Args:
         data: 原始图片字节
-        max_long_edge: 最长边上限(px),默认 800
+        max_long_edge: 最长边上限(px),默认 ``VIDEO_REF_MAX_LONG_EDGE``(2048)
 
     Returns:
         处理后的图片字节
@@ -1208,6 +1211,7 @@ async def encode_image_bytes_async(raw: bytes, output_format: str) -> bytes:
 
 
 __all__ = [
+    "VIDEO_REF_MAX_LONG_EDGE",
     "SEEDANCE_IMAGE_MIN_EDGE",
     "SEEDANCE_ASPECT_MIN",
     "SEEDANCE_ASPECT_MAX",

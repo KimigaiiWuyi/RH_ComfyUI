@@ -69,7 +69,7 @@ run(request)
 `VideoTaskShape`:`TEXT2VIDEO / IMAGE2VIDEO / FIRST_LAST_FRAME / MULTIMODAL`。
 
 `VideoGenerationBase.normalize()` 统一完成视频预处理:分辨率小写归一 +
-`images` 与 `ordered_content` 图片项的等比缩放(最长边 ≤ 800px,EXIF 校正)。
+`images` 与 `ordered_content` 图片项的等比缩放(最长边 ≤ 2048px,EXIF 校正)。
 入口层(api.submit / bot 命令)**不再各自预处理** —— run() 是唯一执行路径,
 此处天然覆盖三入口(回归测试 `tests/test_video_normalize.py`)。
 
