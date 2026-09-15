@@ -17,6 +17,9 @@ from .overrides import (
     HappyHorseVideoModel,
     Seedance25VideoModel,
 )
+from ...core.base.video import VideoTaskShape
+from ...core.base.errors import ValidationError
+from ...core.schema.card import ModelCard
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
@@ -38,6 +41,7 @@ from ...utils.mappers.seedance_billing import (
     estimate_seedance15_pro_points,
     input_video_duration_from_params,
 )
+from ...utils.backends.seedance.classify import resolve_request_frame_mode
 from ...utils.mappers.happyhorse_billing import estimate_happyhorse_points
 from ...utils.mappers.minimax_h3_billing import estimate_minimax_h3_points
 
@@ -57,10 +61,32 @@ def _settle_output_duration(request: GenerationRequest, usage: dict[str, Any]) -
 
 
 class Seedance15ProDef(SeedanceVideoModel):
-    """Seedance 1.5 Pro — 定义迁移自 pipelines YAML(2026-07 起以代码为准)"""
+    """Seedance 1.5 Pro — 文生 / 图生 / 首尾帧(官方 1.x,无 2.0 多参考)。"""
 
     def __init__(self) -> None:
         super().__init__(self.node_def())
+        self.supported_shapes = {
+            VideoTaskShape.TEXT2VIDEO,
+            VideoTaskShape.IMAGE2VIDEO,
+            VideoTaskShape.FIRST_LAST_FRAME,
+        }
+        self.max_reference_total = 2
+        self.card = ModelCard(
+            description=self.node.description or "Seedance 1.5 Pro 文生/图生/首尾帧",
+            strengths=["离线推理 flex 半价", "最高 1080p", "有声视频", "首尾帧"],
+            categories=["短视频", "写实"],
+            weaknesses=["不支持多参考图/视频/音频(请用 Seedance 2.0)"],
+            sample_prompts=["一只橘猫从石桥上走过,雨夜灯光反射在水面上"],
+            languages=["zh", "en"],
+            speed_hint="slow",
+        )
+
+    def validate(self, request: GenerationRequest) -> None:
+        super().validate(request)
+        if request.video_refs or request.audio_refs:
+            raise ValidationError(f"{self.display_name} 仅支持文生/图生/首尾帧,不接受参考视频或参考音频")
+        if resolve_request_frame_mode(request) == "reference":
+            raise ValidationError(f"{self.display_name} 不支持多参考,请改用首尾帧或只传 1~2 张图")
 
     @staticmethod
     def node_def() -> NodeDef:
@@ -80,9 +106,10 @@ class Seedance15ProDef(SeedanceVideoModel):
                 "\n"
                 "- 1080p 分辨率"
                 "\n"
-                "- 按输入自动决定形态:0 张=文生 / 1 张=图生 / 2 张=首尾帧 / 多图+音视频=多模态"
+                "- 按输入自动决定形态:0 张=文生 / 1 张=图生 / 2 张=首尾帧"
                 "\n"
-                "支持时长:4~12 秒。"
+                "支持时长:4~12 秒。不支持多参考图、参考视频或参考音频"
+                "(需要多素材参考时改用 seedance2)。"
                 "\n"
                 "适用场景:成本敏感的生产场景。"
                 "\n"
@@ -102,35 +129,20 @@ class Seedance15ProDef(SeedanceVideoModel):
             mode="declarative",
             inputs={
                 "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="视频生成提示词"),
-                # 与 Seedance 2.0 一致:按输入自动决定 文生/图生/首尾帧/多模态
                 "images": PortSpec(
                     type=PortType.LIST,
                     min_items=0,
-                    max_items=9,
+                    max_items=2,
                     item_type=PortType.IMAGE,
                     title="参考图片",
-                    description="参考图片:0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考",
-                ),
-                "video_refs": PortSpec(
-                    type=PortType.LIST,
-                    max_items=3,
-                    item_type=PortType.VIDEO,
-                    title="参考视频",
-                    description='参考视频,prompt 中用 "视频1/视频2/..." 引用',
-                ),
-                "audio_refs": PortSpec(
-                    type=PortType.LIST,
-                    max_items=3,
-                    item_type=PortType.AUDIO,
-                    title="参考音频",
-                    description='参考音频,prompt 中用 "音频1/音频2/..." 引用',
+                    description="参考图片(0~2 张):0 张=文生 / 1 张=首帧 / 2 张=首尾帧",
                 ),
                 "frame_mode": PortSpec(
                     type=PortType.ENUM,
                     default="auto",
-                    values=["auto", "first_last", "reference"],
+                    values=["auto", "first_last"],
                     title="多图角色",
-                    description="多图角色:auto=2 图默认首尾帧 / first_last=强制首尾帧 / reference=全部参考",
+                    description="auto=按张数判定;first_last=强制首尾帧。1.5 Pro 不支持多参考",
                 ),
                 "ratio": PortSpec(
                     type=PortType.ENUM,

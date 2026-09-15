@@ -51,12 +51,37 @@ def test_text_only_image_models_have_no_image_port_and_reject_images(cls):
         m.validate(req)
 
 
-@pytest.mark.parametrize("cls", [Seedance15ProDef, Seedance2FastDef, Seedance25Def])
+@pytest.mark.parametrize("cls", [Seedance2FastDef, Seedance25Def])
 def test_seedance_variants_declare_media_ports(cls):
-    # 模型 supported_shapes 含 图生/多模态,input_schema 必须同步声明媒体端口
+    # 2.x 含图生/多模态,input_schema 必须同步声明媒体端口
     node = cls.node_def()
     for port in ("images", "video_refs", "audio_refs", "frame_mode"):
         assert port in node.inputs, f"{cls.__name__} 缺少 {port} 端口"
+
+
+def test_seedance15_is_first_last_only():
+    """1.5 Pro 官方只有文生/图生/首尾帧,catalog 不得再广告 2.0 多参考。"""
+    from RH_ComfyUI.core.base.video import VideoTaskShape
+
+    node = Seedance15ProDef.node_def()
+    assert "images" in node.inputs
+    assert node.inputs["images"].max_items == 2
+    assert "video_refs" not in node.inputs
+    assert "audio_refs" not in node.inputs
+    fm = node.inputs["frame_mode"]
+    assert "first_last" in (fm.values or [])
+    assert "reference" not in (fm.values or [])
+    model = Seedance15ProDef()
+    assert VideoTaskShape.MULTIMODAL not in model.supported_shapes
+    model.validate(GenerationRequest(task_type=TaskType.VIDEO, prompt="x"))
+    with pytest.raises(ValidationError):
+        model.validate(
+            GenerationRequest(
+                task_type=TaskType.VIDEO,
+                prompt="x",
+                params={"frame_mode": "reference"},
+            )
+        )
 
 
 def test_wan30_declares_seedance2_like_ports_plus_file():
