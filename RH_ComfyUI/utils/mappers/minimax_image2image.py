@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import io
+import asyncio
 
 from ..core.request import OutputType, GenerationResult, GenerationRequest
 from ..backends.minimax.api import MiniMaxAPI
@@ -26,7 +27,7 @@ async def minimax_image01_img2img_mapper(
     # 构建 subject_reference:将用户上传的图片编码为 base64
     subject_reference = []
     for img_bytes in request.images:
-        data_url = api._encode_image_to_base64(img_bytes)
+        data_url = await asyncio.to_thread(api._encode_image_to_base64, img_bytes)
         subject_reference.append({"image": data_url})
 
     images = await api.generate_image(

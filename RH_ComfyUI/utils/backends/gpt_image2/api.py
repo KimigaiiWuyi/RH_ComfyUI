@@ -170,7 +170,13 @@ class GPTImage2API:
                         logger.warning(f"[GPT-Image2] 下载图片失败，状态码: {resp.status}")
                         return 500
                     image_data = await resp.read()
-                    return Image.open(io.BytesIO(image_data))
+
+                    def _open() -> Image.Image:
+                        img = Image.open(io.BytesIO(image_data))
+                        img.load()
+                        return img
+
+                    return await asyncio.to_thread(_open)
         except Exception as e:
             logger.warning(f"[GPT-Image2] 下载图片失败: {e}")
             return 500
@@ -196,7 +202,7 @@ class GPTImage2API:
         if content.startswith("data:") or (
             len(content) > 100 and "/" not in content and not content.startswith(("http://", "https://"))
         ):
-            return self._decode_base64_image(content)
+            return await asyncio.to_thread(self._decode_base64_image, content)
 
         if content.startswith(("http://", "https://")):
             return await self._download_image_from_url(content)
@@ -307,7 +313,17 @@ class GPTImage2API:
         if output_format:
             request_body["output_format"] = output_format
         if image_list is not None:
-            request_body["image"] = [base64.b64encode(img_bytes).decode() for img_bytes in image_list]
+
+            def _enc() -> list[str]:
+                return [base64.b64encode(img_bytes).decode() for img_bytes in image_list]
+
+            total = 0
+            for img_bytes in image_list:
+                total += len(img_bytes)
+            if total >= 256 * 1024:
+                request_body["image"] = await asyncio.to_thread(_enc)
+            else:
+                request_body["image"] = _enc()
 
         resp = await self._request("POST", self.images_url, headers=headers, json=request_body)
 

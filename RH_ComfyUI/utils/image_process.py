@@ -11,13 +11,20 @@
 - ensure_min_edge: 等比放大使宽、高均不少于指定阈值(Seedance 参考图 ≥300)
 - crop_to_seedance_aspect: 居中裁切使宽高比落入官方 0.40~2.50(目标 0.41 / 2.49)
 - prepare_seedance_image_bytes: 先放大再裁切,Seedance 2.x 提交前共用
+- prepare_seedance_image_bytes_async / run_image_prep: 专用线程池,禁止在事件循环上跑
 - ensure_standard_image: 上传前一律收成标准 JPEG(透明通道铺中性灰底)
 """
 
 from __future__ import annotations
 
+import atexit
+import asyncio
+import hashlib
+import threading
 from io import BytesIO
-from typing import Any, Callable
+from typing import Any, TypeVar, Callable
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 
 # 视频参考图最长边上限(2K)。超过才等比缩小,小图不放大。
 VIDEO_REF_MAX_LONG_EDGE = 2048
@@ -31,6 +38,73 @@ SEEDANCE_ASPECT_MIN = 0.41
 SEEDANCE_ASPECT_MAX = 2.49
 SEEDANCE_ASPECT_OFFICIAL_MIN = 0.40
 SEEDANCE_ASPECT_OFFICIAL_MAX = 2.50
+
+# 参考图预处理专用池:Pillow 解码/JPEG optimize 会握一会儿 GIL,但不能跑在事件循环上。
+# 与默认 to_thread 池分开,避免 30 张大 PNG 把读盘/R2 压缩也排干。
+_IMG_PREP_WORKERS = 4
+_IMG_PREP_POOL = ThreadPoolExecutor(max_workers=_IMG_PREP_WORKERS, thread_name_prefix="rh-img-prep")
+atexit.register(_IMG_PREP_POOL.shutdown, wait=False)
+
+_T = TypeVar("_T")
+_CACHE_MAX_ENTRIES = 64
+_CACHE_MAX_BYTES = 64 * 1024 * 1024
+_cache_lock = threading.Lock()
+_img_prep_cache: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
+_img_prep_cache_bytes = 0
+
+
+def _img_prep_cache_key(tag: str, data: bytes) -> str:
+    return f"{tag}:{hashlib.sha256(data).hexdigest()}"
+
+
+def _img_prep_cache_get(key: str) -> tuple[bytes, str] | None:
+    with _cache_lock:
+        if key not in _img_prep_cache:
+            return None
+        _img_prep_cache.move_to_end(key)
+        return _img_prep_cache[key]
+
+
+def _img_prep_cache_put(key: str, out: bytes, info: str) -> None:
+    global _img_prep_cache_bytes
+    with _cache_lock:
+        if key in _img_prep_cache:
+            old = _img_prep_cache.pop(key)
+            _img_prep_cache_bytes -= len(old[0])
+        while _img_prep_cache and (
+            len(_img_prep_cache) >= _CACHE_MAX_ENTRIES or _img_prep_cache_bytes + len(out) > _CACHE_MAX_BYTES
+        ):
+            _, evicted = _img_prep_cache.popitem(last=False)
+            _img_prep_cache_bytes -= len(evicted[0])
+        _img_prep_cache[key] = (out, info)
+        _img_prep_cache_bytes += len(out)
+
+
+def clear_image_prep_cache() -> None:
+    """测试用:清空参考图预处理缓存。"""
+    global _img_prep_cache_bytes
+    with _cache_lock:
+        _img_prep_cache.clear()
+        _img_prep_cache_bytes = 0
+
+
+def _cached_image_prep(tag: str, data: bytes, fn: Callable[[bytes], tuple[bytes, str]]) -> tuple[bytes, str]:
+    if not data:
+        return data, ""
+    key = _img_prep_cache_key(tag, data)
+    hit = _img_prep_cache_get(key)
+    if hit is not None:
+        return hit
+    out, info = fn(data)
+    _img_prep_cache_put(key, out, info)
+    return out, info
+
+
+async def run_image_prep(fn: Callable[..., _T], *args: object) -> _T:
+    """在专用参考图线程池跑 CPU 活,让出事件循环。"""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_IMG_PREP_POOL, fn, *args)
+
 
 # ── 核心函数 ──────────────────────────────────────────────────────
 
@@ -358,12 +432,24 @@ def standardize_generation_images(request: Any) -> Any:
     return request
 
 
+def _seedance_bytes_cached(data: bytes) -> tuple[bytes, str]:
+    return _cached_image_prep("seedance", data, prepare_seedance_image_bytes)
+
+
+async def prepare_seedance_image_bytes_async(data: bytes) -> tuple[bytes, str]:
+    """``prepare_seedance_image_bytes`` 的线程池封装,带内容哈希缓存。"""
+    if not data:
+        return data, ""
+    return await run_image_prep(_seedance_bytes_cached, data)
+
+
 async def prepare_seedance_image_ref(ref: Any) -> Any:
     """Seedance 参考图提交前改写:短边放大 + 宽高比裁切,并清掉旧 url。
 
     2.0 / 2.5 / Fast / Mini 共用。``asset://``、非图片、取不到字节、已满足
     宽高与比例时原样返回。调用方应在 materialize / 上传之前走本函数,避免
     http URL 把小图或超比例原图交给上游。
+    Pillow 必须进 ``rh-img-prep`` 池,10MB+ PNG 在循环上会冻死全站 HTTP。
     """
     from .core.types import MediaRef, MediaKind
     from .video_process import ensure_media_bytes
@@ -376,7 +462,7 @@ async def prepare_seedance_image_ref(ref: Any) -> Any:
     raw = ref.data if ref.data else await ensure_media_bytes(ref)
     if not raw:
         return ref
-    new_data, info = prepare_seedance_image_bytes(raw)
+    new_data, info = await prepare_seedance_image_bytes_async(raw)
     if not info:
         return ref
     try:
@@ -1220,6 +1306,9 @@ __all__ = [
     "ensure_min_edge",
     "crop_to_seedance_aspect",
     "prepare_seedance_image_bytes",
+    "prepare_seedance_image_bytes_async",
+    "run_image_prep",
+    "clear_image_prep_cache",
     "image_mime_from_bytes",
     "is_standard_jpeg",
     "is_standard_jpeg_or_png",

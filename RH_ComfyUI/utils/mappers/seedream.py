@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import base64
+import asyncio
 from typing import TYPE_CHECKING
 
 from ..core.types import NodeOutput
@@ -180,7 +181,7 @@ async def seedream_mapper(request, api: "SeedreamAPI") -> NodeOutput:
             body["image"] = image_urls[0] if len(image_urls) == 1 else image_urls
         else:
             # 没 R2 则回落 data URL(不推荐,可能被 413 拒)
-            body["image"] = _encode_images_to_data_urls(list(request.images))
+            body["image"] = await asyncio.to_thread(_encode_images_to_data_urls, list(request.images))
 
     # Pro 不接受 Lite-only 字段(防御性拦截)
     if _is_pro_model(model):

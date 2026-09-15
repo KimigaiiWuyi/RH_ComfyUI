@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from io import BytesIO
 
 from PIL import Image
@@ -16,11 +18,14 @@ from RH_ComfyUI.utils.image_process import (
     SEEDANCE_ASPECT_OFFICIAL_MAX,
     SEEDANCE_ASPECT_OFFICIAL_MIN,
     SEEDANCE_IMAGE_MIN_EDGE,
+    clear_image_prep_cache,
     crop_to_seedance_aspect,
     ensure_min_edge,
     image_mime_from_bytes,
     prepare_seedance_image_bytes,
+    prepare_seedance_image_bytes_async,
     prepare_seedance_image_ref,
+    run_image_prep,
 )
 
 
@@ -271,6 +276,64 @@ def test_prepare_seedance_image_ref_clears_url_after_crop():
     assert out.url is None
     assert out.data is not None
     _assert_seedance_aspect_ok(*_open(out.data).size)
+
+
+def test_prepare_seedance_image_bytes_async_matches_sync():
+    raw = _png(80, 80)
+    clear_image_prep_cache()
+
+    async def _run() -> tuple[bytes, str]:
+        return await prepare_seedance_image_bytes_async(raw)
+
+    out_async, info_async = asyncio.run(_run())
+    out_sync, info_sync = prepare_seedance_image_bytes(raw)
+    assert out_async == out_sync
+    assert info_async == info_sync
+    img = _open(out_async)
+    assert img.size[0] >= SEEDANCE_IMAGE_MIN_EDGE
+    assert img.size[1] >= SEEDANCE_IMAGE_MIN_EDGE
+
+
+def test_prepare_seedance_image_bytes_async_cache_hit():
+    raw = _jpeg(100, 50)
+    clear_image_prep_cache()
+
+    async def _run() -> tuple[bytes, bytes]:
+        a, _ = await prepare_seedance_image_bytes_async(raw)
+        b, _ = await prepare_seedance_image_bytes_async(raw)
+        return a, b
+
+    first, second = asyncio.run(_run())
+    assert first == second
+    assert first is second
+
+
+def test_run_image_prep_lets_event_loop_tick():
+    worker_names: list[str] = []
+
+    def _sleep_on_pool(payload: bytes) -> bytes:
+        worker_names.append(threading.current_thread().name)
+        time.sleep(0.25)
+        return payload
+
+    async def _run() -> int:
+        ticks = 0
+
+        async def _ticker() -> None:
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.05)
+                ticks += 1
+
+        task = asyncio.create_task(_ticker())
+        await run_image_prep(_sleep_on_pool, b"x")
+        task.cancel()
+        return ticks
+
+    ticks = asyncio.run(_run())
+    assert ticks >= 3
+    assert worker_names
+    assert worker_names[0].startswith("rh-img-prep")
 
 
 def test_prepare_request_clamps_audio_and_inlines(monkeypatch):

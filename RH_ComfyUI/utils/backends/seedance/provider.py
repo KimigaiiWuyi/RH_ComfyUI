@@ -369,7 +369,10 @@ class SeedanceProvider(ABC):
             hosted = await self._publish_video_bytes(ref.data, mime)
             if hosted:
                 return hosted
-        return self.bytes_to_data_url(ref.data, mime)
+        data = ref.data
+        if len(data) >= 256 * 1024:
+            return await asyncio.to_thread(self.bytes_to_data_url, data, mime)
+        return self.bytes_to_data_url(data, mime)
 
     async def materialize_all(self, refs: list[MediaRef]) -> list[Optional[str]]:
         """并行准备多个媒体,结果顺序与输入一致(受 Semaphore 限流)。"""

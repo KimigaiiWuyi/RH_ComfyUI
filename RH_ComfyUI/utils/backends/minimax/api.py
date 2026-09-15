@@ -168,7 +168,13 @@ class MiniMaxAPI:
                         logger.warning(f"[MiniMax] 下载图片失败，状态码: {resp.status}")
                         return 500
                     image_data = await resp.read()
-                    return Image.open(io.BytesIO(image_data))
+
+                    def _open() -> Image.Image:
+                        img = Image.open(io.BytesIO(image_data))
+                        img.load()
+                        return img
+
+                    return await asyncio.to_thread(_open)
         except Exception as e:
             logger.warning(f"[MiniMax] 下载图片失败: {e}")
             return 500

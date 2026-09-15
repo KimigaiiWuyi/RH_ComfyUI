@@ -232,8 +232,9 @@ class MIMOAPI:
             elif reference_audio[:3] == b"ID3" or reference_audio[0:2] == b"\xff\xfb":
                 mime_type = "audio/mpeg"
 
-            b64_audio = base64.b64encode(reference_audio).decode("utf-8")
-            request_body["audio"]["voice"] = f"data:{mime_type};base64,{b64_audio}"
+            from ...offload import data_url_async
+
+            request_body["audio"]["voice"] = await data_url_async(reference_audio, mime_type)
 
         # 预置音色
         if voice and model == "mimo-v2.5-tts":

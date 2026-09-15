@@ -259,7 +259,11 @@ class MiniMaxH3Provider:
             ) from exc
         if published:
             return published
-        b64 = base64.b64encode(ref.data).decode("ascii")
+        data = ref.data
+        if len(data) >= 256 * 1024:
+            b64_b = await asyncio.to_thread(base64.b64encode, data)
+            return f"data:{mime};base64,{b64_b.decode('ascii')}"
+        b64 = base64.b64encode(data).decode("ascii")
         return f"data:{mime};base64,{b64}"
 
     async def materialize_all(self, refs: list[MediaRef]) -> list[Optional[str]]:

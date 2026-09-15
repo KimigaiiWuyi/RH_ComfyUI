@@ -65,7 +65,7 @@ async def prepare_ref_media_request(request: GenerationRequest, cfg: RefMediaPre
     from ...core.base.errors import ValidationError
     from ...core.schema.types import MediaRef, MediaKind, ContentItem, ContentItemType, media_ref_cache_key
     from ...utils.audio_process import clamp_seedance_ref_audio, clamp_minimax_h3_ref_audio
-    from ...utils.image_process import prepare_seedance_image_ref, prepare_seedance_image_bytes
+    from ...utils.image_process import prepare_seedance_image_ref, prepare_seedance_image_bytes_async
     from ...utils.video_process import (
         ensure_media_bytes,
         prepare_seedance_ref_video,
@@ -219,9 +219,9 @@ async def prepare_ref_media_request(request: GenerationRequest, cfg: RefMediaPre
         request.audio_refs = [_final_audio(a) for a in request.audio_refs]
 
     if request.images:
+        prepared = await asyncio.gather(*[prepare_seedance_image_bytes_async(raw) for raw in request.images])
         new_images: list[bytes] = []
-        for raw in request.images:
-            out, info = prepare_seedance_image_bytes(raw)
+        for out, info in prepared:
             if info:
                 logger.info(f"[{cfg.image_log}] 参考图预处理: {info}")
             new_images.append(out)

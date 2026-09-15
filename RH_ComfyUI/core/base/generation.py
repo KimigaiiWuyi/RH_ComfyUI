@@ -4,7 +4,7 @@
 
     run(request)
       ├─ 1. validate(request)            # schema 通用校验 + 子类跨字段校验
-      ├─ 2. normalize(request)           # 默认值填充 / 单位归一化(可覆盖)
+      ├─ 2. normalize(request)           # 有内联图则 rh-img-prep 池(C-46)
       ├─ 3. plugin_dry_run() 则抛 DryRunInterrupt
       ├─ 4. 钉扎 request.channel(空/auto=负载均衡;未知名称 ValidationError)
       ├─ 5. balancer.order_candidates()  # 负载均衡选通道(多通道时)
@@ -48,6 +48,17 @@ def normalize_channel_pin(raw: object) -> str | None:
     if not name or name.lower() == "auto":
         return None
     return name
+
+
+def _request_has_inline_image_bytes(request: GenerationRequest) -> bool:
+    """扁平 images 或 ordered_content 里带内联图字节。有则 normalize 必须进线程池。"""
+    if request.images:
+        return True
+    for item in request.ordered_content:
+        media = item.media
+        if media is not None and media.data:
+            return True
+    return False
 
 
 def requested_channel_name(request: GenerationRequest) -> str | None:
@@ -304,7 +315,13 @@ class AIGCGenerationBase(ABC):
            weighted / least_failures;熔断统计同理只看子集。
         """
         self.validate(request)
-        request = self.normalize(request)
+        # 内联图 Pillow 归一化必须进 rh-img-prep 池,否则 10MB PNG 冻死全站 HTTP(C-46)
+        if _request_has_inline_image_bytes(request):
+            from ...utils.image_process import run_image_prep
+
+            request = await run_image_prep(self.normalize, request)
+        else:
+            request = self.normalize(request)
         from ...rh_config.comfyui_config import plugin_dry_run
 
         if plugin_dry_run():
