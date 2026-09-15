@@ -11,10 +11,10 @@ from RH_ComfyUI.utils.mappers.gpt_image2_billing import (
     resolve_size_string,
     calculate_image_points,
     calculate_image_tokens,
-    estimate_gpt_image2_points,
-    normalize_gpt_image_usage,
     sanitize_gpt_image_raw,
     settle_gpt_image2_points,
+    normalize_gpt_image_usage,
+    estimate_gpt_image2_points,
 )
 
 # ── 常量 ──
@@ -114,8 +114,7 @@ def test_gpt_image25_quality_axis_matches_20_anchors():
 
 def test_gpt_image25_quality_monotonic():
     toks = [
-        calculate_image_tokens(q, 2048, 2048, "gpt-image-2.5-flare")
-        for q in ("low", "medium", "high", "xhigh", "max")
+        calculate_image_tokens(q, 2048, 2048, "gpt-image-2.5-flare") for q in ("low", "medium", "high", "xhigh", "max")
     ]
     assert toks == sorted(toks)
     assert len(set(toks)) == 5
@@ -250,8 +249,8 @@ def test_gpt_image2_estimate_cost_never_below_minimum():
                 assert m.estimate_cost(req) >= 1
     flare = GptImage25FlareDef()
     for q in ("low", "medium", "high", "xhigh", "max"):
-                req = _make_request(ratio="1:1", quality=q, image_size="2K")
-                assert flare.estimate_cost(req) >= 1
+        req = _make_request(ratio="1:1", quality=q, image_size="2K")
+        assert flare.estimate_cost(req) >= 1
 
 
 _OFFICIAL_USAGE = {
@@ -346,5 +345,10 @@ def test_settle_cached_tokens_prefer_image_input():
 
 def test_sanitize_omits_b64_json():
     cleaned = sanitize_gpt_image_raw(_OFFICIAL_USAGE)
-    assert cleaned["data"][0]["b64_json"] == "<omitted>"
-    assert _OFFICIAL_USAGE["data"][0]["b64_json"] == "..."
+    data = cleaned["data"]
+    assert isinstance(data, list)
+    item = data[0]
+    assert isinstance(item, dict)
+    assert item["b64_json"] == "<omitted>"
+    orig = _OFFICIAL_USAGE["data"][0]
+    assert orig["b64_json"] == "..."

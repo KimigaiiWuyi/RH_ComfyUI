@@ -7,10 +7,10 @@ import re
 import base64
 import asyncio
 from typing import Any, Dict, List, Union, Literal, Optional
+from dataclasses import field, dataclass
 
 import aiohttp
 from PIL import Image
-from dataclasses import dataclass, field
 
 from gsuid_core.logger import logger
 
@@ -343,9 +343,11 @@ class GPTImage2API:
                 return 500
 
             image = await self._parse_image_from_content(image_content)
+            if isinstance(image, int):
+                return image
             from ....utils.mappers.gpt_image2_billing import (
-                normalize_gpt_image_usage,
                 sanitize_gpt_image_raw,
+                normalize_gpt_image_usage,
             )
 
             return GPTImageDrawResult(

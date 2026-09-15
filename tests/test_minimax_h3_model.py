@@ -164,20 +164,14 @@ def test_channel_bindings_has_minimax_h3():
 
 
 def test_classify_t2v_i2v_flf_r2v():
-    t2v = classify_minimax_h3(
-        GenerationRequest(task_type=TaskType.VIDEO, prompt="a", ratio="16:9")
-    )
+    t2v = classify_minimax_h3(GenerationRequest(task_type=TaskType.VIDEO, prompt="a", ratio="16:9"))
     assert t2v.shape == VideoTaskShape.TEXT2VIDEO
 
-    i2v = classify_minimax_h3(
-        GenerationRequest(task_type=TaskType.VIDEO, prompt="a", images=[b"x"])
-    )
+    i2v = classify_minimax_h3(GenerationRequest(task_type=TaskType.VIDEO, prompt="a", images=[b"x"]))
     assert i2v.shape == VideoTaskShape.IMAGE2VIDEO
     assert i2v.images()[0].role == MediaRole.FIRST_FRAME
 
-    flf = classify_minimax_h3(
-        GenerationRequest(task_type=TaskType.VIDEO, prompt="a", images=[b"a", b"b"])
-    )
+    flf = classify_minimax_h3(GenerationRequest(task_type=TaskType.VIDEO, prompt="a", images=[b"a", b"b"]))
     assert flf.shape == VideoTaskShape.FIRST_LAST_FRAME
     assert flf.images()[0].role == MediaRole.FIRST_FRAME
     assert flf.images()[1].role == MediaRole.LAST_FRAME
@@ -252,13 +246,9 @@ def test_classify_explicit_four_modes():
 def test_to_api_resolution_and_ratio():
     assert to_api_resolution("768p") == "768P"
     assert to_api_resolution("2k") == "2K"
-    spec = classify_minimax_h3(
-        GenerationRequest(task_type=TaskType.VIDEO, prompt="a", ratio="9:16")
-    )
+    spec = classify_minimax_h3(GenerationRequest(task_type=TaskType.VIDEO, prompt="a", ratio="9:16"))
     assert to_api_ratio(spec) == "9:16"
-    spec_i2v = classify_minimax_h3(
-        GenerationRequest(task_type=TaskType.VIDEO, prompt="a", images=[b"x"], ratio="16:9")
-    )
+    spec_i2v = classify_minimax_h3(GenerationRequest(task_type=TaskType.VIDEO, prompt="a", images=[b"x"], ratio="16:9"))
     assert to_api_ratio(spec_i2v) == "16:9"
     spec_auto = classify_minimax_h3(
         GenerationRequest(task_type=TaskType.VIDEO, prompt="a", images=[b"x"], ratio="adaptive")
@@ -765,9 +755,11 @@ def test_prepare_request_h3_two_videos_trim_to_total_budget(monkeypatch):
 def test_prepare_request_h3_video_skips_seedance_min_pixels(monkeypatch):
     seen: dict[str, float] = {}
 
-    async def _fake_video(data: bytes, **kwargs):
-        seen["max_s"] = float(kwargs.get("max_s") or 0)
-        seen["min_pixels"] = float(kwargs.get("min_pixels") if "min_pixels" in kwargs else -1)
+    async def _fake_video(data: bytes, **kwargs: object):
+        max_s = kwargs["max_s"] if "max_s" in kwargs else 0
+        min_pixels = kwargs["min_pixels"] if "min_pixels" in kwargs else -1
+        seen["max_s"] = float(max_s) if isinstance(max_s, (int, float, str)) else 0.0
+        seen["min_pixels"] = float(min_pixels) if isinstance(min_pixels, (int, float, str)) else -1.0
         return data, 8.0, None
 
     import RH_ComfyUI.utils.video_process as video_mod

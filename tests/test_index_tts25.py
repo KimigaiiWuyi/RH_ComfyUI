@@ -28,12 +28,15 @@ def test_index_tts25_in_all_models():
 def test_index_tts25_mappings_target_runninghub_nodes():
     node = IndexTTS25Def.node_def()
     by_source = {m["source"]: m for m in node.mappings}
-    assert by_source["reference_audio"]["target"] == "2.audio"
-    assert by_source["reference_audio"]["type"] == "upload_audio"
-    assert by_source["reference_audio"]["optional"] is True
-    assert by_source["prompt"]["target"] == "6.prompt"
-    assert by_source["mood"]["target"] == "8.text"
-    assert by_source["mood"]["default"] == ""
+    ref = by_source["reference_audio"]
+    prompt = by_source["prompt"]
+    mood = by_source["mood"]
+    assert ref["target"] == "2.audio"
+    assert "type" in ref and ref["type"] == "upload_audio"
+    assert "optional" in ref and ref["optional"] is True
+    assert prompt["target"] == "6.prompt"
+    assert mood["target"] == "8.text"
+    assert "default" in mood and mood["default"] == ""
 
 
 def test_index_tts25_rh_app_cancel_flags():

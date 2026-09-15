@@ -3,6 +3,7 @@
 import pytest
 
 from RH_ComfyUI.models.asr.defs import FishAsrDef
+from RH_ComfyUI.core.schema.types import MediaRef
 from RH_ComfyUI.models.image.defs import (
     Qwen2511Def,
     Qwen2512Def,
@@ -96,7 +97,7 @@ def test_asr_proportional():
 # ── FishAsrDef.estimate_cost 钩子 ──
 
 
-def _make_asr_request(audio: bytes = None, audio_refs=None) -> GenerationRequest:
+def _make_asr_request(audio: bytes | None = None, audio_refs: list[MediaRef] | None = None) -> GenerationRequest:
     return GenerationRequest(
         task_type=TaskType.ASR,
         prompt="",

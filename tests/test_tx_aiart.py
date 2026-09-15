@@ -7,7 +7,7 @@ from RH_ComfyUI.utils.backends.tx_aiart.api import sign_tc3
 
 def test_sign_tc3_deterministic():
     payload = '{"Ratio":"16:9","LogoAdd":0}'
-    kwargs = dict(
+    a = sign_tc3(
         secret_id="AKIDtest",
         secret_key="secret",
         service="aiart",
@@ -18,8 +18,17 @@ def test_sign_tc3_deterministic():
         region="ap-guangzhou",
         version="2022-12-29",
     )
-    a = sign_tc3(**kwargs)
-    b = sign_tc3(**kwargs)
+    b = sign_tc3(
+        secret_id="AKIDtest",
+        secret_key="secret",
+        service="aiart",
+        host="aiart.tencentcloudapi.com",
+        action="ImageOutpainting",
+        payload=payload,
+        timestamp=1700000000,
+        region="ap-guangzhou",
+        version="2022-12-29",
+    )
     assert a["Authorization"] == b["Authorization"]
     assert a["Authorization"].startswith("TC3-HMAC-SHA256 Credential=AKIDtest/")
     assert "SignedHeaders=content-type;host;x-tc-action" in a["Authorization"]
@@ -30,8 +39,9 @@ def test_sign_tc3_deterministic():
 
 def test_sign_tc3_changes_with_secret():
     payload = '{"Ratio":"16:9"}'
-    common = dict(
+    a = sign_tc3(
         secret_id="AKIDtest",
+        secret_key="aaa",
         service="aiart",
         host="aiart.tencentcloudapi.com",
         action="ImageOutpainting",
@@ -40,13 +50,22 @@ def test_sign_tc3_changes_with_secret():
         region="ap-guangzhou",
         version="2022-12-29",
     )
-    a = sign_tc3(secret_key="aaa", **common)
-    b = sign_tc3(secret_key="bbb", **common)
+    b = sign_tc3(
+        secret_id="AKIDtest",
+        secret_key="bbb",
+        service="aiart",
+        host="aiart.tencentcloudapi.com",
+        action="ImageOutpainting",
+        payload=payload,
+        timestamp=1700000000,
+        region="ap-guangzhou",
+        version="2022-12-29",
+    )
     assert a["Authorization"] != b["Authorization"]
 
 
 def test_tx_aiart_adapter_registered():
-    from RH_ComfyUI.utils.backends import backend_registry, init_backends
+    from RH_ComfyUI.utils.backends import init_backends, backend_registry
 
     init_backends()
     adapter = backend_registry.get("tx_aiart")

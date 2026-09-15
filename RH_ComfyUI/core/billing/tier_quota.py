@@ -15,7 +15,7 @@ VIP 策略(与 bot_id 无关):
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Final, Optional
+from typing import Dict, Final, Optional, TypedDict
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dataclasses import dataclass
@@ -52,6 +52,16 @@ _TIER_FALLBACK: Final[Dict[str, tuple[int, int, int]]] = {
     "special": (_SPECIAL_H5, _SPECIAL_H5 * 4, _SPECIAL_H5 * 12),
 }
 
+
+class TierQuotaDict(TypedDict):
+    tier: str
+    label: str
+    h5: int
+    day: int
+    week: int
+    unlimited: bool
+
+
 _TIER_LABELS: Final[Dict[str, str]] = {
     "free": "免费用户",
     "basic": "基础会员",
@@ -71,7 +81,7 @@ class TierQuotas:
     week: int
     unlimited: bool = False
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> TierQuotaDict:
         return {
             "tier": self.tier,
             "label": self.label,

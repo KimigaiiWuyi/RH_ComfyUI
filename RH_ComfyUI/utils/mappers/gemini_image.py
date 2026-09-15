@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional, Protocol
 
 from ..core.types import NodeOutput
 from ..core.request import GenerationRequest
 
-if TYPE_CHECKING:
-    from ..backends.gemini_image.api import GeminiImageAPI
+
+class GeminiImageClient(Protocol):
+    async def generate(
+        self,
+        *,
+        model: str,
+        prompt: str,
+        images: list[bytes] | None = ...,
+        aspect_ratio: str = ...,
+        image_size: str | None = ...,
+    ) -> bytes: ...
+
 
 # generate_content image_config.aspect_ratio 白名单(上游 400 原文)。
 # 产品面仍可暴露 8:5 等,发请求前必须折到这里。
@@ -80,7 +90,7 @@ def _gemini_ratio(request: GenerationRequest) -> str:
 
 async def gemini_flash_image_mapper(
     request: GenerationRequest,
-    api: "GeminiImageAPI",
+    api: GeminiImageClient,
 ) -> NodeOutput:
     """有图走图生图(编辑),无图走文生图。Gemini 只吃 aspect_ratio + image_size。"""
     model = request.params.get("model") or "gemini-3.1-flash-image-preview"

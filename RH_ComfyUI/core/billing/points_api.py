@@ -10,7 +10,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
+from collections.abc import Callable, Awaitable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +20,8 @@ from gsuid_core.logger import logger
 from .tier_quota import normalize_tier, list_tier_quotas
 
 if TYPE_CHECKING:
-    from ...utils.database.models import RHWalletOperation
+    from .tier_quota import TierQuotaDict
+    from ...utils.database.models import QuotaResult, QuotaStatus, RHWalletOperation
 
 from ...utils.database.wallet_contract import (
     WalletIntegrityError,
@@ -92,7 +94,7 @@ async def get_wallet_job_operations(job_key: str) -> list[RHWalletOperation]:
 class PointsDeniedError(Exception):
     """积分/额度不足。``detail`` 为 get_quota_status 形 dict + reason/need。"""
 
-    def __init__(self, message: str, *, detail: Optional[dict[str, Any]] = None):
+    def __init__(self, message: str, *, detail: Optional[QuotaResult] = None):
         super().__init__(message)
         self.message = message
         self.detail = detail or {}
@@ -103,7 +105,7 @@ async def get_quota_status(
     bot_id: str,
     *,
     vip_tier: Optional[str] = None,
-) -> dict[str, Any]:
+) -> QuotaStatus:
     from ...utils.database.models import RHBind
 
     return await RHBind.get_quota_status(user_id, bot_id, vip_tier=vip_tier)
@@ -114,7 +116,7 @@ async def list_quota_statuses(
     bot_id: str,
     *,
     vip_tiers: Optional[dict[str, str]] = None,
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, QuotaStatus]:
     """管理端列表：一次读出 bot 池钱包，按到期规则内存算出三桶。不写库、不建账。"""
     from ...utils.database.models import RHBind
 
@@ -128,7 +130,7 @@ async def charge_points(
     *,
     vip_tier: Optional[str] = None,
     reason: str = "",
-) -> dict[str, Any]:
+) -> QuotaResult:
     """预扣三桶;不足抛 PointsDeniedError。
 
     返回扣后 status(含 available / buckets)。
@@ -139,18 +141,18 @@ async def charge_points(
         raise ValueError("amount 必须 > 0")
     # vip_tier 显式传入则用;否则 RHBind 行内档位(与 bot_id 无关)
     ok, detail = await RHBind.deduct_triple(user_id, bot_id, amount, vip_tier=vip_tier)
-    tier = str((detail or {}).get("tier") or normalize_tier(vip_tier))
+    raw_tier = detail["tier"] if "tier" in detail else None
+    tier = str(raw_tier or normalize_tier(vip_tier))
     if not ok:
-        msg = detail.get("reason") or f"积分不足:需要 {amount}"
+        raw_reason = detail["reason"] if "reason" in detail else None
+        msg = raw_reason or f"积分不足:需要 {amount}"
         logger.warning(
             f"[charge_points] denied user={user_id} bot_id={bot_id} "
             f"amount={amount} tier={tier} reason={msg!r} ({reason})"
         )
         raise PointsDeniedError(msg, detail=detail)
-    logger.info(
-        f"[charge_points] ok user={user_id} bot_id={bot_id} -{amount} "
-        f"tier={tier} avail={detail.get('available')} ({reason})"
-    )
+    avail = detail["available"] if "available" in detail else None
+    logger.info(f"[charge_points] ok user={user_id} bot_id={bot_id} -{amount} tier={tier} avail={avail} ({reason})")
     return detail
 
 
@@ -161,7 +163,7 @@ async def refund_points(
     *,
     vip_tier: Optional[str] = None,
     reason: str = "",
-) -> dict[str, Any]:
+) -> QuotaStatus:
     """三桶退回；失败向调用方传播，不能以余额查询冒充成功。"""
     from ...utils.database.models import RHBind
 
@@ -174,7 +176,7 @@ async def force_refill_points(
     bot_id: str,
     *,
     vip_tier: Optional[str] = None,
-) -> dict[str, Any]:
+) -> QuotaStatus:
     """立刻把三桶补到当前档满额(管理端 / 手动刷新)。"""
     from ...utils.database.models import RHBind
 
@@ -187,7 +189,7 @@ async def set_vip_tier(
     tier: str,
     *,
     refill: bool = True,
-) -> dict[str, Any]:
+) -> QuotaStatus:
     """设置某池额度档(free/basic/pro/enterprise/special/unlimited),与 bot_id 无关。"""
     from ...utils.database.models import RHBind
 
@@ -200,7 +202,7 @@ async def refill_buckets(
     buckets: list[str] | str = "all",
     *,
     vip_tier: Optional[str] = None,
-) -> dict[str, Any]:
+) -> QuotaStatus:
     """补满指定桶 h5/day/week 或 all。"""
     from ...utils.database.models import RHBind
 
@@ -211,7 +213,7 @@ async def force_refill_bot_pool(
     bot_id: str,
     *,
     default_vip_tier: str = "free",
-    vip_tier_resolver=None,
+    vip_tier_resolver: Callable[[str], Awaitable[str | None]] | None = None,
 ) -> dict[str, int]:
     """批量强制补满某 bot_id 下所有已有 RHBind 行。
 
@@ -238,9 +240,9 @@ async def force_refill_bot_pool(
     return {"scanned": len(rows), "refilled": refilled, "errors": errors}
 
 
-def get_all_tier_quotas() -> dict[str, Any]:
+def get_all_tier_quotas() -> dict[str, TierQuotaDict]:
     """供 /vip/tiers 展示:各档三桶 cap。"""
-    out: dict[str, Any] = {}
+    out: dict[str, TierQuotaDict] = {}
     for k, q in list_tier_quotas().items():
         out[k] = q.as_dict()
     return out

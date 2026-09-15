@@ -240,9 +240,16 @@ _USAGE_NEST_KEYS: tuple[str, ...] = (
 def _nonneg_int(val: object) -> int:
     if val is None or isinstance(val, bool):
         return 0
-    try:
+    if isinstance(val, int):
+        n = val
+    elif isinstance(val, float):
         n = int(val)
-    except (TypeError, ValueError):
+    elif isinstance(val, str):
+        try:
+            n = int(val)
+        except ValueError:
+            return 0
+    else:
         return 0
     return n if n > 0 else 0
 

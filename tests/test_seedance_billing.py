@@ -1,5 +1,6 @@
 """Seedance 视频模型动态计价:token 计算/积分换算/estimate_cost 钩子"""
 
+from RH_ComfyUI.core.schema.types import MediaRef, MediaKind
 from RH_ComfyUI.models.video.defs import (
     Seedance2Def,
     Seedance25Def,
@@ -383,16 +384,16 @@ def _make_video_request(
     resolution: str = "720p",
     duration: int = 5,
     generate_audio: bool = True,
-    video_refs: list = None,
-    **extra_params,
+    video_refs: list[MediaRef] | None = None,
+    **extra_params: object,
 ) -> GenerationRequest:
-    params = {"resolution": resolution, "generate_audio": generate_audio}
+    params: dict[str, object] = {"resolution": resolution, "generate_audio": generate_audio}
     params.update(extra_params)
     return GenerationRequest(
         task_type=TaskType.VIDEO,
         prompt="test video",
         duration=duration,
-        video_refs=video_refs or [],
+        video_refs=list(video_refs or []),
         params=params,
     )
 
@@ -417,7 +418,10 @@ def test_seedance2_estimate_cost_with_video_refs():
     """有输入视频时积分不同"""
     m = Seedance2Def()
     req_no_video = _make_video_request(resolution="720p", video_refs=None)
-    req_with_video = _make_video_request(resolution="720p", video_refs=[object()])
+    req_with_video = _make_video_request(
+        resolution="720p",
+        video_refs=[MediaRef(kind=MediaKind.VIDEO, data=b"x")],
+    )
     # 有输入视频 token 更多但费率更低,净效果取决于具体参数
     assert m.estimate_cost(req_no_video) >= 1
     assert m.estimate_cost(req_with_video) >= 1

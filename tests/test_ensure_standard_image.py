@@ -69,6 +69,7 @@ def test_transparent_png_flattens_to_gray_jpeg() -> None:
     decoded = Image.open(io.BytesIO(out))
     assert decoded.mode == "RGB"
     px = decoded.getpixel((0, 0))
+    assert isinstance(px, tuple)
     assert all(abs(int(c) - 128) <= 8 for c in px)
 
 

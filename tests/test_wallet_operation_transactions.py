@@ -5,13 +5,14 @@ from __future__ import annotations
 import os
 import json
 import asyncio
+import inspect
 import multiprocessing
 from uuid import uuid4
 from typing import TYPE_CHECKING, Literal
 from pathlib import Path
 from functools import wraps
 from dataclasses import replace
-from collections.abc import Callable, Awaitable
+from collections.abc import Callable, Awaitable, Coroutine
 
 import pytest
 from sqlmodel import col
@@ -30,7 +31,11 @@ _SANDBOX_ENV = "RH_COMFYUI_WALLET_TEST_DB"
 def _aio(fn: Callable[..., Awaitable[None]]) -> Callable[..., None]:
     @wraps(fn)
     def wrapped(*args: object, **kwargs: object) -> None:
-        asyncio.run(fn(*args, **kwargs))
+        result = fn(*args, **kwargs)
+        if not inspect.iscoroutine(result):
+            raise TypeError("wallet test helper must return a coroutine")
+        coro: Coroutine[object, object, None] = result
+        asyncio.run(coro)
 
     return wrapped
 
@@ -105,7 +110,7 @@ async def test_sandbox_is_not_the_live_database_and_rolls_back(wallet_sandbox: P
     assert bound == wallet_sandbox.resolve()
     assert bound != _live_sqlite_path()
     async with base_models.async_maker() as session:
-        session.add(models.RHBind(user_id="isolation-rollback-fixture", bot_id="fixture"))
+        session.add(models.RHBind(user_id="isolation-rollback-fixture", bot_id="fixture", group_id=None))
         await session.flush()
         await session.rollback()
     async with base_models.async_maker() as session:
@@ -179,6 +184,7 @@ async def test_legacy_refund_never_reduces_a_downgraded_bucket() -> None:
             RHBind(
                 user_id=key,
                 bot_id="fixture",
+                group_id=None,
                 vip_tier="free",
                 point=100_000,
                 point_5h=100_000,
@@ -188,7 +194,8 @@ async def test_legacy_refund_never_reduces_a_downgraded_bucket() -> None:
         )
         await session.commit()
     status = await RHBind.add_triple(key, "fixture", 10)
-    assert all(bucket["balance"] >= 100_000 for bucket in status["buckets"].values())
+    buckets = status["buckets"]
+    assert all(buckets[name]["balance"] >= 100_000 for name in ("h5", "day", "week"))
 
 
 @_aio
@@ -199,7 +206,9 @@ async def test_duplicate_wallet_is_rejected_before_any_mutation() -> None:
     key = "duplicate-" + uuid4().hex
     async with base_models.async_maker() as session:
         for _ in range(2):
-            session.add(RHBind(user_id=key, bot_id="fixture", point_5h=500, point_day=500, point_week=500))
+            session.add(
+                RHBind(user_id=key, bot_id="fixture", group_id=None, point_5h=500, point_day=500, point_week=500)
+            )
         await session.commit()
     with pytest.raises(Exception, match="WALLET_BINDING_NOT_UNIQUE"):
         await RHBind.deduct_triple(key, "fixture", 10)
@@ -233,9 +242,16 @@ def operation_command(
     )
 
 
-@pytest.mark.parametrize("bad", [True, False, 0.5, float("nan"), float("inf"), -1, 2_000_000_001, "100"])
-@_aio
-async def test_rejects_non_integer_or_out_of_range_commands(bad: int | float | str) -> None:
+@pytest.mark.parametrize("bad", [True, False, 0.5, float("nan"), float("inf"), "100"])
+def test_rejects_non_integer_points(bad: object) -> None:
+    from RH_ComfyUI.utils.database.wallet_contract import validate_wallet_points
+
+    with pytest.raises(ValueError, match="bounded nonnegative integer"):
+        validate_wallet_points(bad)
+
+
+@pytest.mark.parametrize("bad", [-1, 2_000_000_001])
+def test_rejects_out_of_range_points(bad: int) -> None:
     with pytest.raises(ValueError, match="bounded nonnegative integer"):
         operation_command("invalid-points", points=bad)
 
@@ -353,6 +369,7 @@ async def test_zero_legacy_refund_does_not_refresh_expired_buckets() -> None:
             RHBind(
                 user_id=key,
                 bot_id="fixture",
+                group_id=None,
                 point=17,
                 point_5h=17,
                 point_day=19,
@@ -440,11 +457,11 @@ def _process_wallet_requests(
     import_lock: Lock,
 ) -> None:
     try:
-        from pytest_socket import disable_socket
-
-        disable_socket(allow_unix_socket=True)
+        sock = __import__("pytest_socket")
     except ImportError:
-        pass
+        sock = None
+    if sock is not None:
+        sock.disable_socket(allow_unix_socket=True)
 
     async def run() -> list[str]:
         # Core 导入会更新合成配置的 .part 文件；只串行导入，不串行钱包请求。
@@ -600,6 +617,7 @@ async def test_concurrent_insufficient_balance_commits_only_affordable_operation
             RHBind(
                 user_id=key,
                 bot_id="fixture",
+                group_id=None,
                 point=25,
                 point_5h=25,
                 point_day=25,
@@ -656,6 +674,7 @@ async def test_legacy_wallet_paths_cannot_overwrite_new_charges(legacy_mode: str
             RHBind(
                 user_id=key,
                 bot_id="fixture",
+                group_id=None,
                 point=5000,
                 point_5h=5000,
                 point_day=6000,
@@ -685,6 +704,7 @@ async def test_expired_legacy_query_and_new_charge_share_one_refresh() -> None:
             RHBind(
                 user_id=key,
                 bot_id="fixture",
+                group_id=None,
                 point=500,
                 point_5h=500,
                 point_day=500,
@@ -703,11 +723,11 @@ async def test_expired_legacy_query_and_new_charge_share_one_refresh() -> None:
 
 def _process_commit_before_ack(key: str, committed: Event, hold_ack: Event) -> None:
     try:
-        from pytest_socket import disable_socket
-
-        disable_socket(allow_unix_socket=True)
+        sock = __import__("pytest_socket")
     except ImportError:
-        pass
+        sock = None
+    if sock is not None:
+        sock.disable_socket(allow_unix_socket=True)
 
     async def commit() -> None:
         from gsuid_core.utils.database import base_models
@@ -918,7 +938,13 @@ async def test_upgrade_from_legacy_wallet_preserves_rows_and_adds_receipt_constr
     now = now_ts()
     try:
         async with engine.begin() as connection:
-            await connection.run_sync(RHBind.__table__.create)
+            from sqlalchemy import Table, inspect as sa_inspect
+
+            mapper = sa_inspect(RHBind)
+            table = mapper.local_table
+            if not isinstance(table, Table):
+                raise RuntimeError("RHBind has no table")
+            await connection.run_sync(table.create)
             await connection.execute(
                 insert(RHBind).values(
                     user_id=key,

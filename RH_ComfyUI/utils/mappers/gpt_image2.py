@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 from PIL import Image
 
@@ -15,8 +15,20 @@ from .gpt_image2_params import (
     resolve_gpt_image2_output_format,
 )
 
-if TYPE_CHECKING:
-    from ..backends.gpt_image2.api import GPTImage2API
+
+class GptImageDrawClient(Protocol):
+    async def draw_image(
+        self,
+        *,
+        model: str,
+        prompt: str,
+        aspect_ratio: str | None = ...,
+        image_size: str | None = ...,
+        quality: str | None = ...,
+        background: str | None = ...,
+        output_format: str | None = ...,
+        image_list: list[bytes] | None = ...,
+    ) -> object: ...
 
 
 def _calculate_aspect_ratio(w: int, h: int) -> str:
@@ -37,7 +49,7 @@ def _calculate_aspect_ratio(w: int, h: int) -> str:
 
 async def gpt_image2_mapper(
     request: GenerationRequest,
-    api: GPTImage2API,
+    api: GptImageDrawClient,
 ) -> NodeOutput:
     """GPT-Image2 的自适应映射+执行 (支持文生图/图生图/图像编辑)
 

@@ -143,32 +143,43 @@ def request_bits_from_record(
     """从统计行还原 settle 所需的 resolution / 是否有输入视频。"""
     body = _parse_json_object(request_body) or {}
     extra = _parse_json_object(extra_params) or {}
-    nested = body.get("params") if isinstance(body.get("params"), dict) else {}
-    res = (
-        extra.get("resolution")
-        or nested.get("resolution")
-        or body.get("resolution")
-        or resolution
-        or "720p"
-    )
-    res = str(res).strip() or "720p"
-    ivd = extra.get("input_video_duration")
-    if ivd is None:
-        ivd = nested.get("input_video_duration")
-    if ivd is None:
-        ivd = body.get("input_video_duration")
-    try:
-        ivd_f = float(ivd) if ivd is not None else None
-    except (TypeError, ValueError):
-        ivd_f = None
-    video_refs = _as_list(body.get("video_refs") or extra.get("video_refs") or nested.get("video_refs"))
+    raw_nested = body["params"] if "params" in body else None
+    nested: dict[str, Any] = raw_nested if isinstance(raw_nested, dict) else {}
+
+    def _truthy(key: str, *blobs: dict[str, Any]) -> object:
+        for blob in blobs:
+            if key in blob and blob[key]:
+                return blob[key]
+        return None
+
+    def _first_not_none(key: str, *blobs: dict[str, Any]) -> object:
+        for blob in blobs:
+            if key in blob and blob[key] is not None:
+                return blob[key]
+        return None
+
+    def _as_float(raw: object, default: float | None) -> float | None:
+        if raw is None or raw == "":
+            return default
+        if isinstance(raw, (int, float, str)):
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return default
+        return default
+
+    raw_res = _truthy("resolution", extra, nested, body)
+    if not raw_res:
+        raw_res = resolution
+    res = str(raw_res or "720p").strip() or "720p"
+    ivd_f = _as_float(_first_not_none("input_video_duration", extra, nested, body), None)
+    video_refs = _as_list(_truthy("video_refs", body, extra, nested))
     has_video = bool(video_refs) or (ivd_f is not None and ivd_f > 0) or _content_has_video(body)
-    dur = extra.get("duration") or nested.get("duration") or body.get("duration") or duration_seconds
-    try:
-        dur_f = float(dur) if dur is not None else 5.0
-    except (TypeError, ValueError):
-        dur_f = 5.0
-    if dur_f <= 0:
+    dur = _truthy("duration", extra, nested, body)
+    if not dur:
+        dur = duration_seconds
+    dur_f = _as_float(dur, 5.0)
+    if dur_f is None or dur_f <= 0:
         dur_f = 5.0
     return {
         "resolution": res,
@@ -391,7 +402,9 @@ async def _reconcile_locked(
                 from ...utils.database.models import RHWalletOperation
 
                 managed = await RHWalletOperation.reconcile_record_once(
-                    plan["record_id"], plan["actual"], adjust_wallet=adjust_wallet,
+                    plan["record_id"],
+                    plan["actual"],
+                    adjust_wallet=adjust_wallet,
                 )
                 if managed is not None:
                     receipt, replayed = managed
@@ -405,12 +418,16 @@ async def _reconcile_locked(
                             charged_points += max(receipt.billed_delta_points, 0)
                             refunded_points += max(-receipt.billed_delta_points, 0)
                     if len(changes) < _MAX_CHANGES:
-                        changes.append({
-                            **plan, "actual": receipt.net_after_points,
-                            "delta": 0 if replayed else receipt.billed_delta_points,
-                            "wallet": wallet_status, "operation_key": receipt.operation_key,
-                            "receipt_digest": receipt.receipt_digest,
-                        })
+                        changes.append(
+                            {
+                                **plan,
+                                "actual": receipt.net_after_points,
+                                "delta": 0 if replayed else receipt.billed_delta_points,
+                                "wallet": wallet_status,
+                                "operation_key": receipt.operation_key,
+                                "receipt_digest": receipt.receipt_digest,
+                            }
+                        )
                     continue
                 # 只有未接入操作回执的历史记录继续走旧兼容路径。
                 if plan["delta"] == 0:
@@ -423,9 +440,7 @@ async def _reconcile_locked(
                     continue
                 wallet_st = "skipped"
                 if adjust_wallet and not plan.get("wallet_marked"):
-                    wallet_st = await _apply_wallet(
-                        plan["user_id"], plan["bot_id"], plan["delta"], plan["record_id"]
-                    )
+                    wallet_st = await _apply_wallet(plan["user_id"], plan["bot_id"], plan["delta"], plan["record_id"])
                     if wallet_st == "denied":
                         wallet_denied += 1
                     elif wallet_st == "error":

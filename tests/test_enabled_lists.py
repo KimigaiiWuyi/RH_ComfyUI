@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from RH_ComfyUI.rh_config.service_config import SERVICE_CONFIG_DEFAULT
+from gsuid_core.utils.plugins_config.models import GsListStrConfig
 from RH_ComfyUI.utils.backends.enabled_list import is_model_enabled
 from RH_ComfyUI.utils.backends.seedance.config import is_seedance_model_enabled_on
 
@@ -55,6 +56,7 @@ def test_every_section_has_model_list_with_defaults():
     ]
     for key in lists:
         item = SERVICE_CONFIG_DEFAULT[key]
+        assert isinstance(item, GsListStrConfig), f"{key} 应为 GsListStrConfig"
         assert item.data, f"{key} 应带默认模型"
         assert item.options, f"{key} 应有 options"
 

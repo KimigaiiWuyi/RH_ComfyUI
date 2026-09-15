@@ -9,6 +9,7 @@ from RH_ComfyUI.core.billing.tier_quota import (
     is_unlimited_tier,
 )
 from RH_ComfyUI.rh_config.plugin_config import PLUGIN_CONFIG_DEFAULT
+from gsuid_core.utils.plugins_config.models import GsIntConfig
 
 
 def test_tier_keys_include_special_and_unlimited():
@@ -26,9 +27,15 @@ def test_normalize_accepts_new_tiers():
 
 
 def test_special_quota_config_defaults_follow_5h_multiples():
-    h5 = PLUGIN_CONFIG_DEFAULT["Quota_Special_5h"].data
-    day = PLUGIN_CONFIG_DEFAULT["Quota_Special_Day"].data
-    week = PLUGIN_CONFIG_DEFAULT["Quota_Special_Week"].data
+    h5_cfg = PLUGIN_CONFIG_DEFAULT["Quota_Special_5h"]
+    day_cfg = PLUGIN_CONFIG_DEFAULT["Quota_Special_Day"]
+    week_cfg = PLUGIN_CONFIG_DEFAULT["Quota_Special_Week"]
+    assert isinstance(h5_cfg, GsIntConfig)
+    assert isinstance(day_cfg, GsIntConfig)
+    assert isinstance(week_cfg, GsIntConfig)
+    h5 = h5_cfg.data
+    day = day_cfg.data
+    week = week_cfg.data
     assert h5 == 500_000
     assert day == h5 * 4
     assert week == h5 * 12

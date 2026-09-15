@@ -134,8 +134,19 @@ def test_mapper_snaps_8_5_before_generate(monkeypatch):
     seen: list[str] = []
 
     class _FakeApi:
-        async def generate(self, **kwargs):
-            seen.append(str(kwargs.get("aspect_ratio")))
+        async def generate(
+            self,
+            *,
+            model: str,
+            prompt: str,
+            images: list[bytes] | None = None,
+            aspect_ratio: str = "1:1",
+            image_size: str | None = "2K",
+            background: bool = True,
+            poll_interval: float = 1.5,
+            max_wait: float = 600.0,
+        ) -> bytes:
+            seen.append(aspect_ratio)
             return b"IMG"
 
     req = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", ratio="8:5")
@@ -144,12 +155,8 @@ def test_mapper_snaps_8_5_before_generate(monkeypatch):
 
 
 def test_canonical_image_model_strips_agent_suffix():
-    assert gapi._canonical_image_model("gemini-3.1-flash-image-preview-agent") == (
-        "gemini-3.1-flash-image-preview"
-    )
-    assert gapi._canonical_image_model("gemini-3.1-flash-image-preview") == (
-        "gemini-3.1-flash-image-preview"
-    )
+    assert gapi._canonical_image_model("gemini-3.1-flash-image-preview-agent") == ("gemini-3.1-flash-image-preview")
+    assert gapi._canonical_image_model("gemini-3.1-flash-image-preview") == ("gemini-3.1-flash-image-preview")
 
 
 def test_banana2_served_by_gemini_only():

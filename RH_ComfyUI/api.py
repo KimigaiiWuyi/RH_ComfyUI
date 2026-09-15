@@ -468,8 +468,12 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
     # 透传后端私有参数到 params。frame_mode 是 HTTP 顶层半显式开关,
     # GenerationRequest 无同名字段,必须进 params,否则 Seedance 2.5 把多参考图
     # 判成首尾帧并强制 adaptive。扁平 images 若全部 role=reference,也视为多参考。
-    existing_params = req_kwargs.get("params") if isinstance(req_kwargs.get("params"), dict) else {}
-    fm = str(existing_params.get("frame_mode") or passthrough.get("frame_mode") or "").strip().lower()
+    raw_params = req_kwargs["params"] if "params" in req_kwargs else None
+    existing_params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+    raw_fm = existing_params["frame_mode"] if "frame_mode" in existing_params else None
+    if raw_fm is None and "frame_mode" in passthrough:
+        raw_fm = passthrough["frame_mode"]
+    fm = str(raw_fm or "").strip().lower()
     if fm in ("", "auto") and image_roles:
         if not any(r in ("first_frame", "last_frame") for r in image_roles) and all(
             r == "reference" for r in image_roles

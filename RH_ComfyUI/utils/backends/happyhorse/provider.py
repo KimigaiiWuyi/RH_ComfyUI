@@ -56,17 +56,23 @@ def _pick_vendor_message(
     http_status: Optional[int] = None,
 ) -> str:
     """错误文案优先级: message → msg → code → HTTP status。"""
-    data = resp_json.get("data") if isinstance(resp_json.get("data"), dict) else {}
-    err = resp_json.get("error") if isinstance(resp_json.get("error"), dict) else {}
-    for value in (resp_json.get("message"), data.get("message"), err.get("message")):
+    raw_data = resp_json["data"] if "data" in resp_json else None
+    data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
+    raw_err = resp_json["error"] if "error" in resp_json else None
+    err: dict[str, Any] = raw_err if isinstance(raw_err, dict) else {}
+
+    def _from(blob: dict[str, Any], key: str) -> object:
+        return blob[key] if key in blob else None
+
+    for value in (_from(resp_json, "message"), _from(data, "message"), _from(err, "message")):
         text = _field_text(value)
         if text is not None:
             return text
-    for value in (resp_json.get("msg"), data.get("msg")):
+    for value in (_from(resp_json, "msg"), _from(data, "msg")):
         text = _field_text(value)
         if text is not None:
             return text
-    for value in (resp_json.get("code"), data.get("code")):
+    for value in (_from(resp_json, "code"), _from(data, "code")):
         text = _field_text(value)
         if text is not None:
             return text

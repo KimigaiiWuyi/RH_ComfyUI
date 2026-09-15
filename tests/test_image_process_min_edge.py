@@ -2,30 +2,30 @@
 
 from __future__ import annotations
 
+import time
 import asyncio
 import threading
-import time
 from io import BytesIO
 
 from PIL import Image
 
-from RH_ComfyUI.core.schema.request import GenerationRequest, TaskType
-from RH_ComfyUI.core.schema.types import ContentItem, ContentItemType, MediaKind, MediaRef
-from RH_ComfyUI.models.video.defs import Seedance2Def, Seedance2FastDef, Seedance2MiniDef, Seedance25Def
+from RH_ComfyUI.core.schema.types import MediaRef, MediaKind, ContentItem, ContentItemType
+from RH_ComfyUI.models.video.defs import Seedance2Def, Seedance25Def, Seedance2FastDef, Seedance2MiniDef
+from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.image_process import (
     SEEDANCE_ASPECT_MAX,
     SEEDANCE_ASPECT_MIN,
+    SEEDANCE_IMAGE_MIN_EDGE,
     SEEDANCE_ASPECT_OFFICIAL_MAX,
     SEEDANCE_ASPECT_OFFICIAL_MIN,
-    SEEDANCE_IMAGE_MIN_EDGE,
-    clear_image_prep_cache,
-    crop_to_seedance_aspect,
+    run_image_prep,
     ensure_min_edge,
     image_mime_from_bytes,
+    clear_image_prep_cache,
+    crop_to_seedance_aspect,
+    prepare_seedance_image_ref,
     prepare_seedance_image_bytes,
     prepare_seedance_image_bytes_async,
-    prepare_seedance_image_ref,
-    run_image_prep,
 )
 
 
@@ -84,7 +84,9 @@ def test_rgba_png_keeps_alpha():
     assert image_mime_from_bytes(out) == "image/png"
     assert img.size == (300, 300)
     # 抽样确认 alpha 没被拍成不透明
-    assert img.getpixel((0, 0))[3] < 255
+    px = img.getpixel((0, 0))
+    assert isinstance(px, tuple) and len(px) >= 4
+    assert px[3] < 255
 
 
 def test_already_large_returns_original():
@@ -394,4 +396,3 @@ def test_prepare_request_seedance25_video_uses_30s_max(monkeypatch):
     asyncio.run(Seedance25Def().prepare_request(req))
     assert seen["max_s"] == 30.0
     assert seen["min_pixels"] == 407696
-

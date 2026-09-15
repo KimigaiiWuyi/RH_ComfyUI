@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, Callable, Optional, Required, TypedDict
 from dataclasses import field, dataclass
 
 from .types import PortSpec, CapabilityManifest
@@ -29,10 +29,10 @@ class MappingRule(TypedDict, total=False):
     default=缺省值, type/template=上传或模板处理, optional=可缺省。
     """
 
-    source: str
-    target: str
-    value: Any
-    default: Any
+    source: Required[str]
+    target: Required[str]
+    value: object
+    default: object
     type: str
     template: str
     description: str

@@ -30,33 +30,47 @@ def format_text(catalog: dict[str, object], task_filter: str | None = None) -> s
     Returns:
         适合直接 `bot.send()` 的多行字符串
     """
-    models = catalog.get("models", [])
-    raw_display = catalog.get("task_display")
-    task_display: dict[str, str] = raw_display if isinstance(raw_display, dict) else {}
-    if not isinstance(models, list):
+    models_raw = catalog["models"] if "models" in catalog else []
+    display_raw = catalog["task_display"] if "task_display" in catalog else None
+    task_display: dict[str, str] = {}
+    if isinstance(display_raw, dict):
+        for key, val in display_raw.items():
+            if isinstance(key, str) and isinstance(val, str):
+                task_display[key] = val
+    if not isinstance(models_raw, list):
         return "❌ 模型清单为空"
-    if not models:
-        scope = f"任务 {task_display.get(task_filter, task_filter)} " if task_filter else ""
+    if not models_raw:
+        if task_filter:
+            shown = task_display[task_filter] if task_filter in task_display else task_filter
+            scope = f"任务 {shown} "
+        else:
+            scope = ""
         return f"❌ 当前{scope}没有任何可用模型"
 
     lines: list[str] = []
     if task_filter:
-        lines.append(f"📦 RH_ComfyUI 可用模型 ({task_display.get(task_filter, task_filter)})")
+        shown = task_display[task_filter] if task_filter in task_display else task_filter
+        lines.append(f"📦 RH_ComfyUI 可用模型 ({shown})")
     else:
         lines.append("📦 RH_ComfyUI 可用模型清单")
     lines.append("=" * 32)
 
     # 按目录分组(catalog_group; 缺省回退 task_type)
     grouped: dict[str, list[ModelEntry]] = {}
-    for m in models:  # type: ignore[union-attr]
+    for m in models_raw:
         if not isinstance(m, dict):
             continue
-        entry = ModelEntry.from_dict(m)
+        typed: dict[str, object] = {}
+        for key, val in m.items():
+            if isinstance(key, str):
+                typed[key] = val
+        entry = ModelEntry.from_dict(typed)
         group_key = entry.catalog_group or entry.task_type
         grouped.setdefault(group_key, []).append(entry)
 
     for task, entries in grouped.items():
-        lines.append(f"\n【{task_display.get(task, task)}】")
+        label = task_display[task] if task in task_display else task
+        lines.append(f"\n【{label}】")
         for e in entries:
             status = "✅" if e.available else "❌"
             cost = f" {e.point_cost}积分" if e.point_cost else ""
@@ -86,7 +100,7 @@ async def ai_list_models(task_type: str = "") -> str:
         task_type=task_type or None,
         as_text=True,
     )
-    text = catalog.get("text")
+    text = catalog["text"] if "text" in catalog else None
     return text if isinstance(text, str) else str(catalog)
 
 

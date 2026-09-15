@@ -2275,8 +2275,6 @@ class RHComfyuiStatsCache(SQLModel, table=True):
     - expires_at: unix 秒,过期行可惰性忽略并由下次写入覆盖
     """
 
-    # SQLModel/SQLAlchemy 对 __tablename__ 的 stub 与字面量赋值冲突
-    __tablename__ = "rhcomfyuistatscache"  # type: ignore[assignment]
     __table_args__ = (
         Index("ix_rhcomfyuistatscache_bot_exp", "bot_id", "expires_at"),
         {"extend_existing": True},

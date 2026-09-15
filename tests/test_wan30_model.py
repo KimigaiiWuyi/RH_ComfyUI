@@ -246,19 +246,22 @@ def test_channel_translates_happyhorse_403_to_retryable_channel_error(monkeypatc
     class _P(Wan30Provider):
         name = "dashscope"
 
-    ch = Wan30Channel(_P, dry_run_resolver=lambda: False)
+    class _BoomProvider(Wan30Provider):
+        async def run(self, spec, *, model=None, on_progress=None):  # noqa: ANN001
+            raise HappyHorseProviderError(
+                "dashscope API 错误 403: AccessDenied",
+                code="HTTP_ERROR",
+                retryable=True,
+                provider="dashscope",
+                http_status=403,
+                user_message="Access denied.",
+            )
 
-    async def _boom(spec, *, model=None, on_progress=None):
-        raise HappyHorseProviderError(
-            "dashscope API 错误 403: AccessDenied",
-            code="HTTP_ERROR",
-            retryable=True,
-            provider="dashscope",
-            http_status=403,
-            user_message="Access denied.",
-        )
+    class _BoomChannel(Wan30Channel):
+        def _get_provider(self) -> Wan30Provider | None:
+            return _BoomProvider(api_key="k")
 
-    ch._get_provider = lambda: type("Prov", (), {"api_key": "k", "run": staticmethod(_boom)})()
+    ch = _BoomChannel(_P, dry_run_resolver=lambda: False)
 
     with pytest.raises(ChannelError) as ei:
         asyncio.run(
@@ -293,19 +296,22 @@ def test_run_failovers_to_next_channel_after_dashscope_403(monkeypatch):
     class _P(Wan30Provider):
         name = "dashscope"
 
-    dash = Wan30Channel(_P, dry_run_resolver=lambda: False)
+    class _BoomProvider(Wan30Provider):
+        async def run(self, spec, *, model=None, on_progress=None):  # noqa: ANN001
+            raise HappyHorseProviderError(
+                "dashscope API 错误 403: AccessDenied",
+                code="HTTP_ERROR",
+                retryable=True,
+                provider="dashscope",
+                http_status=403,
+                user_message="Access denied.",
+            )
 
-    async def _boom(spec, *, model=None, on_progress=None):
-        raise HappyHorseProviderError(
-            "dashscope API 错误 403: AccessDenied",
-            code="HTTP_ERROR",
-            retryable=True,
-            provider="dashscope",
-            http_status=403,
-            user_message="Access denied.",
-        )
+    class _BoomChannel(Wan30Channel):
+        def _get_provider(self) -> Wan30Provider | None:
+            return _BoomProvider(api_key="k")
 
-    dash._get_provider = lambda: type("Prov", (), {"api_key": "k", "run": staticmethod(_boom)})()
+    dash = _BoomChannel(_P, dry_run_resolver=lambda: False)
 
     async def _dash_ok() -> bool:
         return True
@@ -334,9 +340,7 @@ def test_run_failovers_to_next_channel_after_dashscope_403(monkeypatch):
         async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
             return request
 
-    out = asyncio.run(
-        _Model().run(GenerationRequest(task_type=TaskType.VIDEO, prompt="一只猫"))
-    )
+    out = asyncio.run(_Model().run(GenerationRequest(task_type=TaskType.VIDEO, prompt="一只猫")))
     assert out.data == b"from-gateway"
     # 确认不是 ChannelError 直接穿出
     assert not isinstance(out, ChannelError)

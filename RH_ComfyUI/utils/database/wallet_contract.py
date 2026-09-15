@@ -19,7 +19,7 @@ class WalletOperationConflict(ValueError):
     """幂等键或原始计费主体与已冻结命令不一致。"""
 
 
-def validate_wallet_points(value: int) -> None:
+def validate_wallet_points(value: object) -> None:
     if type(value) is not int or not 0 <= value <= MAX_WALLET_POINTS:
         raise ValueError("points must be a bounded nonnegative integer")
 

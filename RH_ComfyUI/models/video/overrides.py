@@ -145,9 +145,7 @@ async def prepare_ref_media_request(request: GenerationRequest, cfg: RefMediaPre
         audio_durs[key] = float(dur or 0.0)
         if action is None and new_data is raw:
             out = (
-                _replaced(ref, kind=MediaKind.AUDIO, data=new_data, mime=mime)
-                if ref.data is None and new_data
-                else ref
+                _replaced(ref, kind=MediaKind.AUDIO, data=new_data, mime=mime) if ref.data is None and new_data else ref
             )
             audio_out[key] = out
             return out
@@ -254,13 +252,10 @@ async def prepare_ref_media_request(request: GenerationRequest, cfg: RefMediaPre
         for dur in audio_durs.values():
             if dur <= 0:
                 raise ValidationError(
-                    "无法探测参考音频时长,请换一段 "
-                    f"{cfg.audio_min_s:.0f}~{cfg.audio_max_s:.0f} 秒的音频"
+                    f"无法探测参考音频时长,请换一段 {cfg.audio_min_s:.0f}~{cfg.audio_max_s:.0f} 秒的音频"
                 )
             if cfg.audio_min_s > 0 and dur < cfg.audio_min_s:
-                raise ValidationError(
-                    f"单段参考音频须 ≥ {cfg.audio_min_s:.0f} 秒,当前约 {dur:.1f} 秒"
-                )
+                raise ValidationError(f"单段参考音频须 ≥ {cfg.audio_min_s:.0f} 秒,当前约 {dur:.1f} 秒")
 
     return request
 
@@ -609,10 +604,7 @@ class Seedance25VideoModel(SeedanceVideoModel):
         # 多模态参考(带视频/音频 / frame_mode=reference / omni=reference / ≥3 张图)与纯文生可用自定义比例
         is_edit_or_extend = task_mode in ("edit", "extend")
         is_frame_driven = frame_mode == "first_last" or (
-            not has_av
-            and not request_forces_multiref(request, n_img=n_img)
-            and 1 <= n_img <= 2
-            and task_mode == "auto"
+            not has_av and not request_forces_multiref(request, n_img=n_img) and 1 <= n_img <= 2 and task_mode == "auto"
         )
         if (is_edit_or_extend or is_frame_driven) and ratio and ratio != "adaptive":
             raise ValidationError(
@@ -900,9 +892,7 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
         if not prompt:
             raise ValidationError(f"{self.display_name} 必须填写提示词")
         if len(prompt) > self.MAX_PROMPT_CHARS:
-            raise ValidationError(
-                f"{self.display_name} 提示词最长 {self.MAX_PROMPT_CHARS} 字符,当前 {len(prompt)}"
-            )
+            raise ValidationError(f"{self.display_name} 提示词最长 {self.MAX_PROMPT_CHARS} 字符,当前 {len(prompt)}")
 
         duration = request.duration
         if duration is not None and duration != 0 and not (4 <= int(duration) <= 15):
@@ -916,28 +906,20 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
         task_mode = task_raw if isinstance(task_raw, str) else "auto"
 
         if n_img > self.MAX_IMAGES:
-            raise ValidationError(
-                f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,当前 {n_img} 张"
-            )
+            raise ValidationError(f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,当前 {n_img} 张")
         if n_vid > self.MAX_VIDEOS:
-            raise ValidationError(
-                f"{self.display_name} 最多 {self.MAX_VIDEOS} 段参考视频,当前 {n_vid} 段"
-            )
+            raise ValidationError(f"{self.display_name} 最多 {self.MAX_VIDEOS} 段参考视频,当前 {n_vid} 段")
         if n_aud > self.MAX_AUDIOS:
-            raise ValidationError(
-                f"{self.display_name} 最多 {self.MAX_AUDIOS} 段参考音频,当前 {n_aud} 段"
-            )
+            raise ValidationError(f"{self.display_name} 最多 {self.MAX_AUDIOS} 段参考音频,当前 {n_aud} 段")
         if n_img + n_vid + n_aud > self.MAX_REFERENCE_TOTAL:
             raise ValidationError(
-                f"{self.display_name} 参考素材合计最多 {self.MAX_REFERENCE_TOTAL} 个,"
-                f"当前 {n_img + n_vid + n_aud} 个"
+                f"{self.display_name} 参考素材合计最多 {self.MAX_REFERENCE_TOTAL} 个,当前 {n_img + n_vid + n_aud} 个"
             )
 
         has_av = n_vid > 0 or n_aud > 0
         if spec.shape in (VideoTaskShape.IMAGE2VIDEO, VideoTaskShape.FIRST_LAST_FRAME) and has_av:
             raise ValidationError(
-                f"{self.display_name} 的图生/首尾帧模式不能同时传参考视频或音频;"
-                "请改用「全能参考」模式,或移除音视频素材"
+                f"{self.display_name} 的图生/首尾帧模式不能同时传参考视频或音频;请改用「全能参考」模式,或移除音视频素材"
             )
         if spec.shape == VideoTaskShape.IMAGE2VIDEO and n_img > 1:
             raise ValidationError(f"{self.display_name} 的图生模式只接受 1 张图,当前 {n_img} 张")
@@ -996,9 +978,7 @@ class MiniMaxH3VideoModel(VideoPipelineModel):
                 external,
                 builtin_vendor_model="MiniMax-H3",
             )
-        bindings: list[ChannelBinding] = [
-            ChannelBinding(ch, vendor_model="MiniMax-H3") for ch in builtins.values()
-        ]
+        bindings: list[ChannelBinding] = [ChannelBinding(ch, vendor_model="MiniMax-H3") for ch in builtins.values()]
         bindings.extend(external)
         return bindings
 
@@ -1051,8 +1031,7 @@ class Wan30VideoModel(VideoPipelineModel):
         self.supports_generate_audio = True
         self.max_reference_total = self.MAX_IMAGES + self.MAX_VIDEOS + self.MAX_AUDIOS
         self.card = ModelCard(
-            description=node.description
-            or "万相 3.0 统一视频生成:文生/首帧/首尾帧/多参考,另支持 PDF 等参考文件",
+            description=node.description or "万相 3.0 统一视频生成:文生/首帧/首尾帧/多参考,另支持 PDF 等参考文件",
             strengths=[
                 "文生 / 首帧 / 首尾帧 / 图+视频+音频多参考",
                 "参考 PDF/PPT/文档 或网页生视频",
@@ -1095,9 +1074,7 @@ class Wan30VideoModel(VideoPipelineModel):
 
         prompt = (request.prompt or "").strip()
         if len(prompt) > self.MAX_PROMPT_CHARS:
-            raise ValidationError(
-                f"{self.display_name} 提示词最长 {self.MAX_PROMPT_CHARS} 字符,当前 {len(prompt)}"
-            )
+            raise ValidationError(f"{self.display_name} 提示词最长 {self.MAX_PROMPT_CHARS} 字符,当前 {len(prompt)}")
 
         duration = request.duration
         if duration is not None and duration != 0 and duration != -1 and not (2 <= int(duration) <= 30):
@@ -1118,7 +1095,19 @@ class Wan30VideoModel(VideoPipelineModel):
         super().validate(request)
 
     async def prepare_request(self, request: GenerationRequest) -> GenerationRequest:
-        return await SeedanceVideoModel.prepare_request(self, request)
+        return await prepare_ref_media_request(
+            request,
+            RefMediaPrep(
+                video_min_s=self.ref_video_min_s,
+                video_max_s=self.ref_video_max_s,
+                video_loop_target_s=self.ref_video_loop_target_s,
+                video_trim_target_s=self.ref_video_trim_target_s,
+                video_min_pixels=self.ref_video_min_pixels,
+                audio_max_s=self.ref_audio_max_s,
+                audio_trim_target_s=self.ref_audio_trim_target_s,
+                image_log="seedance",
+            ),
+        )
 
     def channel_bindings(self) -> list[ChannelBinding]:
         node = self.node
@@ -1131,9 +1120,7 @@ class Wan30VideoModel(VideoPipelineModel):
                 external,
                 builtin_vendor_model="wan3.0-video",
             )
-        bindings: list[ChannelBinding] = [
-            ChannelBinding(ch, vendor_model="wan3.0-video") for ch in builtins.values()
-        ]
+        bindings: list[ChannelBinding] = [ChannelBinding(ch, vendor_model="wan3.0-video") for ch in builtins.values()]
         bindings.extend(external)
         return bindings
 
@@ -1167,4 +1154,3 @@ __all__ = [
     "MiniMaxH3VideoModel",
     "Wan30VideoModel",
 ]
-

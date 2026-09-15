@@ -28,7 +28,8 @@ from RH_ComfyUI.utils.mappers.gpt_image2_params import (
     resolve_gpt_image_family_model,
 )
 
-_FAMILY = (GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef)
+_FamilyCls = type[GptImage2Def] | type[GptImage25SunburstDef] | type[GptImage25FlareDef]
+_FAMILY: tuple[_FamilyCls, ...] = (GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef)
 _EXPECTED = (
     ("gpt-image-2", GptImage2Def, 65),
     ("gpt-image-2.5-sunburst", GptImage25SunburstDef, 67),
@@ -37,7 +38,7 @@ _EXPECTED = (
 
 
 @pytest.mark.parametrize("name,cls,priority", _EXPECTED)
-def test_family_catalog_identity(name: str, cls: type[GptImageFamilyModel], priority: int):
+def test_family_catalog_identity(name: str, cls: _FamilyCls, priority: int):
     node = cls.node_def()
     assert node.name == name
     assert node.backend_model == name
@@ -81,12 +82,12 @@ def test_gpt_image2_rejects_xhigh_and_max():
 
 @pytest.mark.parametrize("cls", (GptImage25FlareDef, GptImage25SunburstDef))
 @pytest.mark.parametrize("quality", GPT_IMAGE25_QUALITIES)
-def test_gpt_image25_accepts_five_qualities(cls: type[GptImageFamilyModel], quality: str):
+def test_gpt_image25_accepts_five_qualities(cls: _FamilyCls, quality: str):
     cls().validate(GenerationRequest(task_type=TaskType.IMAGE, prompt="x", params={"quality": quality}))
 
 
 @pytest.mark.parametrize("cls", _FAMILY)
-def test_family_rejects_transparent_jpeg(cls: type[GptImageFamilyModel]):
+def test_family_rejects_transparent_jpeg(cls: _FamilyCls):
     m = cls()
     req = GenerationRequest(
         task_type=TaskType.IMAGE,
@@ -98,7 +99,7 @@ def test_family_rejects_transparent_jpeg(cls: type[GptImageFamilyModel]):
 
 
 @pytest.mark.parametrize("cls", _FAMILY)
-def test_family_validate_omitted_or_webp_becomes_png(cls: type[GptImageFamilyModel]):
+def test_family_validate_omitted_or_webp_becomes_png(cls: _FamilyCls):
     """image_pack 扩图不传 / 遗留 webp 必须过校验并落到 png。"""
     m = cls()
     omitted = GenerationRequest(task_type=TaskType.IMAGE, prompt="x", ratio="16:9")
@@ -115,7 +116,7 @@ def test_family_validate_omitted_or_webp_becomes_png(cls: type[GptImageFamilyMod
 
 
 @pytest.mark.parametrize("cls", _FAMILY)
-def test_family_normalize_and_estimate_align(cls: type[GptImageFamilyModel]):
+def test_family_normalize_and_estimate_align(cls: _FamilyCls):
     from RH_ComfyUI.utils.mappers.gpt_image2_billing import estimate_gpt_image2_points
 
     m = cls()

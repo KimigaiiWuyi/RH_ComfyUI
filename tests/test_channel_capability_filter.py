@@ -13,6 +13,7 @@ aifoundation,触发 ``validate_spec`` 抛 ``UNSUPPORTED_RESOLUTION`` →
 
 import asyncio
 from typing import Any, Optional
+from collections.abc import Collection
 
 import pytest
 
@@ -94,8 +95,8 @@ def _creds(**kw: Any) -> Any:
 def _make_seedance_channel(
     name: str,
     *,
-    resolutions: set[str] = frozenset(),
-    ratios: set[str] = frozenset(),
+    resolutions: Collection[str] = (),
+    ratios: Collection[str] = (),
     min_dur: int = 0,
     max_dur: int = 0,
     max_imgs: int = 9,

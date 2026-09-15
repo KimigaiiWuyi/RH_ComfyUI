@@ -117,9 +117,9 @@ class AIGCGenerationBase(ABC):
     # ── 弹性:瞬时错误(429/503)原通道排队退避 ──
     # 初始间隔 → 指数增长,单次上限 max_delay;累计等待超过 max_wait 则放弃该通道
     # (再 failover / 整单失败)。不计熔断(通道健康,只是瞬时过载)。
-    transient_retry_delay: ClassVar[float] = 2.0
-    transient_retry_max_delay: ClassVar[float] = 60.0
-    transient_retry_max_wait: ClassVar[float] = 3600.0  # 1 小时
+    transient_retry_delay: float = 2.0
+    transient_retry_max_delay: float = 60.0
+    transient_retry_max_wait: float = 3600.0  # 1 小时
 
     # ── 路由 ──
     priority: int = 50  # 数字越大越优先
