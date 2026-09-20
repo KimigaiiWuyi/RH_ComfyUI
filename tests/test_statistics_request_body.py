@@ -192,3 +192,24 @@ def test_begin_then_record_updates_same_row(monkeypatch) -> None:
     assert updates[0]["record_id"] == 7
     assert updates[0]["status"] == "ok"
     assert updates[0]["elapsed_ms"] == 100
+
+
+def test_image_core_params_keep_ratio_and_image_size() -> None:
+    """图片不再把 ratio/resolution 列写死成空;档位来自 params.image_size。"""
+    req = GenerationRequest(
+        task_type=TaskType.IMAGE,
+        prompt="cat",
+        ratio="16:9",
+        params={"image_size": "4K", "quality": "high"},
+    )
+    core = statistics._extract_core_params(req)
+    assert core["ratio"] == "16:9"
+    assert core["resolution"] == "4K"
+    camel = GenerationRequest(
+        task_type=TaskType.IMAGE,
+        prompt="cat",
+        params={"aspectRatio": "9:16", "imageSize": "2K"},
+    )
+    camel_core = statistics._extract_core_params(camel)
+    assert camel_core["ratio"] == "9:16"
+    assert camel_core["resolution"] == "2K"

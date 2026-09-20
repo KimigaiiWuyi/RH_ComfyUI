@@ -86,7 +86,7 @@ async def gpt_image2_mapper(
         )
 
     if isinstance(drawn, int):
-        raise RuntimeError(f"GPT-Image2 生成失败，错误码: {drawn}")
+        raise RuntimeError(f"{model} 生成失败，错误码: {drawn}")
 
     from ..backends.gpt_image2.api import GPTImageDrawResult
 
@@ -99,7 +99,7 @@ async def gpt_image2_mapper(
     elif isinstance(drawn, Image.Image):
         image = drawn
     else:
-        raise RuntimeError(f"GPT-Image2 返回了无法处理的类型: {type(drawn)}")
+        raise RuntimeError(f"{model} 返回了无法处理的类型: {type(drawn)}")
 
     data, mime = encode_pil_image(image, output_format)
 

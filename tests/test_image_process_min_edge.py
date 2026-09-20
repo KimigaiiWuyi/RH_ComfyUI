@@ -1,4 +1,4 @@
-"""Seedance 参考图短边放大 + 宽高比裁切。"""
+"""Seedance 参考图短边放大 + 宽高比白底补边。"""
 
 from __future__ import annotations
 
@@ -18,11 +18,12 @@ from RH_ComfyUI.utils.image_process import (
     SEEDANCE_IMAGE_MIN_EDGE,
     SEEDANCE_ASPECT_OFFICIAL_MAX,
     SEEDANCE_ASPECT_OFFICIAL_MIN,
+    SEEDANCE_ASPECT_PAD_MAX_SIDE,
     run_image_prep,
     ensure_min_edge,
     image_mime_from_bytes,
     clear_image_prep_cache,
-    crop_to_seedance_aspect,
+    pad_to_seedance_aspect,
     prepare_seedance_image_ref,
     prepare_seedance_image_bytes,
     prepare_seedance_image_bytes_async,
@@ -187,38 +188,106 @@ def _assert_seedance_aspect_ok(w: int, h: int) -> None:
     assert ar >= SEEDANCE_ASPECT_MIN - 1e-9
 
 
-def test_wide_jpeg_crops_to_max_aspect():
-    """复现网关 400:2.69 超 2.50,应居中裁到 2.49。"""
+def test_wide_jpeg_pads_white_border_to_max_aspect():
+    """复现网关 400:2.69 超 2.50,应补白边到 2.49,且原图一行不裁。"""
     raw = _jpeg(2690, 1000)
-    out, info = crop_to_seedance_aspect(raw)
+    out, info = pad_to_seedance_aspect(raw)
     assert info
+    assert "pad-white" in info
     img = _open(out)
-    assert img.size[1] == 1000
-    assert img.size[0] < 2690
+    # 原图宽高完整保留,只向上/下补白
+    assert img.size[0] == 2690
+    assert img.size[1] > 1000
     _assert_seedance_aspect_ok(*img.size)
     assert abs(img.size[0] / img.size[1] - SEEDANCE_ASPECT_MAX) < 0.02
+    # 原图内容原样落在画布中央
+    assert img.getpixel((10, 500)) == (20, 180, 90)
+    # 补出来的上下边是纯白
+    assert img.getpixel((10, 5)) == (255, 255, 255)
+    assert img.getpixel((10, img.size[1] - 5)) == (255, 255, 255)
 
 
-def test_tall_png_crops_to_min_aspect():
+def test_tall_png_pads_white_border_to_min_aspect():
+    """1000×2690 过竖,应左右补白到 0.41。"""
     raw = _png(1000, 2690)
-    out, info = crop_to_seedance_aspect(raw)
+    out, info = pad_to_seedance_aspect(raw)
     assert info
     img = _open(out)
-    assert img.size[0] == 1000
-    assert img.size[1] < 2690
+    assert img.size[1] == 2690
+    assert img.size[0] > 1000
     _assert_seedance_aspect_ok(*img.size)
     assert abs(img.size[0] / img.size[1] - SEEDANCE_ASPECT_MIN) < 0.02
+    # 原图水平居中:左侧补白、右侧补白
+    assert img.getpixel((5, 10)) == (255, 255, 255)
+    assert img.getpixel((img.size[0] - 5, 10)) == (255, 255, 255)
+    assert img.getpixel((img.size[0] // 2, 10)) == (0, 128, 255)
+
+
+def test_pad_keeps_rgba_original_transparency():
+    """RGBA 原图补边后仍是 RGBA,半透明像素按白底合成且不再有残透明。"""
+    raw = _png(200, 800, mode="RGBA")
+    out, info = pad_to_seedance_aspect(raw)
+    assert info
+    img = _open(out)
+    assert img.mode == "RGBA"
+    assert img.size[1] == 800
+    assert img.size[0] > 200
+    # 补出来的区域是不透明白
+    assert img.getpixel((2, 400)) == (255, 255, 255, 255)
+    # 原图半透明像素合成到白底:RGB 各通道向 255 靠拢且 alpha 变实
+    r, g, b, a = img.getpixel((img.size[0] // 2, 400))
+    assert a == 255
+    assert r > 0 and g > 128 and b == 255
+
+
+def test_pad_rgba_transparent_pixels_fall_on_white():
+    """原图自身的透明区域补边后应落在白底上(整图不再有透明白边残留)。"""
+    raw = _png(200, 800, mode="RGBA", color=(0, 0, 0, 0))
+    out, info = pad_to_seedance_aspect(raw)
+    assert info
+    img = _open(out)
+    assert img.getpixel((2, 400)) == (255, 255, 255, 255)
+    assert img.getpixel((img.size[0] // 2, 400)) == (255, 255, 255, 255)
+
+
+def test_extreme_long_strip_downscales_before_pad():
+    """极端长条图补边会撑爆画布,先整体等比缩小再补边。"""
+    raw = _jpeg(8000, 100)
+    out, info = pad_to_seedance_aspect(raw)
+    assert info
+    img = _open(out)
+    assert max(img.size) <= SEEDANCE_ASPECT_PAD_MAX_SIDE
+    _assert_seedance_aspect_ok(*img.size)
+    # 缩小后原图宽高仍在画布内完整保留,没有被裁掉
+    assert img.size[0] < 8000
+    # 过宽图补上下白边:中间是原图,上下是白
+    assert img.getpixel((img.size[0] // 2, img.size[1] // 2)) == (20, 180, 90)
+    assert img.getpixel((img.size[0] // 2, 2)) == (255, 255, 255)
+    assert img.getpixel((img.size[0] // 2, img.size[1] - 2)) == (255, 255, 255)
+
+
+def test_extreme_tall_strip_downscales_then_pads_sides():
+    """极端竖长条图:左右补白,画布不超上限。"""
+    raw = _jpeg(100, 8000)
+    out, info = pad_to_seedance_aspect(raw)
+    assert info
+    img = _open(out)
+    assert max(img.size) <= SEEDANCE_ASPECT_PAD_MAX_SIDE
+    _assert_seedance_aspect_ok(*img.size)
+    assert img.size[1] < 8000
+    assert img.getpixel((2, img.size[1] // 2)) == (255, 255, 255)
+    assert img.getpixel((img.size[0] - 2, img.size[1] // 2)) == (255, 255, 255)
 
 
 def test_valid_aspect_returns_original():
     raw = _jpeg(640, 480)
-    out, info = crop_to_seedance_aspect(raw)
+    out, info = pad_to_seedance_aspect(raw)
     assert info == ""
     assert out is raw
 
 
-def test_small_wide_upscales_then_crops():
-    """100×50 先放大到 600×300(AR=2.00,合法),不应再裁。"""
+def test_small_wide_upscales_then_pads():
+    """100×50 先放大到 600×300(AR=2.00,合法),不应再补边。"""
     raw = _jpeg(100, 50)
     out, info = prepare_seedance_image_bytes(raw)
     assert info
@@ -226,13 +295,15 @@ def test_small_wide_upscales_then_crops():
     assert img.size[0] >= SEEDANCE_IMAGE_MIN_EDGE
     assert img.size[1] >= SEEDANCE_IMAGE_MIN_EDGE
     _assert_seedance_aspect_ok(*img.size)
+    assert img.size == (600, 300)
 
 
-def test_small_and_too_wide_upscales_then_crops():
-    """269×100 = 2.69,放大后仍超限,再裁到 2.49。"""
+def test_small_and_too_wide_upscales_then_pads():
+    """269×100 = 2.69,放大后仍超限,再补白边到 2.49。"""
     raw = _jpeg(269, 100)
     out, info = prepare_seedance_image_bytes(raw)
     assert "aspect" in info
+    assert "pad-white" in info
     img = _open(out)
     assert img.size[0] >= SEEDANCE_IMAGE_MIN_EDGE
     assert img.size[1] >= SEEDANCE_IMAGE_MIN_EDGE
@@ -240,7 +311,7 @@ def test_small_and_too_wide_upscales_then_crops():
     assert abs(img.size[0] / img.size[1] - SEEDANCE_ASPECT_MAX) < 0.02
 
 
-def test_prepare_request_crops_wide_flat_and_ordered():
+def test_prepare_request_pads_wide_flat_and_ordered():
     wide = _jpeg(2690, 1000)
     req = GenerationRequest(
         task_type=TaskType.VIDEO,
@@ -256,6 +327,8 @@ def test_prepare_request_crops_wide_flat_and_ordered():
     out = asyncio.run(Seedance2Def().prepare_request(req))
     flat = _open(out.images[0])
     _assert_seedance_aspect_ok(*flat.size)
+    # 原图内容完整保留:补边只放大短边
+    assert flat.size[0] == 2690
     oc_img = next(i for i in out.ordered_content if i.type == ContentItemType.IMAGE)
     assert oc_img.media is not None
     assert oc_img.media.url is None
@@ -263,15 +336,16 @@ def test_prepare_request_crops_wide_flat_and_ordered():
     _assert_seedance_aspect_ok(*_open(oc_img.media.data).size)
 
 
-def test_prepare_request_crops_on_seedance25():
+def test_prepare_request_pads_on_seedance25():
     wide = _jpeg(2690, 1000)
     req = GenerationRequest(task_type=TaskType.VIDEO, prompt="动起来", images=[wide])
     out = asyncio.run(Seedance25Def().prepare_request(req))
     img = _open(out.images[0])
     _assert_seedance_aspect_ok(*img.size)
+    assert img.size[0] == 2690
 
 
-def test_prepare_seedance_image_ref_clears_url_after_crop():
+def test_prepare_seedance_image_ref_clears_url_after_pad():
     wide = _png(2690, 1000)
     ref = MediaRef(kind=MediaKind.IMAGE, data=wide, url="https://cdn.example.com/wide.png")
     out = asyncio.run(prepare_seedance_image_ref(ref))

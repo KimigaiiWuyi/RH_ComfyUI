@@ -230,6 +230,17 @@ def test_mapper_does_not_collapse_25_to_gpt_image_2():
     assert api.calls[0]["model"] != "gpt-image-2"
 
 
+def test_mapper_error_uses_catalog_model_not_gpt_image_2_label():
+    class _FailApi:
+        async def draw_image(self, **kwargs: object) -> int:
+            return 404
+
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="p", model="gpt-image-2.5-flare")
+    with pytest.raises(RuntimeError, match="gpt-image-2.5-flare 生成失败") as ei:
+        asyncio.run(gpt_image2_mapper(req, _FailApi()))
+    assert "GPT-Image2" not in str(ei.value)
+
+
 def test_channel_bindings_do_not_leak_across_family():
     channel_registry.clear()
     try:

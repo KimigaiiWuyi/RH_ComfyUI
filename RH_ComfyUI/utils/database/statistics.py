@@ -85,13 +85,35 @@ def _extract_video_params(request: "GenerationRequest") -> dict[str, Any]:
     }
 
 
+def _param_text(params: dict[str, Any], key: str) -> str:
+    if key not in params:
+        return ""
+    raw = params[key]
+    if isinstance(raw, str):
+        return raw.strip()
+    return ""
+
+
 def _extract_image_params(request: "GenerationRequest") -> dict[str, Any]:
+    """图片也落 ratio / 档位。缺省 width/height(720x1280)不是出图像素,列上不写分辨率像素。"""
+    params = request.params if isinstance(request.params, dict) else {}
+    ratio = (request.ratio or "").strip()
+    if not ratio:
+        for key in ("ratio", "aspectRatio", "aspect_ratio"):
+            ratio = _param_text(params, key)
+            if ratio:
+                break
+    resolution = ""
+    for key in ("image_size", "size_mode", "imageSize"):
+        resolution = _param_text(params, key)
+        if resolution:
+            break
     return {
         "duration_seconds": None,
         "width": request.width,
         "height": request.height,
-        "ratio": "",
-        "resolution": "",
+        "ratio": ratio,
+        "resolution": resolution,
         "seed": request.seed,
     }
 

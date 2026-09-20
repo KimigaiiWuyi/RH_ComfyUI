@@ -9,8 +9,8 @@
 当前内置处理:
 - resize_long_edge: 等比缩放最长边到指定阈值
 - ensure_min_edge: 等比放大使宽、高均不少于指定阈值(Seedance 参考图 ≥300)
-- crop_to_seedance_aspect: 居中裁切使宽高比落入官方 0.40~2.50(目标 0.41 / 2.49)
-- prepare_seedance_image_bytes: 先放大再裁切,Seedance 2.x 提交前共用
+- pad_to_seedance_aspect: 白色背景补边使宽高比落入官方 0.40~2.50(目标 0.41 / 2.49)
+- prepare_seedance_image_bytes: 先放大再补边,Seedance 2.x 提交前共用
 - prepare_seedance_image_bytes_async / run_image_prep: 专用线程池,禁止在事件循环上跑
 - ensure_standard_image: 上传前一律收成标准 JPEG(透明通道铺中性灰底)
 """
@@ -20,6 +20,7 @@ from __future__ import annotations
 import atexit
 import asyncio
 import hashlib
+import math
 import threading
 from io import BytesIO
 from typing import Any, TypeVar, Callable
@@ -32,12 +33,16 @@ VIDEO_REF_MAX_LONG_EDGE = 2048
 # Seedance 官方硬限:参考图宽、高均须 ≥ 此像素,否则上游拒收。
 SEEDANCE_IMAGE_MIN_EDGE = 300
 
-# 官方 image_url 宽高比硬限:0.40 ≤ w/h ≤ 2.50。裁切目标取内侧,避免整数取整后仍踩线。
+# 官方 image_url 宽高比硬限:0.40 ≤ w/h ≤ 2.50。补边目标取内侧,避免整数取整后仍踩线。
 # 勿用 0.39:低于 0.40 会被上游 InvalidParameter 拒收。
 SEEDANCE_ASPECT_MIN = 0.41
 SEEDANCE_ASPECT_MAX = 2.49
 SEEDANCE_ASPECT_OFFICIAL_MIN = 0.40
 SEEDANCE_ASPECT_OFFICIAL_MAX = 2.50
+
+# 补边后画布的单边上限:极端长条图(如 8000×1000)若原样补边会得到上亿像素的画布,
+# 内存与上传都撑不住。超出时先把原图整体等比缩小,再补边——内容仍然完整保留。
+SEEDANCE_ASPECT_PAD_MAX_SIDE = 4096
 
 # 参考图预处理专用池:Pillow 解码/JPEG optimize 会握一会儿 GIL,但不能跑在事件循环上。
 # 与默认 to_thread 池分开,避免 30 张大 PNG 把读盘/R2 压缩也排干。
@@ -200,11 +205,39 @@ def ensure_min_edge(
     return out, info
 
 
-def crop_to_seedance_aspect(data: bytes) -> tuple[bytes, str]:
-    """居中裁切,使宽高比落入官方 0.40~2.50(目标 0.41 或 2.49,取更近一侧)。
+def _seedance_pad_plan(width: int, height: int) -> tuple[int, int, int, int]:
+    """规划补边:返回 (原图放置宽, 原图放置高, 画布宽, 画布高)。
 
-    过宽(w/h > 2.49)裁左右;过竖(w/h < 0.41)裁上下。已在区间内、解码失败
-    或 Pillow 不可用时原样返回。只减较长边,短边不变。
+    只放大画布短边,原图保持 1:1 不缩放;过宽(w/h > 2.49)补上下,
+    过竖(w/h < 0.41)补左右,画布宽高比一定落在 [MIN, MAX] 内。
+    若画布单边超过 SEEDANCE_ASPECT_PAD_MAX_SIDE(极端长条图),先把原图
+    整体等比缩小到能放进展限度内——内容仍然完整保留,只是分辨率降低。
+    """
+    ar = width / height
+    place_w, place_h = width, height
+    if ar > SEEDANCE_ASPECT_MAX:
+        new_w, new_h = width, math.ceil(width / SEEDANCE_ASPECT_MAX)
+    else:
+        new_w, new_h = math.ceil(height * SEEDANCE_ASPECT_MIN), height
+
+    long_side = max(new_w, new_h)
+    if long_side > SEEDANCE_ASPECT_PAD_MAX_SIDE:
+        scale = SEEDANCE_ASPECT_PAD_MAX_SIDE / long_side
+        place_w = max(1, round(width * scale))
+        place_h = max(1, round(height * scale))
+        if place_w / place_h > SEEDANCE_ASPECT_MAX:
+            new_w, new_h = place_w, math.ceil(place_w / SEEDANCE_ASPECT_MAX)
+        else:
+            new_w, new_h = math.ceil(place_h * SEEDANCE_ASPECT_MIN), place_h
+
+    return place_w, place_h, new_w, new_h
+
+
+def pad_to_seedance_aspect(data: bytes) -> tuple[bytes, str]:
+    """白色背景补边,使宽高比落入官方 0.40~2.50(目标 0.41 或 2.49,取更近一侧)。
+
+    过宽(w/h > 2.49)补上下;过竖(w/h < 0.41)补左右。原图 1:1 居中放在纯白画布上,
+    不裁切、内容完整保留。已在区间内、解码失败或 Pillow 不可用时原样返回。
     """
     if not data:
         return data, ""
@@ -234,36 +267,34 @@ def crop_to_seedance_aspect(data: bytes) -> tuple[bytes, str]:
     if SEEDANCE_ASPECT_MIN <= ar <= SEEDANCE_ASPECT_MAX:
         return data, ""
 
-    # 区间外只可能更靠近某一端:过宽 → 2.49,过竖 → 0.41。
-    if ar > SEEDANCE_ASPECT_MAX:
-        target_ar = SEEDANCE_ASPECT_MAX
-        new_w = max(1, min(width, int(height * target_ar)))
-        while new_w > 1 and new_w / height > SEEDANCE_ASPECT_MAX:
-            new_w -= 1
-        new_h = height
-        left = (width - new_w) // 2
-        box = (left, 0, left + new_w, height)
-    else:
-        target_ar = SEEDANCE_ASPECT_MIN
-        new_h = max(1, min(height, int(width / target_ar)))
-        while new_h < height and width / new_h < SEEDANCE_ASPECT_MIN:
-            new_h -= 1
-        if new_h < 1:
-            new_h = 1
-        new_w = width
-        top = (height - new_h) // 2
-        box = (0, top, width, top + new_h)
-
+    place_w, place_h, new_w, new_h = _seedance_pad_plan(width, height)
     if new_w == width and new_h == height:
         return data, ""
 
     has_alpha = _has_transparency(img)
+    # 居中放置:上下/左右补边量一致
+    left = (new_w - place_w) // 2
+    top = (new_h - place_h) // 2
     try:
-        img = img.crop(box)
         if has_alpha:
-            img = img.convert("RGBA")
-        elif img.mode != "RGB":
-            img = img.convert("RGB")
+            if img.mode != "RGBA":
+                img = img.convert("RGBA")
+            if (place_w, place_h) != (width, height):
+                img = img.resize((place_w, place_h), _lanczos())
+            # 先原样放入透明图层,再整体合成到白底:原图像素不被稀释,
+            # 自身透明处落到白底,补边区保持不透明白。
+            layer = Image.new("RGBA", (new_w, new_h), (0, 0, 0, 0))
+            layer.paste(img, (left, top))
+            canvas = Image.new("RGBA", (new_w, new_h), (255, 255, 255, 255))
+            canvas.alpha_composite(layer)
+        else:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            if (place_w, place_h) != (width, height):
+                img = img.resize((place_w, place_h), _lanczos())
+            canvas = Image.new("RGB", (new_w, new_h), (255, 255, 255))
+            canvas.paste(img, (left, top))
+        img = canvas
     except Exception:  # noqa: BLE001
         return data, ""
 
@@ -291,24 +322,25 @@ def crop_to_seedance_aspect(data: bytes) -> tuple[bytes, str]:
     if not out:
         return data, ""
     cw, ch = img.size
-    info = f"aspect {width}x{height}({ar:.2f})→{cw}x{ch}({cw / ch:.2f}) {tag}"
+    info = f"aspect {width}x{height}({ar:.2f})→{cw}x{ch}({cw / ch:.2f}) pad-white {tag}"
     return out, info
 
 
 def prepare_seedance_image_bytes(data: bytes) -> tuple[bytes, str]:
-    """Seedance 参考图提交前:先等比放大到宽高均 ≥300,再裁到合法宽高比。
+    """Seedance 参考图提交前:先等比放大到宽高均 ≥300,再用白色背景补到合法宽高比。
 
-    任一步未改写时跳过;两步都改则拼 info。失败降级为原字节。
+    补边不缩放、不裁切,原图内容完整保留。任一步未改写时跳过;两步都改则拼 info。
+    失败降级为原字节。
     """
     if not data:
         return data, ""
     out, info_scale = ensure_min_edge(data)
-    out, info_crop = crop_to_seedance_aspect(out)
-    # 裁切只减长边,短边应仍 ≥300;再跑一次防取整边缘。
+    out, info_pad = pad_to_seedance_aspect(out)
+    # 补边只放大画布,原图宽高不变,短边仍 ≥300;再跑一次防极端缩放的边缘。
     out, info_scale2 = ensure_min_edge(out)
     out, mime = ensure_standard_image(out)
     fmt = "" if data.startswith(_JPEG_MAGIC) else (mime.split("/")[-1] if mime else "")
-    infos = [x for x in (info_scale, info_crop, info_scale2, fmt) if x]
+    infos = [x for x in (info_scale, info_pad, info_scale2, fmt) if x]
     return out, "; ".join(infos)
 
 
@@ -1303,8 +1335,9 @@ __all__ = [
     "SEEDANCE_ASPECT_MAX",
     "SEEDANCE_ASPECT_OFFICIAL_MIN",
     "SEEDANCE_ASPECT_OFFICIAL_MAX",
+    "SEEDANCE_ASPECT_PAD_MAX_SIDE",
     "ensure_min_edge",
-    "crop_to_seedance_aspect",
+    "pad_to_seedance_aspect",
     "prepare_seedance_image_bytes",
     "prepare_seedance_image_bytes_async",
     "run_image_prep",
