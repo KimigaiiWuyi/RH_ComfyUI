@@ -22,6 +22,7 @@ from typing import Any, Optional
 from gsuid_core.logger import logger
 
 from ..http_retry import download_with_network_retry
+from ....core.base.errors import VendorTaskNotDurable
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 # background interaction 终态(官方 Interactions API status 枚举)
@@ -251,6 +252,8 @@ class GeminiImageAPI:
                 cancel_remote=_cancel_remote,
                 channel_name="gemini",
             )
+        except VendorTaskNotDurable:
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"[Gemini-Image] 绑定 vendor 任务失败(忽略): {exc}")
 

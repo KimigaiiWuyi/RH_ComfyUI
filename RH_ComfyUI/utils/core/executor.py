@@ -159,7 +159,7 @@ async def execute_generation(
 
     sem = _get_semaphore()
     # 进入执行闸前写入 running(旧路径无预扣;仍先可见进行中)
-    record_id = await begin_task(
+    began = await begin_task(
         request=request,
         request_body=request_body,
         node=node,
@@ -168,6 +168,14 @@ async def execute_generation(
         trace_id=request.trace_id or "",
         point_cost=int(node.point_cost or 0),
     )
+    record_id = began.record_id if began is not None else None
+    if began is not None and began.vendor_task_id:
+        from ...core.base.errors import GenerationError
+
+        raise GenerationError(
+            "已有上游任务号，请使用 resume_poll，不要再次提交",
+            user_message="上游已受理，请勿重复生成。",
+        )
     start_ts = time.monotonic()
     status = "ok"
     error_repr: Optional[str] = None

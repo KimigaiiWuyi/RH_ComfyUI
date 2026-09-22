@@ -371,6 +371,8 @@ class AIGCGenerationBase(ABC):
                 ordered = free + [b for b in ordered if b not in free]
 
         last_error: Optional[Exception] = None
+        # 一次 dispatch 只通知一次。通道重试若再调，一次性收口钩子会把可重试请求打失败。
+        vendor_create_notified = False
         # 按 binding 身份记可用候选,不能用 channel.name:同名两路(内置 gemini +
         # 外部也叫 gemini)失败一路会把另一路从集合里一起删掉,再也切不过去。
         available: list[ChannelBinding] = []
@@ -404,6 +406,12 @@ class AIGCGenerationBase(ABC):
                     #      上限 = min(Channel_Concurrency, model.max_concurrency)
                     async with channel_slot(binding.channel.name):
                         async with channel_slot_for_model(self, binding.channel.name):
+                            # 排队仍算未接触厂商；第一次真正执行前才通知宿主收口。
+                            if not vendor_create_notified:
+                                from ..dispatch.vendor_gate import notify_vendor_create_starting
+
+                                await notify_vendor_create_starting()
+                                vendor_create_notified = True
                             output = await self.execute_on_channel(request, binding, on_progress=on_progress)
                 except ChannelError as e:
                     last_error = e

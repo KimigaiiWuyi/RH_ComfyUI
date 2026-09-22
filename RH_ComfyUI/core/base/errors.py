@@ -66,6 +66,36 @@ class BillingDeniedError(GenerationError):
     """计费拒绝(积分不足 / 账户异常)"""
 
 
+class GenerationAlreadyRunning(GenerationError):
+    """同一 trace 仍在本进程执行。不要再提交，也不要把原消费行打成失败。"""
+
+    def __init__(self, message: str, *, user_message: Optional[str] = None) -> None:
+        super().__init__(
+            message,
+            user_message=user_message if user_message is not None else "任务仍在执行，请勿重复生成。",
+        )
+
+
+class VendorTaskNotDurable(GenerationError):
+    """厂商已返回任务号，但消费行没写上，不能当成可召回。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        record_id: int,
+        vendor_task_id: str,
+        channel: str = "",
+    ) -> None:
+        super().__init__(
+            message,
+            user_message="上游已受理，任务号暂未保存，请勿重复生成。",
+        )
+        self.record_id = record_id
+        self.vendor_task_id = vendor_task_id
+        self.channel = channel
+
+
 class DryRunInterrupt(BaseException):
     """全局 Dry-Run 中断信号。
 

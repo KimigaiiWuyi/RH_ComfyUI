@@ -34,6 +34,7 @@ from ..seedance.provider import (
     SeedanceProviderError,
     http_status_retryable,
 )
+from ....core.base.errors import VendorTaskNotDurable
 
 
 class MiniMaxH3ProviderError(SeedanceProviderError):
@@ -521,6 +522,8 @@ class MiniMaxH3Provider:
                 cancel_remote=_cancel_remote,
                 channel_name=self.name,
             )
+        except VendorTaskNotDurable:
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[MiniMaxH3] 绑定 vendor 任务失败(忽略): {exc}")
 

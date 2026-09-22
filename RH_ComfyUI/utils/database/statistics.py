@@ -13,6 +13,7 @@ import json
 from typing import TYPE_CHECKING, Any, Optional
 from pathlib import Path
 from datetime import datetime, timezone
+from dataclasses import dataclass
 
 from gsuid_core.logger import logger
 
@@ -237,6 +238,15 @@ def _build_common_insert_kwargs(
 # ── 核心入口 ──
 
 
+@dataclass(frozen=True)
+class BeganTask:
+    """begin_task 的结果。已有 vendor_task_id 时调用方应 resume，不要再创建。"""
+
+    record_id: int
+    vendor_task_id: str = ""
+    vendor_channel: str = ""
+
+
 async def begin_task(
     *,
     request: "GenerationRequest",
@@ -247,13 +257,37 @@ async def begin_task(
     entry_point: str = "",
     point_cost: int = 0,
     request_body: Optional[dict[str, Any]] = None,
-) -> Optional[int]:
-    """任务创建/预扣后立刻落库 status=running,返回 record id。
+) -> Optional[BeganTask]:
+    """任务创建/预扣后立刻落库 status=running,返回记录。
 
-    失败返回 None,不抛出——调用方仍可在 record_task 时一次 INSERT 终态。
+    只复用同一用户、同一模型、且仍为 running 的行。已有厂商任务号时带回该号，
+    调用方应 resume_poll，不要再创建。失败返回 None,不抛出。
     """
     try:
         from .models import RHComfyuiTaskRecord, RHComfyuiTaskStatus
+
+        tid = (trace_id or (request.trace_id or "")).strip()[:64]
+        if tid:
+            hit = await RHComfyuiTaskRecord.find_running_match(
+                trace_id=tid,
+                user_id=_resolve_user_id(request),
+                bot_id=(bot_id or "")[:64],
+                task_name=str(node.name)[:128],
+            )
+            if hit is not None:
+                found_id, vendor_task_id, vendor_channel = hit
+                if vendor_task_id:
+                    logger.info(
+                        f"[RHComfyUI.Statistics] running 行已有厂商任务 id={found_id} "
+                        f"trace={tid} vendor_task_id={vendor_task_id}"
+                    )
+                else:
+                    logger.info(f"[RHComfyUI.Statistics] reuse running id={found_id} trace={tid} task={node.name}")
+                return BeganTask(
+                    record_id=found_id,
+                    vendor_task_id=vendor_task_id,
+                    vendor_channel=vendor_channel,
+                )
 
         kwargs = _build_common_insert_kwargs(
             request=request,
@@ -275,7 +309,9 @@ async def begin_task(
             f"[RHComfyUI.Statistics] began id={record_id} task={node.name} "
             f"user={kwargs['user_id']} status=running cost={kwargs['point_cost']}"
         )
-        return record_id
+        if not isinstance(record_id, int) or record_id <= 0:
+            return None
+        return BeganTask(record_id=record_id)
     except Exception as e:  # noqa: BLE001 - 统计失败不影响主流程
         logger.warning(f"[RHComfyUI.Statistics] begin_task 失败(已忽略): {e}")
         return None

@@ -964,6 +964,7 @@ async def resume_poll(
     trace_id: str = "",
     record_id: Optional[int] = None,
     on_progress: Optional[ProgressCallback] = None,
+    update_record: bool = True,
 ) -> GenerationResult:
     """按上游 task_id 继续轮询直至出结果。
 
@@ -976,6 +977,7 @@ async def resume_poll(
         trace_id: 用于 cancel 登记(与 submit 时 trace_id 对齐)
         record_id: 若有则成功/失败时更新 RH 统计行
         on_progress: 进度回调
+        update_record: False 时只轮询，终态和钱包差额交给调用方(dispatch)
 
     Raises:
         ResumeNotSupportedError: 缺少可靠查询条件；不据此写失败或退款
@@ -985,6 +987,26 @@ async def resume_poll(
     """
     start = time.monotonic()
     ag = None
+
+    async def _write_terminal(
+        status: str,
+        error: str = "",
+        elapsed_ms: int = 0,
+        actual_cost: Optional[int] = None,
+    ) -> None:
+        # dispatch 自己结算时不要在这里再写终态、再动钱包。
+        if not update_record:
+            return
+        if actual_cost is None:
+            await _finalize_record(record_id, status=status, error=error, elapsed_ms=elapsed_ms)
+            return
+        await _finalize_record(
+            record_id,
+            status=status,
+            error=error,
+            elapsed_ms=elapsed_ms,
+            actual_cost=actual_cost,
+        )
 
     try:
         if not vendor_task_id or not str(vendor_task_id).strip():
@@ -1101,34 +1123,24 @@ async def resume_poll(
                 logger.warning(f"[resume_poll] settle_model_cost 失败 model={model}: {settle_exc}")
         if actual_cost:
             result.point_cost = actual_cost
-        await _finalize_record(
-            record_id, status="ok", elapsed_ms=elapsed_ms, actual_cost=actual_cost
-        )
+        await _write_terminal("ok", elapsed_ms=elapsed_ms, actual_cost=actual_cost)
         await _emit(on_progress, "done", 100, "恢复完成")
         return result
     except asyncio.CancelledError:
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        await _finalize_record(
-            record_id, status="cancelled", error="user_cancel", elapsed_ms=elapsed_ms
-        )
+        await _write_terminal("cancelled", error="user_cancel", elapsed_ms=elapsed_ms)
         raise
     except ResumeCancelledError as exc:
         # 上游已 cancel:统计 status=cancelled(勿记 failed)
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        await _finalize_record(
-            record_id,
-            status="cancelled",
-            error=str(exc)[:2000],
-            elapsed_ms=elapsed_ms,
-        )
+        await _write_terminal("cancelled", error=str(exc)[:2000], elapsed_ms=elapsed_ms)
         raise
     except ResumeNotSupportedError:
         raise
     except ResumeFailedError as exc:
         if exc.definitive:
-            await _finalize_record(
-                record_id,
-                status="failed",
+            await _write_terminal(
+                "failed",
                 error=str(exc)[:2000],
                 elapsed_ms=int((time.monotonic() - start) * 1000),
             )
@@ -1136,9 +1148,8 @@ async def resume_poll(
     except Exception as exc:
         terminal = provider_terminal_error(exc)
         if terminal is not None:
-            await _finalize_record(
-                record_id,
-                status="cancelled" if isinstance(terminal, ResumeCancelledError) else "failed",
+            await _write_terminal(
+                "cancelled" if isinstance(terminal, ResumeCancelledError) else "failed",
                 error=str(terminal)[:2000],
                 elapsed_ms=int((time.monotonic() - start) * 1000),
             )

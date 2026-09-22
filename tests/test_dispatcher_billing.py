@@ -579,3 +579,336 @@ def _capture_recording(monkeypatch, statuses: list):
 
     monkeypatch.setattr(disp, "begin_dispatch", _begin)
     monkeypatch.setattr(disp, "record_dispatch", _capture)
+
+
+def test_required_task_record_stops_before_vendor(monkeypatch):
+    from RH_ComfyUI.core.base.errors import GenerationError
+    from RH_ComfyUI.core.dispatch.vendor_gate import task_record_required_scope
+
+    class CountingModel(FakeModel):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        async def execute_on_channel(
+            self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+        ) -> NodeOutput:
+            self.calls += 1
+            return await super().execute_on_channel(request, binding, on_progress=on_progress)
+
+    model = CountingModel()
+    model_registry.register(model)
+    _mute_recording(monkeypatch)
+    try:
+        with task_record_required_scope(True), pytest.raises(GenerationError, match="未向厂商提交"):
+            asyncio.run(
+                dispatch(
+                    GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                    _ctx(FakePolicy()),
+                )
+            )
+        assert model.calls == 0
+    finally:
+        model_registry.unregister(model.name)
+
+
+def test_vendor_create_hook_failure_stops_before_execute(monkeypatch):
+    from RH_ComfyUI.core.dispatch.vendor_gate import vendor_create_hook_scope
+
+    class CountingModel(FakeModel):
+        name = "fake_hook_stop"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        async def execute_on_channel(
+            self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+        ) -> NodeOutput:
+            self.calls += 1
+            return await super().execute_on_channel(request, binding, on_progress=on_progress)
+
+    async def _hook() -> None:
+        raise RuntimeError("收口失败")
+
+    model = CountingModel()
+    policy = FakePolicy()
+    model_registry.register(model)
+    _capture_recording(monkeypatch, [])
+    try:
+        with vendor_create_hook_scope(_hook), pytest.raises(RuntimeError, match="收口失败"):
+            asyncio.run(
+                dispatch(
+                    GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                    _ctx(policy),
+                )
+            )
+        assert model.calls == 0
+        assert policy.refunds == 1
+    finally:
+        model_registry.unregister(model.name)
+
+
+def test_vendor_create_hook_runs_once_across_transient_retry(monkeypatch):
+    from RH_ComfyUI.core.dispatch.vendor_gate import vendor_create_hook_scope
+
+    class FlakyModel(FakeModel):
+        name = "fake_hook_once"
+        transient_retry_delay = 0.0
+        transient_retry_max_delay = 0.0
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        async def execute_on_channel(
+            self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+        ) -> NodeOutput:
+            self.calls += 1
+            if self.calls == 1:
+                raise ChannelError("429", retryable=True, transient=True)
+            return await super().execute_on_channel(request, binding, on_progress=on_progress)
+
+    hooks = {"n": 0}
+
+    async def _hook() -> None:
+        hooks["n"] += 1
+
+    model = FlakyModel()
+    model_registry.register(model)
+    _capture_recording(monkeypatch, [])
+    try:
+        with vendor_create_hook_scope(_hook):
+            asyncio.run(
+                dispatch(
+                    GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                    _ctx(FakePolicy()),
+                )
+            )
+        assert hooks["n"] == 1
+        assert model.calls == 2
+    finally:
+        model_registry.unregister(model.name)
+
+
+def test_existing_vendor_task_resumes_without_create(monkeypatch):
+    import importlib
+
+    from RH_ComfyUI.api import GenerationResult as ApiResult
+    from RH_ComfyUI.utils.database.statistics import BeganTask
+
+    class CountingModel(FakeModel):
+        name = "fake_resume_existing"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        async def execute_on_channel(
+            self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+        ) -> NodeOutput:
+            self.calls += 1
+            return await super().execute_on_channel(request, binding, on_progress=on_progress)
+
+    resumed: list[dict[str, Any]] = []
+
+    async def _begin(**kwargs: Any) -> BeganTask:
+        return BeganTask(record_id=5, vendor_task_id="cgt-9", vendor_channel="ark")
+
+    async def _resume(**kwargs: Any) -> ApiResult:
+        resumed.append(kwargs)
+        return ApiResult(kind="image", model="fake", backend="ark", data=b"png", mime_type="image/png")
+
+    disp = importlib.import_module("RH_ComfyUI.core.dispatch.dispatcher")
+    resume_mod = importlib.import_module("RH_ComfyUI.core.dispatch.resume")
+    monkeypatch.setattr(disp, "begin_dispatch", _begin)
+    monkeypatch.setattr(resume_mod, "resume_poll", _resume)
+    monkeypatch.setattr(disp, "record_dispatch", _async_status_sink([]))
+    model = CountingModel()
+    policy = FakePolicy()
+    model_registry.register(model)
+    try:
+        asyncio.run(
+            dispatch(
+                GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name, trace_id="trace-resume"),
+                _ctx(policy),
+            )
+        )
+        assert model.calls == 0
+        assert policy.refunds == 0
+        assert policy.commits == 1
+        assert resumed[0]["vendor_task_id"] == "cgt-9"
+        assert resumed[0]["update_record"] is False
+        assert resumed[0]["record_id"] == 5
+    finally:
+        model_registry.unregister(model.name)
+
+
+def _async_status_sink(statuses: list[str]):
+    async def _capture(**kwargs: Any) -> None:
+        if "status" in kwargs and isinstance(kwargs["status"], str):
+            statuses.append(kwargs["status"])
+
+    return _capture
+
+
+def test_vendor_not_durable_persist_success_stays_unfailed(monkeypatch):
+    import importlib
+
+    from RH_ComfyUI.api import GenerationResult as ApiResult
+    from RH_ComfyUI.core.base.errors import VendorTaskNotDurable
+
+    class RaisingModel(FakeModel):
+        name = "fake_not_durable_ok"
+
+        async def execute_on_channel(
+            self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+        ) -> NodeOutput:
+            raise VendorTaskNotDurable(
+                "未落库",
+                record_id=99,
+                vendor_task_id="cgt-ok",
+                channel="ark",
+            )
+
+    statuses: list[str] = []
+
+    async def _persist(**kwargs: Any) -> bool:
+        return True
+
+    async def _resume(**kwargs: Any) -> ApiResult:
+        return ApiResult(kind="image", model="fake", backend="ark", data=b"png", mime_type="image/png")
+
+    disp = importlib.import_module("RH_ComfyUI.core.dispatch.dispatcher")
+    resume_mod = importlib.import_module("RH_ComfyUI.core.dispatch.resume")
+    monkeypatch.setattr(disp, "begin_dispatch", _async_record_id(99))
+    monkeypatch.setattr(disp, "_persist_vendor_task_id", _persist)
+    monkeypatch.setattr(resume_mod, "resume_poll", _resume)
+    monkeypatch.setattr(disp, "record_dispatch", _async_status_sink(statuses))
+    model = RaisingModel()
+    policy = FakePolicy()
+    model_registry.register(model)
+    try:
+        asyncio.run(
+            dispatch(
+                GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                _ctx(policy),
+            )
+        )
+        assert policy.refunds == 0
+        assert policy.commits == 1
+        assert statuses == ["ok"]
+    finally:
+        model_registry.unregister(model.name)
+
+
+def _async_record_id(record_id: int):
+    async def _begin(**kwargs: Any) -> int:
+        return record_id
+
+    return _begin
+
+
+def test_vendor_not_durable_persist_failure_does_not_refund(monkeypatch):
+    import importlib
+
+    from RH_ComfyUI.core.base.errors import VendorTaskNotDurable
+    from RH_ComfyUI.core.dispatch.active_tasks import get_active_task_registry
+
+    class RaisingModel(FakeModel):
+        name = "fake_not_durable_hold"
+
+        async def execute_on_channel(
+            self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+        ) -> NodeOutput:
+            current = get_active_task_registry().current()
+            assert current is not None
+
+            async def _cancel() -> None:
+                cancelled.append("remote")
+
+            current.cancel_remote = _cancel
+            raise VendorTaskNotDurable(
+                "未落库",
+                record_id=99,
+                vendor_task_id="cgt-hold",
+                channel="ark",
+            )
+
+    cancelled: list[str] = []
+    statuses: list[str] = []
+
+    async def _persist(**kwargs: Any) -> bool:
+        return False
+
+    disp = importlib.import_module("RH_ComfyUI.core.dispatch.dispatcher")
+    monkeypatch.setattr(disp, "begin_dispatch", _async_record_id(99))
+    monkeypatch.setattr(disp, "_persist_vendor_task_id", _persist)
+    monkeypatch.setattr(disp, "record_dispatch", _async_status_sink(statuses))
+    model = RaisingModel()
+    policy = FakePolicy()
+    model_registry.register(model)
+    try:
+        with pytest.raises(VendorTaskNotDurable):
+            asyncio.run(
+                dispatch(
+                    GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", model=model.name),
+                    _ctx(policy),
+                )
+            )
+        assert cancelled == ["remote"]
+        assert policy.refunds == 0
+        assert statuses == []
+    finally:
+        model_registry.unregister(model.name)
+
+
+def test_same_trace_already_running_does_not_create_again(monkeypatch):
+    from RH_ComfyUI.core.base.errors import GenerationAlreadyRunning
+
+    class BlockingModel(FakeModel):
+        name = "fake_already_running"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def execute_on_channel(
+            self, request: GenerationRequest, binding: ChannelBinding, *, on_progress: Optional[Any] = None
+        ) -> NodeOutput:
+            self.calls += 1
+            self.started.set()
+            await self.release.wait()
+            return await super().execute_on_channel(request, binding, on_progress=on_progress)
+
+    model = BlockingModel()
+    policy = FakePolicy()
+    policy2 = FakePolicy()
+    model_registry.register(model)
+    _capture_recording(monkeypatch, [])
+
+    async def _run() -> None:
+        request = GenerationRequest(
+            task_type=TaskType.IMAGE,
+            prompt="cat",
+            model=model.name,
+            trace_id="trace-live-1",
+        )
+        first = asyncio.create_task(dispatch(request, _ctx(policy)))
+        await asyncio.wait_for(model.started.wait(), timeout=5)
+        with pytest.raises(GenerationAlreadyRunning):
+            await dispatch(request, _ctx(policy2))
+        assert model.calls == 1
+        assert policy2.refunds == 1
+        model.release.set()
+        await first
+        assert policy.refunds == 0
+        assert model.calls == 1
+
+    try:
+        asyncio.run(_run())
+    finally:
+        model.release.set()
+        model_registry.unregister(model.name)

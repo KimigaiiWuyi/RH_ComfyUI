@@ -1137,6 +1137,36 @@ class RHComfyuiTaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+def _extra_params_object(raw: str) -> dict[str, Any]:
+    text = raw.strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    extra: dict[str, Any] = {}
+    for key, value in parsed.items():
+        if isinstance(key, str):
+            extra[key] = value
+    return extra
+
+
+def _vendor_identity(raw: str) -> tuple[str, str]:
+    extra = _extra_params_object(raw)
+    vendor_task_id = ""
+    vendor_channel = ""
+    task_id = extra["vendor_task_id"] if "vendor_task_id" in extra else ""
+    channel = extra["vendor_channel"] if "vendor_channel" in extra else ""
+    if isinstance(task_id, str):
+        vendor_task_id = task_id.strip()
+    if isinstance(channel, str):
+        vendor_channel = channel.strip()
+    return vendor_task_id, vendor_channel
+
+
 class RHComfyuiTaskRecord(SQLModel, table=True):
     """RH_ComfyUI 任务执行统计记录"""
 
@@ -2124,10 +2154,16 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         prompt: Optional[str] = None,
         refunded: Optional[bool] = None,
     ) -> bool:
-        """按主键更新任务记录(执行中 → 终态)。找不到行返回 False。"""
+        """按主键更新任务记录(执行中 → 终态)。
+
+        仅 ``status=running`` 可写。已终态返回 False，避免后完成的请求盖掉先完成的结果。
+        """
         if record_id <= 0:
             return False
-        stmt = select(cls).where(col(cls.id) == record_id)
+        stmt = select(cls).where(
+            col(cls.id) == record_id,
+            col(cls.status) == RHComfyuiTaskStatus.RUNNING.value,
+        )
         row = (await session.execute(stmt)).scalar_one_or_none()
         if row is None:
             return False
@@ -2158,6 +2194,71 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             row.prompt = str(prompt)[:4000]
         if refunded is not None:
             row.refunded = bool(refunded)
+        session.add(row)
+        return True
+
+    @classmethod
+    @with_read_session
+    async def find_running_match(
+        cls,
+        session: AsyncSession,
+        *,
+        trace_id: str,
+        user_id: str,
+        bot_id: str,
+        task_name: str,
+    ) -> tuple[int, str, str] | None:
+        """同一用户、同一模型的最近 running 行。
+
+        返回 ``(record_id, vendor_task_id, vendor_channel)``。没有匹配行则 None。
+        """
+        tid = trace_id.strip()
+        if not tid:
+            return None
+        stmt = (
+            select(cls)
+            .where(col(cls.trace_id) == tid)
+            .where(col(cls.status) == RHComfyuiTaskStatus.RUNNING.value)
+            .where(col(cls.user_id) == user_id)
+            .where(col(cls.bot_id) == bot_id)
+            .where(col(cls.task_name) == task_name)
+            .order_by(col(cls.id).desc())
+            .limit(1)
+        )
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is None or row.id is None:
+            return None
+        vendor_task_id, vendor_channel = _vendor_identity(row.extra_params_json or "")
+        return int(row.id), vendor_task_id, vendor_channel
+
+    @classmethod
+    @with_session
+    async def merge_vendor_task_id(
+        cls,
+        session: AsyncSession,
+        record_id: int,
+        *,
+        vendor_task_id: str,
+        channel_name: str = "",
+    ) -> bool:
+        """把上游任务号合并进 extra_params_json。行不存在返回 False。
+
+        锁冲突由 ``@with_session`` 退避重试；其它异常原样抛出。
+        """
+        if record_id <= 0 or not vendor_task_id:
+            return False
+        stmt = select(cls).where(col(cls.id) == record_id)
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return False
+        from ...core.dispatch.active_tasks import _serialize_extra_params_keeping_vendor
+
+        extra = _extra_params_object(row.extra_params_json or "")
+        row.extra_params_json = _serialize_extra_params_keeping_vendor(
+            extra,
+            vendor_task_id=vendor_task_id,
+            channel_name=channel_name,
+        )
         session.add(row)
         return True
 

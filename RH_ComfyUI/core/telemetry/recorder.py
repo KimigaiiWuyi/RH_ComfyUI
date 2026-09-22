@@ -19,6 +19,7 @@ from ..schema.request import GenerationResult, GenerationRequest
 if TYPE_CHECKING:
     from ..base.generation import AIGCGenerationBase
     from ..dispatch.context import DispatchContext
+    from ...utils.database.statistics import BeganTask
 
 
 @dataclass
@@ -78,7 +79,7 @@ async def begin_dispatch(
     ctx: "DispatchContext",
     point_cost: int,
     request_body: Optional[dict[str, Any]] = None,
-) -> Optional[int]:
+) -> Optional["BeganTask"]:
     """预扣成功后立刻写入 running 行;失败返回 None。"""
     try:
         from ...utils.database.statistics import begin_task

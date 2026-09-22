@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import asyncio
 from typing import Any
+from contextvars import Token, ContextVar
 from dataclasses import field, dataclass
 from collections.abc import Callable, Awaitable
 
@@ -46,6 +47,12 @@ class ActiveGeneration:
     wire_prompt: str | None = None
     wire_request: Any | None = None
     _token: int = field(default=0, repr=False)
+    _ctx_token: Token["ActiveGeneration | None"] | None = field(default=None, repr=False)
+
+
+# 3.10/3.11 的 wait_for 会把协程包进子 Task，登记却在父任务上。
+# ContextVar 随子任务拷贝，current() 才能看见这次登记。
+_CURRENT_AG: ContextVar[ActiveGeneration | None] = ContextVar("rh_active_generation", default=None)
 
 
 class ActiveTaskRegistry:
@@ -91,6 +98,7 @@ class ActiveTaskRegistry:
             t = ag.task
             if t is not None:
                 self._local[id(t)] = ag
+            ag._ctx_token = _CURRENT_AG.set(ag)
         return ag
 
     async def unregister(self, ag: ActiveGeneration) -> None:
@@ -102,9 +110,24 @@ class ActiveTaskRegistry:
             t = ag.task
             if t is not None and self._local.get(id(t)) is ag:
                 self._local.pop(id(t), None)
+            token = ag._ctx_token
+            if token is not None and _CURRENT_AG.get() is ag:
+                _CURRENT_AG.reset(token)
+                ag._ctx_token = None
+
+    def _owns(self, ag: ActiveGeneration) -> bool:
+        if ag.record_id is not None and self._by_record.get(ag.record_id) is ag:
+            return True
+        if ag.trace_id and self._by_trace.get(ag.trace_id) is ag:
+            return True
+        task = ag.task
+        return task is not None and self._local.get(id(task)) is ag
 
     def current(self) -> ActiveGeneration | None:
         """取当前协程登记的 ActiveGeneration(无则 None)。"""
+        ag = _CURRENT_AG.get()
+        if ag is not None and self._owns(ag):
+            return ag
         t = asyncio.current_task()
         if t is None:
             return None
@@ -124,6 +147,18 @@ class ActiveTaskRegistry:
         """
         target = ag or self.current()
         if target is None:
+            from .vendor_gate import is_task_record_required
+
+            # 子任务找不到登记时，要求消费行就不能当成可忽略。
+            if is_task_record_required():
+                from ..base.errors import VendorTaskNotDurable
+
+                raise VendorTaskNotDurable(
+                    f"厂商任务号未能挂到进行中的消费记录 vendor_task_id={vendor_task_id}",
+                    record_id=0,
+                    vendor_task_id=vendor_task_id,
+                    channel=channel_name,
+                )
             logger.debug(f"[ActiveTasks] bind_vendor_task 时无进行中任务,忽略: vendor_task_id={vendor_task_id}")
             return
         target.vendor_task_id = vendor_task_id
@@ -137,11 +172,43 @@ class ActiveTaskRegistry:
             f"has_remote_cancel={cancel_remote is not None}, "
             f"trace_id={target.trace_id}, record_id={target.record_id}"
         )
+        from .vendor_gate import is_task_record_required
+
+        saved = True
         if target.record_id is not None:
-            await _persist_vendor_task_id(
-                record_id=int(target.record_id),
+            try:
+                saved = await _persist_vendor_task_id(
+                    record_id=int(target.record_id),
+                    vendor_task_id=vendor_task_id,
+                    channel_name=channel_name or target.channel_name,
+                )
+            except Exception as exc:
+                # 未要求消费行时，统计失败不打断生成。要求落账则必须中止。
+                if not is_task_record_required():
+                    logger.warning(
+                        f"[ActiveTasks] persist vendor_task_id 失败 record_id={target.record_id} "
+                        f"vendor_task_id={vendor_task_id}: {exc}"
+                    )
+                    saved = False
+                else:
+                    from ..base.errors import VendorTaskNotDurable
+
+                    raise VendorTaskNotDurable(
+                        f"厂商任务号未能写入消费记录 record_id={target.record_id} vendor_task_id={vendor_task_id}",
+                        record_id=int(target.record_id),
+                        vendor_task_id=vendor_task_id,
+                        channel=channel_name or target.channel_name,
+                    ) from exc
+
+        # 厂商已经接单。没有消费行或任务号没落库，重启后无法召回。
+        if is_task_record_required() and (target.record_id is None or not saved):
+            from ..base.errors import VendorTaskNotDurable
+
+            raise VendorTaskNotDurable(
+                f"厂商任务号未能写入消费记录 record_id={target.record_id} vendor_task_id={vendor_task_id}",
+                record_id=int(target.record_id or 0),
                 vendor_task_id=vendor_task_id,
-                channel_name=channel_name or target.channel_name,
+                channel=channel_name or target.channel_name,
             )
 
     async def bind_vendor_cancel(
@@ -306,8 +373,7 @@ class ActiveTaskRegistry:
         elif ag.remote_cancel_attempted:
             remote_skip = "本任务已尝试过 remote cancel"
             logger.info(
-                f"[ActiveTasks] 跳过重复上游 cancel: model={ag.model_name}, "
-                f"vendor_task_id={ag.vendor_task_id or ''}"
+                f"[ActiveTasks] 跳过重复上游 cancel: model={ag.model_name}, vendor_task_id={ag.vendor_task_id or ''}"
             )
 
         # remote 期间任务可能已完成:再检查一次,避免对已成功任务报 cancel ok
@@ -424,40 +490,22 @@ async def _persist_vendor_task_id(
     record_id: int,
     vendor_task_id: str,
     channel_name: str = "",
-) -> None:
-    """把上游 task_id 合并进 RHComfyuiTaskRecord.extra_params_json(失败仅日志)。"""
+) -> bool:
+    """把上游 task_id 合并进 RHComfyuiTaskRecord.extra_params_json。"""
     if record_id <= 0 or not vendor_task_id:
-        return
-    try:
-        from sqlmodel import col, select
+        return False
+    from ...utils.database.models import RHComfyuiTaskRecord
 
-        from gsuid_core.utils.database.base_models import async_maker
-
-        from ...utils.database.models import RHComfyuiTaskRecord
-
-        async with async_maker() as session:
-            stmt = select(RHComfyuiTaskRecord).where(col(RHComfyuiTaskRecord.id) == record_id)
-            row = (await session.execute(stmt)).scalar_one_or_none()
-            if row is None:
-                return
-            extra: dict[str, Any] = {}
-            raw = (row.extra_params_json or "").strip()
-            if raw:
-                try:
-                    parsed = json.loads(raw)
-                    if isinstance(parsed, dict):
-                        extra = parsed
-                except (TypeError, ValueError):
-                    pass
-            row.extra_params_json = _serialize_extra_params_keeping_vendor(
-                extra,
-                vendor_task_id=vendor_task_id,
-                channel_name=channel_name,
-            )
-            session.add(row)
-            await session.commit()
-    except Exception as exc:  # noqa: BLE001 — 统计增强不得影响主流程
-        logger.debug(f"[ActiveTasks] persist vendor_task_id 失败(忽略): record_id={record_id}: {exc}")
+    saved = await RHComfyuiTaskRecord.merge_vendor_task_id(
+        record_id,
+        vendor_task_id=vendor_task_id,
+        channel_name=channel_name,
+    )
+    if not saved:
+        logger.error(
+            f"[ActiveTasks] persist vendor_task_id 找不到消费行 record_id={record_id} vendor_task_id={vendor_task_id}"
+        )
+    return saved
 
 
 def get_active_task_registry() -> ActiveTaskRegistry:

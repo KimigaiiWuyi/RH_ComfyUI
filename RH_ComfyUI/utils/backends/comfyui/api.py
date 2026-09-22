@@ -18,6 +18,7 @@ from websockets import ClientConnection
 from gsuid_core.logger import logger
 
 from ..http_retry import RetryingAsyncClient
+from ....core.base.errors import VendorTaskNotDurable
 from ...resource.RESOURCE_PATH import OUTPUT_PATH
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
@@ -384,6 +385,8 @@ class ComfyUIAPI:
                 cancel_remote=_cancel_remote,
                 channel_name=channel,
             )
+        except VendorTaskNotDurable:
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"[ComfyUI] 绑定 vendor 任务失败(忽略): {exc}")
 

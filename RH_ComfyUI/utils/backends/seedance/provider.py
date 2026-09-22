@@ -27,7 +27,7 @@ from gsuid_core.logger import logger
 from .spec import VideoGenSpec, VideoTaskShape
 from ..http_retry import RetryingAsyncClient
 from ...core.types import MediaRef, MediaKind
-from ....core.base.errors import DryRunInterrupt
+from ....core.base.errors import DryRunInterrupt, VendorTaskNotDurable
 
 
 class NormalizedStatus(str, Enum):
@@ -449,6 +449,8 @@ class SeedanceProvider(ABC):
                 cancel_remote=cancel_remote,
                 channel_name=self.name,
             )
+        except VendorTaskNotDurable:
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[Seedance:{self.name}] 绑定 vendor 任务失败(忽略): {exc}")
 

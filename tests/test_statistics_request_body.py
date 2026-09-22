@@ -171,7 +171,9 @@ def test_begin_then_record_updates_same_row(monkeypatch) -> None:
     )
 
     async def _run() -> None:
-        rid = await statistics.begin_task(request=request, node=node, bot_id="http", point_cost=5)
+        began = await statistics.begin_task(request=request, node=node, bot_id="http", point_cost=5)
+        assert began is not None
+        rid = began.record_id
         assert rid == 7
         assert inserts[0]["status"] == "running"
         assert inserts[0]["point_cost"] == 5
@@ -192,6 +194,28 @@ def test_begin_then_record_updates_same_row(monkeypatch) -> None:
     assert updates[0]["record_id"] == 7
     assert updates[0]["status"] == "ok"
     assert updates[0]["elapsed_ms"] == 100
+
+
+def test_begin_task_does_not_insert_when_vendor_task_exists(monkeypatch) -> None:
+    inserts: list[int] = []
+
+    async def fake_find(**kwargs):
+        return (5, "cgt-9", "ark")
+
+    async def fake_insert(**kwargs):
+        inserts.append(1)
+        return 1
+
+    monkeypatch.setattr(RHComfyuiTaskRecord, "find_running_match", fake_find)
+    monkeypatch.setattr(RHComfyuiTaskRecord, "insert_task_record", fake_insert)
+    request = GenerationRequest(task_type=TaskType.IMAGE, prompt="x", user_id="u1", trace_id="job-1")
+    node = SimpleNamespace(name="n1", backend="fake", provider="", backend_model="", backend_models={}, point_cost=5)
+    began = asyncio.run(statistics.begin_task(request=request, node=node, bot_id="http", trace_id="job-1"))
+    assert began is not None
+    assert began.record_id == 5
+    assert began.vendor_task_id == "cgt-9"
+    assert began.vendor_channel == "ark"
+    assert inserts == []
 
 
 def test_image_core_params_keep_ratio_and_image_size() -> None:

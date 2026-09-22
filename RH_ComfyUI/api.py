@@ -155,11 +155,13 @@ async def submit(
         group_id=group_id or "",
         trace_id=request.trace_id or "",
     )
+    from .core.dispatch.vendor_gate import task_record_required_scope
     from .utils.backends.http_retry import strict_create_once_scope
 
     if type(strict_create_once) is not bool:
         raise ValueError("strict_create_once must be a boolean")
-    with strict_create_once_scope(strict_create_once):
+    # submit() 的宿主已在引擎外记账。没有消费行就不许进入厂商请求，否则无法召回。
+    with strict_create_once_scope(strict_create_once), task_record_required_scope(True):
         result = await dispatch(request, ctx)
 
     # 5) 包装为对外的 GenerationResult

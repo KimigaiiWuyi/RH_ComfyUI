@@ -129,23 +129,14 @@ def test_channel_remote_cancel_distinguishes_rh_app_and_comfyui():
     rh_ch = SeedanceProviderChannel(RunningHubSeedanceProvider)
     assert ark_ch.supports_remote_cancel() is True
     assert rh_ch.supports_remote_cancel() is False
-    assert (
-        _channel_supports_remote_cancel(_SeedanceModel(), "ark", channel=ark_ch) is True
-    )
-    assert (
-        _channel_supports_remote_cancel(_SeedanceModel(), "runninghub", channel=rh_ch)
-        is False
-    )
+    assert _channel_supports_remote_cancel(_SeedanceModel(), "ark", channel=ark_ch) is True
+    assert _channel_supports_remote_cancel(_SeedanceModel(), "runninghub", channel=rh_ch) is False
     assert AdapterChannel("comfyui").supports_remote_cancel() is True
     assert AdapterChannel("rh_app").supports_remote_cancel() is False
     # 网关异步视频/图:名字兜底
     assert _channel_supports_remote_cancel(_SeedanceModel(), "gateway_slot1_seedance") is True
-    assert (
-        _channel_supports_remote_cancel(_ComfyModel(), "gateway_slot1_gpt_image_2") is True
-    )
-    assert (
-        _channel_supports_remote_cancel(_ComfyModel(), "gateway_slot1_seedream5") is False
-    )
+    assert _channel_supports_remote_cancel(_ComfyModel(), "gateway_slot1_gpt_image_2") is True
+    assert _channel_supports_remote_cancel(_ComfyModel(), "gateway_slot1_seedream5") is False
 
 
 def test_can_resume_requires_vendor_task_id():
@@ -244,14 +235,9 @@ def test_infer_backend_channel_over_node_backend():
     assert _infer_backend(backend="gpt-image-2", model="gpt-image-2", channel="") == "gpt-image-2"
     assert can_resume(backend="gpt-image-2", vendor_task_id="x") is False
     assert can_resume(channel="gateway_slot1_gpt_image_2", vendor_task_id="x") is True
-    assert (
-        _infer_backend(backend="", model="seedance2", channel="gateway_slot1_seedance")
-        == "seedance"
-    )
+    assert _infer_backend(backend="", model="seedance2", channel="gateway_slot1_seedance") == "seedance"
     assert _infer_backend(backend="", model="minimax_h3", channel="") == "minimax-h3"
-    assert (
-        _infer_backend(backend="", model="minimax_h3", channel="minimax-h3") == "minimax-h3"
-    )
+    assert _infer_backend(backend="", model="minimax_h3", channel="minimax-h3") == "minimax-h3"
 
 
 def test_resolve_seedance_channel_hard_fail_on_missing():
@@ -618,9 +604,7 @@ def test_resume_finalize_refunds_points(monkeypatch):
         # 钱包调用时终态 UPDATE 应已发生,且尚未写 refunded=True
         assert updates, "退款前应已 CAS 终态"
         assert not any(u.get("refunded") is True for u in updates if isinstance(u, dict))
-        refund_calls.append(
-            {"user_id": user_id, "bot_id": bot_id, "amount": amount, "reason": reason}
-        )
+        refund_calls.append({"user_id": user_id, "bot_id": bot_id, "amount": amount, "reason": reason})
         return {"available": 1}
 
     monkeypatch.setattr(
@@ -1184,3 +1168,70 @@ def test_mark_host_wallet_refunded_running_to_cancelled():
     assert ok is True
     assert row.status == "cancelled"
     assert row.refunded is True
+
+
+def test_child_task_sees_parent_registration():
+    """3.10/3.11 wait_for 的子 Task 不在 _local 里，仍要找到登记。"""
+
+    async def _run() -> None:
+        reg = ActiveTaskRegistry()
+        ag = await reg.register(model_name="seedance2", trace_id="child-sees", record_id=8)
+        seen: list[int | None] = []
+
+        async def _child() -> None:
+            current = reg.current()
+            seen.append(None if current is None else current.record_id)
+
+        await asyncio.create_task(_child())
+        assert seen == [8]
+        await reg.unregister(ag)
+
+    asyncio.run(_run())
+
+
+def test_bind_without_registration_raises_when_record_required():
+    from RH_ComfyUI.core.base.errors import VendorTaskNotDurable
+    from RH_ComfyUI.core.dispatch.vendor_gate import task_record_required_scope
+
+    async def _run() -> None:
+        reg = ActiveTaskRegistry()
+
+        async def _child() -> None:
+            await reg.bind_vendor_task(vendor_task_id="cgt-orphan", channel_name="ark")
+
+        with task_record_required_scope(True), pytest.raises(VendorTaskNotDurable):
+            await asyncio.create_task(_child())
+
+    asyncio.run(_run())
+
+
+def test_seedance_bind_reraises_vendor_task_not_durable(monkeypatch):
+    from RH_ComfyUI.core.dispatch import active_tasks
+    from RH_ComfyUI.core.base.errors import VendorTaskNotDurable
+    from RH_ComfyUI.utils.backends.seedance.spec import VideoGenSpec
+    from RH_ComfyUI.utils.backends.seedance.provider import NormalizedTask, NormalizedStatus, SeedanceProvider
+
+    class _Provider(SeedanceProvider):
+        name = "ark"
+
+        async def render_create(
+            self,
+            spec: VideoGenSpec,
+            *,
+            model: str | None,
+        ) -> tuple[str, str, dict[str, str], dict[str, Any]]:
+            return ("POST", "http://example", {}, {})
+
+        def parse_create(self, resp_json: dict[str, Any]) -> str:
+            return ""
+
+        async def get(self, task_id: str) -> NormalizedTask:
+            return NormalizedTask(id=task_id, status=NormalizedStatus.RUNNING)
+
+    class _Reg:
+        async def bind_vendor_task(self, **kwargs: object) -> None:
+            raise VendorTaskNotDurable("nope", record_id=1, vendor_task_id="cgt-1", channel="ark")
+
+    monkeypatch.setattr(active_tasks, "get_active_task_registry", lambda: _Reg())
+    with pytest.raises(VendorTaskNotDurable):
+        asyncio.run(_Provider()._bind_active_cancel("cgt-1"))
