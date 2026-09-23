@@ -16,6 +16,7 @@ from typing import Any, Optional
 from gsuid_core.logger import logger
 
 from ..spec import MediaRole, VideoGenSpec, VideoTaskShape
+from ..draft import is_draft_flag, draft_task_id_from_params
 from ..provider import (
     NormalizedTask,
     DryRunInterrupt,
@@ -179,6 +180,42 @@ _OMNI_REF_SHAPES = frozenset(
 )
 
 
+def build_seedance25_final_body(
+    spec: VideoGenSpec,
+    *,
+    model: str | None,
+    draft_id: str,
+) -> dict[str, Any]:
+    """成片 body:只带 draft_task 与可重设字段。
+
+    提示词、素材、时长、宽高比、种子、音频开关、任务类型由样片复用,
+    再传会 400,即使取值相同。
+    """
+    body: dict[str, Any] = {
+        "content": [{"type": "draft_task", "draft_task": {"id": draft_id}}],
+        "resolution": "1080p",
+    }
+    if model:
+        body["model"] = model
+    if spec.return_last_frame:
+        body["return_last_frame"] = True
+    body["watermark"] = bool(spec.watermark)
+    if spec.service_tier and spec.service_tier != "default":
+        body["service_tier"] = spec.service_tier
+    out_fmt = (spec.output_format or "").strip().lower()
+    if out_fmt and out_fmt != "mp4":
+        body["output_format"] = out_fmt
+    if "callback_url" in spec.params:
+        cb = spec.params["callback_url"]
+        if isinstance(cb, str) and cb:
+            body["callback_url"] = cb
+    if "execution_expires_after" in spec.params:
+        exec_exp = spec.params["execution_expires_after"]
+        if exec_exp is not None:
+            body["execution_expires_after"] = exec_exp
+    return body
+
+
 def apply_omni_reference_task_type(
     body: dict[str, Any],
     spec: VideoGenSpec,
@@ -301,6 +338,10 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
         *,
         model: Optional[str],
     ) -> tuple[str, str, dict[str, str], dict[str, Any]]:
+        draft_id = draft_task_id_from_params(spec.params)
+        if draft_id and _is_seedance25_model(model):
+            body = build_seedance25_final_body(spec, model=model, draft_id=draft_id)
+            return "POST", f"{self.base_url}{self._endpoint}", self._create_headers(), body
         content = await self._build_content(spec)
         body: dict[str, Any] = {"content": content}
         if model:
@@ -330,9 +371,12 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
         if out_fmt and out_fmt != "mp4":
             body["output_format"] = out_fmt
         apply_omni_reference_task_type(body, spec, model)
-        draft = spec.params.get("draft")
-        if draft is not None:
-            body["draft"] = draft
+        # 2.5 样片必须是 JSON true;其它模型保持调用方原值(1.5 的 draft 语义不同)
+        if _is_seedance25_model(model) and is_draft_flag(spec.params):
+            body["draft"] = True
+            body["resolution"] = "480p"
+        elif "draft" in spec.params and spec.params["draft"] is not None:
+            body["draft"] = spec.params["draft"]
         cb = spec.params.get("callback_url")
         if cb:
             body["callback_url"] = cb

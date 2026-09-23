@@ -74,7 +74,23 @@ async def _do_generate(
 
     try:
         result = await dispatch(request, ctx)
-        ai_return(f"生成完成，使用模型: {result.model_used}")
+        meta = result.metadata if isinstance(result.metadata, dict) else {}
+        vendor_id = meta["vendor_task_id"] if "vendor_task_id" in meta else ""
+        channel_name = meta["channel"] if "channel" in meta else ""
+        if not isinstance(vendor_id, str):
+            vendor_id = ""
+        if not isinstance(channel_name, str):
+            channel_name = ""
+        from ..utils.backends.seedance.draft import seedance_ai_success_text
+
+        ai_return(
+            seedance_ai_success_text(
+                model_used=result.model_used,
+                params=request.params,
+                vendor_task_id=vendor_id,
+                channel=channel_name,
+            )
+        )
         return result
     except GenerationError as e:
         ai_return(f"错误：{e.user_message}")
@@ -219,13 +235,21 @@ async def edit_image(bot: Bot, ev: Event) -> None:
       - 传 ≥2 张图        → 首尾帧生视频(图片1=首帧, 图片2=尾帧)
       - 传图+音/视频参考  → 多模态参考生视频(prompt 中用 "图片1/音频1" 等代号引用素材)
 
+    Seedance 2.5 的样片和成片是两轮,各调用一次本工具,中间等用户确认。
+    用户只说生成视频时用普通格式,不要加 draft,也不要在样片返回后立刻再调成片。
+    只有用户明确要先看样片/预览时,才用格式4。工具返回 vendor_task_id 后停下来,
+    把样片交给用户。用户在之后的对话里明确同意,才用格式5单独出 1080p 成片。
+    成片这一轮不要写提示词,不要再传 image_id / audio_id。
+
     Args:
         text: 视频描述 + 可选模型名。
               格式1: "一只猫在草地上追蝴蝶"
               格式2: "wan 一只猫在草地上追蝴蝶"
               格式3 (Seedance 多模态): "图片1为主角,音频1为背景音乐,他在草原上奔跑"
-        image_id: 可选，参考图片的资源ID（img_xxxxxxxx），支持多张。
-        audio_id: 可选,多模态参考音频。
+              格式4 (只要 480p 样片): "seedance2.5 draft 女孩抱着狐狸,镜头缓缓拉远"
+              格式5 (用户确认后出成片): "seedance2.5 final cgt-20260923-abcd"
+        image_id: 可选，参考图片的资源ID（img_xxxxxxxx），支持多张。成片轮次不要传。
+        audio_id: 可选,多模态参考音频。成片轮次不要传。
     """,
 )
 async def generate_video(bot: Bot, ev: Event) -> None:
@@ -236,12 +260,40 @@ async def generate_video(bot: Bot, ev: Event) -> None:
         return
 
     model_name, actual_prompt = parse_model_from_prompt(prompt, TaskType.VIDEO)
+    from ..utils.backends.seedance.draft import split_seedance25_round
+
+    round_name, round_body = split_seedance25_round(model_name, actual_prompt)
+    if round_name == "draft" and not round_body.strip():
+        ai_return("错误：样片仍需要视频描述")
+        await bot.send("请在样片后写上视频描述，例如：生视频 seedance2.5 draft 女孩抱着狐狸")
+        return
+    if round_name == "final":
+        if ev.image_id or ev.image_id_list or ev.audio_id or ev.audio_id_list:
+            ai_return("错误：成片不能再传参考图片或音频，上游会复用样片素材")
+            await bot.send("出成片时不要再附带图片或音频。")
+            return
+        request = GenerationRequest(
+            task_type=TaskType.VIDEO,
+            prompt="",
+            model="seedance2.5",
+            resolution="1080p",
+            params={"draft_task_id": round_body},
+        )
+        result = await _do_generate(request, ev, bot)
+        if result is None:
+            return
+        await bot.send("✅ 成片已生成！")
+        await bot.send(MessageSegment.video(result.data))
+        return
 
     request = GenerationRequest(
         task_type=TaskType.VIDEO,
-        prompt=actual_prompt,
+        prompt=round_body,
         model=model_name,
     )
+    if round_name == "draft":
+        request.resolution = "480p"
+        request.params["draft"] = True
 
     # 收集参考图片/音频;具体走 文生/图生/首尾帧/多模态 由路由+mapper 按输入分发
     image_ids = ev.image_id_list or ([ev.image_id] if ev.image_id else [])
@@ -264,7 +316,17 @@ async def generate_video(bot: Bot, ev: Event) -> None:
     if result is None:
         return
 
-    await bot.send("✅ 视频生成完成！")
+    if round_name == "draft":
+        from ..utils.backends.seedance.draft import seedance_draft_user_text
+
+        meta = result.metadata if isinstance(result.metadata, dict) else {}
+        vendor_id = meta["vendor_task_id"] if "vendor_task_id" in meta else ""
+        if not isinstance(vendor_id, str) or not vendor_id.strip():
+            task_fallback = meta["task_id"] if "task_id" in meta else ""
+            vendor_id = task_fallback if isinstance(task_fallback, str) else ""
+        await bot.send(seedance_draft_user_text(vendor_id))
+    else:
+        await bot.send("✅ 视频生成完成！")
     await bot.send(MessageSegment.video(result.data))
 
     # ── 尾帧图(若 Seedance 返回) ──

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Sequence, TypedDict
+from typing import TYPE_CHECKING, Any, Optional, Sequence, TypedDict, NamedTuple
 from datetime import datetime, timezone
 
 from sqlmodel import Field, SQLModel, col
@@ -1167,6 +1167,32 @@ def _vendor_identity(raw: str) -> tuple[str, str]:
     return vendor_task_id, vendor_channel
 
 
+class DraftTaskOrigin(NamedTuple):
+    """按样片上游任务号找回的消费行,供成片钉扎通道和本地计价。"""
+
+    channel: str
+    status: str
+    created_at: datetime
+    duration_seconds: int | None
+    input_video_duration: float | None
+    user_id: str
+
+
+def _input_video_duration_value(extra: dict[str, Any]) -> float | None:
+    if "input_video_duration" not in extra:
+        return None
+    raw = extra["input_video_duration"]
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw) if raw >= 0 else None
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text.replace(".", "", 1).isdigit():
+            return float(text)
+    return None
+
+
 class RHComfyuiTaskRecord(SQLModel, table=True):
     """RH_ComfyUI 任务执行统计记录"""
 
@@ -2230,6 +2256,54 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             return None
         vendor_task_id, vendor_channel = _vendor_identity(row.extra_params_json or "")
         return int(row.id), vendor_task_id, vendor_channel
+
+    @classmethod
+    @with_read_session
+    async def find_draft_task_origin(
+        cls,
+        session: AsyncSession,
+        vendor_task_id: str,
+    ) -> DraftTaskOrigin | None:
+        """用样片上游任务号找最近一条消费行。没有匹配则 None。
+
+        vendor_task_id 写在 extra_params JSON 里,没有独立列。
+        """
+        tid = vendor_task_id.strip()
+        if not tid:
+            return None
+        # json.dumps 默认带空格;紧凑写法也认。前缀撞车时解析后跳过,继续看下一条。
+        from sqlalchemy import or_
+
+        spaced = f'"vendor_task_id": "{tid}"'
+        compact = f'"vendor_task_id":"{tid}"'
+        stmt = (
+            select(cls)
+            .where(
+                or_(
+                    col(cls.extra_params_json).contains(spaced, autoescape=True),
+                    col(cls.extra_params_json).contains(compact, autoescape=True),
+                )
+            )
+            .order_by(col(cls.id).desc())
+            .limit(20)
+        )
+        rows = (await session.execute(stmt)).scalars().all()
+        for row in rows:
+            found_id, channel = _vendor_identity(row.extra_params_json or "")
+            if found_id != tid:
+                continue
+            extra = _extra_params_object(row.extra_params_json or "")
+            duration = row.duration_seconds if isinstance(row.duration_seconds, int) else None
+            owner = row.user_id if isinstance(row.user_id, str) else ""
+            return DraftTaskOrigin(
+                channel=channel,
+                status=row.status or "",
+                created_at=row.created_at,
+                duration_seconds=duration,
+                input_video_duration=_input_video_duration_value(extra),
+                user_id=owner,
+            )
+        return None
 
     @classmethod
     @with_session

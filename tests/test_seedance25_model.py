@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import asyncio
 
 import pytest
@@ -40,8 +41,12 @@ def test_schema_ports_and_limits():
         "output_format",
         "omni_reference_task_type",
         "generate_audio",
+        "draft",
+        "draft_task_id",
     ):
         assert port in node.inputs, f"缺少端口 {port}"
+    assert node.inputs["prompt"].required is False
+    assert node.inputs["draft"].default is False
 
     # 官方 camera_fixed 仅 1.x;2.5 暴露会让前端展示「固定镜头」并触发 400
     assert "camera_fixed" not in node.inputs
@@ -566,3 +571,270 @@ def test_build_request_infers_reference_from_image_roles():
     )
     assert req.params.get("frame_mode") == "reference"
     Seedance25Def().validate(req)
+
+
+def test_draft_requires_480p_and_bills_as_480p():
+    m = Seedance25Def()
+    ok = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="样片",
+        resolution="480p",
+        duration=5,
+        ratio="16:9",
+        params={"draft": True},
+    )
+    m.validate(ok)
+    plain = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="样片",
+        resolution="480p",
+        duration=5,
+        ratio="16:9",
+    )
+    priced = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="样片",
+        resolution="720p",
+        duration=5,
+        params={"draft": True},
+    )
+    m.validate(priced)
+    assert priced.resolution == "480p"
+    assert priced.params["resolution"] == "480p"
+    assert m.estimate_cost(priced) == m.estimate_cost(plain)
+
+
+def test_final_rejects_reused_fields_and_bills_1080p():
+    m = Seedance25Def()
+    ok = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="",
+        model="seedance2.5",
+        resolution="1080p",
+        duration=5,
+        channel="ark",
+        params={"draft_task_id": "cgt-2026-draft"},
+    )
+    m.validate(ok)
+    plain = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="成片",
+        resolution="1080p",
+        duration=5,
+    )
+    under = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="",
+        resolution="720p",
+        duration=5,
+        channel="ark",
+        params={"draft_task_id": "cgt-2026-draft"},
+    )
+    m.validate(under)
+    assert under.resolution == "1080p"
+    assert under.params["resolution"] == "1080p"
+    assert m.estimate_cost(under) == m.estimate_cost(plain)
+    with pytest.raises(ValidationError, match="提示词"):
+        m.validate(
+            GenerationRequest(
+                task_type=TaskType.VIDEO,
+                prompt="不要再传",
+                resolution="1080p",
+                duration=5,
+                params={"draft_task_id": "cgt-2026-draft"},
+            )
+        )
+    with pytest.raises(ValidationError, match="通道"):
+        m.validate(
+            GenerationRequest(
+                task_type=TaskType.VIDEO,
+                prompt="",
+                resolution="1080p",
+                duration=5,
+                params={"draft_task_id": "cgt-2026-draft"},
+            )
+        )
+    with pytest.raises(ValidationError, match="样片和成片"):
+        m.validate(
+            GenerationRequest(
+                task_type=TaskType.VIDEO,
+                prompt="样片",
+                resolution="480p",
+                duration=5,
+                params={"draft": True, "draft_task_id": "cgt-2026-draft"},
+            )
+        )
+
+
+def test_classify_and_render_draft_then_final():
+    draft_req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="女孩抱着狐狸",
+        model="seedance2.5",
+        resolution="480p",
+        duration=5,
+        ratio="16:9",
+        params={"draft": True, "output_format": "mov"},
+    )
+    draft_spec = classify_video_spec(draft_req)
+    p = ArkSeedanceProvider(api_key="test-key")
+    _m, _u, _h, draft_body = asyncio.run(p.render_create(draft_spec, model="doubao-seedance-2-5-260628"))
+    assert draft_body["draft"] is True
+    assert draft_body["resolution"] == "480p"
+    assert draft_body["duration"] == 5
+    assert draft_body["ratio"] == "16:9"
+    assert any(item["type"] == "text" for item in draft_body["content"])
+
+    final_req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="",
+        model="seedance2.5",
+        resolution="1080p",
+        duration=5,
+        channel="ark",
+        generate_audio=True,
+        params={"draft_task_id": "cgt-2026-draft", "output_format": "mov"},
+    )
+    final_spec = classify_video_spec(final_req)
+    assert final_spec.prompt == ""
+    assert final_spec.media == []
+    assert final_spec.ratio is None
+    _m, _u, _h, final_body = asyncio.run(p.render_create(final_spec, model="doubao-seedance-2-5-260628"))
+    assert final_body["content"] == [{"type": "draft_task", "draft_task": {"id": "cgt-2026-draft"}}]
+    assert final_body["resolution"] == "1080p"
+    assert final_body["output_format"] == "mov"
+    assert final_body["model"] == "doubao-seedance-2-5-260628"
+    for banned in ("duration", "ratio", "seed", "generate_audio", "draft", "omni_reference_task_type"):
+        assert banned not in final_body
+
+
+def test_seedance15_draft_still_sends_duration():
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="1.5 样片",
+        model="seedance15_pro",
+        resolution="480p",
+        duration=5,
+        ratio="16:9",
+        params={"draft": True},
+    )
+    spec = classify_video_spec(req)
+    p = ArkSeedanceProvider(api_key="test-key")
+    _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-1-5-pro-251215"))
+    assert body["draft"] is True
+    assert body["duration"] == 5
+    assert all(item["type"] != "draft_task" for item in body["content"])
+
+
+def test_seedance25_round_is_explicit_and_ai_return_waits():
+    from RH_ComfyUI.utils.backends.seedance.draft import split_seedance25_round, seedance_ai_success_text
+
+    assert split_seedance25_round("seedance2.5", "女孩抱着狐狸") == ("normal", "女孩抱着狐狸")
+    assert split_seedance25_round("seedance2.5", "draft 女孩抱着狐狸") == ("draft", "女孩抱着狐狸")
+    assert split_seedance25_round("wan", "draft 女孩抱着狐狸") == ("normal", "draft 女孩抱着狐狸")
+    assert split_seedance25_round("seedance2.5", "final cgt-2026-draft") == ("final", "cgt-2026-draft")
+    assert split_seedance25_round("seedance2.5", "成片要电影感") == ("normal", "成片要电影感")
+    assert split_seedance25_round("seedance2.5", "final cut of the fox") == ("normal", "final cut of the fox")
+    text = seedance_ai_success_text(
+        model_used="Seedance 2.5",
+        params={"draft": True},
+        vendor_task_id="cgt-2026-draft",
+        channel="ark",
+    )
+    assert "vendor_task_id: cgt-2026-draft" in text
+    assert "不要再调用生视频" in text
+    assert "seedance2.5 final cgt-2026-draft" in text
+    done = seedance_ai_success_text(
+        model_used="Seedance 2.5",
+        params={"draft_task_id": "cgt-2026-draft"},
+        vendor_task_id="cgt-final",
+        channel="ark",
+    )
+    assert done.startswith("成片已生成")
+    plain = seedance_ai_success_text(
+        model_used="Wan",
+        params={},
+        vendor_task_id="",
+        channel="",
+    )
+    assert plain == "生成完成，使用模型: Wan"
+
+
+def test_classify_ordered_draft_task_is_final_body():
+    from RH_ComfyUI.utils.core.types import draft_task_item
+
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="",
+        model="seedance2.5",
+        resolution="720p",
+        duration=5,
+        channel="ark",
+        ordered_content=[draft_task_item("cgt-2026-draft")],
+    )
+    Seedance25Def().validate(req)
+    assert req.resolution == "1080p"
+    spec = classify_video_spec(req)
+    assert spec.resolution == "1080p"
+    assert spec.prompt == ""
+    assert spec.params["draft_task_id"] == "cgt-2026-draft"
+    p = ArkSeedanceProvider(api_key="test-key")
+    _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2-5-260628"))
+    assert body["content"] == [{"type": "draft_task", "draft_task": {"id": "cgt-2026-draft"}}]
+    assert body["resolution"] == "1080p"
+
+
+def test_draft_wire_forces_480p_even_if_request_says_720p():
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="样片",
+        model="seedance2.5",
+        resolution="720p",
+        duration=5,
+        ratio="16:9",
+        params={"draft": True},
+    )
+    spec = classify_video_spec(req)
+    p = ArkSeedanceProvider(api_key="test-key")
+    _m, _u, _h, body = asyncio.run(p.render_create(spec, model="doubao-seedance-2-5-260628"))
+    assert body["draft"] is True
+    assert body["resolution"] == "480p"
+
+
+def test_draft_user_text_includes_task_id():
+    from RH_ComfyUI.utils.backends.seedance.draft import seedance_draft_user_text
+
+    text = seedance_draft_user_text("cgt-2026-draft")
+    assert "seedance2.5 final cgt-2026-draft" in text
+    assert seedance_draft_user_text("").startswith("✅ 样片已生成")
+
+
+def test_record_extra_keeps_input_video_duration():
+    from RH_ComfyUI.utils.database.statistics import _merged_extra_json
+
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="样片",
+        video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/a.mp4")],
+        params={"draft": True},
+    )
+    extra = json.loads(_merged_extra_json(req))
+    assert extra["input_video_duration"] == 5.0
+    assert extra["draft"] is True
+    explicit = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="样片",
+        video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/a.mp4")],
+        params={"input_video_duration": 12.5},
+    )
+    kept = json.loads(_merged_extra_json(explicit))
+    assert kept["input_video_duration"] == 12.5
+
+
+def test_submit_seedance25_final_requires_task_id():
+    from RH_ComfyUI.api import submit_seedance25_final
+
+    with pytest.raises(ValidationError, match="样片任务号"):
+        asyncio.run(submit_seedance25_final("  "))
+    with pytest.raises(ValidationError, match="无效"):
+        asyncio.run(submit_seedance25_final("cgt bad"))

@@ -27,6 +27,13 @@ from ...core.channels.family import lock_bindings_to_provider_family
 from ...core.channels.channel import ChannelBinding
 from ...core.channels.registry import channel_registry
 from ...utils.backends.wan30.channel import builtin_wan30_channels
+from ...utils.backends.seedance.draft import (
+    is_draft_flag,
+    is_valid_draft_task_id,
+    draft_task_id_from_request,
+    ordered_content_is_draft_only,
+    apply_seedance25_round_resolution,
+)
 from ...utils.backends.seedance.config import is_seedance_model_enabled_on
 from ...utils.backends.seedance.channel import builtin_seedance_channels
 from ...utils.backends.happyhorse.channel import builtin_happyhorse_channels
@@ -501,6 +508,28 @@ class SeedanceVideoModel(VideoPipelineModel):
         )
 
 
+def _seedance_resolution(request: GenerationRequest) -> str:
+    params = request.params
+    if isinstance(params, dict) and "resolution" in params:
+        raw = params["resolution"]
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()
+    if isinstance(request.resolution, str) and request.resolution.strip():
+        return request.resolution.strip().lower()
+    return ""
+
+
+def _has_user_prompt(request: GenerationRequest) -> bool:
+    if (request.prompt or "").strip():
+        return True
+    from ...core.schema.types import ContentItemType
+
+    for item in request.ordered_content:
+        if item.type == ContentItemType.TEXT and (item.text or "").strip():
+            return True
+    return False
+
+
 class Seedance25VideoModel(SeedanceVideoModel):
     """Seedance 2.5:30s 连贯直出 / 50 多模态参考 / 视频编辑 / 延长 / mov 输出
 
@@ -558,6 +587,22 @@ class Seedance25VideoModel(SeedanceVideoModel):
         )
 
     def validate(self, request: GenerationRequest) -> None:
+        apply_seedance25_round_resolution(request)
+        params = request.params if isinstance(request.params, dict) else {}
+        draft_id = draft_task_id_from_request(request)
+        drafting = is_draft_flag(params)
+        if draft_id and not is_valid_draft_task_id(draft_id):
+            raise ValidationError(f"{self.display_name} 的样片任务号无效")
+        if draft_id and drafting:
+            raise ValidationError(f"{self.display_name} 不能同时提交样片和成片")
+        if draft_id:
+            self._validate_draft_final(request)
+            return
+        if drafting and _seedance_resolution(request) != "480p":
+            raise ValidationError(f"{self.display_name} 样片仅支持 480p")
+        if not _has_user_prompt(request):
+            raise ValidationError(f"{self.display_name} 缺少提示词")
+
         from ...utils.backends.seedance.classify import (
             request_has_av,
             count_request_images,
@@ -621,6 +666,43 @@ class Seedance25VideoModel(SeedanceVideoModel):
             )
             if not oc_has_video:
                 raise ValidationError(f"{self.display_name} 的 {task_mode} 任务至少需要 1 段参考视频")
+
+    def _validate_draft_final(self, request: GenerationRequest) -> None:
+        """成片只接收任务号和可重设字段;复用字段在本地拒绝。"""
+        if _has_user_prompt(request):
+            raise ValidationError(f"{self.display_name} 成片不能再传提示词,上游会复用样片")
+        draft_id = draft_task_id_from_request(request)
+        has_media = bool(request.images or request.video_refs or request.audio_refs)
+        if has_media or not ordered_content_is_draft_only(request, draft_id):
+            raise ValidationError(f"{self.display_name} 成片不能再传参考素材,上游会复用样片")
+        if request.ratio:
+            raise ValidationError(f"{self.display_name} 成片不能再传宽高比,上游会复用样片")
+        if request.seed is not None:
+            raise ValidationError(f"{self.display_name} 成片不能再传随机种子,上游会复用样片")
+        if request.omni_reference_task_type:
+            raise ValidationError(f"{self.display_name} 成片不能再传任务类型,上游会复用样片")
+        params = request.params if isinstance(request.params, dict) else {}
+        for key in ("task_mode", "frame_mode", "omni_reference_task_type"):
+            if key not in params:
+                continue
+            raw = params[key]
+            if isinstance(raw, str) and raw.strip():
+                raise ValidationError(f"{self.display_name} 成片不能再传 {key},上游会复用样片")
+        if request.camera_fixed:
+            raise ValidationError(
+                f"{self.display_name} 不支持 camera_fixed(固定镜头);该参数仅 Seedance 1.0 / 1.5 可用,请关闭后重试"
+            )
+        if _seedance_resolution(request) != "1080p":
+            raise ValidationError(f"{self.display_name} 基于样片的成片仅支持 1080p")
+        pinned = (request.channel or "").strip()
+        if not pinned or pinned == "auto":
+            raise ValidationError(f"{self.display_name} 成片必须指定样片所在通道")
+        duration = request.duration
+        if duration is not None and duration != 0 and duration != -1 and not (4 <= int(duration) <= 30):
+            raise ValidationError(f"{self.display_name} 时长须为 4~30 秒或 -1(自动),当前 {duration}")
+        from ...core.base.video import VideoGenerationBase
+
+        VideoGenerationBase.validate(self, request)
 
     async def unavailable_reason(self) -> str:
         return (

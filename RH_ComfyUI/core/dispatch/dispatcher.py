@@ -178,6 +178,11 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
 
     # 在校验/normalize/上下文回填之前冻结输入,保证统计表记录调用方原始请求。
     request_body = mask_body(request)
+    # 成片在校验前钉扎样片通道和计价时长,命令与 submit 走同一处
+    caller = (request.user_id or ctx.billing.user_id or "").strip()
+    from ...utils.backends.seedance.draft import prepare_seedance25_final_request
+
+    await prepare_seedance25_final_request(request, user_id=caller)
 
     # 1. 路由(内部含 supports() 匹配与可用性过滤)
     model = await route(request)

@@ -131,6 +131,14 @@ async def submit(
         prompt=prompt,
         kwargs=kwargs,
     )
+    # duration 是 GenerationRequest 字段,成片只把调用方显式传入的值交给钉扎逻辑
+    if (
+        model == "seedance2.5"
+        and "duration" in kwargs
+        and isinstance(kwargs["duration"], int)
+        and not isinstance(kwargs["duration"], bool)
+    ):
+        request.params["duration"] = kwargs["duration"]
 
     # (视频参考图与 ordered_content 图片项的预处理已下沉到
     #  VideoGenerationBase.normalize(),dispatch → model.run() 内统一执行,
@@ -186,6 +194,69 @@ async def submit(
         usage=result.usage or {},
         raw=result.raw or None,
         metadata=result.metadata or {},
+    )
+
+
+async def submit_seedance25_final(
+    draft_task_id: str,
+    *,
+    channel: str = "",
+    output_format: str = "mp4",
+    watermark: bool = False,
+    return_last_frame: bool = False,
+    duration: int | None = None,
+    input_video_duration: float | None = None,
+    service_tier: str = "default",
+    on_progress: Optional[ProgressCallback] = None,
+    bot_id: Optional[str] = None,
+    group_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    strict_create_once: bool = False,
+) -> GenerationResult:
+    """用样片任务号生成 Seedance 2.5 的 1080p 成片。
+
+    这是第二轮,只在用户确认样片之后调用。``draft_task_id`` 是样片结果
+    ``metadata["vendor_task_id"]``。必须能找到该用户的成功样片,且在 7 天内。
+    未传 ``channel`` 时从消费记录钉扎,传入则必须与样片通道相同。
+    ``duration`` 与 ``input_video_duration`` 只参与本地计价,不会上行。
+    ``user_id`` 必须与样片消费行一致。
+    """
+    from .utils.backends.seedance.draft import resolve_seedance25_final
+
+    planned = await resolve_seedance25_final(
+        draft_task_id,
+        channel=channel,
+        duration=duration,
+        input_video_duration=input_video_duration,
+        user_id=user_id or "",
+    )
+    kwargs: dict[str, Any] = {
+        "resolution": "1080p",
+        "draft_task_id": planned.task_id,
+        "channel": planned.channel,
+        "output_format": output_format,
+        "watermark": watermark,
+        "return_last_frame": return_last_frame,
+        "service_tier": service_tier,
+    }
+    if planned.duration is not None:
+        kwargs["duration"] = planned.duration
+    if planned.input_video_duration is not None:
+        kwargs["input_video_duration"] = planned.input_video_duration
+    if user_id:
+        kwargs["user_id"] = user_id
+    if trace_id:
+        kwargs["trace_id"] = trace_id
+    return await submit(
+        model="seedance2.5",
+        prompt="",
+        task_type="video",
+        on_progress=on_progress,
+        bot_id=bot_id,
+        group_id=group_id,
+        strict_create_once=strict_create_once,
+        **kwargs,
     )
 
 
@@ -752,6 +823,7 @@ __all__ = [
     "ProgressEvent",
     "ProgressCallback",
     "submit",
+    "submit_seedance25_final",
     "cancel_generation",
     "resume_poll",
     "settle_model_cost",

@@ -32,6 +32,7 @@ from .spec import (
     OrderedSegment,
     VideoTaskShape,
 )
+from .draft import draft_task_id_from_request
 from ...core.types import MediaRef, MediaKind, ContentItemType
 from ...core.request import GenerationRequest
 
@@ -240,6 +241,40 @@ def request_forces_multiref(request: GenerationRequest, *, n_img: Optional[int] 
     return n_img >= 3
 
 
+def _draft_final_spec(
+    request: GenerationRequest,
+    spec_params: dict[str, object],
+    draft_id: str,
+) -> VideoGenSpec:
+    """成片规格:不带提示词和素材,避免复用字段再次上行。"""
+    spec_params["draft_task_id"] = draft_id
+    output_format: str | None = None
+    if "output_format" in spec_params:
+        raw_fmt = spec_params["output_format"]
+        if isinstance(raw_fmt, str):
+            output_format = raw_fmt.strip().lower() or None
+    raw_duration = request.duration
+    duration = 5 if raw_duration is None else int(raw_duration)
+    return VideoGenSpec(
+        shape=VideoTaskShape.TEXT2VIDEO,
+        prompt="",
+        media=[],
+        ordered_segments=[],
+        ratio=None,
+        resolution="1080p",
+        duration=duration,
+        seed=None,
+        generate_audio=False,
+        watermark=bool(request.watermark),
+        camera_fixed=False,
+        return_last_frame=bool(request.return_last_frame),
+        service_tier=request.service_tier or "default",
+        output_format=output_format,
+        omni_reference_task_type=None,
+        params=spec_params,
+    )
+
+
 def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     """根据用户的通用输入,产出供应商无关的 `VideoGenSpec`。
 
@@ -247,6 +282,11 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
     """
     params = request.params or {}
     spec_params: dict[str, object] = dict(params)
+
+    # 只有 seedance2.5 走成片;2.0 请求自带 model,陌生的 draft_task_id 保持忽略。
+    draft_id = draft_task_id_from_request(request)
+    if draft_id and (request.model or "").strip() == "seedance2.5":
+        return _draft_final_spec(request, spec_params, draft_id)
 
     shape_override = _shape_from_override(params.get("shape") if isinstance(params.get("shape"), str) else None)
 
@@ -380,9 +420,7 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
         return_last_frame=bool(request.return_last_frame),
         service_tier=request.service_tier or "default",
         output_format=output_format,
-        omni_reference_task_type=_resolve_omni_reference_task_type(
-            request, params, task_mode, shape, frame_mode
-        ),
+        omni_reference_task_type=_resolve_omni_reference_task_type(request, params, task_mode, shape, frame_mode),
         params=spec_params,
     )
 

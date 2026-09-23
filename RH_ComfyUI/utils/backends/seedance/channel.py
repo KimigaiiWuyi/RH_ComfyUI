@@ -308,6 +308,7 @@ class SeedanceProviderChannel(ProviderChannel):
             raw=final.raw,
             metadata={
                 "task_id": final.id,
+                "vendor_task_id": final.id,
                 "provider": self.name,
                 "channel": self.name,
                 "model": vendor_model,

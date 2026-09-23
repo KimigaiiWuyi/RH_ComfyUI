@@ -178,6 +178,13 @@ def _merged_extra_json(request: "GenerationRequest") -> str:
         merged_params.update(request.params)
     if request.extra:
         merged_params.update(request.extra)
+    # 成片不能再带 video_refs,输入时长必须在样片这一行就写下来
+    if "input_video_duration" not in merged_params and request.video_refs:
+        from ..mappers.seedance_billing import resolve_input_video_duration
+
+        recovered = resolve_input_video_duration(request.video_refs)
+        if recovered > 0:
+            merged_params["input_video_duration"] = recovered
     if not merged_params:
         return ""
     return _safe_json_dumps(merged_params, EXTRA_PARAMS_MAX_BYTES)

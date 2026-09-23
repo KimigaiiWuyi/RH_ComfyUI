@@ -26,6 +26,7 @@ from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.video import wan_videogen_mapper as _wan_videogen_mapper
 from ...utils.mappers.extra_billing import estimate_wan22_points
 from ...utils.mappers.wan30_billing import estimate_wan30_points
+from ...utils.backends.seedance.draft import is_draft_flag, draft_task_id_from_request
 from ...utils.mappers.seedance_billing import (
     resolution_from_usage,
     settle_seedance2_points,
@@ -442,6 +443,21 @@ class Seedance25Def(Seedance25VideoModel):
                 "\n"
                 "支持时长:4~30 秒,或 -1 自动(所有 task_mode / frame_mode 均可)。"
                 "\n"
+                "样片和成片是两轮,由用户分开确认。用户只说生成视频时走普通生成,"
+                "\n"
+                "不要擅自开样片,也不要在样片返回后同一轮自动接成片。"
+                "\n"
+                "用户明确要先看预览时才 draft=true,且仅 480p,积分与普通 480p 相同。"
+                "\n"
+                "样片返回 vendor_task_id 后停下来给用户看。"
+                "\n"
+                "用户之后明确同意,才单独提交成片: draft_task_id 为该任务号,只出 1080p,"
+                "\n"
+                "另计 1080p 积分。成片不能再传提示词和参考素材。"
+                "\n"
+                "任务号 7 天内有效,且须走样片同一通道。"
+                "\n"
+                "\n"
             ),
             requirements=["seedance_apikey"],
             backend_model="doubao-seedance-2-5-260628",
@@ -451,11 +467,12 @@ class Seedance25Def(Seedance25VideoModel):
             inputs={
                 "prompt": PortSpec(
                     type=PortType.TEXT,
-                    required=True,
+                    required=False,
                     title="提示词",
                     description=(
                         '视频生成提示词。多模态可用 "图片1"/"视频1"/"音频1" 代号引用素材;'
                         "编辑/延长任务避免误用对方关键词以免触发错误任务类型。"
+                        "成片(填写 draft_task_id)时留空,再传会报错。"
                     ),
                 ),
                 "images": PortSpec(
@@ -548,6 +565,25 @@ class Seedance25Def(Seedance25VideoModel):
                     title="输出格式",
                     description="输出视频容器格式(2.5 支持 mp4 / mov)",
                 ),
+                "draft": PortSpec(
+                    type=PortType.BOOLEAN,
+                    default=False,
+                    title="样片",
+                    description=(
+                        "先生成 480p 样片,积分与普通 480p 相同。其它分辨率也会改成 480p。与 draft_task_id 互斥。"
+                    ),
+                ),
+                "draft_task_id": PortSpec(
+                    type=PortType.STRING,
+                    required=False,
+                    title="样片任务号",
+                    description=(
+                        "样片返回的 vendor_task_id,用来生成 1080p 成片。"
+                        "不能再传提示词、素材、宽高比、种子和任务类型。"
+                        "duration 与 input_video_duration 只参与本地计价,不会上行。"
+                        "任务号自创建起 7 天有效,且须走样片同一通道。"
+                    ),
+                ),
                 "omni_reference_task_type": PortSpec(
                     type=PortType.ENUM,
                     default="reference",
@@ -581,10 +617,21 @@ class Seedance25Def(Seedance25VideoModel):
         输入时长优先读 params.input_video_duration,否则累加 video_refs 各段时长
         (未知段按 5s);duration=-1 时输出时长跟输入总时长。
         """
-        resolution = request.params.get("resolution") or request.resolution or "720p"
+        params = request.params if isinstance(request.params, dict) else {}
+        if draft_task_id_from_request(request):
+            resolution = "1080p"
+        elif is_draft_flag(params):
+            resolution = "480p"
+        elif "resolution" in params and isinstance(params["resolution"], str) and params["resolution"].strip():
+            resolution = params["resolution"]
+        elif isinstance(request.resolution, str) and request.resolution.strip():
+            resolution = request.resolution
+        else:
+            resolution = "720p"
         duration = request.duration
         if duration is None:
-            duration = request.params.get("duration", 5)
+            raw_duration = params["duration"] if "duration" in params else 5
+            duration = raw_duration
         try:
             duration_f = float(duration)
         except (TypeError, ValueError):
@@ -597,7 +644,18 @@ class Seedance25Def(Seedance25VideoModel):
         )
 
     def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
-        resolution = resolution_from_usage(usage) or request.params.get("resolution") or request.resolution or "720p"
+        params = request.params if isinstance(request.params, dict) else {}
+        if draft_task_id_from_request(request):
+            fallback = "1080p"
+        elif is_draft_flag(params):
+            fallback = "480p"
+        elif "resolution" in params and isinstance(params["resolution"], str) and params["resolution"].strip():
+            fallback = params["resolution"]
+        elif isinstance(request.resolution, str) and request.resolution.strip():
+            fallback = request.resolution
+        else:
+            fallback = "720p"
+        resolution = resolution_from_usage(usage) or fallback
         return settle_seedance25_points(
             usage,
             str(resolution),
