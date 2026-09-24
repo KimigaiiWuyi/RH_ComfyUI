@@ -34,11 +34,14 @@ def _all_models():
 
 
 def test_all_speech_models_have_dynamic_point_range():
-    """所有 speech 模型:point_range.min 必须严格 < max。"""
+    """付费 speech 模型:point_range.min 必须严格 < max。免费档固定 0。"""
     speech_models = model_registry.by_modality(TaskType.SPEECH)
     assert speech_models, "应至少有一个 speech 模型"
     for m in speech_models:
         rmin, rmax = m.point_range()
+        if m.point_cost == 0:
+            assert (rmin, rmax) == (0, 0), f"{m.name} 免费档应为固定 0 积分"
+            continue
         assert rmin < rmax, (
             f"{m.name} 的 point_range=({rmin}, {rmax}) min==max,"
             f"前端会判定为固定积分不调 estimate,实际动态计费预览会失真"
@@ -93,10 +96,28 @@ def test_mimo_tts_max_uses_realistic_text_length():
     assert rmax >= 5, f"mimo_tts max={rmax} 太小"
 
 
-def test_fish_tts_point_range_still_dynamic():
-    """回归保护:fish_tts 之前就是动态的(1, 2),确保修复 IndexTTS2 时没误改它。"""
-    m = model_registry.get("fish_tts")
+def test_fish_s21_pro_point_range_still_dynamic():
+    """回归保护:s2.1-pro 按文本计费,point_range 必须能触发 estimate。"""
+    m = model_registry.get("s2.1-pro")
     assert m is not None
     rmin, rmax = m.point_range()
     assert rmin < rmax
-    assert rmax >= 2, f"fish_tts max={rmax} 偏离预期(>=2)"
+    assert rmax >= 2, f"s2.1-pro max={rmax} 偏离预期(>=2)"
+
+
+def test_fish_tiers_register_as_separate_models():
+    from RH_ComfyUI.models.asr.overrides import FishAsrModel
+    from RH_ComfyUI.rh_config.fish_models import FISH_ASR_MODELS, FISH_TTS_MODELS
+    from RH_ComfyUI.models.speech.overrides import FishTtsModel
+
+    for spec in FISH_TTS_MODELS:
+        model = model_registry.get(spec.name)
+        assert isinstance(model, FishTtsModel)
+        assert model.node.backend_model == spec.name
+        assert model.priority == spec.priority
+    for spec in FISH_ASR_MODELS:
+        model = model_registry.get(spec.name)
+        assert isinstance(model, FishAsrModel)
+        assert model.node.backend_model == spec.name
+    assert model_registry.get("fish_tts") is None
+    assert model_registry.get("fish_asr") is None

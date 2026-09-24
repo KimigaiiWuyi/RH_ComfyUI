@@ -61,6 +61,43 @@ def test_every_section_has_model_list_with_defaults():
         assert item.options, f"{key} 应有 options"
 
 
+def test_fish_enabled_list_is_upstream_tiers():
+    from RH_ComfyUI.rh_config.fish_models import FISH_MODEL_NAMES
+
+    assert "FishAudio_Model" not in SERVICE_CONFIG_DEFAULT
+    item = SERVICE_CONFIG_DEFAULT["FishAudio_Enabled_Models"]
+    assert isinstance(item, GsListStrConfig)
+    assert item.options == FISH_MODEL_NAMES
+    assert item.data == FISH_MODEL_NAMES
+
+
+def test_fish_legacy_enabled_names_expand(monkeypatch):
+    import RH_ComfyUI.utils.backends.enabled_list as el
+
+    monkeypatch.setattr(
+        el,
+        "_cfg",
+        lambda key: ["fish_tts", "fish_asr"] if key == "FishAudio_Enabled_Models" else None,
+    )
+    monkeypatch.setattr(el, "_legacy_fish_tier", lambda: "s2-pro")
+    assert el.enabled_names("FishAudio_Enabled_Models") == ["s2-pro", "transcribe-1"]
+
+    monkeypatch.setattr(el, "_legacy_fish_tier", lambda: "s1")
+    assert el.enabled_names("FishAudio_Enabled_Models") == ["s2.1-pro", "transcribe-1"]
+
+    monkeypatch.setattr(el, "_legacy_fish_tier", lambda: "s2.1-pro-free")
+    assert el.enabled_names("FishAudio_Enabled_Models") == ["s2.1-pro-free", "transcribe-1"]
+
+
+def test_fish_new_enabled_names_stay(monkeypatch):
+    import RH_ComfyUI.utils.backends.enabled_list as el
+
+    wanted = ["drama-3-preview", "transcribe-1-pro"]
+    monkeypatch.setattr(el, "_cfg", lambda key: wanted if key == "FishAudio_Enabled_Models" else None)
+    monkeypatch.setattr(el, "_legacy_fish_tier", lambda: "s2-pro")
+    assert el.enabled_names("FishAudio_Enabled_Models") == wanted
+
+
 def test_seedance_vendor_list_gate(monkeypatch):
     import RH_ComfyUI.utils.backends.enabled_list as el
 

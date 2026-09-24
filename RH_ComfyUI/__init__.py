@@ -39,6 +39,9 @@ async def init_pipeline_system() -> None:
     """启动时初始化 Pipeline 注册表和 Backend 注册表"""
     from .utils.backends import init_backends
     from .utils.core.pipeline import pipeline_registry
+    from .rh_config.fish_models import migrate_stored_fish_enabled
+
+    migrate_stored_fish_enabled()
 
     # 1. 注册后端（返回 AdapterRegistry 实例）
     registry = init_backends()

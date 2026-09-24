@@ -83,7 +83,7 @@ _ZH_TO_TAG: dict[str, str] = {
 }
 
 # 显式情绪块:`<<EMO: label>>`(与调用方情绪选单/序列化协议一致)。
-_EMO_MARKER_RE = re.compile(r"<<EMO:\s*([^>]*?)\s*>>")
+_EMO_MARKER_RE = re.compile(r"<<(?:EMO|TONE|AEFF|SFX):\s*([^>]*?)\s*>>")
 _MULTISPACE_RE = re.compile(r"\s{2,}")
 # 书面叠字口癖（zz/hhh）：TTS 会逐字母念出
 _WRITTEN_LETTER_FILLER_RE = re.compile(r"(?:(?<=[^A-Za-z])|^)[zZhH]{2,}(?=[^A-Za-z]|$)")
@@ -108,7 +108,7 @@ def _normalize_word(word: str) -> str:
 
 
 def render_inline_markers(text: str) -> str:
-    """把显式情绪块 `<<EMO: label>>` 就地展开为内联 `[english]`(中→英)
+    """把显式标记 `<<EMO|TONE|AEFF|SFX: label>>` 就地展开为内联 `[english]`(中→英)
 
     正文里字面的 `[..]` / `【..】` 一律不动 —— 只有显式情绪块才是情绪。
     """

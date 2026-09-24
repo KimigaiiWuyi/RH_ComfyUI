@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from collections.abc import Callable, Awaitable
 
 from gsuid_core.logger import logger
 
@@ -36,6 +37,8 @@ def _resolve_audio(request: GenerationRequest) -> bytes | None:
 async def fishaudio_asr_mapper(
     request: GenerationRequest,
     api: FishAudioAPI,
+    *,
+    model: str,
 ) -> GenerationResult:
     """Fish Audio ASR:取音频 → POST /v1/asr → 回填文本/分段/时长"""
     audio = _resolve_audio(request)
@@ -46,7 +49,7 @@ async def fishaudio_asr_mapper(
     include_ts = bool(request.params.get("include_timestamps", True))
     ignore_timestamps = not include_ts
 
-    raw = await api.asr(audio, language=language, ignore_timestamps=ignore_timestamps)
+    raw = await api.asr(audio, language=language, ignore_timestamps=ignore_timestamps, model=model)
     if isinstance(raw, str):
         # FishAudioAPI 失败语义:返回人话错误信息(str)
         raise RuntimeError(f"Fish Audio 语音识别失败: {raw}")
@@ -76,3 +79,14 @@ async def fishaudio_asr_mapper(
         raw={"text": text, "duration": duration, "segments": segments},
         metadata={"duration_seconds": duration, "segments_count": len(segments)},
     )
+
+
+def fishaudio_asr_mapper_for(
+    model: str,
+) -> Callable[[GenerationRequest, FishAudioAPI], Awaitable[GenerationResult]]:
+    """把识别档位绑进 mapper。"""
+
+    async def _mapper(request: GenerationRequest, api: FishAudioAPI) -> GenerationResult:
+        return await fishaudio_asr_mapper(request, api, model=model)
+
+    return _mapper

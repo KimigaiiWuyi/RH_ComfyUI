@@ -107,8 +107,8 @@ class DigitalHumanSpeechBase(AIGCGenerationBase):
         if style is EmotionStyle.ENUM:
             request.mood = to_enum_emotion(request.mood, labels, self.emotion_enum)
         elif style is EmotionStyle.NATURAL_LANGUAGE:
-            if not request.mood and labels:
-                request.mood = labels[0]
+            # 句中标记不是这些模型的音频标签,只从正文抹掉,不转成整句 mood
+            pass
         else:  # NONE
             request.mood = None
         return request

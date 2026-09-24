@@ -61,6 +61,7 @@ class FishAudioAdapter(Adapter):
             prompt=request.prompt or "",
             request={
                 "backend": "fishaudio",
+                "model": node.backend_model or node.name,
                 "task": str(getattr(getattr(node, "task_type", None), "value", "") or ""),
                 "prompt": request.prompt or "",
                 "mood": request.mood,

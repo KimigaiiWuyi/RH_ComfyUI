@@ -20,7 +20,9 @@ def _req(prompt: str, mood: str | None = None) -> GenerationRequest:
 def test_render_inline_markers():
     # 情绪块就地展开为 [english]（中→英）
     assert render_inline_markers("今天 <<EMO: 开心>> 天气真好") == "今天 [happy] 天气真好"
-    assert render_inline_markers("你好 <<EMO: whisper>> 我想你了") == "你好 [whisper] 我想你了"
+    assert render_inline_markers("你好 <<TONE: whispering>> 秘密") == "你好 [whispering] 秘密"
+    assert render_inline_markers("<<AEFF: laughing>> 哈哈") == "[laughing] 哈哈"
+    assert render_inline_markers("稍等 <<SFX: break>> 继续") == "稍等 [break] 继续"
     # 字面括号（复制/手打的 []/【】）一律不动
     assert render_inline_markers("我买了[苹果]和【重要】") == "我买了[苹果]和【重要】"
 
@@ -66,7 +68,7 @@ def test_model_normalize_by_style():
     init_backends()
     discover_builtin_models()
 
-    fish = model_registry.get("fish_tts")
+    fish = model_registry.get("s2.1-pro")
     assert fish is not None
     # 情绪块 → 内联展开(句中定位)
     out = fish.normalize(_req("今天 <<EMO: 开心>> 天气真好"))
@@ -89,11 +91,13 @@ def test_model_normalize_by_style():
     mimo = model_registry.get("mimo_tts")
     assert mimo is not None
     out = mimo.normalize(_req("<<EMO: 开心>> 你好"))
-    assert out.prompt == "你好" and out.mood == "开心"
+    assert out.prompt == "你好" and out.mood is None
+    out = mimo.normalize(_req("<<TONE: whispering>> 你好"))
+    assert out.prompt == "你好" and out.mood is None
 
     tts25 = model_registry.get("IndexTTS2.5")
     assert tts25 is not None
-    out = tts25.normalize(_req("<<EMO: 开心>> 你好"))
-    assert out.prompt == "你好" and out.mood == "开心"
+    out = tts25.normalize(_req("<<EMO: 开心>> <<SFX: break>> 你好"))
+    assert out.prompt == "你好" and out.mood is None
     out = tts25.normalize(_req("你好", "高兴"))
     assert out.prompt == "你好" and out.mood == "高兴"

@@ -1,7 +1,8 @@
-"""Fish Audio 官方 API 客户端 — S2 系列 TTS / 音色克隆 / 语音识别
+"""Fish Audio 官方 API 客户端 — TTS / 音色克隆 / 语音识别
 
-只对接官方公开端点(api.fish.audio)。凭证与模型档位从配置动态读取,
+只对接官方公开端点(api.fish.audio)。API Key 从配置动态读取,
 中途改配置即时生效(不缓存到实例,见 @property)。
+合成/识别的 model 由调用方按已启用档位传入,不再读全局单选档位。
 
 网络层用 httpx(与 seedance/aigc 等通道统一风格),统一 120s 总超时 +
 10s 连接超时,避免 aiohttp 默认行为(无超时)下慢响应无限占住并发闸。
@@ -17,16 +18,11 @@ import httpx
 from gsuid_core.logger import logger
 
 from ..http_retry import RetryingAsyncClient
+from ....rh_config.fish_models import ASR_MODEL_NAMES, TTS_MODEL_NAMES
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 # 仅对接官方公开端点(不额外暴露地址配置)。
 _BASE_URL = "https://api.fish.audio"
-
-# 允许的模型档位(header 里的 model 值)。s2.1-pro 在官方免费期内不计费,作默认。
-# 刻意不含营销名 "s2.1-pro-free"(实测线上判 Unknown model):这样即便旧配置里存的是
-# 它,property.model 里 `value in KNOWN_MODELS` 不成立 → 自动回落到 s2.1-pro,免手改。
-DEFAULT_MODEL = "s2.1-pro"
-KNOWN_MODELS = ("s2.1-pro", "s2-pro", "s1")
 
 # 音色训练中的状态:处于这些状态需等待就绪后才能用于合成。
 # 快速克隆通常即时可用;偶发未就绪时轮询兜底,超预算仍未就绪则尽力尝试。
@@ -52,12 +48,6 @@ class FishAudioAPI:
     def api_key(self) -> str:
         """动态读取,避免导入期配置未就绪把空值缓存到进程退出"""
         return SERVICE_CONFIG.get_config("FishAudio_apikey").data or ""
-
-    @property
-    def model(self) -> str:
-        """默认合成档位;非法/空值回退到免费档"""
-        value = SERVICE_CONFIG.get_config("FishAudio_Model").data or ""
-        return value if value in KNOWN_MODELS else DEFAULT_MODEL
 
     def _auth_header(self) -> Dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}"}
@@ -145,7 +135,9 @@ class FishAudioAPI:
             logger.warning("[FishAudio] 未配置 API Key,将无法请求")
             return "未配置 Fish Audio API Key(FishAudio_apikey)"
 
-        engine = model if model in KNOWN_MODELS else self.model
+        engine = model or ""
+        if engine not in TTS_MODEL_NAMES:
+            return f"未知 Fish Audio 语音模型: {engine or '(空)'}"
         body: Dict[str, Any] = {
             "text": text,
             "format": "mp3",
@@ -168,7 +160,7 @@ class FishAudioAPI:
                     detail = resp.text[:200]
                     logger.warning(f"[FishAudio] 合成失败: {resp.status_code}, {detail}")
                     # 400 多为档位不被账号支持(如 Unknown model)→ 指向配置项,可自助修
-                    hint = f"(可在 Web 控制台改 FishAudio_Model 档位,当前 {engine})" if resp.status_code == 400 else ""
+                    hint = f"(请确认「启用的 Fish Audio 模型」已勾选 {engine})" if resp.status_code == 400 else ""
                     return f"HTTP {resp.status_code}: {detail}{hint}"
                 audio = resp.content
         except httpx.HTTPError as e:
@@ -187,6 +179,7 @@ class FishAudioAPI:
         *,
         language: Optional[str] = None,
         ignore_timestamps: bool = False,
+        model: Optional[str] = None,
     ) -> Union[Dict[str, Any], str]:
         """语音识别:audio → {text, duration, segments[]};失败返回**人话错误信息**(str)
 
@@ -205,6 +198,10 @@ class FishAudioAPI:
         if not audio:
             return "音频字节为空,无法识别"
 
+        engine = model or ""
+        if engine not in ASR_MODEL_NAMES:
+            return f"未知 Fish Audio 识别模型: {engine or '(空)'}"
+
         filename, content_type = _audio_content_type(audio)
         files = {"audio": (filename, audio, content_type)}
         # ignore_timestamps=True 才传 "true",其余传 "false" —— 与 aiohttp 旧行为一致
@@ -215,13 +212,15 @@ class FishAudioAPI:
             data["language"] = language
 
         url = f"{self.base_url}/v1/asr"
+        headers = {**self._auth_header(), "model": engine}
         logger.info(
-            f"[FishAudio] 识别: lang={language or 'auto'}, timestamps={not ignore_timestamps}, bytes={len(audio)}"
+            f"[FishAudio] 识别: model={engine}, lang={language or 'auto'}, "
+            f"timestamps={not ignore_timestamps}, bytes={len(audio)}"
         )
 
         try:
             async with RetryingAsyncClient(timeout=_TIMEOUT) as client:
-                resp = await client.post(url, headers=self._auth_header(), files=files, data=data)
+                resp = await client.post(url, headers=headers, files=files, data=data)
                 if resp.status_code != 200:
                     detail = resp.text[:200]
                     logger.warning(f"[FishAudio] 识别失败: {resp.status_code}, {detail}")

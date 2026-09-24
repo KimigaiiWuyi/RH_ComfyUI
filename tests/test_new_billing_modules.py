@@ -12,7 +12,7 @@ from RH_ComfyUI.models.image.defs import (
     MinimaxImage01Def,
 )
 from RH_ComfyUI.models.music.defs import AceStep15Def
-from RH_ComfyUI.models.speech.defs import FishTtsDef, IndexTTS2Def, IndexTTS25Def
+from RH_ComfyUI.models.speech.defs import FishTtsDef, IndexTTS2Def, IndexTTS25Def, FishTtsFreeDef
 from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.speech_billing import (
     FISHAUDIO_POINTS_PER_MILLION_BYTES,
@@ -239,6 +239,14 @@ def test_fish_tts_estimate_cost_matches_direct():
     for text in ["你好", "hello world", "这是一段测试文本" * 100]:
         req = _make_speech_request(text)
         assert m.estimate_cost(req) == estimate_fish_tts_points(text)
+
+
+def test_fish_free_tier_estimate_is_zero():
+    """s2.1-pro-free 上游免费,本插件固定 0 积分。"""
+    m = FishTtsFreeDef()
+    assert m.name == "s2.1-pro-free"
+    assert m.estimate_cost(_make_speech_request("你好" * 1000)) == 0
+    assert m.point_range() == (0, 0)
 
 
 # ═══════════════════════════════════════════════════════════════════════

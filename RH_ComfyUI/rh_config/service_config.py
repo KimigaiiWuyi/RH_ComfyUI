@@ -19,6 +19,8 @@ from gsuid_core.utils.plugins_config.models import (
     GsRepeatGroupConfig,
 )
 
+from .fish_models import FISH_MODEL_NAMES
+
 # 下拉项用静态常量,避免配置模块加载期 import defs 触发循环导入;新增模型时同步此表。
 _IMAGE_MODEL_REAL_NAMES = [
     "anima",
@@ -50,7 +52,6 @@ _RH_APP_NAMES = [
 _GEMINI_MODEL_NAMES = ["banana1", "banana2", "banana_pro"]
 _MINIMAX_MODEL_NAMES = ["minimax_t2a_speech", "minimax_image01", "minimax_h3"]
 _MIMO_MODEL_NAMES = ["mimo_tts"]
-_FISH_MODEL_NAMES = ["fish_tts", "fish_asr"]
 _SEEDANCE_ARK_MODEL_NAMES = [
     "seedance15_pro",
     "seedance2",
@@ -73,9 +74,7 @@ _TX_AIART_MODEL_NAMES = ["tx_image_outpaint"]
 SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     "divider_comfyui": GsDivider(
         "ComfyUI / RunningHub AI 应用",
-        "本地/远程 ComfyUI 与 RunningHub AI 应用。"
-        "须在上方启用列表勾选后才分发。留空则全部不启用。"
-        "增删列表即时生效。",
+        "本地/远程 ComfyUI 与 RunningHub AI 应用。须在上方启用列表勾选后才分发。留空则全部不启用。增删列表即时生效。",
         "ComfyUI 服务配置",
     ),
     "ComfyUI_Enabled_Workflows": GsListStrConfig(
@@ -173,8 +172,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "MiniMax_Enable": GsBoolConfig(
         "启用 MiniMax 供应商",
-        "是否启用官方 MiniMax 通道。关闭后文生图 / T2A / 官方 H3 通道不参与分发;"
-        "minimax_h3 若已挂外部插件通道仍可用。",
+        "是否启用官方 MiniMax 通道。关闭后文生图 / T2A / 官方 H3 通道不参与分发;minimax_h3 若已挂外部插件通道仍可用。",
         True,
     ),
     "MiniMax_Enabled_Models": GsListStrConfig(
@@ -202,9 +200,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "MIMO_Enabled_Models": GsListStrConfig(
         "启用的 MiMo 模型",
-        "从列表勾选要启用的 MiMo 模型;可自由添加内部模型名。"
-        "留空则全部不启用。共用下方 MiMo API Key。"
-        "可选:mimo_tts。",
+        "从列表勾选要启用的 MiMo 模型;可自由添加内部模型名。留空则全部不启用。共用下方 MiMo API Key。可选:mimo_tts。",
         list(_MIMO_MODEL_NAMES),
         options=list(_MIMO_MODEL_NAMES),
     ),
@@ -215,33 +211,26 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "divider_fishaudio": GsDivider(
         "Fish Audio 语音合成",
-        "Fish Audio S2 系列 TTS 与自动音色克隆服务连接配置",
-        "Fish Audio S2 系列 TTS 服务连接配置",
+        "Fish Audio TTS / ASR。每个档位是独立模型,可同时启用多个,共用下方 API Key。",
+        "Fish Audio TTS / ASR 服务连接配置",
     ),
     "FishAudio_Enable": GsBoolConfig(
         "启用 Fish Audio 供应商",
-        "是否启用 Fish Audio。关闭后 fish_tts / fish_asr 均不可用。",
+        "是否启用 Fish Audio。关闭后已勾选的档位均不可用。",
         True,
     ),
     "FishAudio_Enabled_Models": GsListStrConfig(
         "启用的 Fish Audio 模型",
-        "从列表勾选要启用的 Fish Audio 模型;可自由添加内部模型名。"
-        "留空则全部不启用。共用下方 Fish Audio API Key。"
-        "可选:fish_tts / fish_asr。",
-        list(_FISH_MODEL_NAMES),
-        options=list(_FISH_MODEL_NAMES),
+        "勾选要启用的档位,可多选。留空则全部不启用。共用下方 Fish Audio API Key。"
+        "语音:s2-pro / s2.1-pro / s2.1-pro-free / drama-3-preview。"
+        "识别:transcribe-1 / transcribe-1-pro。",
+        list(FISH_MODEL_NAMES),
+        options=list(FISH_MODEL_NAMES),
     ),
     "FishAudio_apikey": GsStrConfig(
         "Fish Audio API Key",
-        "用于设置 Fish Audio 官方 API 的 Key（S2 系列 TTS 与音色克隆）",
+        "用于设置 Fish Audio 官方 API 的 Key（TTS、音色克隆与语音识别）",
         "",
-    ),
-    "FishAudio_Model": GsStrConfig(
-        "Fish Audio 模型档位",
-        "默认 s2.1-pro（官方免费期内不计费，质量最好）；s1 为旧版更稳。"
-        "（营销名 s2.1-pro-free 线上会判 Unknown model，已不作为选项。）",
-        "s2.1-pro",
-        options=["s2.1-pro", "s2-pro", "s1"],
     ),
     "divider_seedance": GsDivider(
         "Seedance 视频生成 / Seedream 5.0 图片",
@@ -373,8 +362,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "HappyHorse_Enable_dashscope": GsBoolConfig(
         "启用 DashScope 供应商",
-        "是否启用官方 DashScope 通道。禁用后官方 happyhorse1.1 / wan3.0 通道不参与分发;"
-        "若已挂外部插件通道,模型仍可用。",
+        "是否启用官方 DashScope 通道。禁用后官方 happyhorse1.1 / wan3.0 通道不参与分发;若已挂外部插件通道,模型仍可用。",
         True,
     ),
     "DashScope_Enabled_Models": GsListStrConfig(

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable, Awaitable
 
 from gsuid_core.logger import logger
 
@@ -20,8 +21,10 @@ _PROVIDER = "fishaudio"
 async def fishaudio_tts_mapper(
     request: GenerationRequest,
     api: FishAudioAPI,
+    *,
+    model: str,
 ) -> GenerationResult:
-    """Fish Audio 合成:参考音频→复用/克隆音色 id,再走 TTS"""
+    """Fish Audio 合成:参考音频→复用/克隆音色 id,再走指定档位 TTS"""
     reference_id: str | None = None
     if request.reference_audio is not None:
         reference_id = await _get_or_create_voice(api, request.reference_audio, request.user_id or "")
@@ -30,7 +33,6 @@ async def fishaudio_tts_mapper(
                 "Fish Audio 音色克隆失败,已停止生成以避免回退随机音色;请检查 API Key 与参考音频是否合规。"
             )
 
-    model = request.params.get("model")
     audio = await api.tts(
         text=request.prompt,
         reference_id=reference_id,
@@ -68,3 +70,14 @@ async def _get_or_create_voice(api: FishAudioAPI, audio: bytes, created_by: str)
         created_by=created_by,
     )
     return voice_id
+
+
+def fishaudio_tts_mapper_for(
+    model: str,
+) -> Callable[[GenerationRequest, FishAudioAPI], Awaitable[GenerationResult]]:
+    """把档位绑进 mapper,执行时不再读全局单选配置。"""
+
+    async def _mapper(request: GenerationRequest, api: FishAudioAPI) -> GenerationResult:
+        return await fishaudio_tts_mapper(request, api, model=model)
+
+    return _mapper

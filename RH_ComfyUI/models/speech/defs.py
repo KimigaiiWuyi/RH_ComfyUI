@@ -13,11 +13,12 @@ from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.speech import index_tts2_mapper as _index_tts2_mapper
+from ...rh_config.fish_models import FISH_TTS_MODELS, FishModelSpec
 from ...utils.mappers.mimo_speech import mimo_tts_mapper as _mimo_tts_mapper
 from ...utils.mappers.extra_billing import estimate_mimo_tts_points, estimate_minimax_t2a_points
 from ...utils.mappers.minimax_speech import minimax_t2a_speech_mapper as _minimax_t2a_speech_mapper
 from ...utils.mappers.speech_billing import estimate_fish_tts_points, estimate_index_tts2_points
-from ...utils.mappers.fishaudio_speech import fishaudio_tts_mapper as _fishaudio_tts_mapper
+from ...utils.mappers.fishaudio_speech import fishaudio_tts_mapper_for as _fishaudio_tts_mapper_for
 
 
 class IndexTTS2Def(IndexTTS2Model):
@@ -352,100 +353,115 @@ class MinimaxT2aSpeechDef(MinimaxSpeechModel):
         )
 
 
-class FishTtsDef(FishTtsModel):
-    """Fish Audio S2 语音合成 — 自动音色克隆 + 内联情绪"""
+def _fish_tts_knowledge(spec: FishModelSpec) -> str:
+    bill = "本插件不计积分(上游免费档)。" if spec.free else "按输入文本 UTF-8 字节计费。"
+    return (
+        f"{spec.display_name}({spec.name}) —— 配音 / 口播 / 有声内容。"
+        "\n"
+        "优势:多语言,韵律自然;情绪块 <<EMO: 情绪词>> 可句中定位与叠加,"
+        "如 今天<<EMO: 开心>>天气真好。字面 []/【】 当普通文本。"
+        "\n"
+        "传入参考音频即自动克隆音色(内容去重、持久复用)。"
+        "\n"
+        f"{bill}"
+        "\n"
+        "适用场景:配音、口播、有声内容、多语言朗读、角色对白。"
+        "\n"
+        "不适用场景:音乐生成。"
+        "\n"
+    )
 
-    def __init__(self) -> None:
-        super().__init__(self.node_def())
 
-    @staticmethod
-    def node_def() -> NodeDef:
-        return NodeDef(
-            name="fish_tts",
-            display_name="Fish Audio S2",
-            task_type=TaskType("speech"),
-            backend="fishaudio",
-            point_cost=2,
-            description="多语言口播首选",
-            knowledge_content=(
-                "Fish Audio S2 系列语音合成模型 —— 配音 / 口播 / 有声内容的**首选**模型。"
-                "\n"
-                "优势：多语言支持，韵律自然，情绪表达细粒度可控（可句中定位与叠加），"
-                "\n"
-                "传入参考音频即自动克隆音色（内容去重、持久复用，无需显式克隆步骤）。"
-                "\n"
-                "情绪用法（重要）：用情绪块 <<EMO: 情绪词>> 在句中定位情绪，"
-                "\n"
-                "如 今天<<EMO: 开心>>天气真好 / 你好<<EMO: 低语>>我想你了，可连续叠加"
-                "\n"
-                "如 <<EMO: 悲伤>><<EMO: 低语>>；情绪词支持中文（开心/低语/悲伤/大笑…）。"
-                "\n"
-                "也可用『情绪』参数或文本开头 [情绪] 指定整句情绪。"
-                "\n"
-                "注意：只有情绪块 <<EMO: …>> 才被识别为情绪；正文里字面的 []/【】 当普通文本。"
-                "\n"
-                "模型档位可配置（默认免费档 s2.1-pro-free，可切换更高档位）。"
-                "\n"
-                "适用场景：配音、口播、有声内容、多语言朗读、角色对白。"
-                "\n"
-                "不适用场景：音乐生成。"
-                "\n"
-            ),
-            requirements=["fishaudio_apikey"],
-            mode="programmatic",
-            mapper_func=_fishaudio_tts_mapper,
-            inputs={
-                "prompt": PortSpec(
-                    type=PortType.TEXT,
-                    required=True,
-                    title="合成文本",
-                    description=(
-                        "待合成文本。用情绪块 <<EMO: 情绪词>> 在句中定位情绪"
-                        "（如 你好<<EMO: 低语>>我想你了）；正文里字面的 []/【】 当普通文本。"
+def _build_fish_tts(spec: FishModelSpec) -> type[FishTtsModel]:
+    """同一 TTS 执行链按上游 model 拆成可独立启停的模型。"""
+    engine = spec.name
+    is_free = spec.free
+
+    class Def(FishTtsModel):
+        def __init__(self) -> None:
+            super().__init__(self.node_def())
+
+        @staticmethod
+        def node_def() -> NodeDef:
+            return NodeDef(
+                name=engine,
+                display_name=spec.display_name,
+                task_type=TaskType("speech"),
+                backend="fishaudio",
+                backend_model=engine,
+                point_cost=0 if is_free else 2,
+                description=spec.description,
+                knowledge_content=_fish_tts_knowledge(spec),
+                requirements=["fishaudio_apikey"],
+                mode="programmatic",
+                mapper_func=_fishaudio_tts_mapper_for(engine),
+                inputs={
+                    "prompt": PortSpec(
+                        type=PortType.TEXT,
+                        required=True,
+                        title="合成文本",
+                        description=(
+                            "待合成文本。用情绪块 <<EMO: 情绪词>> 在句中定位情绪"
+                            "（如 你好<<EMO: 低语>>我想你了）；正文里字面的 []/【】 当普通文本。"
+                        ),
                     ),
+                    "reference_audio": PortSpec(
+                        type=PortType.AUDIO,
+                        title="参考音频",
+                        description="传入即自动克隆音色并持久复用，无需显式克隆",
+                    ),
+                    "mood": PortSpec(
+                        type=PortType.STRING,
+                        title="情绪",
+                        description="整句情绪/语气，自动注入句首；句中定位请用情绪块 <<EMO: 情绪>>",
+                        values=["开心", "悲伤", "愤怒", "惊讶", "平静", "兴奋", "低语", "哭腔", "大笑", "着急"],
+                    ),
+                    "speed": PortSpec(
+                        type=PortType.NUMBER,
+                        default=1.0,
+                        minimum=0.5,
+                        maximum=2.0,
+                        title="语速",
+                        description="语速，0.5~2.0",
+                    ),
+                    "params": PortSpec(type=PortType.STRING, title="扩展参数", description="预留扩展"),
+                },
+                outputs={
+                    "audio": PortSpec(type=PortType.OUTPUT_AUDIO, description="生成的语音"),
+                },
+                capabilities=CapabilityManifest(
+                    supported_tasks=["speech"],
+                    mode="sync",
+                    priority=spec.priority,
                 ),
-                "reference_audio": PortSpec(
-                    type=PortType.AUDIO,
-                    title="参考音频",
-                    description="传入即自动克隆音色并持久复用，无需显式克隆",
-                ),
-                "mood": PortSpec(
-                    type=PortType.STRING,
-                    title="情绪",
-                    description="整句情绪/语气，自动注入句首；句中定位请用情绪块 <<EMO: 情绪>>",
-                    values=["开心", "悲伤", "愤怒", "惊讶", "平静", "兴奋", "低语", "哭腔", "大笑", "着急"],
-                ),
-                "speed": PortSpec(
-                    type=PortType.NUMBER,
-                    default=1.0,
-                    minimum=0.5,
-                    maximum=2.0,
-                    title="语速",
-                    description="语速，0.5~2.0",
-                ),
-                "params": PortSpec(type=PortType.STRING, title="扩展参数", description="预留扩展，可指定 model 档位等"),
-            },
-            outputs={
-                "audio": PortSpec(type=PortType.OUTPUT_AUDIO, description="生成的语音"),
-            },
-            capabilities=CapabilityManifest(
-                supported_tasks=["speech"],
-                mode="sync",
-                # 配音/口播首选:优先级高于其它 TTS(未配置 key 时 check_available 自动让路)
-                priority=85,
-            ),
-        )
+            )
 
-    def estimate_cost(self, request: GenerationRequest) -> int:
-        """动态计费:按输入文本 UTF-8 字节长度计费(15 美元 / M bytes)。"""
-        return estimate_fish_tts_points(request.prompt)
+        def estimate_cost(self, request: GenerationRequest) -> int:
+            if is_free:
+                return 0
+            return estimate_fish_tts_points(request.prompt)
 
-    def point_range(self) -> tuple[int, int]:
-        """积分范围:最小(空文本) ~ 最大(300 字符上限)。"""
-        return (
-            estimate_fish_tts_points(""),
-            estimate_fish_tts_points("你" * 300),
-        )
+        def point_range(self) -> tuple[int, int]:
+            if is_free:
+                return (0, 0)
+            return (
+                estimate_fish_tts_points(""),
+                estimate_fish_tts_points("你" * 300),
+            )
+
+    Def.__name__ = "FishTts_" + engine.replace(".", "_").replace("-", "_")
+    Def.__qualname__ = Def.__name__
+    return Def
 
 
-ALL_MODELS = [IndexTTS2Def, IndexTTS25Def, MimoTtsDef, MinimaxT2aSpeechDef, FishTtsDef]
+_FISH_TTS_BY_NAME: dict[str, type[FishTtsModel]] = {spec.name: _build_fish_tts(spec) for spec in FISH_TTS_MODELS}
+FishTtsDef = _FISH_TTS_BY_NAME["s2.1-pro"]
+FishTtsFreeDef = _FISH_TTS_BY_NAME["s2.1-pro-free"]
+
+ALL_MODELS = [
+    IndexTTS2Def,
+    IndexTTS25Def,
+    MimoTtsDef,
+    MinimaxT2aSpeechDef,
+    *_FISH_TTS_BY_NAME.values(),
+]

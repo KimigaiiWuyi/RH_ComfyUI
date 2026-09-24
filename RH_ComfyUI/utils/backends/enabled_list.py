@@ -16,16 +16,44 @@ def _cfg(key: str) -> Any:
 
 def enabled_names(config_key: str) -> list[str]:
     raw = _cfg(config_key)
-    if not raw:
-        return []
+    names = _parse_names(raw)
+    if config_key != "FishAudio_Enabled_Models":
+        return names
+    if "fish_tts" not in names and "fish_asr" not in names:
+        return names
+    return _expand_fish(names)
+
+
+def _parse_names(raw: object) -> list[str]:
     if isinstance(raw, str):
-        return [raw.strip()] if raw.strip() else []
+        text = raw.strip()
+        return [text] if text else []
+    if not isinstance(raw, list):
+        return []
     out: list[str] = []
     for item in raw:
-        name = str(item or "").strip()
+        if not isinstance(item, str):
+            continue
+        name = item.strip()
         if name:
             out.append(name)
     return out
+
+
+def _legacy_fish_tier() -> str:
+    """只在已存配置里还有 FishAudio_Model 时读取,避免缺键告警。"""
+    from ...rh_config.comfyui_config import SERVICE_CONFIG
+
+    if "FishAudio_Model" not in SERVICE_CONFIG.config:
+        return ""
+    stored = SERVICE_CONFIG.config["FishAudio_Model"].data
+    return stored if isinstance(stored, str) else ""
+
+
+def _expand_fish(names: list[str]) -> list[str]:
+    from ...rh_config.fish_models import expand_legacy_fish_enabled
+
+    return expand_legacy_fish_enabled(names, _legacy_fish_tier())
 
 
 def is_vendor_enabled(config_key: str) -> bool:
