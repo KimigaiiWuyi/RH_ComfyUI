@@ -177,6 +177,9 @@ class GenerationRequest:
     # ── 音频输入(语音克隆参考音色,向后兼容字段) ──
     reference_audio: Optional[bytes] = None
 
+    # Fish 多角色:下标对应正文 <|speaker:N|>。至少两条时 mapper 整组克隆。
+    reference_audios: list[bytes] = field(default_factory=list)
+
     # ── ASR 输入:待转写音频(语义上与参考音频不同,但同样为单条 bytes) ──
     #    与 reference_audio 二选一:若两者都给,ASR 优先用 audio,reference_audio 给 TTS 复用。
     audio_payload: Optional[bytes] = None

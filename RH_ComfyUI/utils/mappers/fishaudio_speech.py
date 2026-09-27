@@ -18,24 +18,47 @@ from ..backends.fishaudio.api import FishAudioAPI
 _PROVIDER = "fishaudio"
 
 
+def fish_reference_id(voice_ids: list[str]) -> str | list[str] | None:
+    """单条用字符串；两条及以上用列表，下标对应正文 <|speaker:N|>。"""
+    if len(voice_ids) >= 2:
+        return voice_ids
+    if len(voice_ids) == 1:
+        return voice_ids[0]
+    return None
+
+
+def _speaker_clips(request: GenerationRequest) -> list[bytes]:
+    """多角色优先 reference_audios；否则退回单条 reference_audio。"""
+    clips = [clip for clip in request.reference_audios if clip]
+    if len(clips) >= 2:
+        return clips
+    if request.reference_audio:
+        return [request.reference_audio]
+    return clips
+
+
 async def fishaudio_tts_mapper(
     request: GenerationRequest,
     api: FishAudioAPI,
     *,
     model: str,
 ) -> GenerationResult:
-    """Fish Audio 合成:参考音频→复用/克隆音色 id,再走指定档位 TTS"""
-    reference_id: str | None = None
-    if request.reference_audio is not None:
-        reference_id = await _get_or_create_voice(api, request.reference_audio, request.user_id or "")
-        if not reference_id:
+    """Fish Audio 合成:每条参考音频复用/克隆音色 id,再走指定档位 TTS。
+
+    两个及以上角色时 reference_id 为列表,正文需已含 <|speaker:N|>。
+    """
+    voice_ids: list[str] = []
+    for clip in _speaker_clips(request):
+        voice_id = await _get_or_create_voice(api, clip, request.user_id or "")
+        if not voice_id:
             raise RuntimeError(
                 "Fish Audio 音色克隆失败,已停止生成以避免回退随机音色;请检查 API Key 与参考音频是否合规。"
             )
+        voice_ids.append(voice_id)
 
     audio = await api.tts(
         text=request.prompt,
-        reference_id=reference_id,
+        reference_id=fish_reference_id(voice_ids),
         model=model,
         speed=request.speed,
     )

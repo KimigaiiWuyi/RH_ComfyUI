@@ -418,6 +418,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
         "audio_refs",
         "ordered_content",
         "reference_audio",
+        "reference_audios",
         "audio_payload",
         "width",
         "height",
@@ -533,6 +534,17 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
     # reference_audio: bytes / dict → bytes
     if "reference_audio" in req_kwargs and isinstance(req_kwargs["reference_audio"], dict):
         req_kwargs["reference_audio"] = await _decode_media_bytes(req_kwargs["reference_audio"])
+
+    # reference_audios: Fish 多角色，每条 dict / bytes → bytes，顺序即 speaker 下标
+    raw_speakers = req_kwargs.get("reference_audios")
+    if isinstance(raw_speakers, list):
+        decoded_speakers: list[bytes] = []
+        for item in raw_speakers:
+            if isinstance(item, dict):
+                decoded_speakers.append(await _decode_media_bytes(item))
+            elif isinstance(item, (bytes, bytearray)):
+                decoded_speakers.append(bytes(item))
+        req_kwargs["reference_audios"] = decoded_speakers
 
     # audio_payload: ASR 输入;bytes / dict → bytes(同 reference_audio)
     if "audio_payload" in req_kwargs and isinstance(req_kwargs["audio_payload"], dict):

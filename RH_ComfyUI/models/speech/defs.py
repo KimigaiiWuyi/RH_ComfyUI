@@ -362,6 +362,8 @@ def _fish_tts_knowledge(spec: FishModelSpec) -> str:
         "如 今天<<EMO: 开心>>天气真好。字面 []/【】 当普通文本。"
         "\n"
         "传入参考音频即自动克隆音色(内容去重、持久复用)。"
+        "多个角色写在同一段正文里:<|speaker:0|> 对应 reference_audios[0],"
+        "再次出现同一编号仍是这个人。"
         "\n"
         f"{bill}"
         "\n"

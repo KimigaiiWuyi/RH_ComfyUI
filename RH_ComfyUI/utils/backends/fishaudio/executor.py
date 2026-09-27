@@ -34,6 +34,7 @@ class FishAudioAdapter(Adapter):
                 "prompt",
                 "mood",
                 "reference_audio",
+                "reference_audios",
                 "speed",
                 # ASR
                 "audio",

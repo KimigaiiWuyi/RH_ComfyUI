@@ -123,13 +123,14 @@ class FishAudioAPI:
     async def tts(
         self,
         text: str,
-        reference_id: Optional[str] = None,
+        reference_id: Optional[Union[str, list[str]]] = None,
         model: Optional[str] = None,
         speed: float = 1.0,
     ) -> Union[bytes, str]:
         """合成语音,返回音频字节;失败返回**人话错误信息**(str),供上层直接透传给用户
 
-        reference_id 为空时用档位内置默认音色;情绪标签已在正文内联(基类处理)。
+        reference_id 为字符串时单音色;为列表时多角色,正文用 <|speaker:N|> 对应该下标。
+        为空时用档位内置默认音色;情绪标签已在正文内联(基类处理)。
         """
         if not self.api_key:
             logger.warning("[FishAudio] 未配置 API Key,将无法请求")
@@ -144,6 +145,7 @@ class FishAudioAPI:
             "mp3_bitrate": 128,
             "normalize": True,
         }
+        speaker_n = len(reference_id) if isinstance(reference_id, list) else (1 if reference_id else 0)
         if reference_id:
             body["reference_id"] = reference_id
         if speed and speed != 1.0:
@@ -151,7 +153,7 @@ class FishAudioAPI:
 
         headers = {**self._auth_header(), "Content-Type": "application/json", "model": engine}
         url = f"{self.base_url}/v1/tts"
-        logger.info(f"[FishAudio] 合成: model={engine}, cloned={bool(reference_id)}, text={text[:50]}...")
+        logger.info(f"[FishAudio] 合成: model={engine}, speakers={speaker_n}, text={text[:50]}...")
 
         try:
             async with RetryingAsyncClient(timeout=_TIMEOUT) as client:
