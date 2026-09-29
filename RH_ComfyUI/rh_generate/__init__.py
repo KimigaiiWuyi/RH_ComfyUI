@@ -401,6 +401,15 @@ async def generate_music(bot: Bot, ev: Event) -> None:
     - IndexTTS2.5 云端模型：前缀 "indextts2.5"（RunningHub AI 应用，支持音色克隆与情绪）
     - MiniMax T2A 云端模型：前缀 "minimax"
     - 小米 MiMo TTS 云端模型：前缀 "mimo"（支持音色复刻、风格控制、方言、唱歌）
+    - Fish Audio 档位：前缀 "s2.1-pro"（成片首选）/ "s2.1-pro-free"（免费试听）/
+      "s2-pro"（上一代）/ "drama-3-preview"（对白预览）。口播、多角色对白优先用 Fish。
+
+    **Fish 多角色对白**：把每个角色的参考音频按出场顺序放进 reference_audios，
+    正文里用 <|speaker:0|> 对应 reference_audios[0]、<|speaker:1|> 对应 reference_audios[1]，
+    同一编号重复出现仍是同一个人。reference_audios 至少两条时整组生效；
+    只有一条时不要写 <|speaker:…>，直接用 reference_audio，正文里也不要留任何标记，
+    否则模型会把标记当正文念出来。
+    Fish 的情绪块 <<EMO: 中文情绪>> 可句中定位叠加；Fish 之外用方括号前缀（见下）。
 
     Args:
         text: 要转换的文字 + 可选模型名 + 可选情绪标签。
@@ -411,12 +420,15 @@ async def generate_music(bot: Bot, ev: Event) -> None:
               格式5: "mimo [用慵懒的语调] 我爱你"（MiMo + 风格指令）
               格式6: "mimo [情绪:东北话] 哎呀妈呀"（MiMo + 方言）
               格式7: "indextts2.5 [开心] 欢迎使用 RH_ComfyUI"（IndexTTS2.5 + 情绪）
+              格式8: "s2.1-pro <<EMO: 开心>>大家好<<"EMO: 低语>>今天有个秘密"（Fish + 句中情绪）
               情绪标签用方括号包裹，放在文本开头（模型名之后）。
               当用户提到"小米"、"MiMo"、"mimo"时，必须使用 "mimo" 前缀。
               当用户提到"minimax"时，使用 "minimax" 前缀。
               当用户提到"indextts2.5"、"IndexTTS2.5"时，使用 "indextts2.5" 前缀。
+              当用户提到配音/口播/角色对白/情绪朗读时，优先使用 "s2.1-pro" 前缀。
         audio_id: 可选，参考音频的资源ID，有则进行语音克隆。
                   若未提供且无用户上传音频，应先调用 get_self_persona_info 获取自身音色。
+                  多角色对白时按出场顺序传多条，映射到正文里的 <|speaker:N|>。
     """,
 )
 async def generate_speech(bot: Bot, ev: Event) -> None:
@@ -439,8 +451,15 @@ async def generate_speech(bot: Bot, ev: Event) -> None:
     )
 
     # 附加参考音频（语音克隆音色）：优先使用 audio_id（AI 调用或用户语音消息），
-    # 其次检查用户上传的音频文件附件
-    if ev.audio_id:
+    # 其次检查用户上传的音频文件附件。
+    # 多条音频按出场顺序进 reference_audios，正文 <|speaker:N|> 取同一下标；
+    # 只有一条时走 reference_audio，正文不该出现 <|speaker:…>。
+    audio_id_list = ev.audio_id_list or ([ev.audio_id] if ev.audio_id else [])
+    if len(audio_id_list) >= 2:
+        from gsuid_core.utils.resource_manager import RM
+
+        request.reference_audios = [await RM.get(aid) for aid in audio_id_list]
+    elif ev.audio_id:
         from gsuid_core.utils.resource_manager import RM
 
         request.reference_audio = await RM.get(ev.audio_id)

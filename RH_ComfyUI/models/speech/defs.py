@@ -362,8 +362,11 @@ def _fish_tts_knowledge(spec: FishModelSpec) -> str:
         "如 今天<<EMO: 开心>>天气真好。字面 []/【】 当普通文本。"
         "\n"
         "传入参考音频即自动克隆音色(内容去重、持久复用)。"
-        "多个角色写在同一段正文里:<|speaker:0|> 对应 reference_audios[0],"
-        "再次出现同一编号仍是这个人。"
+        "单个角色:把音频放进 reference_audio,正文里不要写任何标记。"
+        "多个角色写同一段正文:每条音频放进 reference_audios,"
+        "正文里用 <|speaker:0|> 对应 reference_audios[0]、<|speaker:1|> 对应 reference_audios[1],"
+        "再次出现同一编号仍是这个人;reference_audios 至少两条时整组生效,"
+        "只有一条时与 reference_audio 等价。"
         "\n"
         f"{bill}"
         "\n"
@@ -410,7 +413,20 @@ def _build_fish_tts(spec: FishModelSpec) -> type[FishTtsModel]:
                     "reference_audio": PortSpec(
                         type=PortType.AUDIO,
                         title="参考音频",
-                        description="传入即自动克隆音色并持久复用，无需显式克隆",
+                        description=(
+                            "传入即自动克隆音色并持久复用，无需显式克隆。"
+                            "多角色对白改用 reference_audios（见 knowledge）。"
+                        ),
+                    ),
+                    # 多角色对白专用。只在 inputs 里声明、不在 dispatch 强校验,
+                    # mapper 的 _speaker_clips 取 >=2 条时整组生效,单条等价 reference_audio。
+                    "reference_audios": PortSpec(
+                        type=PortType.AUDIO,
+                        title="多角色参考音频",
+                        description=(
+                            "多角色对白音色,下标对应正文里的 <|speaker:N|>,至少两条时整组生效;"
+                            "单条等价 reference_audio。同一编号重复出现仍是同一个人。"
+                        ),
                     ),
                     "mood": PortSpec(
                         type=PortType.STRING,
