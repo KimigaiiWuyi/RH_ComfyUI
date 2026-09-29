@@ -625,13 +625,20 @@ class NodeOutput:
 
     @classmethod
     def from_result(cls, result: Any) -> "NodeOutput":
-        """从旧 GenerationResult 构造"""
+        """从旧 GenerationResult 构造
+
+        附加产物(``result.outputs``,如 ASR 的 segments / 视频尾帧)必须原样带过来。
+        只留 ``{"main": ...}`` 会让 mapper 产出的时间戳在 executor 落盘前就被丢掉,
+        下游只能退回按音量窗口猜时间轴。
+        """
+        extras = result.outputs if isinstance(result.outputs, dict) else {}
         return cls(
             status="ok",
             output_type=result.output_type.value if hasattr(result.output_type, "value") else str(result.output_type),
             data=result.data,
             mime_type=result.mime_type,
-            outputs={"main": result.data},
+            # "main" 固定指向主产物,同名附加产物不覆盖它
+            outputs={**extras, "main": result.data},
             usage={"points": result.cost_points},
             metadata=result.metadata,
         )
