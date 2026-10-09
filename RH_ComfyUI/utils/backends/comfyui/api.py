@@ -54,6 +54,113 @@ _RUNNINGHUB_QUEUE_FULL_MARKERS = frozenset(
 )
 
 
+# RunningHub /task/openapi/outputs:804 运行中,813 排队中。
+_RH_OUTPUT_NOT_READY = frozenset({804, 813})
+_RH_OUTPUT_URL_KEYS = ("fileUrl", "url", "file_url", "outputUrl")
+_RH_OUTPUT_NEST_KEYS = ("data", "outputs", "results", "files")
+_AUDIO_FILE_SUFFIXES = (".mp3", ".wav", ".flac", ".ogg", ".opus", ".m4a")
+
+
+def _view_subfolder(subfolder: object) -> str:
+    """ComfyUI /view 的 subfolder。空串与 '.' 都表示 output 根目录。"""
+    if subfolder is None:
+        return ""
+    if isinstance(subfolder, Path):
+        text = subfolder.as_posix()
+    elif isinstance(subfolder, str):
+        text = subfolder.replace("\\", "/")
+    else:
+        return ""
+    text = text.strip().strip("/")
+    if text in ("", "."):
+        return ""
+    return text
+
+
+def _as_str_key_dict(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    out: dict[str, object] = {}
+    for key, item in value.items():
+        if isinstance(key, str):
+            out[key] = item
+    return out
+
+
+def _json_int(payload: dict[str, object], key: str) -> int | None:
+    if key not in payload:
+        return None
+    raw = payload[key]
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if stripped.lstrip("-").isdigit():
+            return int(stripped)
+    return None
+
+
+def _collect_http_urls(node: object, into: list[str]) -> None:
+    if isinstance(node, str):
+        if node.startswith(("http://", "https://")):
+            into.append(node)
+        return
+    if isinstance(node, list):
+        for item in node:
+            _collect_http_urls(item, into)
+        return
+    mapping = _as_str_key_dict(node)
+    if mapping is None:
+        return
+    for key in _RH_OUTPUT_URL_KEYS:
+        if key in mapping:
+            _collect_http_urls(mapping[key], into)
+    for key in _RH_OUTPUT_NEST_KEYS:
+        if key in mapping:
+            _collect_http_urls(mapping[key], into)
+
+
+def _parse_runninghub_output_payload(payload: object) -> tuple[int | None, list[str]]:
+    """从 /task/openapi/outputs 里抽出业务码和文件 URL。"""
+    mapping = _as_str_key_dict(payload)
+    if mapping is None:
+        return None, []
+    code = _json_int(mapping, "code")
+    urls: list[str] = []
+    if "data" in mapping:
+        _collect_http_urls(mapping["data"], urls)
+    else:
+        _collect_http_urls(mapping, urls)
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in urls:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+    return code, unique
+
+
+def _pick_output_url(urls: list[str], filename: str) -> str | None:
+    if not urls:
+        return None
+    needle = filename.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if needle:
+        for url in urls:
+            path = url.split("?", 1)[0].rstrip("/").lower()
+            if path.endswith("/" + needle):
+                return url
+    for url in urls:
+        path = url.split("?", 1)[0].lower()
+        if path.endswith(_AUDIO_FILE_SUFFIXES):
+            return url
+    if len(urls) == 1:
+        return urls[0]
+    return None
+
+
 def _runninghub_queue_full_reason(data: Dict[str, Any]) -> Optional[str]:
     """识别 RunningHub 并发/队列已满响应,供提交重试路径使用。"""
     raw_code = data.get("code")
@@ -453,6 +560,7 @@ class ComfyUIAPI:
                                 video["filename"],
                                 video["subfolder"],
                                 video["type"],
+                                prompt_id=prompt_id,
                             )
                             output_audios.append({"filename": video["filename"], "data": video_data})
         return output_audios
@@ -490,45 +598,113 @@ class ComfyUIAPI:
                                 audio["filename"],
                                 audio["subfolder"],
                                 audio["type"],
+                                prompt_id=prompt_id,
                             )
                             output_audios.append({"filename": audio["filename"], "data": audio_data})
         return output_audios
 
-    async def get_file(self, filename: str, subfolder, folder_type: str) -> bytes:
-        if isinstance(subfolder, str):
-            subfolder = Path(subfolder)
+    async def get_file(
+        self,
+        filename: str,
+        subfolder: str | Path | None,
+        folder_type: str,
+        *,
+        prompt_id: str | None = None,
+    ) -> bytes:
+        # RH /view 把 subfolder 拼进 COS key;audio/ 子目录经常 NoSuchKey。
+        # 空 subfolder 与 /task/openapi/outputs 才是同一 prompt_id 的可用地址。
+        local_sub = subfolder if isinstance(subfolder, str) else _view_subfolder(subfolder)
+        local_path = Path(local_sub) / filename if local_sub else Path(filename)
+        if local_path.is_file():
+            return await asyncio.to_thread(local_path.read_bytes)
 
-        file_path = subfolder / filename
-        if file_path.exists():
-            with open(file_path, "rb") as f:
-                return f.read()
+        subfolder_str = _view_subfolder(subfolder)
+        candidates = [subfolder_str]
+        if self.is_runninghub and subfolder_str:
+            candidates.append("")
 
-        url = f"{self.url}/view"
-        subfolder_str = str(subfolder).replace("\\", "/")
+        last_error: httpx.HTTPStatusError | None = None
+        for index, sub in enumerate(candidates):
+            attempts = 3 if index == len(candidates) - 1 else 1
+            for attempt in range(attempts):
+                try:
+                    return await self._fetch_view_once(filename, sub, folder_type)
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code != 404:
+                        raise
+                    last_error = exc
+                    if attempt + 1 < attempts:
+                        logger.info(
+                            f"[ComfyUI] 获取文件 404 filename={filename} "
+                            f"subfolder={sub!r},重试 ({attempt + 1}/{attempts})"
+                        )
+                        await asyncio.sleep(1)
+                        continue
+                    logger.info(f"[ComfyUI] 获取文件 404 filename={filename} subfolder={sub!r}: {exc}")
+                    break
+
+        if self.is_runninghub and prompt_id:
+            try:
+                hosted = await self._download_runninghub_task_output(prompt_id, filename)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 404:
+                    raise
+                last_error = exc
+            else:
+                if hosted is not None:
+                    return hosted
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError(f"获取文件失败: {filename}")
+
+    async def _fetch_view_once(self, filename: str, subfolder: str, folder_type: str) -> bytes:
         params = {
             "filename": filename,
-            "subfolder": subfolder_str,
+            "subfolder": subfolder,
             "type": folder_type,
         }
+        async with RetryingAsyncClient(timeout=6000, follow_redirects=True) as client:
+            response = await client.get(f"{self.url}/view", params=params, timeout=60.0)
+            response.raise_for_status()
+            return response.content
 
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                async with RetryingAsyncClient(timeout=6000, follow_redirects=True) as client:
-                    response = await client.get(url, params=params, timeout=10.0)
-                    response.raise_for_status()
-                    return response.content
-            except httpx.HTTPStatusError as e:
-                if attempt == max_retries - 1:
-                    logger.info(f"获取文件失败，URL: {url}, 参数: {params}, 错误: {e}")
-                    raise
-                logger.info(f"获取文件失败，正在重试 ({attempt + 1}/{max_retries}): {e}")
-                await asyncio.sleep(1)
-            except Exception as e:
-                logger.info(f"获取文件时发生未知错误: {e}")
-                raise
-
-        raise RuntimeError(f"获取文件失败: {filename}")
+    async def _download_runninghub_task_output(self, task_id: str, filename: str) -> bytes | None:
+        """ComfyUI 代理的 prompt_id 就是 /task/openapi/outputs 的 taskId。"""
+        api_key = self.api_key
+        if not api_key:
+            return None
+        url = "https://www.runninghub.cn/task/openapi/outputs"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Host": "www.runninghub.cn",
+        }
+        payload = {"apiKey": api_key, "taskId": task_id}
+        chosen: str | None = None
+        for attempt in range(3):
+            async with RetryingAsyncClient(timeout=30.0, follow_redirects=True) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                body: object = resp.json()
+            code, urls = _parse_runninghub_output_payload(body)
+            if code in _RH_OUTPUT_NOT_READY or (code == 0 and not urls):
+                if attempt < 2:
+                    await asyncio.sleep(2)
+                    continue
+                return None
+            if code not in (0, None):
+                logger.info(f"[ComfyUI] RunningHub outputs 无文件 code={code} taskId={task_id}")
+                return None
+            chosen = _pick_output_url(urls, filename)
+            break
+        if chosen is None:
+            return None
+        logger.info(f"[ComfyUI] 改从 RunningHub outputs 下载 taskId={task_id}")
+        async with RetryingAsyncClient(timeout=120.0, follow_redirects=True) as client:
+            file_resp = await client.get(chosen, timeout=120.0)
+            file_resp.raise_for_status()
+            return file_resp.content
 
     async def get_texts(self, prompt_id: str) -> list[str]:
         output_texts: list[str] = []
