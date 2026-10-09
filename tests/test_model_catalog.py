@@ -5,7 +5,7 @@
 """
 
 import asyncio
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 from RH_ComfyUI.core import (
     ModelCard,
@@ -18,6 +18,7 @@ from RH_ComfyUI.core import (
 from RH_ComfyUI.rh_models.api import _build_entry, build_model_catalog
 from RH_ComfyUI.core.schema.types import PortSpec, PortType
 from RH_ComfyUI.models.video.defs import Seedance2Def
+from RH_ComfyUI.utils.core.pipeline import NodeDef
 from RH_ComfyUI.core.routing.registry import model_registry
 
 
@@ -124,3 +125,36 @@ def test_pure_abc_model_visible_in_catalog():
         assert entry["task_type"] == "image"
     finally:
         model_registry.unregister(model.name)
+
+
+def test_image_catalog_order_gpt_then_banana_then_seed():
+    """图片清单顺位:GPT > Nano Banana > Seedream > Qwen-Image 2512。"""
+    from RH_ComfyUI.models.image.defs import (
+        Banana1Def,
+        Banana2Def,
+        Banana21Def,
+        Qwen2512Def,
+        BananaProDef,
+        GptImage2Def,
+        Seedream5Def,
+        Seedream5ProDef,
+        GptImage25FlareDef,
+        GptImage25SunburstDef,
+    )
+
+    class _CatalogModel(Protocol):
+        @staticmethod
+        def node_def() -> NodeDef: ...
+
+    def _priority(cls: type[_CatalogModel]) -> int:
+        return cls.node_def().capabilities.priority
+
+    gpt = [_priority(GptImage2Def), _priority(GptImage25SunburstDef), _priority(GptImage25FlareDef)]
+    banana = [_priority(Banana21Def), _priority(Banana2Def), _priority(BananaProDef), _priority(Banana1Def)]
+    seed = [_priority(Seedream5ProDef), _priority(Seedream5Def)]
+    assert min(gpt) > max(banana)
+    assert min(banana) > max(seed)
+    assert min(seed) > _priority(Qwen2512Def)
+    assert gpt == sorted(gpt)
+    assert banana == sorted(banana, reverse=True)
+    assert seed == sorted(seed, reverse=True)

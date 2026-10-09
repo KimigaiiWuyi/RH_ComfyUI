@@ -933,7 +933,7 @@ class Banana2Def(ImagePipelineModel):
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
                 mode="sync",
-                priority=70,
+                priority=73,
             ),
         )
 
@@ -1054,7 +1054,7 @@ class Banana21Def(ImagePipelineModel):
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
                 mode="sync",
-                priority=72,
+                priority=74,
             ),
         )
 
@@ -1157,7 +1157,7 @@ class Banana1Def(ImagePipelineModel):
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
                 mode="sync",
-                priority=55,
+                priority=71,
             ),
         )
 
@@ -1279,7 +1279,7 @@ class BananaProDef(ImagePipelineModel):
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
                 mode="sync",
-                priority=60,
+                priority=72,
             ),
         )
 
@@ -1383,7 +1383,7 @@ class GptImage2Def(GptImageFamilyModel):
                 "2.0 更慢、画质与编辑一致性弱于 2.5;未点名 2.5 时才用本模型。"
                 "\n"
             ),
-            priority=65,
+            priority=76,
         )
 
 
@@ -1411,7 +1411,7 @@ class GptImage25SunburstDef(GptImageFamilyModel):
                 "协议与 gpt-image-2 相同,禁止当成 gpt-image-2 的通道或 quality 档。"
                 "\n"
             ),
-            priority=67,
+            priority=77,
             qualities=GPT_IMAGE25_QUALITIES,
         )
 
@@ -1440,7 +1440,7 @@ class GptImage25FlareDef(GptImageFamilyModel):
                 "协议与 gpt-image-2 相同,禁止当成 gpt-image-2 的通道或 quality 档。"
                 "\n"
             ),
-            priority=68,
+            priority=78,
             qualities=GPT_IMAGE25_QUALITIES,
         )
 
@@ -1619,7 +1619,7 @@ class Qwen2512Def(ImagePipelineModel):
                 supported_tasks=["image"],
                 mode="sync",
                 max_concurrency=1,  # 本地 ComfyUI 共用一块 GPU,工作流必须串行
-                priority=80,
+                priority=64,
             ),
         )
 
@@ -1731,7 +1731,7 @@ class Seedream5Def(ImagePipelineModel):
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
                 mode="sync",
-                priority=65,
+                priority=66,
             ),
         )
 
@@ -1845,7 +1845,7 @@ class Seedream5ProDef(Seedream5ProImageModel):
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
                 mode="sync",
-                priority=70,
+                priority=68,
             ),
         )
 

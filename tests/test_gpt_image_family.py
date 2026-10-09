@@ -31,9 +31,9 @@ from RH_ComfyUI.utils.mappers.gpt_image2_params import (
 _FamilyCls = type[GptImage2Def] | type[GptImage25SunburstDef] | type[GptImage25FlareDef]
 _FAMILY: tuple[_FamilyCls, ...] = (GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef)
 _EXPECTED = (
-    ("gpt-image-2", GptImage2Def, 65),
-    ("gpt-image-2.5-sunburst", GptImage25SunburstDef, 67),
-    ("gpt-image-2.5-flare", GptImage25FlareDef, 68),
+    ("gpt-image-2", GptImage2Def, 76),
+    ("gpt-image-2.5-sunburst", GptImage25SunburstDef, 77),
+    ("gpt-image-2.5-flare", GptImage25FlareDef, 78),
 )
 
 
