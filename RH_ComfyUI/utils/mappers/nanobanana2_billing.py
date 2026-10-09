@@ -8,7 +8,7 @@
   - 2K (2048px)   : 1680 tokens → $0.101 → 11 积分
   - 4K (4096px)   : 2520 tokens → $0.151 → 16 积分
 
-point_cost 仅作 image_size 参数缺失时的兜底(按 2K 档估算)。
+与 Nano Banana 2.1 不是同一条曲线。point_cost 仅作 image_size 缺失时的兜底(按 2K 档)。
 """
 
 from __future__ import annotations

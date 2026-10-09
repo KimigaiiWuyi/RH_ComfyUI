@@ -1,7 +1,7 @@
-"""GeminiImageChannel — 把 Gemini Interactions API 接成一个通用 ProviderChannel
+"""GeminiImageChannel — 把 Gemini generate_content 接成一个通用 ProviderChannel
 
-挂在 banana1 / banana2 / banana_pro 上:对外仍是统一模型名,vendor model id
-(如 gemini-3.1-flash-image-preview / gemini-3-pro-image-preview)只在内部请求里出现。
+挂在 banana1 / banana2 / banana2.1 / banana_pro 上:对外仍是目录名,vendor model id
+(如 gemini-3.1-flash-image-preview / gemini-nano-banana-2.1)只在内部请求里出现。
 没填 key → 不可用自动让路;出错抛可重试 ChannelError 切下一通道。
 429/503 标 transient,由 run() 做最长 1 小时的原通道排队退避。
 """

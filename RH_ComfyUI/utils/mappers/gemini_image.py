@@ -17,6 +17,7 @@ class GeminiImageClient(Protocol):
         images: list[bytes] | None = ...,
         aspect_ratio: str = ...,
         image_size: str | None = ...,
+        thinking_level: str | None = ...,
     ) -> bytes: ...
 
 
@@ -40,10 +41,29 @@ GEMINI_ASPECT_RATIOS: tuple[str, ...] = (
 )
 
 
+# Nano Banana 2.1 官方思考档。其他生图模型不发 thinking_config。
+_NANO_BANANA_21_THINKING: tuple[str, ...] = ("minimal", "medium", "high")
+
+
 def _default_image_size(model: str) -> Optional[str]:
-    """尺寸档默认值:一代(gemini-2.5-flash-image)不支持 image_config.image_size,
-    必须整个字段不发;3.x 系(banana2 flash / banana_pro)保持既有默认 2K。"""
-    return None if "2.5" in model else "2K"
+    """尺寸档默认值。一代不支持 image_size,整个字段不发。
+    2.1 官方默认 1K;其余 3.x(banana_pro 等)保持 2K。"""
+    if "2.5" in model:
+        return None
+    if "nano-banana-2.1" in model:
+        return "1K"
+    return "2K"
+
+
+def _thinking_level(model: str, request: GenerationRequest) -> Optional[str]:
+    """2.1 才发思考档;缺省或非法值用官方默认 medium。"""
+    if "nano-banana-2.1" not in model:
+        return None
+    raw = request.params.get("thinking_level")
+    text = str(raw).strip().lower() if raw else "medium"
+    if text not in _NANO_BANANA_21_THINKING:
+        return "medium"
+    return text
 
 
 def _ratio_value(label: str) -> float | None:
@@ -102,6 +122,7 @@ async def gemini_flash_image_mapper(
         logger.info(f"[Gemini-Image] aspect_ratio {raw_ratio} 不在上游白名单,改发 {ratio}")
     raw_size = request.params.get("image_size")
     image_size = str(raw_size) if raw_size else _default_image_size(model)
+    thinking_level = _thinking_level(model, request)
 
     data = await api.generate(
         model=model,
@@ -109,6 +130,7 @@ async def gemini_flash_image_mapper(
         images=request.images or None,
         aspect_ratio=ratio,
         image_size=image_size,
+        thinking_level=thinking_level,
     )
     return NodeOutput(
         status="ok",

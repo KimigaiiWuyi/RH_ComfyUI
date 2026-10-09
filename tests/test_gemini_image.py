@@ -142,6 +142,7 @@ def test_mapper_snaps_8_5_before_generate(monkeypatch):
             images: list[bytes] | None = None,
             aspect_ratio: str = "1:1",
             image_size: str | None = "2K",
+            thinking_level: str | None = None,
             background: bool = True,
             poll_interval: float = 1.5,
             max_wait: float = 600.0,
@@ -160,9 +161,10 @@ def test_canonical_image_model_strips_agent_suffix():
 
 
 def test_banana2_served_by_gemini_only():
-    # Nano Banana 2 走原生 Gemini,不再经过 gpt-image-2 后端。
+    # Nano Banana 2 仍是 Gemini 3.1 Flash,不换成 2.1。
     channel_registry.clear()
     banana2 = Banana2Def()
+    assert banana2.name == "banana2"
     assert banana2.display_name == "Nano Banana 2"
     names = [b.channel.name for b in banana2.channel_bindings()]
     assert names == ["gemini"]
@@ -170,10 +172,36 @@ def test_banana2_served_by_gemini_only():
     assert banana2.channel_bindings()[0].vendor_model == "gemini-3.1-flash-image-preview"
     assert banana2.node.backend == "gemini-image"
     assert banana2.execution_mode == "sync"
-    # 面向前端的 schema:ratio + image_size(Gemini 实际参数),不再是宽高
     schema = banana2.input_schema()
     assert "ratio" in schema and "image_size" in schema
+    assert "thinking_level" not in schema
     assert "width" not in schema and "height" not in schema
+    assert schema["image_size"].values == ["512", "1K", "2K", "4K"]
+    assert schema["image_size"].default == "2K"
+    assert schema["ratio"].values == ["1:1", "16:9", "8:5", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"]
+
+
+def test_banana21_served_by_gemini_only():
+    # Nano Banana 2.1 单独成模型,与 banana2 并存。
+    from RH_ComfyUI.models.image.defs import Banana21Def
+
+    channel_registry.clear()
+    model = Banana21Def()
+    assert model.name == "banana2.1"
+    assert model.display_name == "Nano Banana 2.1"
+    names = [b.channel.name for b in model.channel_bindings()]
+    assert names == ["gemini"]
+    assert model.channel_bindings()[0].vendor_model == "gemini-nano-banana-2.1"
+    assert model.node.backend == "gemini-image"
+    schema = model.input_schema()
+    assert "thinking_level" in schema
+    assert schema["image_size"].values == ["1K", "2K", "4K"]
+    assert schema["image_size"].default == "1K"
+    assert schema["thinking_level"].values == ["minimal", "medium", "high"]
+    assert schema["thinking_level"].default == "medium"
+    for ratio in ("1:4", "4:1", "1:8", "8:1", "4:5", "5:4", "8:5"):
+        assert ratio in (schema["ratio"].values or [])
+    assert "1:4" not in (Banana2Def().input_schema()["ratio"].values or [])
 
 
 def test_banana1_served_by_gemini_first_gen():
@@ -235,6 +263,7 @@ def test_mapper_omits_image_size_for_first_gen(monkeypatch):
             images: Optional[list[bytes]] = None,
             aspect_ratio: str = "1:1",
             image_size: Optional[str] = "2K",
+            thinking_level: Optional[str] = None,
         ) -> bytes:
             captured.append(image_size)
             return b"IMG"
@@ -245,16 +274,124 @@ def test_mapper_omits_image_size_for_first_gen(monkeypatch):
     assert captured[0] is None
 
     req2 = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
-    req2.params["model"] = "gemini-3.1-flash-image-preview"
+    req2.params["model"] = "gemini-3-pro-image-preview"
     asyncio.run(gmapper.gemini_flash_image_mapper(req2, _FakeApi()))
     assert captured[1] == "2K"
 
-    # 显式传 image_size 时(如 banana2 的端口)原样透传
+    # 2.1 官方默认 1K;显式档位原样透传
     req3 = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
-    req3.params["model"] = "gemini-3.1-flash-image-preview"
-    req3.params["image_size"] = "4K"
+    req3.params["model"] = "gemini-nano-banana-2.1"
     asyncio.run(gmapper.gemini_flash_image_mapper(req3, _FakeApi()))
-    assert captured[2] == "4K"
+    assert captured[2] == "1K"
+
+    req4 = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    req4.params["model"] = "gemini-nano-banana-2.1"
+    req4.params["image_size"] = "4K"
+    asyncio.run(gmapper.gemini_flash_image_mapper(req4, _FakeApi()))
+    assert captured[3] == "4K"
+
+    # banana2 的 flash preview 保持默认 2K
+    req5 = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    req5.params["model"] = "gemini-3.1-flash-image-preview"
+    asyncio.run(gmapper.gemini_flash_image_mapper(req5, _FakeApi()))
+    assert captured[4] == "2K"
+
+
+def test_mapper_sends_thinking_only_for_nano_banana_21():
+    from typing import Optional
+
+    import RH_ComfyUI.utils.mappers.gemini_image as gmapper
+    from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
+    from RH_ComfyUI.utils.backends.gemini_image.api import GeminiImageAPI
+
+    captured: list[Optional[str]] = []
+
+    class _FakeApi(GeminiImageAPI):
+        async def generate(
+            self,
+            *,
+            model: str,
+            prompt: str,
+            images: Optional[list[bytes]] = None,
+            aspect_ratio: str = "1:1",
+            image_size: Optional[str] = "2K",
+            thinking_level: Optional[str] = None,
+        ) -> bytes:
+            captured.append(thinking_level)
+            return b"IMG"
+
+    old = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    old.params["model"] = "gemini-3-pro-image-preview"
+    old.params["thinking_level"] = "high"
+    asyncio.run(gmapper.gemini_flash_image_mapper(old, _FakeApi()))
+    assert captured[0] is None
+
+    flash = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    flash.params["model"] = "gemini-3.1-flash-image-preview"
+    flash.params["thinking_level"] = "high"
+    asyncio.run(gmapper.gemini_flash_image_mapper(flash, _FakeApi()))
+    assert captured[1] is None
+
+    new = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", ratio="1:8")
+    new.params["model"] = "gemini-nano-banana-2.1"
+    new.params["thinking_level"] = "high"
+    asyncio.run(gmapper.gemini_flash_image_mapper(new, _FakeApi()))
+    assert captured[2] == "high"
+
+    default = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    default.params["model"] = "gemini-nano-banana-2.1"
+    asyncio.run(gmapper.gemini_flash_image_mapper(default, _FakeApi()))
+    assert captured[3] == "medium"
+
+
+def test_nano_banana_21_generate_content_config(monkeypatch):
+    """2.1 仍走 generate_content:image_config 带新比例,thinking_config 带思考档。"""
+    from google.genai import types
+
+    seen: dict[str, object] = {}
+
+    class _Part:
+        def __init__(self) -> None:
+            self.inline_data = type("D", (), {"data": b"\x89PNG", "uri": None})()
+            self.file_data = None
+            self.text = None
+
+    class _AioModels:
+        async def generate_content(self, **kwargs):
+            seen.update(kwargs)
+            return type(
+                "R",
+                (),
+                {"candidates": [type("C", (), {"content": type("K", (), {"parts": [_Part()]})()})()]},
+            )()
+
+    class _Aio:
+        models = _AioModels()
+
+    class _Client:
+        aio = _Aio()
+
+    monkeypatch.setattr(gapi.GeminiImageAPI, "_build_client", lambda self: _Client())
+    api = gapi.GeminiImageAPI()
+    data = asyncio.run(
+        api.generate(
+            model="gemini-nano-banana-2.1",
+            prompt="cat",
+            aspect_ratio="1:8",
+            image_size="4K",
+            thinking_level="high",
+        )
+    )
+    assert data == b"\x89PNG"
+    assert seen["model"] == "gemini-nano-banana-2.1"
+    config = seen["config"]
+    assert isinstance(config, types.GenerateContentConfig)
+    assert config.response_modalities == ["IMAGE"]
+    assert config.image_config is not None
+    assert config.image_config.aspect_ratio == "1:8"
+    assert config.image_config.image_size == "4K"
+    assert config.thinking_config is not None
+    assert str(config.thinking_config.thinking_level).upper().endswith("HIGH")
 
 
 def test_vertex_invoke_passes_guard_without_api_key(monkeypatch):

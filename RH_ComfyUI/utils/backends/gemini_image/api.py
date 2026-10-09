@@ -130,6 +130,7 @@ class GeminiImageAPI:
         images: Optional[list[bytes]] = None,
         aspect_ratio: str = "1:1",
         image_size: Optional[str] = "2K",
+        thinking_level: Optional[str] = None,
         background: bool = True,
         poll_interval: float = 1.5,
         max_wait: float = 600.0,
@@ -137,7 +138,7 @@ class GeminiImageAPI:
         """生成一张图并返回原始字节;失败抛 RuntimeError(带上游文案)。
 
         image_size=None 时整个字段不发(一代 gemini-2.5-flash-image 不支持
-        image_config.image_size,发了会被上游拒)。
+        image_config.image_size,发了会被上游拒)。thinking_level 只在 2.1 传入。
 
         ``background`` / ``poll_*`` 仅兼容旧调用方,生图已改为单次
         ``generate_content``,不再创建 interaction。
@@ -162,7 +163,8 @@ class GeminiImageAPI:
         endpoint = self.base_url if (self.base_url and not self.is_vertex) else "官方"
         logger.info(
             f"[Gemini-Image] generate_content model={model} vertex={self.is_vertex} endpoint={endpoint} "
-            f"ratio={aspect_ratio} size={image_size or '-'} 参考图={len(images or [])} 张"
+            f"ratio={aspect_ratio} size={image_size or '-'} thinking={thinking_level or '-'} "
+            f"参考图={len(images or [])} 张"
         )
         logger.debug(f"[Gemini-Image] 请求 prompt={prompt[:120]!r} 参考图=[{img_sizes}] modalities=['IMAGE']")
 
@@ -172,10 +174,15 @@ class GeminiImageAPI:
         image_config_kw: dict[str, Any] = {"aspect_ratio": aspect_ratio}
         if image_size:
             image_config_kw["image_size"] = image_size
-        config = types.GenerateContentConfig(
-            response_modalities=["IMAGE"],
-            image_config=types.ImageConfig(**image_config_kw),
-        )
+        # 已安装的 google-genai 把尺寸写在 image_config。response_format
+        # 不在 GenerateContentConfig 上,AI Studio 路径也不会把它发出去。
+        config_kw: dict[str, Any] = {
+            "response_modalities": ["IMAGE"],
+            "image_config": types.ImageConfig(**image_config_kw),
+        }
+        if thinking_level:
+            config_kw["thinking_config"] = types.ThinkingConfig(thinking_level=thinking_level)
+        config = types.GenerateContentConfig(**config_kw)
 
         from ....core.telemetry.wire_capture import set_wire_audit
 
@@ -186,6 +193,7 @@ class GeminiImageAPI:
                 "prompt": prompt,
                 "aspect_ratio": aspect_ratio,
                 "image_size": image_size,
+                "thinking_level": thinking_level,
                 "num_images": len(images or []),
                 "response_modalities": ["IMAGE"],
                 "api": "generate_content",
@@ -213,9 +221,7 @@ class GeminiImageAPI:
         if not interaction_id:
             return
         client = self._build_client()
-        logger.info(
-            f"[Gemini-Image] 上游 cancel interactions.cancel id={interaction_id}"
-        )
+        logger.info(f"[Gemini-Image] 上游 cancel interactions.cancel id={interaction_id}")
         await client.aio.interactions.cancel(interaction_id)
         logger.info(f"[Gemini-Image] 上游 cancel 完成 interaction_id={interaction_id}")
 
@@ -225,9 +231,7 @@ class GeminiImageAPI:
             raise RuntimeError("缺少 interaction_id")
         client = self._build_client()
         interaction = await client.aio.interactions.get(interaction_id)
-        interaction = await self._poll_until_done(
-            client, interaction, interval=1.5, max_wait=3600.0
-        )
+        interaction = await self._poll_until_done(client, interaction, interval=1.5, max_wait=3600.0)
         status = str(getattr(interaction, "status", None) or "").lower()
         if status in {"failed", "cancelled", "canceled"}:
             raise RuntimeError(f"Gemini interaction 失败: status={status}")
@@ -263,8 +267,7 @@ class GeminiImageAPI:
 
             if remote_cancel_already_attempted():
                 logger.debug(
-                    f"[Gemini-Image] 跳过 CancelledError 兜底 cancel"
-                    f"(cancel_generation 已尝试上游): {interaction_id}"
+                    f"[Gemini-Image] 跳过 CancelledError 兜底 cancel(cancel_generation 已尝试上游): {interaction_id}"
                 )
                 return
         except Exception:  # noqa: BLE001

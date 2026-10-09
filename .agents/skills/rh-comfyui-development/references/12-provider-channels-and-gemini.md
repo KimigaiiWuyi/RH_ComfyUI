@@ -54,12 +54,21 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
   全局一条,改完即生效)。
 - **Dry-Run** 只有 `PLUGIN_CONFIG.Dry_Run` 一把开关,开启后 `run()` 拦截全部模型。
 
-## 3. Gemini 生图(banana2 = 原生 Nano Banana 2)
+## 3. Gemini 生图(banana2 与 banana2.1 并存,价格不同)
 
 - **走官方 `google-genai` SDK 的 `client.aio.models.generate_content`**,不要手拼
-  REST/URL/鉴权,也**不要**走 `interactions.create`。Interactions 会把
-  `gemini-3.1-flash-image-preview` 改写成 `…-preview-agent`,该变体
-  报 `Image input modality is not enabled`(参考图 400)。正式 ID 没有 `-agent`。
+  REST/URL/鉴权,也**不要**走 `interactions.create`。Interactions 会把带
+  `-preview` 的生图 ID 改写成 `…-agent`,该变体报
+  `Image input modality is not enabled`(参考图 400)。正式 ID 没有 `-agent`。
+- **不要把 banana2 改成 2.1**。两条目录、两套 schema、两条计费曲线:
+  - `banana2`:vendor `gemini-3.1-flash-image-preview`。尺寸 512/1K/2K/4K,
+    默认 2K。比例是原来那 9 档,没有思考档。价格 60 美元/1M → 5/7/11/16 积分。
+  - `banana2.1`:vendor `gemini-nano-banana-2.1`。尺寸 1K/2K/4K,默认 1K。
+    思考档 `thinking_config.thinking_level`(`minimal` / `medium` 默认 / `high`),
+    **不改变积分**。比例用官方全景表,产品面另留 8:5(mapper 折成 3:2)。
+    价格 30 美元/1M → 4/6/12 积分。4K token 用价格页 **3780**,不是 2 代的 2520。
+- 已安装 SDK 的 `GenerateContentConfig` 没有 `response_format`,不要改去发那个字段。
+  思考档只在 vendor id 含 `nano-banana-2.1` 时发送。
 - **双模互斥(SDK 硬约束)**:`Client(vertexai=True, project=…, api_key=…)` 会抛
   "Project/location and API key are mutually exclusive"。故用**显式开关**
   `Gemini_Image_Use_Vertex`:
@@ -82,20 +91,19 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
   uri**)。`usage.output_tokens_by_modality` 里有 image 即已出图。`steps` 是 SDK
   未声明的 extra 字段,取值要 `getattr` + `model_extra` 兜底,内层是原始 dict。
   提取器见 `gemini_image/api.py::_find_image`(先 outputs 再 steps,兼容 data/uri)。
-- **`Gemini_Enabled_Models`**:与 MiniMax 同构的 GsListStrConfig,默认空。banana1 / banana2 /
-  banana_pro 的 Gemini 通道仅在列表勾选后才 `check_available`。banana_pro 的
+- **`Gemini_Enabled_Models`**:与 MiniMax 同构的 GsListStrConfig。banana1 / banana2 /
+  banana2.1 / banana_pro 的 Gemini 通道仅在列表勾选后才 `check_available`。
+  已保存的旧列表不会自动勾上 `banana2.1`。banana_pro 的
   gpt-image-2 / 外部通道不受此列表影响。
 - **`MiniMax_Enabled_Models` / `DashScope_Enabled_Models` 同理**:只关官方通道,
   不挡 host 模型。`minimax_h3` / `happyhorse1.1` / `wan3.0` 只要有任一外部插件
   通道可用,`/models` 就应 `available=true`。
-- **banana2 独立于 gpt-image-2**:`banana2.backend="gemini-image"`,
-  `Banana2Def.channel_bindings()` 只挂 `GeminiImageChannel`;请求 Nano Banana 2
-  **不经过** gpt-image-2(OpenAI 兼容)后端。日志里 `[GPT-Image2]` 是**后端名**
-  不是模型名 —— 别被误导以为路由错了。
-- **schema 用 ratio + image_size,不用宽高**:Gemini 只吃 `aspect_ratio`(枚举)+
-  `image_size`(512/1K/2K/4K),不吃像素宽高。banana2 的 input 端口是 `ratio` /
-  `image_size`(`image_size` 走 `request.params`,见 [§6.6](./06-entry-points.md))。
-  `generate_content` 的 aspect_ratio **没有 8:5**;mapper 把 8:5 就近折成 3:2。
+- **banana2 / banana2.1 都独立于 gpt-image-2**:`backend="gemini-image"`,
+  `channel_bindings()` 只挂 `GeminiImageChannel`;请求 **不经过** gpt-image-2
+  (OpenAI 兼容)后端。日志里 `[GPT-Image2]` 是**后端名**不是模型名。
+- **schema 不用宽高**。catalog 档位进 `params`(见 [§6.6](./06-entry-points.md))。
+  banana2 只有 `ratio` + `image_size`。`thinking_level` 只在 banana2.1。
+  2.1 宽高比含 1:4、4:1、1:8、8:1、4:5、5:4;产品面 8:5 由 mapper 折成 3:2。
 
 ## 4. input_schema 必须与模型能力一致(agent / 调用方据此判参数)
 
@@ -117,7 +125,8 @@ input 端口**。现全部 Seedance 变体端口已对齐。
 |---|---|---|
 | anima / minimax_image01 / qwen_2512 | 无 | 纯文生图(拒图) |
 | banana1 | images(≤3) | 一代 Gemini(gemini-2.5-flash-image),图生/编辑;无 image_size 端口(一代不支持尺寸档,mapper 对 2.5 系自动不发该字段) |
-| banana2 | images(≤14) | 原生 Gemini,图生/多图参考 |
+| banana2 | images(≤14) | Nano Banana 2(`gemini-3.1-flash-image-preview`),512/1K/2K/4K 默认 2K |
+| banana2.1 | images(≤14) | Nano Banana 2.1(`gemini-nano-banana-2.1`),1K/2K/4K 默认 1K + thinking_level |
 | banana_pro / gpt-image-2 / qwen_2511 | images | 图生/编辑 |
 | seedance*(全变体)| images/video_refs/audio_refs | 多模态视频 |
 | wan2.2_videogen | images(≤2) | 首尾帧 |

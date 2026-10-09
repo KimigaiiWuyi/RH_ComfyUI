@@ -92,7 +92,16 @@ points             = (tokens * 21_000 + 999_999) // 1_000_000
 
 ### 15.2.2 图片 — 按 image_size 档位固定 token + 输入图数
 
-**代表模型**:`seedream5_pro`、`banana_pro`、`banana1`、`banana2`
+**代表模型**:`seedream5_pro`、`banana_pro`、`banana1`、`banana2`、`banana2.1`
+
+`banana2` 与 `banana2.1` **不是同一条曲线**,禁止合成一张价表:
+
+| 模型 | USD/1M | 积分/1M | tokens | 积分 | 缺省档 |
+|---|---|---|---|---|---|
+| banana2 | 60 | 6_000 | 512=747, 1K=1120, 2K=1680, 4K=2520 | 5 / 7 / 11 / 16 | 2K |
+| banana2.1 | 30 | 3_000 | 1K=1120, 2K=1680, 4K=3780 | 4 / 6 / 12 | 1K |
+
+2.1 的 4K 用价格页 3780,不用 2 代的 2520。思考深度不进积分。输入 token 不估算。
 
 **公式**:
 
@@ -401,3 +410,4 @@ for m in model_registry.by_modality(__import__('RH_ComfyUI.utils.core.request', 
 | 2026-07 | estimate_model_points | 加 resolution/duration/generate_audio/num_video_refs | Bug #2 修复 |
 | 2026-07 | banana_pro | schema 移除 quality 字段 | Bug #1 修复 |
 | 2026-08 | seedance 2.0/2.5 | 有输入最低按 4s 计;金额先四舍五入到分;480p=856×480;2.5 开放 1080p(77/46) | 对齐火山方舟价表 |
+| 2026-10 | banana2 / banana2.1 | 2 保持 60 美元曲线;2.1 单独 30 美元曲线(4K=3780 tokens) | 两个模型并存,价格不同 |

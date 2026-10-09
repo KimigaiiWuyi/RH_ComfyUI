@@ -17,6 +17,7 @@ from ...core.channels.channel import ChannelBinding
 from ...utils.mappers.seedream import seedream_mapper as _seedream_mapper
 from ...utils.mappers.gpt_image2 import gpt_image2_mapper as _gpt_image2_mapper
 from ...utils.mappers.image_edit import qwen_edit_mapper as _qwen_edit_mapper
+from ...utils.mappers.gemini_image import GEMINI_ASPECT_RATIOS
 from ...utils.backends.minimax.config import (
     minimax_disabled_reason,
     is_minimax_model_enabled,
@@ -31,6 +32,7 @@ from ...utils.mappers.gpt_image2_billing import ratio_enum_values as _gpt_image2
 from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minimax_image01_mapper
 from ...utils.mappers.nanobanana1_billing import estimate_nanobanana1_points
 from ...utils.mappers.nanobanana2_billing import estimate_nanobanana2_points
+from ...utils.mappers.nanobanana21_billing import estimate_nanobanana21_points
 
 # ── CameraAngleDef 参数范围 — 复用 RunningHub 工作流 2080138749291356162 的合法域 ──
 CAMERA_ANGLE_HORIZ_MIN: float = 0.0
@@ -811,14 +813,10 @@ class TxImageOutpaintDef(ImagePipelineModel):
             from ...utils.image_process import TX_OUTPAINT_RATIOS, source_matches_tx_ratio
 
             if preferred not in TX_OUTPAINT_RATIOS:
-                raise ValidationError(
-                    f"{self.display_name}:ratio 必须是 {', '.join(TX_OUTPAINT_RATIOS)}"
-                )
+                raise ValidationError(f"{self.display_name}:ratio 必须是 {', '.join(TX_OUTPAINT_RATIOS)}")
             sw, sh = self._image_size(request.images[0])
             if source_matches_tx_ratio(sw, sh, preferred):
-                raise ValidationError(
-                    f"{self.display_name}:目标比例 {preferred} 与原图相同,请换一个画幅"
-                )
+                raise ValidationError(f"{self.display_name}:目标比例 {preferred} 与原图相同,请换一个画幅")
 
     def normalize(self, request: GenerationRequest) -> GenerationRequest:
         params = dict(request.params or {})
@@ -868,8 +866,9 @@ class TxImageOutpaintDef(ImagePipelineModel):
 class Banana2Def(ImagePipelineModel):
     """Nano Banana 2 — 走原生 Gemini generate_content(非 OpenAI 兼容网关)
 
-    独立于 gpt-image-2:唯一通道是 GeminiImageChannel(填 Project ID 走 VertexAI,
-    留空走 AI Studio)。请求 Nano Banana 2 不会经过 gpt-image-2 后端。
+    独立于 gpt-image-2,也独立于 banana2.1。唯一通道是 GeminiImageChannel
+    (填 Project ID 走 VertexAI,留空走 AI Studio)。上游模型是
+    gemini-3.1-flash-image-preview,价格与 2.1 不是同一条曲线。
     """
 
     def __init__(self) -> None:
@@ -891,7 +890,8 @@ class Banana2Def(ImagePipelineModel):
                 "\n"
                 "适用场景:较快速度但保持较好质量的图像,精细画面,快速图片编辑。"
                 "\n"
-                "不适用场景:需要极高细节的专业商业图(建议用 banana_pro)。"
+                "不适用场景:需要极高细节的专业商业图(建议用 banana_pro);"
+                "需要 2.1 的全景比例或更低单价时用 banana2.1。"
                 "\n"
                 "凭证:须在「启用的 Gemini 模型」勾选 banana2;"
                 "VertexAI(填 Project ID)或 AI Studio(仅需 key)。"
@@ -973,6 +973,127 @@ class Banana2Def(ImagePipelineModel):
         return (
             estimate_nanobanana2_points("512"),
             estimate_nanobanana2_points("4K"),
+        )
+
+
+class Banana21Def(ImagePipelineModel):
+    """Nano Banana 2.1 — 与 banana2 并存,上游与价格都不同
+
+    目录名 banana2.1,上游 gemini-nano-banana-2.1。通道仍是 GeminiImageChannel,
+    须在「启用的 Gemini 模型」单独勾选。尺寸只有 1K/2K/4K,并多一个思考深度。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="banana2.1",
+            display_name="Nano Banana 2.1",
+            task_type=TaskType("image"),
+            backend="gemini-image",
+            point_cost=4,
+            description="2.1 高速，支持多图参考",
+            knowledge_content=(
+                "Nano Banana 2.1 图像生成/编辑模型(gemini-nano-banana-2.1,原生 generate_content)。"
+                "\n"
+                "与 banana2(Gemini 3.1 Flash)不是同一个模型,积分更低,且没有 512 档。"
+                "\n"
+                "优势:Flash 级速度,支持 1K/2K/4K、全景比例,以及最多 14 张参考图。"
+                "\n"
+                "思考深度 minimal/medium/high(默认 medium)只影响耗时与贴合度,不改变积分。"
+                "\n"
+                "适用场景:较快速度但保持较好质量的图像,精细画面,快速图片编辑。"
+                "\n"
+                "不适用场景:需要极高细节的专业商业图(建议用 banana_pro)。"
+                "\n"
+                "凭证:须在「启用的 Gemini 模型」勾选 banana2.1;"
+                "与 banana2 共用 Gemini 配置(VertexAI 或 AI Studio)。"
+                "\n"
+            ),
+            requirements=["gemini_image_apikey"],
+            backend_model="gemini-nano-banana-2.1",
+            inputs={
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述或编辑指令"),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=14,
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description="参考图片:0 张=文生图,1+ 张=图片编辑/多图参考",
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="9:16",
+                    values=[*GEMINI_ASPECT_RATIOS, "8:5"],
+                    # 8:5 是产品面(图片包 640×400);上游白名单没有,
+                    # mapper 会就近折成 3:2 再发给上游。
+                    title="宽高比",
+                    description="宽高比",
+                ),
+                "image_size": PortSpec(
+                    type=PortType.ENUM,
+                    default="1K",
+                    values=["1K", "2K", "4K"],
+                    title="尺寸档位",
+                    description="输出尺寸档位,官方默认 1K",
+                ),
+                "thinking_level": PortSpec(
+                    type=PortType.ENUM,
+                    default="medium",
+                    values=["minimal", "medium", "high"],
+                    title="思考深度",
+                    description="minimal 更快,medium 为官方默认,high 更贴提示但更慢",
+                ),
+            },
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="sync",
+                priority=72,
+            ),
+        )
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...core.channels.registry import channel_registry
+        from ...utils.backends.gemini_image.channel import GeminiImageChannel
+
+        bindings = [
+            ChannelBinding(
+                GeminiImageChannel(logical_model=self.name),
+                vendor_model=self.node.backend_model,
+            )
+        ]
+        bindings.extend(channel_registry.bindings_for(self.name))
+        return bindings
+
+    async def unavailable_reason(self) -> str:
+        notes: list[str] = []
+        for binding in self.channel_bindings():
+            if await binding.channel.check_available():
+                continue
+            notes.append(f"{binding.channel.name}: {await binding.channel.unavailable_reason()}")
+        if notes:
+            return f"{self.display_name} 无可用供应商({'; '.join(notes)})"
+        return f"{self.display_name} 无可用供应商:请配置 Gemini 或外部供应商插件"
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:按输出分辨率分档(图片输出 30 美元/1M tokens)。
+
+        image_size 缺失 → 按 1K 档(官方默认)估算。思考深度不改变积分。
+        """
+        image_size = request.params.get("image_size")
+        return estimate_nanobanana21_points(image_size)
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:1K 档(最小) ~ 4K 档(最大)。"""
+        return (
+            estimate_nanobanana21_points("1K"),
+            estimate_nanobanana21_points("4K"),
         )
 
 
@@ -1755,6 +1876,7 @@ ALL_MODELS = [
     AnimaDef,
     Banana1Def,
     Banana2Def,
+    Banana21Def,
     BananaProDef,
     CameraAngleDef,
     ImageMattingDef,

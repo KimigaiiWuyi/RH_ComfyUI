@@ -26,6 +26,7 @@ _IMAGE_MODEL_REAL_NAMES = [
     "anima",
     "banana1",
     "banana2",
+    "banana2.1",
     "banana_pro",
     "gpt-image-2",
     "minimax_image01",
@@ -49,7 +50,7 @@ _RH_APP_NAMES = [
     "rh_image_outpaint",
     "IndexTTS2.5",
 ]
-_GEMINI_MODEL_NAMES = ["banana1", "banana2", "banana_pro"]
+_GEMINI_MODEL_NAMES = ["banana1", "banana2", "banana2.1", "banana_pro"]
 _MINIMAX_MODEL_NAMES = ["minimax_t2a_speech", "minimax_image01", "minimax_h3"]
 _MIMO_MODEL_NAMES = ["mimo_tts"]
 _SEEDANCE_ARK_MODEL_NAMES = [
@@ -109,22 +110,24 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "",
     ),
     "divider_gemini_image": GsDivider(
-        "Gemini 生图(Interactions API,走 google-genai SDK)",
-        "Gemini 生图(banana1 / banana2 / banana_pro 的 Gemini 通道)。"
+        "Gemini 生图(generate_content,走 google-genai SDK)",
+        "Gemini 生图(banana1 / banana2 / banana2.1 / banana_pro 的 Gemini 通道)。"
+        "banana2 与 banana2.1 是两个模型,价格和参数都不同,须分别勾选。"
         "默认 AI Studio(API Key);打开 VertexAI 走组织版。"
         "须打开「启用 Gemini 供应商」,并在模型列表勾选后才走 Gemini 通道。",
         "Gemini 生图服务配置",
     ),
     "Gemini_Enable": GsBoolConfig(
         "启用 Gemini 供应商",
-        "是否启用 Gemini 生图通道。关闭后 banana1 / banana2 / banana_pro 均不走 Gemini。",
+        "是否启用 Gemini 生图通道。关闭后 banana1 / banana2 / banana2.1 / banana_pro 均不走 Gemini。",
         True,
     ),
     "Gemini_Enabled_Models": GsListStrConfig(
         "启用的 Gemini 模型",
         "从列表勾选要走 Gemini 通道的内部模型;可自由添加内部模型名。"
         "留空则全部不走 Gemini。共用下方 Gemini 凭证。"
-        "可选:banana1 / banana2 / banana_pro。"
+        "可选:banana1 / banana2 / banana2.1 / banana_pro。"
+        "已保存的旧列表不会自动勾上 banana2.1,需要手动加上。"
         "banana_pro 未勾选时仍可通过 OpenAI 兼容供应商池使用。",
         list(_GEMINI_MODEL_NAMES),
         options=list(_GEMINI_MODEL_NAMES),

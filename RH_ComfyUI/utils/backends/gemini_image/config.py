@@ -11,11 +11,13 @@ from typing import Any
 
 GEMINI_MODEL_BANANA1 = "banana1"
 GEMINI_MODEL_BANANA2 = "banana2"
+GEMINI_MODEL_BANANA21 = "banana2.1"
 GEMINI_MODEL_BANANA_PRO = "banana_pro"
 
 GEMINI_MODEL_OPTIONS: tuple[str, ...] = (
     GEMINI_MODEL_BANANA1,
     GEMINI_MODEL_BANANA2,
+    GEMINI_MODEL_BANANA21,
     GEMINI_MODEL_BANANA_PRO,
 )
 
@@ -62,15 +64,13 @@ def gemini_disabled_reason(name: str, display_name: str) -> str | None:
         return f"{display_name} 未启用:请在 Web 控制台打开「启用 Gemini 供应商」"
     if is_gemini_model_enabled(name):
         return None
-    return (
-        f"{display_name} 未在 Gemini 栏启用:请在 Web 控制台"
-        f"「启用的 Gemini 模型」中添加 {name}"
-    )
+    return f"{display_name} 未在 Gemini 栏启用:请在 Web 控制台「启用的 Gemini 模型」中添加 {name}"
 
 
 __all__ = [
     "GEMINI_MODEL_BANANA1",
     "GEMINI_MODEL_BANANA2",
+    "GEMINI_MODEL_BANANA21",
     "GEMINI_MODEL_BANANA_PRO",
     "GEMINI_MODEL_OPTIONS",
     "gemini_enabled_models",

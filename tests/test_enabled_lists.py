@@ -61,6 +61,16 @@ def test_every_section_has_model_list_with_defaults():
         assert item.options, f"{key} 应有 options"
 
 
+def test_gemini_enabled_list_keeps_banana2_and_21():
+    item = SERVICE_CONFIG_DEFAULT["Gemini_Enabled_Models"]
+    assert isinstance(item, GsListStrConfig)
+    assert item.options == ["banana1", "banana2", "banana2.1", "banana_pro"]
+    assert item.data == item.options
+    pool = SERVICE_CONFIG_DEFAULT["OpenAI_Image_Providers"]
+    names = pool.template["models"].template["model_real_name"].options
+    assert "banana2" in names and "banana2.1" in names
+
+
 def test_fish_enabled_list_is_upstream_tiers():
     from RH_ComfyUI.rh_config.fish_models import FISH_MODEL_NAMES
 

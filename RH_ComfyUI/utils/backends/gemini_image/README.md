@@ -1,7 +1,7 @@
 # backends/gemini_image — Gemini 生图通道(google-genai SDK)
 
-**不是 Adapter**(不进 backend_registry)。`GeminiImageChannel` 是 banana2
-(Nano Banana 2)的一路供应商通道,走官方 google-genai SDK 的
+**不是 Adapter**(不进 backend_registry)。`GeminiImageChannel` 是 banana1 /
+banana2 / banana2.1 / banana_pro 共用的供应商通道,走官方 google-genai SDK 的
 `models.generate_content`,不手拼 REST/鉴权。不要用 Interactions:
 它会把模型改写成 `…-agent`,参考图会被 400 拒。
 

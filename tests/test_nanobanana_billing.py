@@ -1,8 +1,8 @@
-"""Nano Banana 1/2/Pro 动态计价:token 计算/积分换算/estimate_cost 钩子"""
+"""Nano Banana 1/2/2.1/Pro 动态计价:token 计算/积分换算/estimate_cost 钩子"""
 
 import pytest
 
-from RH_ComfyUI.models.image.defs import Banana1Def, Banana2Def, BananaProDef
+from RH_ComfyUI.models.image.defs import Banana1Def, Banana2Def, Banana21Def, BananaProDef
 from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.banana_pro_billing import (
     OUTPUT_TOKENS_BY_SIZE as BPRO_OUTPUT_TOKENS_BY_SIZE,
@@ -22,6 +22,12 @@ from RH_ComfyUI.utils.mappers.nanobanana2_billing import (
     POINTS_PER_MILLION_TOKENS as NB2_POINTS_PER_MILLION_TOKENS,
     calculate_output_points as nb2_calculate_output_points,
     estimate_nanobanana2_points,
+)
+from RH_ComfyUI.utils.mappers.nanobanana21_billing import (
+    OUTPUT_TOKENS_BY_SIZE as NB21_OUTPUT_TOKENS_BY_SIZE,
+    POINTS_PER_MILLION_TOKENS as NB21_POINTS_PER_MILLION_TOKENS,
+    calculate_output_points as nb21_calculate_output_points,
+    estimate_nanobanana21_points,
 )
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -44,7 +50,7 @@ def test_nb2_points_per_million_tokens_constant():
     ],
 )
 def test_nb2_output_tokens_by_size(image_size, expected_tokens):
-    """各分辨率档位 token 消耗与官方文档一致"""
+    """各分辨率档位 token 消耗与 Gemini 3.1 Flash 价格表一致"""
     assert NB2_OUTPUT_TOKENS_BY_SIZE[image_size] == expected_tokens
 
 
@@ -68,8 +74,9 @@ def test_nb2_default_size():
 
 
 def test_nb2_invalid_size_fallback():
-    """非法档位 → 回落到 2K 档"""
+    """非法档位 → 回落到 2K 档;512 仍是合法档,不能当成非法"""
     assert nb2_calculate_output_points("8K") == nb2_calculate_output_points("2K")
+    assert nb2_calculate_output_points("512") == 5
 
 
 def test_nb2_size_ordering():
@@ -101,20 +108,18 @@ def _make_request(ratio=None, images=None, **params) -> GenerationRequest:
 
 
 def test_banana2_estimate_cost_dynamic():
-    """Banana2Def.estimate_cost 走动态计费,按 image_size 分档"""
+    """Banana2Def.estimate_cost 走 60 美元曲线,缺省按 2K"""
     m = Banana2Def()
-    # 默认参数(无 params) → 2K 档
     req_default = _make_request()
     cost_default = m.estimate_cost(req_default)
     assert cost_default == estimate_nanobanana2_points("2K")
 
-    # 4K 应比默认贵
     req_4k = _make_request(image_size="4K")
     assert m.estimate_cost(req_4k) > cost_default
 
-    # 512 应比默认便宜
-    req_512 = _make_request(image_size="512")
-    assert m.estimate_cost(req_512) < cost_default
+    # 2 代没有思考档,即使 params 里塞了也不改价
+    req_high = _make_request(image_size="2K", thinking_level="high")
+    assert m.estimate_cost(req_high) == estimate_nanobanana2_points("2K")
 
 
 def test_banana2_estimate_cost_matches_direct():
@@ -134,7 +139,75 @@ def test_banana2_estimate_cost_never_below_minimum():
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  二、Nano Banana 1 计费测试
+#  二、Nano Banana 2.1 计费测试(与 2 不是同一条曲线)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_nb21_points_per_million_tokens_constant():
+    """30 美元 / 1M tokens,1 美元 = 100 积分 → 3_000 积分 / 1M tokens"""
+    assert NB21_POINTS_PER_MILLION_TOKENS == 3_000
+    assert NB21_POINTS_PER_MILLION_TOKENS != NB2_POINTS_PER_MILLION_TOKENS
+
+
+@pytest.mark.parametrize(
+    "image_size,expected_tokens",
+    [
+        ("1K", 1120),
+        ("2K", 1680),
+        ("4K", 3780),
+    ],
+)
+def test_nb21_output_tokens_by_size(image_size, expected_tokens):
+    """2.1 的 4K 是价格页 3780,不是 2 代的 2520"""
+    assert NB21_OUTPUT_TOKENS_BY_SIZE[image_size] == expected_tokens
+    assert "512" not in NB21_OUTPUT_TOKENS_BY_SIZE
+
+
+@pytest.mark.parametrize(
+    "image_size,expected_points",
+    [
+        ("1K", 4),  # 1120 * 3000 / 1M = 3.36 → ceil = 4
+        ("2K", 6),  # 1680 * 3000 / 1M = 5.04 → ceil = 6
+        ("4K", 12),  # 3780 * 3000 / 1M = 11.34 → ceil = 12
+    ],
+)
+def test_nb21_calculate_output_points(image_size, expected_points):
+    assert nb21_calculate_output_points(image_size) == expected_points
+
+
+def test_nb21_default_and_unknown_size():
+    """缺失、512、非法档都回落到官方默认 1K"""
+    assert nb21_calculate_output_points(None) == 4
+    assert nb21_calculate_output_points("512") == 4
+    assert nb21_calculate_output_points("8K") == 4
+
+
+def test_banana21_estimate_cost_ignores_thinking():
+    m = Banana21Def()
+    assert m.estimate_cost(_make_request()) == estimate_nanobanana21_points("1K")
+    high = _make_request(image_size="2K", thinking_level="high")
+    low = _make_request(image_size="2K", thinking_level="minimal")
+    assert m.estimate_cost(high) == m.estimate_cost(low) == 6
+
+
+def test_banana2_and_21_prices_differ_at_same_size():
+    """同一档位两条曲线必须不同,不能共用一张价表"""
+    old = Banana2Def()
+    new = Banana21Def()
+    assert old.estimate_cost(_make_request(image_size="1K")) == 7
+    assert new.estimate_cost(_make_request(image_size="1K")) == 4
+    assert old.estimate_cost(_make_request(image_size="2K")) == 11
+    assert new.estimate_cost(_make_request(image_size="2K")) == 6
+    assert old.estimate_cost(_make_request(image_size="4K")) == 16
+    assert new.estimate_cost(_make_request(image_size="4K")) == 12
+    assert old.point_range() == (5, 16)
+    assert new.point_range() == (4, 12)
+    assert old.point_cost == 2
+    assert new.point_cost == 4
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  三、Nano Banana 1 计费测试
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -177,7 +250,7 @@ def test_banana1_estimate_cost_same_regardless_of_params():
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  三、Banana Pro 计费测试(独立于 GPT-Image-2)
+#  四、Banana Pro 计费测试(独立于 GPT-Image-2)
 # ═══════════════════════════════════════════════════════════════════════
 
 

@@ -16,11 +16,11 @@ aiohttp 路径包 `call_with_network_retry`;不要在 poll 循环再叠一层。
 | `gpt-image-2` | `gpt_image2/` | OpenAI 兼容协议 | 文生图/图生图/编辑自适应;凭证可指向 OneAPI/NewAPI 等网关(注意名字带**连字符**) |
 
 > **Gemini 不是 Adapter**:`gemini_image/` 提供一个 `GeminiImageChannel`,内部走
-> **官方 google-genai SDK 的 `interactions.create`**(不手拼 REST)。留空 Project ID
-> 走 AI Studio(`Client(api_key=)`);填 Project ID 走 VertexAI
-> (`Client(vertexai=True, project=, location=)`,鉴权用 ADC 或服务账号 JSON——
-> SDK 限制 project 与 api_key 互斥)。banana2(Nano Banana 2)是**原生 Gemini 模型**,
-> 在 `Banana2Def.channel_bindings()` 里唯一挂这条通道,与 gpt-image-2 完全独立。
+> **官方 google-genai SDK 的 `models.generate_content`**(不手拼 REST,也不要走
+> `interactions.create`:它会把 preview 生图 ID 改写成 `…-agent`,参考图 400)。
+> 双模由 `Gemini_Image_Use_Vertex` 决定,不要再用「填了 Project ID 就走 Vertex」。
+> banana2(`gemini-3.1-flash-image-preview`)与 banana2.1(`gemini-nano-banana-2.1`)
+> 共用这条通道,参数和价格分开,各自在 `channel_bindings()` 里挂上。
 | `rh_app` | `rh_app/` | RunningHub **AI 应用** | webapp id=`workflow_file`;与 comfyui **不同 API**;**无** remote cancel;可 query resume |
 | `minimax` | `minimax/` | MiniMax | 图片 + 语音(T2A);H3 视频走独立 `minimax-h3` 通道 |
 | `mimo` | `mimo/` | MiMo TTS | 语音 |
@@ -72,7 +72,7 @@ ComfyUI 字段注入。
 | 文件 | 服务的模型 |
 |---|---|
 | `gpt_image2.py` | banana2 / banana_pro / gpt-image-2 |
-| `gemini_image.py` | banana2 的 Gemini 通道(Interactions API 双模,vendor=gemini-3.1-flash-image-preview) |
+| `gemini_image.py` | banana1 / banana2 / banana2.1 / banana_pro(generate_content;2=`gemini-3.1-flash-image-preview`,2.1=`gemini-nano-banana-2.1`) |
 | `image_edit.py` | qwen_2511(图片编辑) |
 | `minimax_text2image.py` | minimax_image01 |
 | `video.py` | wan2.2_videogen(含 t2v/i2v 工作流切换) |
@@ -97,7 +97,7 @@ catalog-only 键(`frame_mode` / `image_size` / `task_mode` 等)从
 | `ComfyUI_BaseURL` / `ComfyUI_Enabled_Workflows` | ComfyUI 地址 + **启用工作流列表**(GsListStrConfig,默认空;勾选/自填内部模型名或 json,改完即时生效) |
 | `RH_apikey` / `RH_App_Enabled_Apps` | RunningHub 通用 Key + **启用的 RH AI 应用**(GsListStrConfig,默认勾满 anima/多角度/抠图/高清/扩图;留空则全关;改完即时生效) |
 | `OpenAI_Image_apikey` / `OpenAI_Image_BaseURL` | OpenAI 兼容生图 |
-| `Gemini_Image_apikey` / `Gemini_Image_BaseURL` / `Gemini_Image_Use_Vertex` / `Gemini_Image_Project_ID` / `Gemini_Image_Location` / `Gemini_Image_SA_File` / `Gemini_Enabled_Models` | Gemini 生图(**显式开关** `Use_Vertex` 决定模式:开=VertexAI+ADC/SA(忽略 key),关=AI Studio+key;不再由 Project ID 推断。`BaseURL`=直连不通时的中转地址,仅 AI Studio 生效,留空直连官方)。`Gemini_Enabled_Models` 勾选 banana1/banana2/banana_pro,默认空则不走 Gemini 通道 |
+| `Gemini_Image_apikey` / `Gemini_Image_BaseURL` / `Gemini_Image_Use_Vertex` / `Gemini_Image_Project_ID` / `Gemini_Image_Location` / `Gemini_Image_SA_File` / `Gemini_Enabled_Models` | Gemini 生图(**显式开关** `Use_Vertex` 决定模式:开=VertexAI+ADC/SA(忽略 key),关=AI Studio+key;不再由 Project ID 推断。`BaseURL`=直连不通时的中转地址,仅 AI Studio 生效,留空直连官方)。`Gemini_Enabled_Models` 勾选 banana1/banana2/banana2.1/banana_pro;已保存的旧列表不会自动勾上 banana2.1。留空则不走 Gemini 通道 |
 | `MiniMax_apikey` / `MiniMax_Enabled_Models` / `MIMO_apikey` | MiniMax(文生图/T2A/H3 共用 Key;启用列表默认空)/ MiMo |
 | `Seedance_apikey_{ark,runninghub}` + `Seedance_BaseURL_*` + `Seedance_Enable_*` | Seedance 内置供应商凭证(网关凭证在外部插件自己的面板) |
 | `OpenAI_Image_Providers` | OpenAI 兼容供应商池(重复组,每行一家,含 `weight` 负载权重;见 13 章;增删/改映射/改权重后需 `rh 刷新供应商`) |
