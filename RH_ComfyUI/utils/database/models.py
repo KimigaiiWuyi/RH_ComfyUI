@@ -14,6 +14,7 @@ from sqlalchemy import (
     ColumnElement,
     CheckConstraint,
     UniqueConstraint,
+    or_,
     and_,
     case,
     func,
@@ -2222,6 +2223,33 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             row.refunded = bool(refunded)
         session.add(row)
         return True
+
+    @classmethod
+    @with_session
+    async def backfill_empty_key_prefixes(cls, session: AsyncSession, prefixes: dict[str, str]) -> int:
+        """给还没记前缀的历史行补上。已有前缀的不动。"""
+        filled = 0
+        blank = or_(col(cls.backend_key_prefix) == "", col(cls.backend_key_prefix).is_(None))
+        for name, prefix in prefixes.items():
+            text = prefix.strip()[:6]
+            if not name or not text:
+                continue
+            by_provider = await session.execute(
+                update(cls).where(col(cls.backend_provider) == name, blank).values(backend_key_prefix=text)
+            )
+            if isinstance(by_provider, CursorResult):
+                filled += by_provider.rowcount
+            provider_is_backend = or_(
+                col(cls.backend_provider) == "",
+                col(cls.backend_provider).is_(None),
+                col(cls.backend_provider) == name,
+            )
+            by_backend = await session.execute(
+                update(cls).where(col(cls.backend) == name, blank, provider_is_backend).values(backend_key_prefix=text)
+            )
+            if isinstance(by_backend, CursorResult):
+                filled += by_backend.rowcount
+        return filled
 
     @classmethod
     @with_read_session

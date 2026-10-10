@@ -364,6 +364,7 @@ def test_nano_banana_21_generate_content_config(monkeypatch):
         def model_dump(self, **_kwargs: object) -> dict[str, object]:
             blob = b"\x89PNG" * 80
             return {
+                "sdk_http_response": {"headers": {"Server": "openresty"}},
                 "model_version": "gemini-nano-banana-2.1",
                 "usage_metadata": {"total_token_count": 12},
                 "candidates": [
@@ -411,6 +412,7 @@ def test_nano_banana_21_generate_content_config(monkeypatch):
     assert isinstance(images, list)
     assert images == [{"mime_type": "image/png", "data": "<bytes len=28>"}]
     assert vendor["model_version"] == "gemini-nano-banana-2.1"
+    assert "sdk_http_response" not in vendor
     usage = vendor["usage_metadata"]
     assert isinstance(usage, dict)
     assert usage["total_token_count"] == 12
@@ -462,6 +464,9 @@ def test_gemini_channel_availability(monkeypatch):
     monkeypatch.setattr(gapi, "SERVICE_CONFIG", _FakeConfig({"Gemini_Image_apikey": "AIzaKEY"}))
     assert asyncio.run(ch.check_available()) is True
     assert ch.audit_key_prefix() == "AIzaKE"
+    studio = ch.audit_prefix_names()
+    assert studio["gemini-ai-studio"] == "AIzaKE"
+    assert studio["gemini-vertex"] == "AIzaKE"
     # Vertex(开开关):无 key 但有 project 也算可用,审计记 project 前缀
     monkeypatch.setattr(
         gapi,
@@ -470,6 +475,23 @@ def test_gemini_channel_availability(monkeypatch):
     )
     assert asyncio.run(ch.check_available()) is True
     assert ch.audit_key_prefix() == "projxy"
+    vertex = ch.audit_prefix_names()
+    assert vertex["gemini-vertex"] == "projxy"
+    assert vertex["gemini-ai-studio"] == "projxy"
+    monkeypatch.setattr(
+        gapi,
+        "SERVICE_CONFIG",
+        _FakeConfig(
+            {
+                "Gemini_Image_apikey": "AIzaKEY",
+                "Gemini_Image_Project_ID": "projxyz",
+                "Gemini_Image_Use_Vertex": False,
+            }
+        ),
+    )
+    both = ch.audit_prefix_names()
+    assert both["gemini-ai-studio"] == "AIzaKE"
+    assert both["gemini-vertex"] == "projxy"
 
 
 def test_gemini_enabled_list_gates_named_channel(monkeypatch):

@@ -90,6 +90,10 @@ class Adapter(ABC):
     async def get_node_unavailable_reason(self, node: NodeDef) -> str:
         return await self.get_unavailable_reason()
 
+    def audit_key_prefix(self) -> str:
+        """统计用凭证前 6 位。无供应商 key 的后端保持空。"""
+        return ""
+
     # ── 便捷方法(向后兼容) ──
 
     async def execute_legacy(

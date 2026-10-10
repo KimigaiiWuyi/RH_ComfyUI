@@ -31,8 +31,8 @@ from ...utils.mappers.banana_pro_billing import estimate_banana_pro_points
 from ...utils.mappers.gpt_image2_billing import ratio_enum_values as _gpt_image2_ratio_values
 from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minimax_image01_mapper
 from ...utils.mappers.nanobanana1_billing import estimate_nanobanana1_points
-from ...utils.mappers.nanobanana2_billing import estimate_nanobanana2_points
-from ...utils.mappers.nanobanana21_billing import estimate_nanobanana21_points
+from ...utils.mappers.nanobanana2_billing import settle_nanobanana2_points, estimate_nanobanana2_points
+from ...utils.mappers.nanobanana21_billing import settle_nanobanana21_points, estimate_nanobanana21_points
 
 # ── CameraAngleDef 参数范围 — 复用 RunningHub 工作流 2080138749291356162 的合法域 ──
 CAMERA_ANGLE_HORIZ_MIN: float = 0.0
@@ -890,6 +890,8 @@ class Banana2Def(ImagePipelineModel):
                 "\n"
                 "适用场景:较快速度但保持较好质量的图像,精细画面,快速图片编辑。"
                 "\n"
+                "预扣按输出分辨率;成功后按厂商回传的输入、出图、文本和思考 token 结算。"
+                "\n"
                 "不适用场景:需要极高细节的专业商业图(建议用 banana_pro);"
                 "需要 2.1 的全景比例或更低单价时用 banana2.1。"
                 "\n"
@@ -963,10 +965,14 @@ class Banana2Def(ImagePipelineModel):
     def estimate_cost(self, request: GenerationRequest) -> int:
         """动态计费:按输出分辨率分档计费(60 美元/1M tokens)。
 
-        image_size 缺失 → 按 2K 档(默认值)估算。
+        image_size 缺失 → 按 2K 档(默认值)估算。输入和思考 token 在成功后结算。
         """
         image_size = request.params.get("image_size")
         return estimate_nanobanana2_points(image_size)
+
+    def settle_cost(self, request: GenerationRequest, usage: dict) -> int | None:
+        """按厂商 usage_metadata 分项实扣;没有 token 时维持预扣。"""
+        return settle_nanobanana2_points(usage)
 
     def point_range(self) -> tuple[int, int]:
         """积分范围:512 档(最小) ~ 4K 档(最大)。"""
@@ -1002,7 +1008,8 @@ class Banana21Def(ImagePipelineModel):
                 "\n"
                 "优势:Flash 级速度,支持 1K/2K/4K、全景比例,以及最多 14 张参考图。"
                 "\n"
-                "思考深度 minimal/medium/high(默认 medium)只影响耗时与贴合度,不改变积分。"
+                "思考深度 minimal/medium/high(默认 medium)。预扣按输出分辨率;"
+                "成功后按厂商回传的输入、出图、文本和思考 token 结算。"
                 "\n"
                 "适用场景:较快速度但保持较好质量的图像,精细画面,快速图片编辑。"
                 "\n"
@@ -1084,10 +1091,14 @@ class Banana21Def(ImagePipelineModel):
     def estimate_cost(self, request: GenerationRequest) -> int:
         """动态计费:按输出分辨率分档(图片输出 30 美元/1M tokens)。
 
-        image_size 缺失 → 按 1K 档(官方默认)估算。思考深度不改变积分。
+        image_size 缺失 → 按 1K 档(官方默认)估算。输入和思考 token 在成功后结算。
         """
         image_size = request.params.get("image_size")
         return estimate_nanobanana21_points(image_size)
+
+    def settle_cost(self, request: GenerationRequest, usage: dict) -> int | None:
+        """按厂商 usage_metadata 分项实扣;没有 token 时维持预扣。"""
+        return settle_nanobanana21_points(usage)
 
     def point_range(self) -> tuple[int, int]:
         """积分范围:1K 档(最小) ~ 4K 档(最大)。"""

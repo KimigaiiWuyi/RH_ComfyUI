@@ -56,6 +56,14 @@ class ProviderChannel(ABC):
         """审计用:当前生效凭证 key 前 6 位(默认空;持密钥的通道覆盖)"""
         return ""
 
+    def audit_prefix_names(self) -> dict[str, str]:
+        """落库的供应商名 → 前 6 位。默认只有通道名。"""
+        prefix = self.audit_key_prefix().strip()[:6]
+        name = self.name.strip()
+        if not name or not prefix:
+            return {}
+        return {name: prefix}
+
     def supports_remote_cancel(self) -> bool:
         """该供应商通道创建上游任务后是否可 DELETE/cancel。
 

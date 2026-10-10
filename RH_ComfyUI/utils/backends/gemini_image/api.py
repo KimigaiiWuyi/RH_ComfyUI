@@ -394,7 +394,7 @@ def _gemini_vendor_payload(response: object) -> dict[str, object]:
     if isinstance(payload, dict):
         copied: dict[str, object] = {}
         for raw_key, item in payload.items():
-            if isinstance(raw_key, str):
+            if isinstance(raw_key, str) and raw_key != "sdk_http_response":
                 copied[raw_key] = item
         return copied
     return {"summary": _summarize_generate(response)}

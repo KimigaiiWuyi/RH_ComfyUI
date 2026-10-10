@@ -51,6 +51,12 @@ class ComfyUIAdapter(Adapter):
     async def get_unavailable_reason(self) -> str:
         return "未配置 ComfyUI 服务地址,请在 Web 控制台配置 ComfyUI_BaseURL"
 
+    def audit_key_prefix(self) -> str:
+        # 本地地址不带供应商 key;RunningHub 把 RH_apikey 嵌进代理 URL
+        if not self.api.is_runninghub:
+            return ""
+        return (self.api.api_key or "")[:6]
+
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(
             supported_tasks=["image", "video", "music", "speech"],

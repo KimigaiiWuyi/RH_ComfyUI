@@ -19,6 +19,9 @@ from typing import Optional
 
 # 60 美元 / 1M tokens,1 美元 = 100 积分 → 60 * 100 = 6_000 积分 / 1M tokens
 POINTS_PER_MILLION_TOKENS: int = 6_000
+# 标准档:输入(文本/图片)$0.50/1M;文本与思考输出 $3/1M。图片输出沿用上面的 6_000。
+INPUT_POINTS_PER_MILLION: int = 50
+TEXT_POINTS_PER_MILLION: int = 300
 
 # ── 分辨率分档 → 消耗 tokens(取自官方文档) ──
 
@@ -53,9 +56,24 @@ def estimate_nanobanana2_points(image_size: Optional[str]) -> int:
     return calculate_output_points(image_size)
 
 
+def settle_nanobanana2_points(usage: object) -> Optional[int]:
+    """厂商 usage_metadata 实扣。解析不到时 None,维持预扣。"""
+    from .gemini_image_usage import settle_gemini_image_points
+
+    return settle_gemini_image_points(
+        usage,
+        input_points_per_million=INPUT_POINTS_PER_MILLION,
+        text_points_per_million=TEXT_POINTS_PER_MILLION,
+        image_points_per_million=POINTS_PER_MILLION_TOKENS,
+    )
+
+
 __all__ = [
     "POINTS_PER_MILLION_TOKENS",
+    "INPUT_POINTS_PER_MILLION",
+    "TEXT_POINTS_PER_MILLION",
     "OUTPUT_TOKENS_BY_SIZE",
     "calculate_output_points",
     "estimate_nanobanana2_points",
+    "settle_nanobanana2_points",
 ]

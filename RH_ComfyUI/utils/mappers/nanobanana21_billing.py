@@ -9,7 +9,7 @@ token 与单价取自 Gemini API 价格页(2026-10):
   - 4K (4096px) : 3780 tokens → $0.113  → 12 积分
 
 与 Nano Banana 2(60 美元/1M,含 512 档)不是同一条曲线。
-2.1 没有 512 档。预扣只按输出图片;输入与思考 token 不在此估算内。
+2.1 没有 512 档。预扣只按输出图片。成功后按 usage_metadata 补入输入、文本和思考 token。
 point_cost 仅作 image_size 缺失时的静态兜底(按默认 1K 档)。
 """
 
@@ -19,6 +19,9 @@ from typing import Optional
 
 # 30 美元 / 1M tokens,1 美元 = 100 积分 → 30 * 100 = 3_000 积分 / 1M tokens
 POINTS_PER_MILLION_TOKENS: int = 3_000
+# 标准档:输入(文本/图片)$1.50/1M;文本与思考输出 $7.50/1M。图片输出沿用上面的 3_000。
+INPUT_POINTS_PER_MILLION: int = 150
+TEXT_POINTS_PER_MILLION: int = 750
 
 # 价格页:4K 为 3780 tokens,不是 2 代那张表的 2520。
 OUTPUT_TOKENS_BY_SIZE: dict[str, int] = {
@@ -51,9 +54,24 @@ def estimate_nanobanana21_points(image_size: Optional[str]) -> int:
     return calculate_output_points(image_size)
 
 
+def settle_nanobanana21_points(usage: object) -> Optional[int]:
+    """厂商 usage_metadata 实扣。解析不到时 None,维持预扣。"""
+    from .gemini_image_usage import settle_gemini_image_points
+
+    return settle_gemini_image_points(
+        usage,
+        input_points_per_million=INPUT_POINTS_PER_MILLION,
+        text_points_per_million=TEXT_POINTS_PER_MILLION,
+        image_points_per_million=POINTS_PER_MILLION_TOKENS,
+    )
+
+
 __all__ = [
     "POINTS_PER_MILLION_TOKENS",
+    "INPUT_POINTS_PER_MILLION",
+    "TEXT_POINTS_PER_MILLION",
     "OUTPUT_TOKENS_BY_SIZE",
     "calculate_output_points",
     "estimate_nanobanana21_points",
+    "settle_nanobanana21_points",
 ]

@@ -101,7 +101,13 @@ points             = (tokens * 21_000 + 999_999) // 1_000_000
 | banana2 | 60 | 6_000 | 512=747, 1K=1120, 2K=1680, 4K=2520 | 5 / 7 / 11 / 16 | 2K |
 | banana2.1 | 30 | 3_000 | 1K=1120, 2K=1680, 4K=3780 | 4 / 6 / 12 | 1K |
 
-2.1 的 4K 用价格页 3780,不用 2 代的 2520。思考深度不进积分。输入 token 不估算。
+2.1 的 4K 用价格页 3780,不用 2 代的 2520。预扣只按输出档,不含输入和思考。
+banana2 / banana2.1 成功后做差额结算:输入(文本与图片同价)、
+图片输出、文本输出与思考 token 各用标准档单价。banana2 为 $0.50 / $60 / $3,
+banana2.1 为 $1.50 / $30 / $7.50(输入 / 图片输出 / 文本与思考,每 1M tokens)。
+原生回包读 `usage_metadata`;聚合网关读 `usage.rawUsage` 的 input/output tokens,
+没有输出明细时输出 token 按图片计。通道把任务 JSON 放进 `NodeOutput.raw` 或 `usage` 即可。
+解析不到 usage 时维持预扣。
 
 **公式**:
 
@@ -411,3 +417,4 @@ for m in model_registry.by_modality(__import__('RH_ComfyUI.utils.core.request', 
 | 2026-07 | banana_pro | schema 移除 quality 字段 | Bug #1 修复 |
 | 2026-08 | seedance 2.0/2.5 | 有输入最低按 4s 计;金额先四舍五入到分;480p=856×480;2.5 开放 1080p(77/46) | 对齐火山方舟价表 |
 | 2026-10 | banana2 / banana2.1 | 2 保持 60 美元曲线;2.1 单独 30 美元曲线(4K=3780 tokens) | 两个模型并存,价格不同 |
+| 2026-10 | banana2 / banana2.1 | 成功后按 usage_metadata 分项结算(输入 / 出图 / 文本与思考) | 厂商回传 token,预扣仍只按输出档 |

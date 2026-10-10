@@ -6,6 +6,8 @@ from typing import Optional, Protocol
 
 from ..core.types import NodeOutput
 from ..core.request import GenerationRequest
+from .gemini_image_usage import usage_from_gemini_raw
+from ...core.telemetry.wire_capture import get_vendor_raw
 
 
 class GeminiImageClient(Protocol):
@@ -132,13 +134,13 @@ async def gemini_flash_image_mapper(
         image_size=image_size,
         thinking_level=thinking_level,
     )
-    from ...core.telemetry.wire_capture import get_vendor_raw
-
+    raw = get_vendor_raw()
     return NodeOutput(
         status="ok",
         output_type="image",
         data=data,
         mime_type="image/png",
         outputs={"image": data},
-        raw=get_vendor_raw(),
+        usage=usage_from_gemini_raw(raw),
+        raw=raw,
     )

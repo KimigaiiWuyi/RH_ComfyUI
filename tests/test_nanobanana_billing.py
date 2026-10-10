@@ -11,6 +11,7 @@ from RH_ComfyUI.utils.mappers.banana_pro_billing import (
     estimate_banana_pro_points,
     calculate_banana_pro_points,
 )
+from RH_ComfyUI.utils.mappers.gemini_image_usage import usage_from_gemini_raw
 from RH_ComfyUI.utils.mappers.nanobanana1_billing import (
     OUTPUT_TOKENS as NB1_OUTPUT_TOKENS,
     POINTS_PER_MILLION_TOKENS as NB1_POINTS_PER_MILLION_TOKENS,
@@ -21,12 +22,14 @@ from RH_ComfyUI.utils.mappers.nanobanana2_billing import (
     OUTPUT_TOKENS_BY_SIZE as NB2_OUTPUT_TOKENS_BY_SIZE,
     POINTS_PER_MILLION_TOKENS as NB2_POINTS_PER_MILLION_TOKENS,
     calculate_output_points as nb2_calculate_output_points,
+    settle_nanobanana2_points,
     estimate_nanobanana2_points,
 )
 from RH_ComfyUI.utils.mappers.nanobanana21_billing import (
     OUTPUT_TOKENS_BY_SIZE as NB21_OUTPUT_TOKENS_BY_SIZE,
     POINTS_PER_MILLION_TOKENS as NB21_POINTS_PER_MILLION_TOKENS,
     calculate_output_points as nb21_calculate_output_points,
+    settle_nanobanana21_points,
     estimate_nanobanana21_points,
 )
 
@@ -188,6 +191,113 @@ def test_banana21_estimate_cost_ignores_thinking():
     high = _make_request(image_size="2K", thinking_level="high")
     low = _make_request(image_size="2K", thinking_level="minimal")
     assert m.estimate_cost(high) == m.estimate_cost(low) == 6
+
+
+# 厂商回包:输入 2456(文本 216 + 图 2240),出图 1120,候选里另有文本 658,思考 954。
+_VENDOR_USAGE = {
+    "usage_metadata": {
+        "candidates_token_count": 1778,
+        "candidates_tokens_details": [{"modality": "IMAGE", "token_count": 1120}],
+        "prompt_token_count": 2456,
+        "prompt_tokens_details": [
+            {"modality": "TEXT", "token_count": 216},
+            {"modality": "IMAGE", "token_count": 2240},
+        ],
+        "thoughts_token_count": 954,
+        "total_token_count": 5188,
+    }
+}
+
+
+def test_banana21_settle_uses_vendor_token_split():
+    """2.1:输入 $1.50、出图 $30、文本与思考 $7.50,加权后向上取整为 5。"""
+    assert settle_nanobanana21_points(_VENDOR_USAGE) == 5
+    assert Banana21Def().settle_cost(_make_request(), _VENDOR_USAGE) == 5
+    wrapped = {"raw_task": _VENDOR_USAGE}
+    assert settle_nanobanana21_points(wrapped) == 5
+
+
+def test_banana2_settle_uses_its_own_rates():
+    """3.1 Flash:输入 $0.50、出图 $60、文本与思考 $3,同一份用量是 8 积分。"""
+    assert settle_nanobanana2_points(_VENDOR_USAGE) == 8
+    assert Banana2Def().settle_cost(_make_request(), _VENDOR_USAGE) == 8
+
+
+def test_banana_settle_keeps_prepaid_without_usage():
+    assert settle_nanobanana21_points({}) is None
+    assert settle_nanobanana2_points({"usage_metadata": {}}) is None
+    assert Banana21Def().settle_cost(_make_request(), {}) is None
+
+
+def test_banana21_settle_treats_missing_details_as_image_output():
+    """没有候选明细时,候选 token 全部按图片输出。1120 × $30/1M → 4 积分。"""
+    usage = {"usage_metadata": {"candidates_token_count": 1120, "total_token_count": 1120}}
+    assert settle_nanobanana21_points(usage) == 4
+
+
+# 聚合网关任务回包:输入 1684 全是文本,输出 1120 无明细(按图片)。
+_GATEWAY_TASK = {
+    "taskId": "task_example",
+    "status": "SUCCESS",
+    "usage": {
+        "taskId": "task_example",
+        "model": None,
+        "imageCount": 1,
+        "rawUsage": {
+            "cached_tokens": 0,
+            "image_count": 1,
+            "images": 1,
+            "input_tokens": 1684,
+            "input_tokens_details": {"image_tokens": 0, "text_tokens": 1684},
+            "output_tokens": 1120,
+            "prompt_tokens": 1684,
+            "total_tokens": 2804,
+        },
+    },
+}
+
+
+def test_gateway_raw_usage_settles_without_gemini_metadata():
+    """网关 rawUsage 没有 usage_metadata 也入账。2.1 为 4,同一份用量 banana2 为 7。"""
+    assert settle_nanobanana21_points(_GATEWAY_TASK) == 4
+    assert settle_nanobanana2_points(_GATEWAY_TASK) == 7
+    assert Banana21Def().settle_cost(_make_request(), {"raw_task": _GATEWAY_TASK}) == 4
+    assert Banana2Def().settle_cost(_make_request(), {"raw_task": _GATEWAY_TASK}) == 7
+    normalized = usage_from_gemini_raw(_GATEWAY_TASK)
+    assert normalized["input_tokens"] == 1684
+    assert normalized["output_tokens"] == 1120
+    assert settle_nanobanana21_points(normalized) == 4
+
+
+def test_gateway_output_details_bill_text_separately():
+    """有输出明细时,文本输出走文本单价,不并进图片输出。"""
+    task = {
+        "usage": {
+            "rawUsage": {
+                "input_tokens": 1684,
+                "output_tokens": 2120,
+                "output_tokens_details": {"image_tokens": 1120, "text_tokens": 1000},
+                "total_tokens": 3804,
+            }
+        }
+    }
+    assert settle_nanobanana21_points(task) == 5
+    assert settle_nanobanana2_points(task) == 8
+
+
+def test_gateway_total_tokens_alone_keeps_prepaid():
+    assert settle_nanobanana21_points({"usage": {"rawUsage": {"total_tokens": 2804}}}) is None
+
+
+def test_gemini_usage_dict_roundtrips_into_settle():
+    """mapper 挂上的 usage 仍能被后结算读到,不依赖原始回包嵌套。"""
+    usage = usage_from_gemini_raw(_VENDOR_USAGE)
+    assert usage["input_tokens"] == 2456
+    assert usage["output_tokens"] == 1778
+    assert usage["thoughts_token_count"] == 954
+    assert usage["total_tokens"] == 5188
+    assert settle_nanobanana21_points(usage) == 5
+    assert settle_nanobanana2_points(usage) == 8
 
 
 def test_banana2_and_21_prices_differ_at_same_size():

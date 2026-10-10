@@ -26,6 +26,9 @@ class FishAudioAdapter(Adapter):
     async def get_unavailable_reason(self) -> str:
         return "未配置 Fish Audio API Key,请在 Web 控制台配置 FishAudio_apikey"
 
+    def audit_key_prefix(self) -> str:
+        return (self.api.api_key or "")[:6]
+
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(
             supported_tasks=["speech", "asr"],

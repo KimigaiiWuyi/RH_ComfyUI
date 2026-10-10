@@ -35,6 +35,11 @@ def _is_rate_limited(exc: BaseException) -> bool:
     return status in (429, 503)
 
 
+# invoke 写进 metadata 的名字;run() 的 setdefault 不会再覆盖成通道名 gemini
+GEMINI_AI_STUDIO_PROVIDER = "gemini-ai-studio"
+GEMINI_VERTEX_PROVIDER = "gemini-vertex"
+
+
 class GeminiImageChannel(ProviderChannel):
     """Gemini 生图通道(VertexAI / AI Studio 双模;vendor_model 区分 Flash / Pro)"""
 
@@ -64,6 +69,19 @@ class GeminiImageChannel(ProviderChannel):
     def audit_key_prefix(self) -> str:
         # AI Studio 记 key 前缀;Vertex 无 key,记 project 前缀
         return (self._api.api_key or self._api.project_id or "")[:6]
+
+    def audit_prefix_names(self) -> dict[str, str]:
+        """历史行的供应商名是 gemini-ai-studio / gemini-vertex,不是通道名。"""
+        key = (self._api.api_key or "").strip()[:6]
+        project = (self._api.project_id or "").strip()[:6]
+        current = key or project
+        found: dict[str, str] = {}
+        if self.name.strip() and current:
+            found[self.name.strip()] = project if self._api.is_vertex and project else current
+        if current:
+            found[GEMINI_AI_STUDIO_PROVIDER] = key or current
+            found[GEMINI_VERTEX_PROVIDER] = project or current
+        return found
 
     async def invoke(self, **kwargs: Any) -> NodeOutput:
         request = kwargs["request"]
@@ -103,7 +121,8 @@ class GeminiImageChannel(ProviderChannel):
             ) from exc
 
         # 消费统计维度:区分 VertexAI / AI Studio
-        output.metadata.setdefault("channel", "gemini-vertex" if self._api.is_vertex else "gemini-ai-studio")
+        stored = GEMINI_VERTEX_PROVIDER if self._api.is_vertex else GEMINI_AI_STUDIO_PROVIDER
+        output.metadata.setdefault("channel", stored)
         return output
 
 

@@ -48,6 +48,9 @@ class SeedreamAdapter(Adapter):
             return "未配置火山 ARK Base URL,请在 Web 控制台配置 Seedance_BaseURL_ark"
         return "Seedream 供应商不可用"
 
+    def audit_key_prefix(self) -> str:
+        return (self.api.api_key or "")[:6]
+
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(
             supported_tasks=["image"],

@@ -50,6 +50,12 @@ class AdapterChannel(ProviderChannel):
         # rh_app / gemini-image: 无远程 cancel API
         return self.name == "comfyui"
 
+    def audit_key_prefix(self) -> str:
+        adapter = self._adapter()
+        if adapter is None:
+            return ""
+        return adapter.audit_key_prefix()
+
     def _enable_gate(self, node: Any = None) -> str | None:
         from ..utils.core.pipeline import NodeDef
 

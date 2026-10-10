@@ -23,6 +23,10 @@ class TxAiartAdapter(Adapter):
     async def get_unavailable_reason(self) -> str:
         return "未配置腾讯云混元扩图凭证,请在 Web 控制台填写 TX_AIArt_secret_id / TX_AIArt_secret_key"
 
+    def audit_key_prefix(self) -> str:
+        # 腾讯云用 SecretId 标识账号,账单列记它的前 6 位
+        return (self.api.secret_id or "")[:6]
+
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(
             supported_tasks=["image"],
