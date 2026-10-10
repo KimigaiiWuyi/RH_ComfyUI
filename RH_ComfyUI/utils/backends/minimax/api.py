@@ -268,15 +268,17 @@ class MiniMaxAPI:
 
         from ....core.telemetry.wire_capture import set_wire_from_http_body
 
-        # subject_reference 可能含 data URL,仅审计非敏感字段摘要
-        audit_body = {k: ("[masked]" if k == "subject_reference" else v) for k, v in request_body.items()}
-        set_wire_from_http_body(audit_body, prompt=prompt)
+        set_wire_from_http_body(request_body, prompt=prompt)
 
         resp = await self._request("POST", self.generation_url, headers=self._headers(), json=request_body)
 
         if isinstance(resp, int):
             logger.error(f"[MiniMax] 图片生成失败，错误状态码: {resp}")
             return resp
+
+        from ....core.telemetry.wire_capture import set_vendor_raw
+
+        set_vendor_raw(resp)
 
         try:
             data = resp.get("data", {})
@@ -666,6 +668,8 @@ class MiniMaxAPI:
             return 500
 
         # 2. 轮询任务状态
+        from ....core.telemetry.wire_capture import set_vendor_raw
+
         elapsed = 0.0
         while elapsed < max_poll_time:
             await asyncio.sleep(poll_interval)
@@ -680,6 +684,7 @@ class MiniMaxAPI:
             logger.info(f"[MiniMax] T2A 任务状态: {status} (elapsed={elapsed:.0f}s)")
 
             if status == "success":
+                set_vendor_raw(query_resp)
                 file_id = query_resp.get("file_id")
                 if not file_id:
                     logger.error("[MiniMax] T2A 任务成功但缺少 file_id")
@@ -690,6 +695,7 @@ class MiniMaxAPI:
                 return audio_data
 
             if status == "failed":
+                set_vendor_raw(query_resp)
                 base_resp = query_resp.get("base_resp", {})
                 logger.error(f"[MiniMax] T2A 任务失败: {base_resp}")
                 return 500

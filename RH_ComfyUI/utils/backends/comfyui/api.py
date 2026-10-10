@@ -306,6 +306,17 @@ class ComfyUIAPI:
                     logger.info(result)
                 else:
                     logger.debug(f"Prompt {prompt_id} history is empty.")
+            if isinstance(result, dict) and result:
+                from ....core.telemetry.wire_capture import set_vendor_raw
+
+                # history 里的 prompt 是整份工作流,请求体已经另存
+                entry = result.get(prompt_id)
+                audit: dict[str, object] = {"prompt_id": prompt_id}
+                if isinstance(entry, dict):
+                    for keep in ("status", "outputs", "meta"):
+                        if keep in entry:
+                            audit[keep] = entry[keep]
+                set_vendor_raw(audit)
             return result
 
     async def queue_prompt(self, prompt: Dict[str, Any]) -> Dict[str, Any]:

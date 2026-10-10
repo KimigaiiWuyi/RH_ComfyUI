@@ -184,8 +184,11 @@ class GeminiImageAPI:
             config_kw["thinking_config"] = types.ThinkingConfig(thinking_level=thinking_level)
         config = types.GenerateContentConfig(**config_kw)
 
-        from ....core.telemetry.wire_capture import set_wire_audit
+        from ....core.telemetry.wire_capture import set_vendor_raw, set_wire_audit
 
+        image_parts: list[dict[str, str | bytes]] = [
+            {"mime_type": image_mime_from_bytes(img), "data": img} for img in (images or [])
+        ]
         set_wire_audit(
             prompt=prompt,
             request={
@@ -194,7 +197,8 @@ class GeminiImageAPI:
                 "aspect_ratio": aspect_ratio,
                 "image_size": image_size,
                 "thinking_level": thinking_level,
-                "num_images": len(images or []),
+                "num_images": len(image_parts),
+                "images": image_parts,
                 "response_modalities": ["IMAGE"],
                 "api": "generate_content",
             },
@@ -205,6 +209,7 @@ class GeminiImageAPI:
             contents=contents,
             config=config,
         )
+        set_vendor_raw(_gemini_vendor_payload(response))
         logger.info(f"[Gemini-Image] 完成 model={model} {_summarize_generate(response)}")
         logger.debug(f"[Gemini-Image] 原始响应: {_safe_dump(response)}")
 
@@ -232,6 +237,9 @@ class GeminiImageAPI:
         client = self._build_client()
         interaction = await client.aio.interactions.get(interaction_id)
         interaction = await self._poll_until_done(client, interaction, interval=1.5, max_wait=3600.0)
+        from ....core.telemetry.wire_capture import set_vendor_raw
+
+        set_vendor_raw(_gemini_vendor_payload(interaction))
         status = str(getattr(interaction, "status", None) or "").lower()
         if status in {"failed", "cancelled", "canceled"}:
             raise RuntimeError(f"Gemini interaction 失败: status={status}")
@@ -367,6 +375,29 @@ def _find_generate_image(response: Any) -> tuple[Optional[bytes], Optional[str]]
             if uri:
                 return None, str(uri)
     return None, None
+
+
+def _gemini_vendor_payload(response: object) -> dict[str, object]:
+    """SDK 对象转可落库的 dict;没有 model_dump 时只留结构摘要。"""
+    dump = getattr(response, "model_dump", None)
+    payload: object = None
+    if callable(dump):
+        try:
+            payload = dump(mode="json", exclude_none=True)
+        except TypeError:
+            try:
+                payload = dump()
+            except Exception:  # noqa: BLE001 — SDK 对象不可序列化时退回摘要
+                payload = None
+        except Exception:  # noqa: BLE001
+            payload = None
+    if isinstance(payload, dict):
+        copied: dict[str, object] = {}
+        for raw_key, item in payload.items():
+            if isinstance(raw_key, str):
+                copied[raw_key] = item
+        return copied
+    return {"summary": _summarize_generate(response)}
 
 
 def _summarize_generate(response: Any) -> str:

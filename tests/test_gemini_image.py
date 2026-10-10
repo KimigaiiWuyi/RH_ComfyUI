@@ -1,5 +1,6 @@
 """Gemini 生图后端(google-genai SDK / Interactions API)— 双模判定 + 图片解析 + 接线"""
 
+import json
 import base64
 import asyncio
 from types import SimpleNamespace
@@ -356,14 +357,27 @@ def test_nano_banana_21_generate_content_config(monkeypatch):
             self.file_data = None
             self.text = None
 
+    class _Response:
+        def __init__(self) -> None:
+            self.candidates = [type("C", (), {"content": type("K", (), {"parts": [_Part()]})()})()]
+
+        def model_dump(self, **_kwargs: object) -> dict[str, object]:
+            blob = b"\x89PNG" * 80
+            return {
+                "model_version": "gemini-nano-banana-2.1",
+                "usage_metadata": {"total_token_count": 12},
+                "candidates": [
+                    {
+                        "finish_reason": "STOP",
+                        "content": {"parts": [{"inline_data": {"mime_type": "image/png", "data": blob}}]},
+                    }
+                ],
+            }
+
     class _AioModels:
         async def generate_content(self, **kwargs):
             seen.update(kwargs)
-            return type(
-                "R",
-                (),
-                {"candidates": [type("C", (), {"content": type("K", (), {"parts": [_Part()]})()})()]},
-            )()
+            return _Response()
 
     class _Aio:
         models = _AioModels()
@@ -373,16 +387,39 @@ def test_nano_banana_21_generate_content_config(monkeypatch):
 
     monkeypatch.setattr(gapi.GeminiImageAPI, "_build_client", lambda self: _Client())
     api = gapi.GeminiImageAPI()
-    data = asyncio.run(
-        api.generate(
+
+    async def _run() -> tuple[bytes, dict[str, object], dict[str, object]]:
+        from RH_ComfyUI.core.telemetry.wire_capture import get_vendor_raw, get_wire_audit
+
+        ref = b"\x89PNG\r\n\x1a\n" + b"x" * 20
+        image = await api.generate(
             model="gemini-nano-banana-2.1",
             prompt="cat",
+            images=[ref],
             aspect_ratio="1:8",
             image_size="4K",
             thinking_level="high",
         )
-    )
+        wire = get_wire_audit().get("request")
+        body = wire if isinstance(wire, dict) else {}
+        return image, get_vendor_raw(), body
+
+    data, vendor, body = asyncio.run(_run())
     assert data == b"\x89PNG"
+    assert body["num_images"] == 1
+    images = body["images"]
+    assert isinstance(images, list)
+    assert images == [{"mime_type": "image/png", "data": "<bytes len=28>"}]
+    assert vendor["model_version"] == "gemini-nano-banana-2.1"
+    usage = vendor["usage_metadata"]
+    assert isinstance(usage, dict)
+    assert usage["total_token_count"] == 12
+    stored = json.dumps(vendor)
+    assert "\\x89PNG" not in stored
+    assert b"\x89PNG".hex() not in stored
+    parts = vendor["candidates"]
+    assert isinstance(parts, list)
+    assert "<bytes len=" in stored
     assert seen["model"] == "gemini-nano-banana-2.1"
     config = seen["config"]
     assert isinstance(config, types.GenerateContentConfig)

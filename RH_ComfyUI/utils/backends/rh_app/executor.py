@@ -320,6 +320,9 @@ class RHAppAdapter(Adapter):
             TASK_MIME_MAP.get(request.task_type, "application/octet-stream"),
         )
 
+        from ....core.telemetry.wire_capture import get_vendor_raw, attach_file_url
+
+        captured = get_vendor_raw()
         if text_content is not None and not file_url:
             data = str(text_content).encode("utf-8")
             return NodeOutput(
@@ -327,6 +330,7 @@ class RHAppAdapter(Adapter):
                 output_type="image",
                 data=data,
                 mime_type="text/plain",
+                raw=captured,
             )
 
         if not file_url:
@@ -341,7 +345,7 @@ class RHAppAdapter(Adapter):
             output_type=output_type.value,
             data=file_data,
             mime_type=mime_type,
-            raw={"file_url": file_url},
+            raw=attach_file_url(captured, file_url) if isinstance(file_url, str) else captured,
         )
 
 

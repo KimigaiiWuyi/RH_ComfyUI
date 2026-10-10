@@ -272,10 +272,16 @@ class RHAppAPI:
             status = result.get("status", "")
 
             if status == "SUCCESS":
+                from ....core.telemetry.wire_capture import set_vendor_raw
+
+                set_vendor_raw(result)
                 logger.success(f"[RHApp] 任务 {task_id} 完成")
                 return result.get("results", [])
 
             if status == "FAILED":
+                from ....core.telemetry.wire_capture import set_vendor_raw
+
+                set_vendor_raw(result)
                 error_msg = result.get("errorMessage", "未知错误")
                 failed_reason = result.get("failedReason", {})
                 if isinstance(failed_reason, dict) and failed_reason:

@@ -242,7 +242,7 @@ async def generate_image_result(
             "size": size,
             "background": background,
             "output_format": output_format,
-            "num_images": n_refs,
+            "images": list(image_list or []),
         },
     )
 

@@ -46,6 +46,8 @@ class ActiveGeneration:
     # wire 镜像:ContextVar 丢失时(子任务) record_task 仍可读最终载荷
     wire_prompt: str | None = None
     wire_request: Any | None = None
+    # 厂商回包镜像;wait_for 子任务里的 ContextVar 写不回父任务
+    vendor_raw: dict[str, object] | None = None
     _token: int = field(default=0, repr=False)
     _ctx_token: Token["ActiveGeneration | None"] | None = field(default=None, repr=False)
 

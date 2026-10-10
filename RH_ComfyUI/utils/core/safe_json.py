@@ -31,6 +31,9 @@ _BASE64_FIELD_NAMES = frozenset(
     }
 )
 _NORMALIZED_BASE64_FIELD_NAMES = frozenset(re.sub(r"[^a-z0-9]", "", x) for x in _BASE64_FIELD_NAMES)
+# image/InputImage 里的裸 base64 也要脱敏。URL 含 :/ 不会命中,不能整字段强制替换。
+_IMAGE_PAYLOAD_FIELDS = frozenset({"image", "images", "inputimage", "inputimages"})
+_IMAGE_BARE_B64_MIN = 16
 # 新格式 <base64://{sha10}#{len}>；兼容旧 <base64 len=N>
 _MASKED_BASE64_RE = re.compile(r"^(?:<base64 len=\d+>|<base64://[0-9a-f]+#\d+>)$", re.IGNORECASE)
 _MASKED_BYTES_RE = re.compile(r"^<bytes len=\d+>$")
@@ -47,16 +50,27 @@ def _base64_token(payload: str) -> str:
     return f"<base64://{digest}#{len(compact)}>"
 
 
-def _is_base64_field(name: str | None) -> bool:
+def _normalized_field(name: str | None) -> str:
     if not name:
+        return ""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _is_base64_field(name: str | None) -> bool:
+    normalized = _normalized_field(name)
+    if not normalized:
         return False
-    normalized = re.sub(r"[^a-z0-9]", "", name.lower())
     if normalized in _NORMALIZED_BASE64_FIELD_NAMES:
         return True
     return normalized.endswith("base64") or normalized.endswith("b64json")
 
 
-def _mask_base64_string(value: str, *, force: bool = False) -> str:
+def _is_image_payload_field(name: str | None) -> bool:
+    normalized = _normalized_field(name)
+    return bool(normalized) and normalized in _IMAGE_PAYLOAD_FIELDS
+
+
+def _mask_base64_string(value: str, *, field_name: str | None = None, force: bool = False) -> str:
     """替换字符串中的 base64 内容,保留非媒体文本原样。"""
     if _MASKED_BASE64_RE.fullmatch(value) or _MASKED_BYTES_RE.fullmatch(value) or _MASKED_DATA_URL_RE.fullmatch(value):
         return value
@@ -66,7 +80,10 @@ def _mask_base64_string(value: str, *, force: bool = False) -> str:
         return f"{prefix}{_base64_token(payload)}"
     if force:
         return _base64_token(value)
-    if len(value) >= _BARE_B64_THRESHOLD and _BARE_B64_RE.fullmatch(value):
+    bare = _BARE_B64_RE.fullmatch(value) is not None
+    if bare and _is_image_payload_field(field_name) and len(value) >= _IMAGE_BARE_B64_MIN:
+        return _base64_token(value)
+    if bare and len(value) >= _BARE_B64_THRESHOLD:
         return _base64_token(value)
     return value
 
@@ -90,7 +107,7 @@ def _normalize(node: Any, *, seen: set[int], field_name: str | None = None) -> A
         return _normalize(node.value, seen=seen, field_name=field_name)
 
     if isinstance(node, str):
-        return _mask_base64_string(node, force=_is_base64_field(field_name))
+        return _mask_base64_string(node, field_name=field_name, force=_is_base64_field(field_name))
 
     if isinstance(node, (bytes, bytearray, memoryview)):
         return f"<bytes len={len(node)}>"

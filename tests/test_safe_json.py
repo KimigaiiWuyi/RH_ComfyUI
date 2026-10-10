@@ -69,3 +69,22 @@ def test_mask_body_handles_dataclass_enum_and_cycles() -> None:
     assert masked["payload"] == {"name": "test", "data": "<bytes len=3>", "kind": "sample"}
     assert masked["self"] == "<circular reference>"
     json.loads(dump_body(cycle))
+
+
+def test_mask_body_masks_image_base64_and_keeps_urls() -> None:
+    short_b64 = "AQIDBAUGBwgJCgsMDQ4PEA=="
+    body = {
+        "image": "https://cdn.example/a.png",
+        "images": [short_b64, "ordinary"],
+        "InputImage": short_b64,
+        "prompt": short_b64,
+    }
+
+    masked = mask_body(body)
+
+    assert masked["image"] == "https://cdn.example/a.png"
+    assert masked["images"][0].startswith("<base64://")
+    assert masked["images"][0].endswith(f"#{len(short_b64)}>")
+    assert masked["images"][1] == "ordinary"
+    assert masked["InputImage"].startswith("<base64://")
+    assert masked["prompt"] == short_b64

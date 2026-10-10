@@ -80,19 +80,6 @@ class SeedreamAdapter(Adapter):
         if request.images:
             await self._materialize_images(request.images, request.params)
 
-        from ....core.telemetry.wire_capture import set_wire_audit
-
-        set_wire_audit(
-            prompt=request.prompt or "",
-            request={
-                "model": request.params.get("model") or node.backend_model or "",
-                "prompt": request.prompt or "",
-                "ratio": request.ratio,
-                "size_mode": request.params.get("size_mode") or request.params.get("image_size"),
-                "num_images": len(request.images or []),
-                "image_urls": list(request.params.get("_image_urls") or []),
-            },
-        )
         await _emit(on_progress, ProgressEvent(stage="running", percent=15, message="Seedream 生成中"))
         result = await node.mapper_func(request, self.api)
         await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="完成"))

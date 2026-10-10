@@ -325,6 +325,9 @@ class GPTImage2API:
             else:
                 request_body["image"] = _enc()
 
+        from ....core.telemetry.wire_capture import set_wire_from_http_body
+
+        set_wire_from_http_body(request_body, prompt=prompt)
         resp = await self._request("POST", self.images_url, headers=headers, json=request_body)
 
         if isinstance(resp, int):

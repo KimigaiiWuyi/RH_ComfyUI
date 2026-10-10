@@ -727,6 +727,9 @@ async def _resume_rh_app(
     }
     mime = ext_mime.get(output_type_str, "image/png")
     kind = "video" if output_type_str == "mp4" else "image"
+    from ..telemetry.wire_capture import get_vendor_raw, attach_file_url
+
+    vendor = get_vendor_raw()
     if text_content is not None and not file_url:
         return GenerationResult(
             kind="text",
@@ -734,6 +737,7 @@ async def _resume_rh_app(
             backend="rh_app",
             data=str(text_content).encode("utf-8"),
             mime_type="text/plain",
+            raw=vendor or None,
             metadata={"task_id": vendor_task_id, "channel": "rh_app", "resumed": True},
         )
     if not file_url:
@@ -748,7 +752,7 @@ async def _resume_rh_app(
         backend="rh_app",
         data=data,
         mime_type=mime,
-        raw={"file_url": file_url},
+        raw=attach_file_url(vendor, file_url) if isinstance(file_url, str) else (vendor or None),
         metadata={"task_id": vendor_task_id, "channel": "rh_app", "resumed": True},
     )
 
@@ -825,12 +829,15 @@ async def _resume_comfyui(
     if not data:
         raise ResumeFailedError(f"ComfyUI 无法从 history 提取产物 prompt_id={vendor_task_id}")
 
+    from ..telemetry.wire_capture import get_vendor_raw
+
     return GenerationResult(
         kind=kind,
         model=model,
         backend="comfyui",
         data=data,
         mime_type=mime,
+        raw=get_vendor_raw() or None,
         metadata={
             "task_id": vendor_task_id,
             "channel": channel or ("runninghub" if api.is_runninghub else "comfyui-local"),
@@ -855,12 +862,15 @@ async def _resume_gemini(
     if not payload:
         raise ResumeFailedError("Gemini 响应未包含图片")
 
+    from ..telemetry.wire_capture import get_vendor_raw
+
     return GenerationResult(
         kind="image",
         model=model,
         backend="gemini-image",
         data=payload,
         mime_type="image/png",
+        raw=get_vendor_raw() or None,
         metadata={"task_id": vendor_task_id, "channel": "gemini", "resumed": True},
     )
 

@@ -132,10 +132,13 @@ async def gemini_flash_image_mapper(
         image_size=image_size,
         thinking_level=thinking_level,
     )
+    from ...core.telemetry.wire_capture import get_vendor_raw
+
     return NodeOutput(
         status="ok",
         output_type="image",
         data=data,
         mime_type="image/png",
         outputs={"image": data},
+        raw=get_vendor_raw(),
     )

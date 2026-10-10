@@ -206,6 +206,9 @@ class TxAiartAPI:
             "LogoAdd": 0,
         }
         payload = json.dumps(body_obj, ensure_ascii=False, separators=(",", ":"))
+        from ....core.telemetry.wire_capture import set_wire_from_http_body
+
+        set_wire_from_http_body(body_obj)
         url = f"https://{self.host}"
         last_error = "未知错误"
 
@@ -267,6 +270,9 @@ class TxAiartAPI:
                 last_error = "响应缺少 ResultImage"
                 await asyncio.sleep(1.5)
                 continue
+            from ....core.telemetry.wire_capture import set_vendor_raw
+
+            set_vendor_raw(response)
             return await asyncio.to_thread(decode_result_image, result)
 
         raise RuntimeError(f"腾讯云扩图失败: {last_error}")

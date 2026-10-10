@@ -206,6 +206,9 @@ async def seedream_mapper(request, api: "SeedreamAPI") -> NodeOutput:
     if request.seed is not None:
         body["seed"] = int(request.seed)
 
+    from ...core.telemetry.wire_capture import set_wire_from_http_body
+
+    set_wire_from_http_body(body)
     result = await api.generate(body)
 
     pil_image = result["image"]

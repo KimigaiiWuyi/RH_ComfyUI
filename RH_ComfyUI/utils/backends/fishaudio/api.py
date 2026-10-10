@@ -154,6 +154,9 @@ class FishAudioAPI:
         headers = {**self._auth_header(), "Content-Type": "application/json", "model": engine}
         url = f"{self.base_url}/v1/tts"
         logger.info(f"[FishAudio] 合成: model={engine}, speakers={speaker_n}, text={text[:50]}...")
+        from ....core.telemetry.wire_capture import set_wire_from_http_body
+
+        set_wire_from_http_body(body, prompt=text)
 
         try:
             async with RetryingAsyncClient(timeout=_TIMEOUT) as client:
@@ -165,6 +168,24 @@ class FishAudioAPI:
                     hint = f"(请确认「启用的 Fish Audio 模型」已勾选 {engine})" if resp.status_code == 400 else ""
                     return f"HTTP {resp.status_code}: {detail}{hint}"
                 audio = resp.content
+                if audio:
+                    from ....core.telemetry.wire_capture import set_vendor_raw
+
+                    response_headers: dict[str, str] = {}
+                    for header_name in ("x-request-id", "x-trace-id", "request-id", "cf-ray"):
+                        header_value = resp.headers.get(header_name)
+                        if header_value:
+                            response_headers[header_name] = header_value
+                    # TTS 正文是 mp3,没有 JSON 回包,只留状态和请求号
+                    set_vendor_raw(
+                        {
+                            "status_code": resp.status_code,
+                            "content_type": resp.headers.get("content-type", ""),
+                            "content_length": len(audio),
+                            "body": f"<audio {len(audio)} bytes>",
+                            "headers": response_headers,
+                        }
+                    )
         except httpx.HTTPError as e:
             logger.warning(f"[FishAudio] 合成网络异常: {e}")
             return f"网络异常: {e}"
@@ -215,6 +236,16 @@ class FishAudioAPI:
 
         url = f"{self.base_url}/v1/asr"
         headers = {**self._auth_header(), "model": engine}
+        from ....core.telemetry.wire_capture import set_wire_from_http_body
+
+        set_wire_from_http_body(
+            {
+                "model": engine,
+                "language": language or "",
+                "ignore_timestamps": ignore_timestamps,
+                "audio": audio,
+            }
+        )
         logger.info(
             f"[FishAudio] 识别: model={engine}, lang={language or 'auto'}, "
             f"timestamps={not ignore_timestamps}, bytes={len(audio)}"

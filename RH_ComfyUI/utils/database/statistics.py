@@ -391,10 +391,11 @@ async def record_task(
     """
     try:
         from .models import RHComfyuiTaskRecord
+        from ...core.telemetry.wire_capture import get_vendor_raw
 
-        raw_json = ""
-        if result is not None and result.raw:
-            raw_json = _safe_json_dumps(result.raw, RAW_RESPONSE_MAX_BYTES)
+        # result.raw 优先(Seedance 等已脱敏);否则用本次请求里记下的厂商回包
+        raw_payload = result.raw if result is not None and result.raw else get_vendor_raw()
+        raw_json = _safe_json_dumps(raw_payload, RAW_RESPONSE_MAX_BYTES) if raw_payload else ""
 
         saved_files_json = ""
         if result is not None and result.metadata:

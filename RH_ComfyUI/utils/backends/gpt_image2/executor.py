@@ -67,19 +67,6 @@ class GPTImage2Adapter(Adapter):
         if node.backend_model:
             request.params["model"] = node.backend_model
 
-        from ....core.telemetry.wire_capture import set_wire_audit
-
-        set_wire_audit(
-            prompt=request.prompt or "",
-            request={
-                "model": request.params.get("model") or node.backend_model or "gpt-image-2",
-                "prompt": request.prompt or "",
-                "ratio": request.ratio,
-                "width": request.width,
-                "height": request.height,
-                "num_images": len(request.images or []),
-            },
-        )
         await _emit(on_progress, ProgressEvent(stage="running", percent=10, message="GPT-Image2 生成中"))
         result = await node.mapper_func(request, self.api)
         await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="完成"))

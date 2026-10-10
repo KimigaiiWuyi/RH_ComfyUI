@@ -205,13 +205,18 @@ async def dispatch(request: GenerationRequest, ctx: DispatchContext) -> Generati
     record_id: Optional[int] = None
     active_handle: ActiveGeneration | None = None
     # 清空上游 wire 快照;backend 在 POST 前 set_wire_audit,record 时取最终 body
-    from ..telemetry.wire_capture import clear_wire_audit
+    from ..telemetry.wire_capture import get_vendor_raw, clear_wire_audit
 
     clear_wire_audit()
     start = time.monotonic()
     output: Optional[NodeOutput] = None
 
     async def _commit(done: NodeOutput) -> GenerationResult:
+        # 同步出图(Gemini 等)只把字节交上来,回包在 set_vendor_raw
+        if not done.raw:
+            captured = get_vendor_raw()
+            if captured:
+                done.raw = captured
         done_result = GenerationResult.from_node_output(done)
         done_result.model_used = model.display_name
         done_result.pipeline_used = model.name

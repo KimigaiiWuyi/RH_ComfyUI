@@ -56,19 +56,6 @@ class FishAudioAdapter(Adapter):
         if node.mapper_func is None:
             raise RuntimeError(f"Fish Audio 节点 {node.name} 缺少 mapper_func")
 
-        from ....core.telemetry.wire_capture import set_wire_audit
-
-        set_wire_audit(
-            prompt=request.prompt or "",
-            request={
-                "backend": "fishaudio",
-                "model": node.backend_model or node.name,
-                "task": str(getattr(getattr(node, "task_type", None), "value", "") or ""),
-                "prompt": request.prompt or "",
-                "mood": request.mood,
-                "voice_id": request.voice_id,
-            },
-        )
         # 区分提示语:按 node.task_type 推断(TTS / ASR)
         if getattr(node, "task_type", None) is not None and str(node.task_type.value) == "asr":
             await _emit(on_progress, ProgressEvent(stage="running", percent=20, message="Fish Audio 识别中"))

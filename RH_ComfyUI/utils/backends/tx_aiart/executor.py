@@ -46,17 +46,6 @@ class TxAiartAdapter(Adapter):
         if not ratio:
             raise RuntimeError(f"{node.display_name}:缺少 ratio")
 
-        from ....core.telemetry.wire_capture import set_wire_audit
-
-        set_wire_audit(
-            prompt=request.prompt or "",
-            request={
-                "model": node.name,
-                "action": "ImageOutpainting",
-                "ratio": ratio,
-                "region": self.api.region,
-            },
-        )
         await _emit(on_progress, ProgressEvent(stage="running", percent=15, message="腾讯云扩图中"))
         png = await self.api.image_outpainting(request.images[0], ratio)
         await _emit(on_progress, ProgressEvent(stage="done", percent=100, message="完成"))

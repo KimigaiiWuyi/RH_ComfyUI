@@ -237,3 +237,111 @@ def test_image_core_params_keep_ratio_and_image_size() -> None:
     camel_core = statistics._extract_core_params(camel)
     assert camel_core["ratio"] == "9:16"
     assert camel_core["resolution"] == "2K"
+
+
+def test_record_task_stores_vendor_raw_when_result_has_none(monkeypatch) -> None:
+    """同步出图没填 result.raw 时,仍把 set_vendor_raw 的回包写入统计。"""
+    from RH_ComfyUI.core.telemetry.wire_capture import set_vendor_raw, clear_wire_audit
+
+    captured: dict = {}
+
+    async def fake_insert(**kwargs):
+        captured.update(kwargs)
+        return 7
+
+    monkeypatch.setattr(RHComfyuiTaskRecord, "insert_task_record", fake_insert)
+    request = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    node = SimpleNamespace(
+        name="banana2.1",
+        backend="gemini-image",
+        provider="",
+        backend_model="",
+        backend_models={},
+        point_cost=4,
+    )
+
+    async def _run() -> None:
+        clear_wire_audit()
+        set_vendor_raw(
+            {
+                "model_version": "gemini-nano-banana-2.1",
+                "usage_metadata": {"total_token_count": 3},
+                "candidates": [{"content": {"parts": [{"inline_data": {"data": "A" * 800}}]}}],
+            }
+        )
+        await statistics.record_task(
+            request=request,
+            result=None,
+            node=node,
+            status="ok",
+            elapsed_ms=8,
+        )
+        clear_wire_audit()
+
+    asyncio.run(_run())
+    stored = json.loads(captured["raw_response_json"])
+    assert stored["model_version"] == "gemini-nano-banana-2.1"
+    assert stored["usage_metadata"]["total_token_count"] == 3
+    assert "A" * 800 not in captured["raw_response_json"]
+    assert "<base64://" in captured["raw_response_json"]
+
+
+def test_set_wire_audit_masks_bytes_at_the_choke_point() -> None:
+    """调用方传原始 bytes,占位由 set_wire_audit 统一生成。"""
+    from RH_ComfyUI.core.telemetry.wire_capture import get_wire_audit, set_wire_audit, clear_wire_audit
+
+    clear_wire_audit()
+    set_wire_audit(
+        prompt="cat",
+        request={
+            "images": [{"mime_type": "image/png", "data": b"\x89PNG" + b"x" * 20}],
+            "image": "https://cdn.example/a.png",
+        },
+    )
+    body = get_wire_audit()["request"]
+    assert isinstance(body, dict)
+    assert body["images"] == [{"mime_type": "image/png", "data": "<bytes len=24>"}]
+    assert body["image"] == "https://cdn.example/a.png"
+    clear_wire_audit()
+
+
+def test_set_vendor_raw_keeps_urls_and_drops_base64() -> None:
+    """回包与请求同一套脱敏:URL 原样留下,bytes / base64 不进统计。"""
+    from RH_ComfyUI.core.telemetry.wire_capture import get_vendor_raw, set_vendor_raw, attach_file_url, clear_wire_audit
+
+    payload = "A" * 400
+    long_text = "出错。" * 5000
+    clear_wire_audit()
+    set_vendor_raw(
+        {
+            "image_url": "https://cdn.example/a.png",
+            "images": [payload],
+            "preview": f"data:image/png;base64,{payload}",
+            "b64_json": payload,
+            "note": "ok",
+            "trace": long_text,
+            "audio": b"mp3-bytes",
+        }
+    )
+    stored = get_vendor_raw()
+    dumped = json.dumps(stored)
+    assert stored["image_url"] == "https://cdn.example/a.png"
+    assert stored["note"] == "ok"
+    images = stored["images"]
+    assert isinstance(images, list)
+    assert str(images[0]).startswith("<base64://")
+    preview = stored["preview"]
+    assert isinstance(preview, str)
+    assert preview.startswith("data:image/png;base64,<base64://")
+    assert stored["b64_json"] == "<omitted>"
+    assert stored["audio"] == "<bytes len=9>"
+    trace = stored["trace"]
+    assert isinstance(trace, str)
+    assert trace.startswith("<omitted ")
+    assert payload not in dumped
+    assert long_text not in dumped
+    merged = attach_file_url(stored, "https://cdn.example/out.png")
+    assert merged["file_url"] == "https://cdn.example/out.png"
+    assert merged["image_url"] == "https://cdn.example/a.png"
+    assert attach_file_url({}, "https://cdn.example/out.png") == {"file_url": "https://cdn.example/out.png"}
+    clear_wire_audit()
