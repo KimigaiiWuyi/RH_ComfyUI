@@ -1,6 +1,6 @@
 """连线参考音在语音 normalize() 里提升成克隆端口。
 
-画布计费前的 voice_refs 查不到 schema 时会静默跳过，mapper 又只读
+调用方计费前查不到 schema 时会静默跳过，mapper 又只读
 reference_audio。这里用注册表里的真实模型走 normalize，确认兜底改写，
 并且不盖掉调用方已经写好的音色。
 """

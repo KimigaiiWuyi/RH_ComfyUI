@@ -74,9 +74,9 @@ async def init_pipeline_system() -> None:
 
     _ = (record_task, RHComfyuiTaskRecord)
 
-    from .utils.database.key_prefix_backfill import backfill_historical_key_prefixes
+    from .utils.database.key_prefix_backfill import schedule_key_prefix_backfill
 
-    await backfill_historical_key_prefixes()
+    schedule_key_prefix_backfill()
 
     logger.info(
         f"[RHComfyUI] 初始化完成: {len(pipeline_registry.all_pipelines())} 个 Pipeline, "

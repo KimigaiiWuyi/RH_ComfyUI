@@ -27,8 +27,8 @@ from .generation import AIGCGenerationBase
 from ..schema.types import MediaRef, PortSpec, PortType
 from ..schema.request import TaskType, GenerationRequest
 
-# 画布把 @ 音频收成这个代号，序号与 audio_refs 下标对齐、从 1 起。
-# 与 canvas_backend voice_refs 同一套正则：计费前改一次，这里在进 mapper 前再兜底。
+# 调用方把 @ 音频收成这个代号，序号与 audio_refs 下标对齐、从 1 起。
+# 计费前改一次，进 mapper 前再兜底，两边用同一套正则。
 _AUDIO_MENTION_RE = re.compile(r"\[@参考音频(\d+)\]")
 _SPK_PLACEHOLDER_RE = re.compile(r"<<SPK:(\d+)>>")
 _SPEAKER_TAG_RE = re.compile(r"<\|speaker:(\d+)\|>")
@@ -38,7 +38,7 @@ _BLANK_RUN_RE = re.compile(r"\n{3,}")
 
 
 def _collapse_inline_spacing(text: str) -> str:
-    """折叠内联空白，保留换行。与 voice_refs / 前端 stripMentions 的收尾一致。"""
+    """折叠内联空白，保留换行。与调用方去掉 @ 提及后的收尾一致。"""
     out = _INLINE_SPACING_RE.sub(" ", text)
     out = _INLINE_EOL_RE.sub("\n", out)
     return _BLANK_RUN_RE.sub("\n\n", out).strip()
@@ -128,7 +128,7 @@ class DigitalHumanSpeechBase(AIGCGenerationBase):
     def _adopt_linked_voice(self, request: GenerationRequest) -> GenerationRequest:
         """audio_refs 里已有字节、但克隆端口还空着时，补上音色。
 
-        画布在计费前按 schema 做过同样的改写。schema 查不到时那一步会静默跳过，
+        调用方在计费前按 schema 做过同样的改写。schema 查不到时那一步会静默跳过，
         任务仍成功，只是走了内置默认音色。这里兜住所有入口。
         调用方已经写了 reference_audio / reference_audios 时不动，避免盖掉显式音色。
         不清理 audio_refs：ASR 和多模态视频还要读它。

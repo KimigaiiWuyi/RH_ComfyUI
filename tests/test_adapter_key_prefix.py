@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+
 from pytest import MonkeyPatch
 
 from RH_ComfyUI.models.bridge import AdapterChannel
@@ -87,4 +90,61 @@ def test_historical_row_uses_provider_then_backend() -> None:
     assert prefix_for_row("gemini-image", "gemini-vertex", prefixes) == "projxy"
     assert prefix_for_row("gemini-image", "gemini", prefixes) == ""
     assert prefix_for_row("fishaudio", "other-vendor", prefixes) == ""
+    assert prefix_for_row("fishaudio", "other-vendor", prefixes, "fishaudio") == ""
     assert prefix_for_row("seedance", "", prefixes) == ""
+    slot_prefixes = {"seedance": "sd-key", "ark": "ark-ke", "gateway_slot1_seedance": "gwkey1"}
+    assert prefix_for_row("seedance", "", slot_prefixes, "gateway_slot1_seedance") == "gwkey1"
+    assert prefix_for_row("seedance", "", slot_prefixes, "ark") == "ark-ke"
+    assert prefix_for_row("seedance", "", slot_prefixes, "") == "sd-key"
+    assert prefix_for_row("seedance", "ark", slot_prefixes, "gateway_slot1_seedance") == "ark-ke"
+
+
+def test_backfill_skips_when_marker_exists(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    from RH_ComfyUI.utils.database import key_prefix_backfill as backfill
+
+    marker = tmp_path / "key_prefix_backfill.done"
+    marker.write_text("done", encoding="utf-8")
+    monkeypatch.setattr(backfill, "_marker_path", lambda: marker)
+
+    async def _boom(**_kwargs: object) -> list[tuple[int, str, str]]:
+        raise AssertionError("marker exists")
+
+    monkeypatch.setattr(
+        "RH_ComfyUI.utils.database.models.RHComfyuiTaskRecord.list_blank_key_prefix_page",
+        staticmethod(_boom),
+    )
+    assert asyncio.run(backfill.backfill_historical_key_prefixes()) == 0
+
+
+def test_backfill_pages_and_writes_marker(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    from RH_ComfyUI.utils.database import key_prefix_backfill as backfill
+
+    marker = tmp_path / "nested" / "key_prefix_backfill.done"
+    monkeypatch.setattr(backfill, "_marker_path", lambda: marker)
+    monkeypatch.setattr(backfill, "collect_audit_prefixes", lambda: {"fishaudio": "fish-S"})
+    seen: list[dict[int, str]] = []
+
+    async def _page(*, after_id: int, limit: int) -> list[tuple[int, str, str, str]]:
+        del limit
+        if after_id == 0:
+            return [
+                (1, "fishaudio", "fishaudio", ""),
+                (2, "fishaudio", "other-vendor", "gateway_slot1_seedance"),
+            ]
+        return []
+
+    async def _apply(updates: dict[int, str]) -> int:
+        seen.append(updates)
+        return len(updates)
+
+    monkeypatch.setattr(
+        "RH_ComfyUI.utils.database.models.RHComfyuiTaskRecord.list_blank_key_prefix_page",
+        staticmethod(_page),
+    )
+    monkeypatch.setattr(
+        "RH_ComfyUI.utils.database.models.RHComfyuiTaskRecord.apply_key_prefix_batch",
+        staticmethod(_apply),
+    )
+    assert asyncio.run(backfill.backfill_historical_key_prefixes()) == 1
+    assert seen == [{1: "fish-S"}]
+    assert marker.read_text(encoding="utf-8") == "done"

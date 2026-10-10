@@ -2225,30 +2225,66 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         return True
 
     @classmethod
-    @with_session
-    async def backfill_empty_key_prefixes(cls, session: AsyncSession, prefixes: dict[str, str]) -> int:
-        """给还没记前缀的历史行补上。已有前缀的不动。"""
-        filled = 0
+    @with_read_session
+    async def list_blank_key_prefix_page(
+        cls,
+        session: AsyncSession,
+        *,
+        after_id: int,
+        limit: int,
+    ) -> list[tuple[int, str, str, str]]:
+        """按主键取一页还没记前缀的行。读连接,不占写锁。"""
+        if limit <= 0:
+            return []
         blank = or_(col(cls.backend_key_prefix) == "", col(cls.backend_key_prefix).is_(None))
-        for name, prefix in prefixes.items():
-            text = prefix.strip()[:6]
-            if not name or not text:
+        # 坏 JSON 上 json_extract 会直接抛错,整页补写就停了。
+        channel = case(
+            (
+                func.json_valid(cls.extra_params_json),
+                func.json_extract(cls.extra_params_json, "$.vendor_channel"),
+            ),
+            else_=None,
+        )
+        stmt = (
+            select(col(cls.id), col(cls.backend), col(cls.backend_provider), channel)
+            .where(col(cls.id) > after_id, blank)
+            .order_by(col(cls.id))
+            .limit(limit)
+        )
+        found: list[tuple[int, str, str, str]] = []
+        for row in (await session.execute(stmt)).all():
+            raw_id, raw_backend, raw_provider, raw_channel = row
+            if not isinstance(raw_id, int):
                 continue
-            by_provider = await session.execute(
-                update(cls).where(col(cls.backend_provider) == name, blank).values(backend_key_prefix=text)
+            backend_name = raw_backend if isinstance(raw_backend, str) else ""
+            provider_name = raw_provider if isinstance(raw_provider, str) else ""
+            channel_name = raw_channel if isinstance(raw_channel, str) else ""
+            found.append((raw_id, backend_name, provider_name, channel_name))
+        return found
+
+    @classmethod
+    @with_session
+    async def apply_key_prefix_batch(cls, session: AsyncSession, updates: dict[int, str]) -> int:
+        """给这一页里对得上的行写前缀。已有前缀的不动。"""
+        grouped: dict[str, list[int]] = {}
+        for row_id, prefix in updates.items():
+            text = prefix.strip()[:6]
+            if row_id <= 0 or not text:
+                continue
+            if text not in grouped:
+                grouped[text] = [row_id]
+            else:
+                grouped[text].append(row_id)
+        blank = or_(col(cls.backend_key_prefix) == "", col(cls.backend_key_prefix).is_(None))
+        filled = 0
+        for text, ids in grouped.items():
+            result = await session.execute(
+                update(cls).where(col(cls.id).in_(ids), blank).values(backend_key_prefix=text)
             )
-            if isinstance(by_provider, CursorResult):
-                filled += by_provider.rowcount
-            provider_is_backend = or_(
-                col(cls.backend_provider) == "",
-                col(cls.backend_provider).is_(None),
-                col(cls.backend_provider) == name,
-            )
-            by_backend = await session.execute(
-                update(cls).where(col(cls.backend) == name, blank, provider_is_backend).values(backend_key_prefix=text)
-            )
-            if isinstance(by_backend, CursorResult):
-                filled += by_backend.rowcount
+            changed = result.rowcount if isinstance(result, CursorResult) else len(ids)
+            if changed < 0:
+                changed = len(ids)
+            filled += changed
         return filled
 
     @classmethod

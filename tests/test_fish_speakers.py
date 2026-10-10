@@ -32,7 +32,7 @@ def test_inline_emotion_keeps_speaker_tags():
 def test_fish_tts_schema_declares_reference_audios(spec):  # noqa: ANN001
     """多角色端口必须进 input_schema。
 
-    外部插件（画布 / Agent）靠它判断模型支不支持多角色；漏报会让它们退回
+    外部插件靠它判断模型支不支持多角色；漏报会让它们退回
     单音色，用户连的参考音频被静默忽略。
     """
     schema = get_model_input_schema(spec.name)

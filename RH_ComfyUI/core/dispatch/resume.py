@@ -55,8 +55,51 @@ class ResumeUncertainError(ResumeFailedError):
     """查询/下载未确定结果；保留原任务，不据此失败退款。"""
 
 
+@runtime_checkable
+class _GatewayTerminalError(Protocol):
+    code: str
+    user_message: str
+
+
+def _loaded_gateway_error_type() -> type[BaseException] | None:
+    """网关类只从已加载模块取，避免 RH 单测硬导入 aigc 插件。"""
+    import sys
+
+    names = [
+        name
+        for name in sys.modules
+        if name == "aigc_system.seedance_gateway.unified" or name.endswith(".seedance_gateway.unified")
+    ]
+    for name in names:
+        module = sys.modules[name]
+        if "GatewayUnifiedError" not in module.__dict__:
+            continue
+        cls = module.__dict__["GatewayUnifiedError"]
+        if isinstance(cls, type) and issubclass(cls, BaseException):
+            return cls
+    return None
+
+
+def _gateway_terminal(error: BaseException) -> ResumeFailedError | None:
+    gateway_type = _loaded_gateway_error_type()
+    if gateway_type is None:
+        return None
+    gateway = error if isinstance(error, gateway_type) else error.__cause__
+    if not isinstance(gateway, gateway_type) or not isinstance(gateway, _GatewayTerminalError):
+        return None
+    # retryable 只表示首次提交可换通道。这条任务号已失败，再查结果相同。
+    if gateway.code == "TASK_FAILED":
+        return ResumeFailedError(gateway.user_message, definitive=True)
+    if gateway.code == "TASK_CANCELLED":
+        return ResumeCancelledError(gateway.user_message)
+    return None
+
+
 def provider_terminal_error(error: BaseException) -> ResumeFailedError | None:
     """只认已有 provider 类型的明确终态码；过期/unknown/网络不可猜失败。"""
+    gateway = _gateway_terminal(error)
+    if gateway is not None:
+        return gateway
     from ...utils.backends.seedance.provider import SeedanceProviderError
 
     cause = error if isinstance(error, SeedanceProviderError) else error.__cause__
