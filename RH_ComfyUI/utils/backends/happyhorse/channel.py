@@ -17,6 +17,7 @@ from gsuid_core.logger import logger
 
 from .classify import classify_happyhorse, resolve_vendor_model
 from .provider import HappyHorseProvider, HappyHorseProviderError
+from ...audit_key import mask_api_key
 from ..http_retry import download_with_network_retry
 from ...core.types import NodeOutput, ProgressEvent
 from ...core.request import GenerationRequest
@@ -134,7 +135,7 @@ class HappyHorseChannel(ProviderChannel):
         return f"供应商 {self.name} 未配置(需要启用开关 + API Key + Base URL)"
 
     def audit_key_prefix(self) -> str:
-        return (self._resolve_creds().api_key or "")[:6]
+        return mask_api_key(self._resolve_creds().api_key or "")
 
     def supports_request(self, request: GenerationRequest) -> bool:
         try:

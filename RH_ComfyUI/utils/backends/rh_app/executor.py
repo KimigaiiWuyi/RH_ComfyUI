@@ -7,6 +7,7 @@ from typing import Any
 
 from .api import rh_app_api
 from ..base import Adapter
+from ...audit_key import mask_api_key
 from ...core.types import NodeOutput, ProgressEvent, CapabilityManifest
 from ...core.request import (
     TASK_MIME_MAP,
@@ -48,7 +49,7 @@ class RHAppAdapter(Adapter):
         return "未配置 RunningHub API Key,请在 Web 控制台配置 RH_apikey"
 
     def audit_key_prefix(self) -> str:
-        return (self.api.api_key or "")[:6]
+        return mask_api_key(self.api.api_key or "")
 
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(

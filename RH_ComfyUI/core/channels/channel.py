@@ -53,12 +53,12 @@ class ProviderChannel(ABC):
         """
 
     def audit_key_prefix(self) -> str:
-        """审计用:当前生效凭证 key 前 6 位(默认空;持密钥的通道覆盖)"""
+        """审计用:当前生效凭证脱敏(前5*****后5;默认空;持密钥的通道覆盖)"""
         return ""
 
     def audit_prefix_names(self) -> dict[str, str]:
-        """落库的供应商名 → 前 6 位。默认只有通道名。"""
-        prefix = self.audit_key_prefix().strip()[:6]
+        """落库的供应商名 → 脱敏钥。默认只有通道名。"""
+        prefix = self.audit_key_prefix().strip()
         name = self.name.strip()
         if not name or not prefix:
             return {}

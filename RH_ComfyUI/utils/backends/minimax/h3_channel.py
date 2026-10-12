@@ -22,6 +22,7 @@ from .config import (
     minimax_disabled_reason,
     is_minimax_model_enabled,
 )
+from ...audit_key import mask_api_key
 from .h3_classify import classify_minimax_h3
 from .h3_provider import MiniMaxH3Provider, MiniMaxH3ProviderError
 from ...core.types import NodeOutput, ProgressEvent
@@ -77,7 +78,7 @@ class MiniMaxH3Channel(ProviderChannel):
         return "MiniMax H3 通道不可用"
 
     def audit_key_prefix(self) -> str:
-        return (minimax_api_key() or "")[:6]
+        return mask_api_key(minimax_api_key() or "")
 
     def supports_request(self, request: GenerationRequest) -> bool:
         try:

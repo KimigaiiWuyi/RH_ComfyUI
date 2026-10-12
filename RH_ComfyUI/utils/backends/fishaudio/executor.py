@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .api import fishaudio_api
 from ..base import Adapter
+from ...audit_key import mask_api_key
 from ...core.types import NodeOutput, ProgressEvent, CapabilityManifest
 from ...core.request import GenerationResult, GenerationRequest
 from ...core.pipeline import NodeDef
@@ -27,7 +28,7 @@ class FishAudioAdapter(Adapter):
         return "未配置 Fish Audio API Key,请在 Web 控制台配置 FishAudio_apikey"
 
     def audit_key_prefix(self) -> str:
-        return (self.api.api_key or "")[:6]
+        return mask_api_key(self.api.api_key or "")
 
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(

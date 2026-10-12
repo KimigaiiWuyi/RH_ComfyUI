@@ -9,6 +9,7 @@ from PIL import Image
 import RH_ComfyUI.utils.backends.openai_image.api as oapi
 import RH_ComfyUI.utils.backends.openai_image.providers as oprov
 from RH_ComfyUI.core import channel_registry
+from RH_ComfyUI.utils.audit_key import mask_api_key
 from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from gsuid_core.utils.plugins_config.models import GsStrConfig, GsBoolConfig, GsRepeatGroupConfig
 from RH_ComfyUI.utils.backends.openai_image import channel as ochan
@@ -164,7 +165,7 @@ def test_channel_availability():
 
     ch = OpenAIImageChannel("baidu", credentials_resolver=resolver_ok)
     assert asyncio.run(ch.check_available()) is True
-    assert ch.audit_key_prefix() == "sk-sec"
+    assert ch.audit_key_prefix() == mask_api_key("sk-secret123")
 
     ch_off = OpenAIImageChannel("baidu", credentials_resolver=resolver_off)
     assert asyncio.run(ch_off.check_available()) is False

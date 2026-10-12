@@ -47,9 +47,19 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
 ## 2. 消费统计维度
 
 - `backend_provider` = 通道名(`output.metadata["channel"]`,run() 落);
-- `backend_key_prefix` = key 前 6 位,来自 `ProviderChannel.audit_key_prefix()`
-  (run() 落 metadata,recorder 透传,DB 列已加)。含密钥的通道要记前缀就覆盖
-  `audit_key_prefix`。
+- `backend_key_prefix` = 钥脱敏 `前5*****后5`,来自 `ProviderChannel.audit_key_prefix()`
+  (run() 落 metadata,recorder 透传,DB 列 VARCHAR(16) 正好放下 15 字)。含密钥的通道覆盖
+  `audit_key_prefix`,内部走 `utils.audit_key.mask_api_key`。启动时
+  `key_prefix_backfill` 用当前配置把空值和旧前 6 位自愈成新掩码
+  (marker ``key_mask_head_tail_v2.done``，内容 ``remaining=N``)。
+  先 COUNT 尚未含 ``*****`` 的行：0 或 COUNT≤上次 remaining 则跳过翻页。
+  旧文件内容 ``done`` 没有 N，COUNT>0 时再跑一遍把不可补残留记下来。
+  现网一把钥都没有则不写标记。
+  `backend_provider` 列宽 32,长通道名会被截断;`prefix_for_row` 对截断名做
+  唯一全名还原(或 `vendor_channel` 补全)。已注册的 `gateway_slotN_*` 同一槽
+  共用一把钥,未再注册的同槽通道名仍用该槽现网钥。
+  ``comfyui`` / ``runninghub`` 与 ``rh_app`` 共用 ``RH_apikey``,不看
+  ``Seedance_Enable_runninghub``。不按模型名猜 Slot。
 - 负载均衡策略/阈值键:`Load_Balance_Mode` / `Failure_Threshold`(`PLUGIN_CONFIG`,
   全局一条,改完即生效)。
 - **Dry-Run** 只有 `PLUGIN_CONFIG.Dry_Run` 一把开关,开启后 `run()` 拦截全部模型。

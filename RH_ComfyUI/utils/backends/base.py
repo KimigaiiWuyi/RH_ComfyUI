@@ -91,7 +91,7 @@ class Adapter(ABC):
         return await self.get_unavailable_reason()
 
     def audit_key_prefix(self) -> str:
-        """统计用凭证前 6 位。无供应商 key 的后端保持空。"""
+        """统计用凭证脱敏(前5*****后5)。无供应商 key 的后端保持空。"""
         return ""
 
     # ── 便捷方法(向后兼容) ──

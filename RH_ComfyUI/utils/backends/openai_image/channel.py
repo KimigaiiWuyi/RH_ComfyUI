@@ -14,12 +14,13 @@ from collections.abc import Callable
 import aiohttp
 
 from .api import OpenAIImageError, size_for, generate_image_result
+from ...audit_key import mask_api_key
 from ...core.types import NodeOutput
 from ...core.request import GenerationRequest
 from ....core.base.errors import ChannelError
 from ....core.channels.channel import ProviderChannel
-from ...mappers.gpt_image2_billing import normalize_gpt_image_usage, sanitize_gpt_image_raw
 from ...mappers.gpt_image2_params import mime_for_output_format
+from ...mappers.gpt_image2_billing import sanitize_gpt_image_raw, normalize_gpt_image_usage
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,7 @@ class OpenAIImageChannel(ProviderChannel):
         return f"供应商 {self.name} 未配置(需启用 + API Key + Base URL)"
 
     def audit_key_prefix(self) -> str:
-        return (self._resolve().api_key or "")[:6]
+        return mask_api_key(self._resolve().api_key or "")
 
     async def invoke(self, **kwargs: Any) -> NodeOutput:
         request: GenerationRequest = kwargs["request"]

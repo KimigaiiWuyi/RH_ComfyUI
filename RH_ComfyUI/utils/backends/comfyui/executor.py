@@ -20,6 +20,7 @@ from gsuid_core.logger import logger
 
 from .api import ComfyUIAPI
 from ..base import Adapter
+from ...audit_key import mask_api_key
 from ...core.types import NodeOutput, ProgressEvent, CapabilityManifest
 from ...core.request import (
     TASK_MIME_MAP,
@@ -55,7 +56,7 @@ class ComfyUIAdapter(Adapter):
         # 本地地址不带供应商 key;RunningHub 把 RH_apikey 嵌进代理 URL
         if not self.api.is_runninghub:
             return ""
-        return (self.api.api_key or "")[:6]
+        return mask_api_key(self.api.api_key or "")
 
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(

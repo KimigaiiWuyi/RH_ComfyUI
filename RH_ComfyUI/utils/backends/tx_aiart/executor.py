@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .api import tx_aiart_api
 from ..base import Adapter
+from ...audit_key import mask_api_key
 from ...core.types import NodeOutput, ProgressEvent, CapabilityManifest
 from ...core.request import GenerationRequest
 from ...core.pipeline import NodeDef
@@ -24,8 +25,8 @@ class TxAiartAdapter(Adapter):
         return "未配置腾讯云混元扩图凭证,请在 Web 控制台填写 TX_AIArt_secret_id / TX_AIArt_secret_key"
 
     def audit_key_prefix(self) -> str:
-        # 腾讯云用 SecretId 标识账号,账单列记它的前 6 位
-        return (self.api.secret_id or "")[:6]
+        # 腾讯云用 SecretId 标识账号,账单列记脱敏后的 SecretId
+        return mask_api_key(self.api.secret_id or "")
 
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(

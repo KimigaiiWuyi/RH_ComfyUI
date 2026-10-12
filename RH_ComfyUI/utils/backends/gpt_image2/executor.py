@@ -17,6 +17,7 @@ from PIL import Image
 
 from .api import gpt_image2_api
 from ..base import Adapter
+from ...audit_key import mask_api_key
 from ...core.types import NodeOutput, ProgressEvent, CapabilityManifest
 from ...core.request import GenerationResult, GenerationRequest
 from ...core.pipeline import NodeDef
@@ -40,7 +41,7 @@ class GPTImage2Adapter(Adapter):
         )
 
     def audit_key_prefix(self) -> str:
-        return (self.api.api_key or "")[:6]
+        return mask_api_key(self.api.api_key or "")
 
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(

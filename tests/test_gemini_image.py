@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import RH_ComfyUI.utils.backends.gemini_image.api as gapi
 from RH_ComfyUI.core import channel_registry
+from RH_ComfyUI.utils.audit_key import mask_api_key
 from RH_ComfyUI.models.image.defs import Banana2Def
 from RH_ComfyUI.utils.backends.gemini_image.channel import GeminiImageChannel
 
@@ -463,10 +464,10 @@ def test_gemini_channel_availability(monkeypatch):
     assert asyncio.run(ch.check_available()) is False
     monkeypatch.setattr(gapi, "SERVICE_CONFIG", _FakeConfig({"Gemini_Image_apikey": "AIzaKEY"}))
     assert asyncio.run(ch.check_available()) is True
-    assert ch.audit_key_prefix() == "AIzaKE"
+    assert ch.audit_key_prefix() == mask_api_key("AIzaKEY")
     studio = ch.audit_prefix_names()
-    assert studio["gemini-ai-studio"] == "AIzaKE"
-    assert studio["gemini-vertex"] == "AIzaKE"
+    assert studio["gemini-ai-studio"] == mask_api_key("AIzaKEY")
+    assert studio["gemini-vertex"] == mask_api_key("AIzaKEY")
     # Vertex(开开关):无 key 但有 project 也算可用,审计记 project 前缀
     monkeypatch.setattr(
         gapi,
@@ -474,10 +475,10 @@ def test_gemini_channel_availability(monkeypatch):
         _FakeConfig({"Gemini_Image_Use_Vertex": True, "Gemini_Image_Project_ID": "projxyz"}),
     )
     assert asyncio.run(ch.check_available()) is True
-    assert ch.audit_key_prefix() == "projxy"
+    assert ch.audit_key_prefix() == mask_api_key("projxyz")
     vertex = ch.audit_prefix_names()
-    assert vertex["gemini-vertex"] == "projxy"
-    assert vertex["gemini-ai-studio"] == "projxy"
+    assert vertex["gemini-vertex"] == mask_api_key("projxyz")
+    assert vertex["gemini-ai-studio"] == mask_api_key("projxyz")
     monkeypatch.setattr(
         gapi,
         "SERVICE_CONFIG",
@@ -490,8 +491,8 @@ def test_gemini_channel_availability(monkeypatch):
         ),
     )
     both = ch.audit_prefix_names()
-    assert both["gemini-ai-studio"] == "AIzaKE"
-    assert both["gemini-vertex"] == "projxy"
+    assert both["gemini-ai-studio"] == mask_api_key("AIzaKEY")
+    assert both["gemini-vertex"] == mask_api_key("projxyz")
 
 
 def test_gemini_enabled_list_gates_named_channel(monkeypatch):

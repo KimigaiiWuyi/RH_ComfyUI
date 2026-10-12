@@ -32,6 +32,7 @@ from gsuid_core.webconsole.mount_app import PageSchema, GsAdminModel, site
 from gsuid_core.utils.database.startup import exec_list
 from gsuid_core.utils.database.base_models import Bind, BaseIDModel, with_session, with_read_session
 
+from ..audit_key import AUDIT_KEY_STARS, AUDIT_KEY_STORE_MAX
 from ..core.request import TaskType
 from .wallet_contract import (
     MAX_WALLET_POINTS,
@@ -1239,7 +1240,7 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     backend: str = Field(default="", title="后端 comfyui/rh_app/seedance/...", max_length=32)
     backend_model: str = Field(default="", title="实际使用的厂商模型ID", max_length=128)
     backend_provider: str = Field(default="", title="供应商(ark/gateway/runninghub/...)", max_length=32)
-    backend_key_prefix: str = Field(default="", title="供应商 Key 前6位(审计用)", max_length=16)
+    backend_key_prefix: str = Field(default="", title="供应商 Key 脱敏(前5*****后5)", max_length=16)
 
     # ── 核心输入参数 ──
     duration_seconds: Optional[int] = Field(default=None, title="视频/音频时长(秒)")
@@ -2225,6 +2226,33 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         return True
 
     @classmethod
+    def _key_prefix_lacks_mask(cls) -> ColumnElement[bool]:
+        """空前缀、NULL、旧前 6 位。首次扫描补空值和 apply 写掩码时用。"""
+        return or_(
+            col(cls.backend_key_prefix).is_(None),
+            ~col(cls.backend_key_prefix).contains(AUDIT_KEY_STARS),
+        )
+
+    @classmethod
+    def _needs_key_prefix_heal(cls) -> ColumnElement[bool]:
+        # 空串是无钥终态(本地 ComfyUI);再算待愈会让 remaining 被新消费抬高、每次启动翻页。
+        prefix = col(cls.backend_key_prefix)
+        return and_(
+            prefix.is_not(None),
+            prefix != "",
+            ~prefix.contains(AUDIT_KEY_STARS),
+        )
+
+    @classmethod
+    @with_read_session
+    async def count_blank_key_prefix(cls, session: AsyncSession) -> int:
+        """尚未写成前5*****后5的旧前 6 位行数。空串不计。启动探测用,不带 json_extract。"""
+        raw = (
+            await session.execute(select(func.count()).select_from(cls).where(cls._needs_key_prefix_heal()))
+        ).scalar_one()
+        return int(raw) if isinstance(raw, int) else 0
+
+    @classmethod
     @with_read_session
     async def list_blank_key_prefix_page(
         cls,
@@ -2232,11 +2260,12 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         *,
         after_id: int,
         limit: int,
+        include_empty: bool = False,
     ) -> list[tuple[int, str, str, str]]:
-        """按主键取一页还没记前缀的行。读连接,不占写锁。"""
+        """按主键取一页旧前 6 位。include_empty 只给 v2 首次扫描补历史空值。读连接,不占写锁。"""
         if limit <= 0:
             return []
-        blank = or_(col(cls.backend_key_prefix) == "", col(cls.backend_key_prefix).is_(None))
+        needs_heal = cls._key_prefix_lacks_mask() if include_empty else cls._needs_key_prefix_heal()
         # 坏 JSON 上 json_extract 会直接抛错,整页补写就停了。
         channel = case(
             (
@@ -2246,8 +2275,13 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             else_=None,
         )
         stmt = (
-            select(col(cls.id), col(cls.backend), col(cls.backend_provider), channel)
-            .where(col(cls.id) > after_id, blank)
+            select(
+                col(cls.id),
+                col(cls.backend),
+                col(cls.backend_provider),
+                channel,
+            )
+            .where(col(cls.id) > after_id, needs_heal)
             .order_by(col(cls.id))
             .limit(limit)
         )
@@ -2265,21 +2299,21 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     @classmethod
     @with_session
     async def apply_key_prefix_batch(cls, session: AsyncSession, updates: dict[int, str]) -> int:
-        """给这一页里对得上的行写前缀。已有前缀的不动。"""
+        """给这一页里对得上的行写脱敏钥。已是新掩码的不动。"""
         grouped: dict[str, list[int]] = {}
         for row_id, prefix in updates.items():
-            text = prefix.strip()[:6]
+            text = prefix.strip()[:AUDIT_KEY_STORE_MAX]
             if row_id <= 0 or not text:
                 continue
             if text not in grouped:
                 grouped[text] = [row_id]
             else:
                 grouped[text].append(row_id)
-        blank = or_(col(cls.backend_key_prefix) == "", col(cls.backend_key_prefix).is_(None))
+        writable = cls._key_prefix_lacks_mask()
         filled = 0
         for text, ids in grouped.items():
             result = await session.execute(
-                update(cls).where(col(cls.id).in_(ids), blank).values(backend_key_prefix=text)
+                update(cls).where(col(cls.id).in_(ids), writable).values(backend_key_prefix=text)
             )
             changed = result.rowcount if isinstance(result, CursorResult) else len(ids)
             if changed < 0:

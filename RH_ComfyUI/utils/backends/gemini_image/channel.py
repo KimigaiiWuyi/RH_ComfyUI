@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from .api import gemini_image_api
 from .config import gemini_disabled_reason, is_gemini_model_enabled
+from ...audit_key import mask_api_key
 from ...core.types import NodeOutput
 from ....core.base.errors import ChannelError
 from ...mappers.gemini_image import gemini_flash_image_mapper
@@ -67,13 +68,13 @@ class GeminiImageChannel(ProviderChannel):
         return "未配置 Gemini(AI Studio 需 Gemini_Image_apikey;Vertex 需 Gemini_Image_Project_ID)"
 
     def audit_key_prefix(self) -> str:
-        # AI Studio 记 key 前缀;Vertex 无 key,记 project 前缀
-        return (self._api.api_key or self._api.project_id or "")[:6]
+        # AI Studio 记 key 脱敏;Vertex 无 key,记 project 脱敏
+        return mask_api_key(self._api.api_key or self._api.project_id or "")
 
     def audit_prefix_names(self) -> dict[str, str]:
         """历史行的供应商名是 gemini-ai-studio / gemini-vertex,不是通道名。"""
-        key = (self._api.api_key or "").strip()[:6]
-        project = (self._api.project_id or "").strip()[:6]
+        key = mask_api_key(self._api.api_key or "")
+        project = mask_api_key(self._api.project_id or "")
         current = key or project
         found: dict[str, str] = {}
         if self.name.strip() and current:

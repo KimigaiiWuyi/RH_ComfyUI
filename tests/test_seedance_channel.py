@@ -10,6 +10,7 @@ from typing import Any, Optional
 import pytest
 
 from RH_ComfyUI.core import SeedanceProviderChannel, channel_registry
+from RH_ComfyUI.utils.audit_key import mask_api_key
 from RH_ComfyUI.core.base.errors import ChannelError
 from RH_ComfyUI.models.video.defs import (
     Seedance2Def,
@@ -220,9 +221,9 @@ def test_bridge_model_accepts_external_channel():
     assert names == ["gpt-image-2", "azure"]
 
 
-# ── 消费审计:记录供应商 key 前 6 位 ──
+# ── 消费审计:记录供应商 key 前5*****后5 ──
 
 
 def test_audit_key_prefix():
     ch = _make_channel(name="fake", api_key="sk-abcdef123")
-    assert ch.audit_key_prefix() == "sk-abc"
+    assert ch.audit_key_prefix() == mask_api_key("sk-abcdef123")

@@ -9,6 +9,7 @@ from PIL import Image
 
 from .api import minimax_api
 from ..base import Adapter
+from ...audit_key import mask_api_key
 from ...core.types import NodeOutput, ProgressEvent, CapabilityManifest
 from ...core.request import (
     TASK_MIME_MAP,
@@ -40,7 +41,7 @@ class MiniMaxAdapter(Adapter):
         return "未配置 MiniMax API Key,请在 Web 控制台配置 MiniMax_apikey"
 
     def audit_key_prefix(self) -> str:
-        return (self.api.api_key or "")[:6]
+        return mask_api_key(self.api.api_key or "")
 
     def capabilities(self) -> CapabilityManifest:
         return CapabilityManifest(

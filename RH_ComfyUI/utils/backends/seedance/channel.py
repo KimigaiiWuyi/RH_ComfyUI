@@ -33,6 +33,7 @@ from .provider import (
     SeedanceProviderError,
     UnsupportedProviderShapeError,
 )
+from ...audit_key import mask_api_key
 from ..http_retry import download_with_network_retry
 from ...core.types import NodeOutput, ProgressEvent
 from ...core.request import GenerationRequest
@@ -163,7 +164,7 @@ class SeedanceProviderChannel(ProviderChannel):
         return f"供应商 {self.name} 未配置(需要启用开关 + API Key + Base URL)"
 
     def audit_key_prefix(self) -> str:
-        return (self._resolve_creds().api_key or "")[:6]
+        return mask_api_key(self._resolve_creds().api_key or "")
 
     def supports_remote_cancel(self) -> bool:
         """跟 provider 是否 override 了非 no-op ``delete``(ark/网关 True,runninghub False)。"""

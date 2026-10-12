@@ -71,7 +71,7 @@ resync 全部复用。
   - 两端点响应结构一致:解析 `data[0].b64_json | url`,统一转 PNG 字节。
     空 key 不拼 Bearer(§11 红线)。
 - `size` 由 `size_for(ratio, width, height)` 从枚举宽高比映射(无 ratio 时按宽高就近取)。
-- 审计:`audit_key_prefix()` 记 key 前 6 位 → 统计表 `backend_key_prefix`;
+- 审计:`audit_key_prefix()` 记 key 脱敏 `前5*****后5` → 统计表 `backend_key_prefix`;
   `backend_provider` = 供应商 `name`。
 
 ## 13.5 与 Gemini 通道的关系(banana2 多通道范例)
