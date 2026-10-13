@@ -450,6 +450,37 @@ def test_prepare_request_clamps_audio_and_inlines(monkeypatch):
     assert oc.media.url is None
 
 
+def test_prepare_request_clamps_audio_total_duration(monkeypatch):
+    """两段各 10s 都低于单段 15.2s,合计超限;r2v 硬限是 total,必须再裁。"""
+    a = b"AUDIOA" * 32
+    b_data = b"AUDIOB" * 32
+    calls: list[float] = []
+
+    async def _fake_audio(data, **kwargs):
+        max_s = float(kwargs.get("max_s") or 15.2)
+        calls.append(max_s)
+        if max_s >= 15.2:
+            return data, 10.0, None
+        return data + b"|trim", max_s, "trim"
+
+    import RH_ComfyUI.utils.audio_process as audio_mod
+
+    monkeypatch.setattr(audio_mod, "clamp_seedance_ref_audio", _fake_audio)
+
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="两段配乐",
+        audio_refs=[
+            MediaRef(kind=MediaKind.AUDIO, data=a, url="https://cdn.example.com/a.mp3"),
+            MediaRef(kind=MediaKind.AUDIO, data=b_data, url="https://cdn.example.com/b.mp3"),
+        ],
+    )
+    out = asyncio.run(Seedance2Def().prepare_request(req))
+    assert any(c < 15.2 for c in calls), f"应触发合计裁切,calls={calls}"
+    assert out.audio_refs[0].data == a + b"|trim"
+    assert out.audio_refs[1].data == b_data + b"|trim"
+
+
 def test_prepare_request_seedance25_video_uses_30s_max(monkeypatch):
     seen: dict[str, float] = {}
 

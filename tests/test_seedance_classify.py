@@ -241,3 +241,68 @@ def test_omni_hint_reference_forces_multimodal():
         )
     )
     assert spec.shape == VideoTaskShape.MULTIMODAL
+
+
+def _audio_item(url=None, data=None) -> ContentItem:
+    return ContentItem(
+        type=ContentItemType.AUDIO,
+        media=MediaRef(kind=MediaKind.AUDIO, url=url, data=data),
+        role="reference",
+    )
+
+
+def test_duplicate_audio_url_in_oc_counts_once():
+    """prompt 里同一段音频 @ 两次:只占一条参考,第二次改成 [@参考音频1]。"""
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="",
+        ordered_content=[
+            _txt("先"),
+            _audio_item("https://ex.com/soundtrack.mp3?sig=aaa"),
+            _txt("再"),
+            _audio_item("https://ex.com/soundtrack.mp3?sig=bbb"),
+        ],
+        params={"frame_mode": "reference"},
+    )
+    spec = classify_video_spec(req)
+    assert len(spec.audios()) == 1
+    assert [s.kind for s in spec.ordered_segments] == ["text", "media", "text", "text"]
+    skip_text = spec.ordered_segments[3].text or ""
+    assert skip_text == "[@参考音频1]"
+
+
+def test_duplicate_audio_bytes_in_oc_counts_once():
+    """两份相同 bytes(不同对象)仍算一段音频。"""
+    blob = b"ID3" + b"\x00" * 64
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="",
+        ordered_content=[
+            _txt("先"),
+            _audio_item(data=blob),
+            _txt("再"),
+            _audio_item(data=bytes(blob)),
+        ],
+        params={"frame_mode": "reference"},
+    )
+    spec = classify_video_spec(req)
+    assert len(spec.audios()) == 1
+    assert spec.ordered_segments[3].kind == "text"
+    assert spec.ordered_segments[3].text == "[@参考音频1]"
+
+
+def test_two_distinct_audios_in_oc_stay_two():
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="",
+        ordered_content=[
+            _txt("A"),
+            _audio_item("https://ex.com/a.mp3"),
+            _txt("B"),
+            _audio_item("https://ex.com/b.mp3"),
+        ],
+        params={"frame_mode": "reference"},
+    )
+    spec = classify_video_spec(req)
+    assert len(spec.audios()) == 2
+    assert [s.kind for s in spec.ordered_segments] == ["text", "media", "text", "media"]

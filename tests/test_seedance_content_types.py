@@ -128,3 +128,75 @@ def test_ordered_content_video_url_preserved():
     content = _build(req)
     assert any(c["type"] == "video_url" for c in content)
     assert not any(c["type"] == "image_url" for c in content)
+
+
+def test_duplicate_audio_mentions_single_audio_url_in_content():
+    """同一 soundtrack @ 两次 → content[] 只有一条 audio_url,正文两个 [@参考音频1]。"""
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="",
+        ordered_content=[
+            ContentItem(type=ContentItemType.TEXT, text="先用"),
+            ContentItem(
+                type=ContentItemType.AUDIO,
+                media=MediaRef(kind=MediaKind.AUDIO, url="https://ex.com/soundtrack.mp3"),
+                role="reference",
+            ),
+            ContentItem(type=ContentItemType.TEXT, text="再用"),
+            ContentItem(
+                type=ContentItemType.AUDIO,
+                media=MediaRef(kind=MediaKind.AUDIO, url="https://ex.com/soundtrack.mp3"),
+                role="reference",
+            ),
+        ],
+        params={"frame_mode": "reference"},
+    )
+    content = _build(req)
+    audios = [c for c in content if c["type"] == "audio_url"]
+    assert len(audios) == 1, content
+    assert audios[0]["audio_url"]["url"] == "https://ex.com/soundtrack.mp3"
+    text = str(content[0].get("text") or "")
+    assert text.count("[@参考音频1]") == 2
+    assert "[@参考音频2]" not in text
+
+
+def test_ark_collapses_duplicate_audio_segments_without_classify():
+    """classify 漏去重时,ark 仍只发一条 audio_url 并复用序号。"""
+    from RH_ComfyUI.utils.backends.seedance.spec import (
+        MediaRole,
+        OrderedSegment,
+        SpecMedia,
+        VideoGenSpec,
+        VideoTaskShape,
+    )
+
+    sm1 = SpecMedia(
+        kind=MediaKind.AUDIO,
+        role=MediaRole.REFERENCE,
+        ref=MediaRef(kind=MediaKind.AUDIO, url="https://ex.com/a.mp3"),
+        index=1,
+    )
+    sm2 = SpecMedia(
+        kind=MediaKind.AUDIO,
+        role=MediaRole.REFERENCE,
+        ref=MediaRef(kind=MediaKind.AUDIO, url="https://ex.com/a.mp3?sig=2"),
+        index=2,
+    )
+    spec = VideoGenSpec(
+        shape=VideoTaskShape.MULTIMODAL,
+        prompt="",
+        media=[sm1, sm2],
+        ordered_segments=[
+            OrderedSegment(kind="text", text="先"),
+            OrderedSegment(kind="media", media=sm1),
+            OrderedSegment(kind="text", text="再"),
+            OrderedSegment(kind="media", media=sm2),
+        ],
+    )
+    p = ArkSeedanceProvider(api_key="x")
+    content = asyncio.run(p._build_content(spec))
+    audios = [c for c in content if c["type"] == "audio_url"]
+    assert len(audios) == 1, content
+    text = str(content[0].get("text") or "")
+    assert text.count("[@参考音频1]") == 2
+    assert "[@参考音频2]" not in text

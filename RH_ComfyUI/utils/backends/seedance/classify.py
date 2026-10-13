@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 import hashlib
 from typing import Mapping, Optional
+from urllib.parse import urlsplit
 
 from .spec import (
     MediaRole,
@@ -35,6 +36,7 @@ from .spec import (
 from .draft import draft_task_id_from_request
 from ...core.types import MediaRef, MediaKind, ContentItemType
 from ...core.request import GenerationRequest
+from ...core.media_labels import media_ref_marker
 
 _SHAPE_OVERRIDE_MAP: dict[str, VideoTaskShape] = {
     "text2video": VideoTaskShape.TEXT2VIDEO,
@@ -62,10 +64,18 @@ def _next_index(media: list[SpecMedia], kind: MediaKind) -> int:
 
 
 def _media_dedup_key(ref: MediaRef) -> Optional[str]:
-    """给一张图算 dedup key(同字节 → 同 key);无 data(外链)→ None 不去重。"""
-    if ref.data is None or len(ref.data) == 0:
+    """同内容去重键:优先 bytes sha256,否则 url path(剥 query)。
+
+    prompt 里同一段音频 @ 两次时,OC 会带两条相同 url;不按 path 去重
+    会把时长算两遍,Seedance r2v 合计 ≤15.2s 直接 400。
+    """
+    if ref.data is not None and len(ref.data) > 0:
+        return hashlib.sha256(ref.data).hexdigest()
+    url = (ref.url or "").strip()
+    if not url:
         return None
-    return hashlib.sha256(ref.data).hexdigest()
+    path = urlsplit(url).path or url.split("?", 1)[0]
+    return f"url:{path}" if path else None
 
 
 # 匹配「[@参考图片N] / [参考图片N] / 图片N / image N / …」,捕获组 = digit。
@@ -114,16 +124,20 @@ def _rewrite_image_refs(text: str, orig_to_deduped: Mapping[int, int]) -> str:
     return out
 
 
-def _build_image_dedup_map(items) -> tuple[dict[int, int], set[int]]:
-    """扫一遍 ordered_content,建立每张图(按出现顺序 1-based)的 dedup 映射。
+def _build_image_dedup_map(items) -> tuple[dict[int, int], set[int], dict[int, int]]:
+    """扫一遍 ordered_content,建立每段媒体(按出现顺序 1-based)的 dedup 映射。
 
     Returns:
-        (orig_to_deduped, keep_orig_positions):
-          - orig_to_deduped: 原图序号 1..N → 去重后序号 1..M
-          - keep_orig_positions: 哪些原图序号(1..N)要保留进 ordered_segments
+        (orig_to_deduped, keep_orig_positions, orig_to_kind_n):
+          - orig_to_deduped: 原序号 1..N → 去重后混合序号(给文本里「图片N」改写)
+          - keep_orig_positions: 哪些原序号要保留为媒体段
+          - orig_to_kind_n: 原序号 → 该类型去重后的 1-based 序号(跳过重复时写 [@参考音频N])
     """
-    seen: dict[str, int] = {}  # dedup_key → 去重后序号
+    seen: dict[str, int] = {}  # f"{kind}:{dedup_key}" → 去重后混合序号
+    kind_seen: dict[str, int] = {}  # 同上 → 该类型序号
+    kind_count: dict[str, int] = {}
     orig_to_deduped: dict[int, int] = {}
+    orig_to_kind_n: dict[int, int] = {}
     keep: set[int] = set()
     orig_pos = 0
     dedup_pos = 0
@@ -131,22 +145,29 @@ def _build_image_dedup_map(items) -> tuple[dict[int, int], set[int]]:
         if item.type == ContentItemType.TEXT or item.media is None:
             continue
         orig_pos += 1
+        kind = _content_item_kind_value(item) or "image"
         key = _media_dedup_key(item.media)
-        if key is None:
-            # 无 data(纯外链 URL):不去重,每个都是独立的
+        slot = f"{kind}:{key}" if key else None
+        if slot is None:
             dedup_pos += 1
+            kind_count[kind] = kind_count.get(kind, 0) + 1
             orig_to_deduped[orig_pos] = dedup_pos
+            orig_to_kind_n[orig_pos] = kind_count[kind]
             keep.add(orig_pos)
             continue
-        cached = seen.get(key)
+        cached = seen.get(slot)
         if cached is not None:
             orig_to_deduped[orig_pos] = cached
+            orig_to_kind_n[orig_pos] = kind_seen[slot]
             continue
         dedup_pos += 1
-        seen[key] = dedup_pos
+        kind_count[kind] = kind_count.get(kind, 0) + 1
+        seen[slot] = dedup_pos
+        kind_seen[slot] = kind_count[kind]
         orig_to_deduped[orig_pos] = dedup_pos
+        orig_to_kind_n[orig_pos] = kind_count[kind]
         keep.add(orig_pos)
-    return orig_to_deduped, keep
+    return orig_to_deduped, keep, orig_to_kind_n
 
 
 def resolve_request_frame_mode(request: GenerationRequest) -> str:
@@ -302,9 +323,9 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
 
     if request.ordered_content and oc_has_media:
         # 第一遍:算 dedup 映射(同 bytes 的图压缩成一个)
-        orig_to_deduped, keep_orig = _build_image_dedup_map(request.ordered_content)
+        orig_to_deduped, keep_orig, orig_to_kind_n = _build_image_dedup_map(request.ordered_content)
 
-        # 第二遍:构造 ordered_segments,只保留 keep_orig 的图,text 用映射改写图片引用
+        # 第二遍:构造 ordered_segments,只保留 keep_orig 的媒体,text 用映射改写引用
         orig_pos = 0
         for item in request.ordered_content:
             if item.type == ContentItemType.TEXT:
@@ -317,7 +338,11 @@ def classify_video_spec(request: GenerationRequest) -> VideoGenSpec:
                 continue
             orig_pos += 1
             if orig_pos not in keep_orig:
-                # 重复图:跳过(不占 content[] 位置;文本仍按位置保留)
+                # 同一段音/视频/图再次 @ :不占 content[] 槽,正文留下首次序号
+                kind_n = orig_to_kind_n.get(orig_pos)
+                if kind_n is not None:
+                    kind = MediaKind(item.media.kind.value)
+                    ordered_segments.append(OrderedSegment(kind="text", text=media_ref_marker(kind, kind_n)))
                 continue
             # 以 MediaRef.kind 为准(构造时已按 mime/文件头纠正 video/audio 误标为 image)
             kind = MediaKind(item.media.kind.value)

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from .types import MediaRef, MediaKind, ContentItem, ContentItemType
+from .types import MediaRef, MediaKind, ContentItem, ContentItemType, media_ref_cache_key
 from .request import GenerationRequest
 
 _KIND_TO_REF_NAME = {
@@ -58,12 +58,8 @@ def append_spaced_media_ref(parts: list[str], kind: Any, n: int) -> None:
 
 
 def _media_identity(ref: MediaRef) -> str:
-    """去重键:优先 bytes id,再 url,再对象 id。"""
-    if ref.data is not None:
-        return f"bytes:{id(ref.data)}:{len(ref.data)}"
-    if ref.url:
-        return f"url:{ref.url}"
-    return f"obj:{id(ref)}"
+    """去重键:同内容 bytes / 同 url path 必须撞同一键,禁止 ``id(data)``。"""
+    return media_ref_cache_key(ref)
 
 
 def _kind_of(item: ContentItem) -> Optional[MediaKind]:

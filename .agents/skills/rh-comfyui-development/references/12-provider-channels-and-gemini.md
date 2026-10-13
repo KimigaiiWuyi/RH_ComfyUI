@@ -52,8 +52,9 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
   `audit_key_prefix`,内部走 `utils.audit_key.mask_api_key`。启动时
   `key_prefix_backfill` 用当前配置把空值和旧前 6 位自愈成新掩码
   (marker ``key_mask_head_tail_v2.done``，内容 ``remaining=N``)。
-  先 COUNT 尚未含 ``*****`` 的行：0 或 COUNT≤上次 remaining 则跳过翻页。
-  旧文件内容 ``done`` 没有 N，COUNT>0 时再跑一遍把不可补残留记下来。
+  COUNT 只计非空且尚未含 ``*****`` 的行（空串是无钥终态，不抬 remaining）。
+  remaining 已知且 COUNT=0 或 COUNT≤上次 remaining 则跳过翻页。
+  无标记（含旧文本 ``done``）时翻页 ``include_empty=True``，尝试补历史空值。
   现网一把钥都没有则不写标记。
   `backend_provider` 列宽 32,长通道名会被截断;`prefix_for_row` 对截断名做
   唯一全名还原(或 `vendor_channel` 补全)。已注册的 `gateway_slotN_*` 同一槽

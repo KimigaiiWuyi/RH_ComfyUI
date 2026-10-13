@@ -9,10 +9,14 @@
 
 from __future__ import annotations
 
-from RH_ComfyUI.utils.core.types import ContentItem, ContentItemType, image_ref
+from RH_ComfyUI.utils.core.types import ContentItem, ContentItemType, MediaKind, MediaRef, image_ref
 from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.video import interpolate_prompt_refs
-from RH_ComfyUI.utils.core.media_labels import ensure_media_ref_labels, append_spaced_media_ref
+from RH_ComfyUI.utils.core.media_labels import (
+    append_spaced_media_ref,
+    ensure_media_ref_labels,
+    labeled_prompt_from_ordered_content,
+)
 from RH_ComfyUI.utils.backends.seedance.classify import classify_video_spec
 from RH_ComfyUI.utils.backends.happyhorse.classify import classify_happyhorse, rewrite_prompt_for_r2v
 
@@ -143,3 +147,18 @@ def test_seedance_first_last_flat_ensure_noop():
     assert out.prompt == "从 [@参考图片1] 变到 [@参考图片2]"
     spec = classify_video_spec(out)
     assert len(spec.media) == 2
+
+
+def test_same_audio_bytes_copies_reuse_index():
+    """两份相同音频 bytes(不同对象)编号仍是 [@参考音频1]。"""
+    blob = b"ID3" + b"\x00" * 80
+    prompt = labeled_prompt_from_ordered_content(
+        [
+            ContentItem(type=ContentItemType.TEXT, text="先"),
+            ContentItem(type=ContentItemType.AUDIO, media=MediaRef(kind=MediaKind.AUDIO, data=blob)),
+            ContentItem(type=ContentItemType.TEXT, text="再"),
+            ContentItem(type=ContentItemType.AUDIO, media=MediaRef(kind=MediaKind.AUDIO, data=bytes(blob))),
+        ]
+    )
+    assert prompt.count("[@参考音频1]") == 2
+    assert "[@参考音频2]" not in prompt

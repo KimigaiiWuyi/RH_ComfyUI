@@ -56,6 +56,9 @@ class RefMediaPrep:
     h3_audio: bool = False
     total_max_s: float = 0.0
     total_target_s: float = 0.0
+    # Seedance r2v:多段参考音频合计 ≤15.2s(与单段上限分开,不能跟视频总预算混用)
+    audio_total_max_s: float = 0.0
+    audio_total_target_s: float = 0.0
     reject_unprobeable_audio: bool = False
     image_log: str = "seedance"
 
@@ -206,6 +209,18 @@ async def prepare_ref_media_request(request: GenerationRequest, cfg: RefMediaPre
             audio_durs,
             budget_s=cfg.total_max_s,
             target_s=cfg.total_target_s or cfg.audio_trim_target_s,
+            min_s=cfg.audio_min_s or 0.0,
+            h3_audio=cfg.h3_audio,
+            audio_loop_target_s=cfg.audio_loop_target_s,
+            audio_trim_target_s=cfg.audio_trim_target_s,
+        )
+    elif cfg.audio_total_max_s > 0:
+        # Seedance r2v:只压音频合计,视频仍按单段 [2,15]/[2,30],不能共用 H3 的 AV 总预算
+        await _fit_total_audio_budget(
+            audio_out,
+            audio_durs,
+            budget_s=cfg.audio_total_max_s,
+            target_s=cfg.audio_total_target_s or cfg.audio_trim_target_s,
             min_s=cfg.audio_min_s or 0.0,
             h3_audio=cfg.h3_audio,
             audio_loop_target_s=cfg.audio_loop_target_s,
@@ -422,7 +437,8 @@ class SeedanceVideoModel(VideoPipelineModel):
         """提交前预处理:参考视频时长/像素 + 参考音频时长 + 参考图短边/宽高比。
 
         视频:时长钳到 [min, max];像素 < 407696 时等比放大。两步合并进一趟 ffmpeg。
-        音频:超过 15.2s 裁到 15.0s。
+        音频:单段超过 15.2s 裁到 15.0s;多段合计仍超 15.2s 再按预算裁到 ~15.0s
+        (Seedance r2v 硬限是 audio *total* duration,两段各 10s 也会 400)。
         图片:宽或高 < 300px 时等比放大;宽高比超出 0.40~2.50 时居中裁到 0.41 或 2.49。
         多段参考并发处理,ffmpeg 由全局闸限并发。探测/编解码失败放行原片。
         """
@@ -436,6 +452,8 @@ class SeedanceVideoModel(VideoPipelineModel):
                 video_min_pixels=self.ref_video_min_pixels,
                 audio_max_s=self.ref_audio_max_s,
                 audio_trim_target_s=self.ref_audio_trim_target_s,
+                audio_total_max_s=self.ref_audio_max_s,
+                audio_total_target_s=self.ref_audio_trim_target_s,
                 image_log="seedance",
             ),
         )

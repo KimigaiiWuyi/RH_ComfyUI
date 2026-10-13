@@ -25,7 +25,7 @@ from ..provider import (
     SeedanceProviderError,
     normalize_usage,
 )
-from ....core.types import MediaKind
+from ....core.types import MediaKind, MediaRef, media_ref_cache_key
 from ....core.media_labels import append_spaced_media_ref
 
 # Seedance / 方舟 content[] 协议:每种媒体的 type 键与 payload 键同名。
@@ -69,21 +69,34 @@ class ContentArrayMixin:
         按 @ 出现顺序嵌入该 text(前后留空格)。
         媒体项必须紧跟 text、且 **保持 ordered_segments（即提示词 @ 顺序）**,
         禁止再按图片→视频→音频重排 —— 否则网关 ``content[N]`` 对不上第 N 个 @。
+        同一段音频/视频/图多次出现只占一个 content[] 槽,正文复用首次序号
+        (prompt 里 @ 两次仍是一条参考,时长不能算两遍)。
         """
         if spec.ordered_segments:
-            # 有序路径:并行 materialize 所有媒体
-            media_refs = [s.media.ref for s in spec.ordered_segments if s.kind == "media" and s.media]
+            unique_refs: list[MediaRef] = []
+            slot_to_unique: dict[str, int] = {}
+            seg_slots: list[Optional[str]] = []
+            for s in spec.ordered_segments:
+                if s.kind != "media" or s.media is None:
+                    continue
+                kind = MediaKind(s.media.ref.kind.value) if s.media.ref is not None else s.media.kind
+                slot = f"{kind.value}:{media_ref_cache_key(s.media.ref)}"
+                seg_slots.append(slot)
+                if slot not in slot_to_unique:
+                    slot_to_unique[slot] = len(unique_refs)
+                    unique_refs.append(s.media.ref)
             if isinstance(self, SeedanceProvider):
-                urls = await self.materialize_all(media_refs)
+                urls = await self.materialize_all(unique_refs)
             else:
-                urls = [None] * len(media_refs)
+                urls = [None] * len(unique_refs)
 
-            url_iter = iter(urls)
             text_parts: list[str] = []
             media_items: list[dict[str, Any]] = []
             img_idx = 0
             vid_idx = 0
             aud_idx = 0
+            slot_kind_n: dict[str, int] = {}
+            slot_iter = iter(seg_slots)
 
             for seg in spec.ordered_segments:
                 if seg.kind == "text":
@@ -93,25 +106,36 @@ class ContentArrayMixin:
                     continue
                 if seg.media is None:
                     continue
-                url = next(url_iter, None)
+                slot = next(slot_iter, None)
+                if not slot:
+                    continue
+                uniq_i = slot_to_unique.get(slot)
+                url = urls[uniq_i] if uniq_i is not None and uniq_i < len(urls) else None
                 if not url:
                     continue
                 # SpecMedia.kind 与 MediaRef.kind 可能因历史路径不一致;
                 # 以 ref.kind 为准(构造时已按文件头/mime 纠正),避免视频走 image_url。
                 kind = MediaKind(seg.media.ref.kind.value) if seg.media.ref is not None else seg.media.kind
+                reused_n = slot_kind_n.get(slot)
+                if reused_n is not None:
+                    append_spaced_media_ref(text_parts, kind, reused_n)
+                    continue
+                if kind == MediaKind.IMAGE:
+                    img_idx += 1
+                    n = img_idx
+                elif kind == MediaKind.VIDEO:
+                    vid_idx += 1
+                    n = vid_idx
+                elif kind == MediaKind.AUDIO:
+                    aud_idx += 1
+                    n = aud_idx
+                else:
+                    continue
+                slot_kind_n[slot] = n
+                append_spaced_media_ref(text_parts, kind, n)
                 key = _content_type_key(kind)
                 d = {"type": key, key: {"url": url}}
                 d["role"] = self._role_str(seg.media.role, kind)
-
-                if kind == MediaKind.IMAGE:
-                    img_idx += 1
-                    append_spaced_media_ref(text_parts, kind, img_idx)
-                elif kind == MediaKind.VIDEO:
-                    vid_idx += 1
-                    append_spaced_media_ref(text_parts, kind, vid_idx)
-                elif kind == MediaKind.AUDIO:
-                    aud_idx += 1
-                    append_spaced_media_ref(text_parts, kind, aud_idx)
                 media_items.append(d)
 
             items: list[dict[str, Any]] = []
