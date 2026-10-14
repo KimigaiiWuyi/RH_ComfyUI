@@ -113,6 +113,7 @@ class VideoGenerationBase(AIGCGenerationBase):
                             role=item.media.role,
                             mime_type=item.media.mime_type,
                             filename=item.media.filename,
+                            asset_uris=dict(getattr(item.media, "asset_uris", None) or {}),
                         ),
                         role=item.role,
                         text=item.text,

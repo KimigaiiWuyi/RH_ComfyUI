@@ -40,7 +40,7 @@ SEEDANCE_ASPECT_MAX = 2.49
 SEEDANCE_ASPECT_OFFICIAL_MIN = 0.40
 SEEDANCE_ASPECT_OFFICIAL_MAX = 2.50
 
-# 补边后画布的单边上限:极端长条图(如 8000×1000)若原样补边会得到上亿像素的画布,
+# 补边后成图的单边上限:极端长条图(如 8000×1000)若原样补边会得到上亿像素的成图,
 # 内存与上传都撑不住。超出时先把原图整体等比缩小,再补边——内容仍然完整保留。
 SEEDANCE_ASPECT_PAD_MAX_SIDE = 4096
 
@@ -206,11 +206,11 @@ def ensure_min_edge(
 
 
 def _seedance_pad_plan(width: int, height: int) -> tuple[int, int, int, int]:
-    """规划补边:返回 (原图放置宽, 原图放置高, 画布宽, 画布高)。
+    """规划补边:返回 (原图放置宽, 原图放置高, 成图宽, 成图高)。
 
-    只放大画布短边,原图保持 1:1 不缩放;过宽(w/h > 2.49)补上下,
-    过竖(w/h < 0.41)补左右,画布宽高比一定落在 [MIN, MAX] 内。
-    若画布单边超过 SEEDANCE_ASPECT_PAD_MAX_SIDE(极端长条图),先把原图
+    只放大成图短边,原图保持 1:1 不缩放;过宽(w/h > 2.49)补上下,
+    过竖(w/h < 0.41)补左右,成图宽高比一定落在 [MIN, MAX] 内。
+    若成图单边超过 SEEDANCE_ASPECT_PAD_MAX_SIDE(极端长条图),先把原图
     整体等比缩小到能放进展限度内——内容仍然完整保留,只是分辨率降低。
     """
     ar = width / height
@@ -236,7 +236,7 @@ def _seedance_pad_plan(width: int, height: int) -> tuple[int, int, int, int]:
 def pad_to_seedance_aspect(data: bytes) -> tuple[bytes, str]:
     """白色背景补边,使宽高比落入官方 0.40~2.50(目标 0.41 或 2.49,取更近一侧)。
 
-    过宽(w/h > 2.49)补上下;过竖(w/h < 0.41)补左右。原图 1:1 居中放在纯白画布上,
+    过宽(w/h > 2.49)补上下;过竖(w/h < 0.41)补左右。原图 1:1 居中放在纯白底上,
     不裁切、内容完整保留。已在区间内、解码失败或 Pillow 不可用时原样返回。
     """
     if not data:
@@ -336,7 +336,7 @@ def prepare_seedance_image_bytes(data: bytes) -> tuple[bytes, str]:
         return data, ""
     out, info_scale = ensure_min_edge(data)
     out, info_pad = pad_to_seedance_aspect(out)
-    # 补边只放大画布,原图宽高不变,短边仍 ≥300;再跑一次防极端缩放的边缘。
+    # 补边只放大成图,原图宽高不变,短边仍 ≥300;再跑一次防极端缩放的边缘。
     out, info_scale2 = ensure_min_edge(out)
     out, mime = ensure_standard_image(out)
     fmt = "" if data.startswith(_JPEG_MAGIC) else (mime.split("/")[-1] if mime else "")
@@ -455,6 +455,7 @@ def standardize_generation_images(request: Any) -> Any:
                     role=media.role,
                     mime_type=mime or media.mime_type,
                     filename=media.filename,
+                    asset_uris=dict(getattr(media, "asset_uris", None) or {}),
                 ),
                 role=item.role,
                 text=item.text,
@@ -510,6 +511,7 @@ async def prepare_seedance_image_ref(ref: Any) -> Any:
         role=ref.role,
         mime_type=image_mime_from_bytes(new_data),
         filename=ref.filename,
+        asset_uris=dict(getattr(ref, "asset_uris", None) or {}),
     )
 
 

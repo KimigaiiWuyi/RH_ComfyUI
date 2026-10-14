@@ -519,6 +519,7 @@ async def prepare_seedance_video_ref(
         role=ref.role,
         mime_type="video/mp4",
         filename=ref.filename,
+        asset_uris=dict(getattr(ref, "asset_uris", None) or {}),
     )
 
 

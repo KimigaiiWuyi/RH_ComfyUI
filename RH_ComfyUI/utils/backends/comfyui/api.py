@@ -17,7 +17,7 @@ from websockets import ClientConnection
 
 from gsuid_core.logger import logger
 
-from ..http_retry import RetryingAsyncClient
+from ..http_retry import NETWORK_RETRY_ATTEMPTS, RetryingAsyncClient
 from ....core.base.errors import VendorTaskNotDurable
 from ...resource.RESOURCE_PATH import OUTPUT_PATH
 from ....rh_config.comfyui_config import SERVICE_CONFIG
@@ -141,6 +141,91 @@ def _parse_runninghub_output_payload(payload: object) -> tuple[int | None, list[
         seen.add(item)
         unique.append(item)
     return code, unique
+
+
+# RunningHub Comfy history 不带 endpoint。公开对象与 AI 应用 file_url 同形。
+_TOS_PUBLIC_HOST = "tos-cn-beijing.volces.com"
+
+
+def _is_audio_filename(filename: object) -> bool:
+    if not isinstance(filename, str):
+        return False
+    lower = filename.lower().split("?", 1)[0]
+    return lower.endswith(_AUDIO_FILE_SUFFIXES)
+
+
+def _tos_public_url(source: dict[str, object]) -> str | None:
+    """history 项里的 bucket + objectKey → 火山 TOS 公开地址。"""
+    if "bucket" not in source or "objectKey" not in source:
+        return None
+    bucket = source["bucket"]
+    key = source["objectKey"]
+    if not isinstance(bucket, str) or not isinstance(key, str):
+        return None
+    bucket = bucket.strip()
+    key = key.strip().lstrip("/")
+    if not bucket or not key or "/" in bucket or ".." in key.split("/"):
+        return None
+    provider = source["storageProvider"] if "storageProvider" in source else "tos"
+    if not isinstance(provider, str) or provider.lower() != "tos":
+        return None
+    return f"https://{bucket}.{_TOS_PUBLIC_HOST}/{key}"
+
+
+def _direct_output_url(source: dict[str, object]) -> str | None:
+    for key in _RH_OUTPUT_URL_KEYS:
+        if key not in source:
+            continue
+        raw = source[key]
+        if isinstance(raw, str) and raw.startswith(("http://", "https://")):
+            return raw
+    return _tos_public_url(source)
+
+
+def _view_candidates(subfolder: object, source: dict[str, object], runninghub: bool) -> list[str]:
+    """RH 把 subfolder 拼进对象键。租户哈希不是 ComfyUI 子目录,不能拿去 /view。"""
+    raw = _view_subfolder(subfolder)
+    object_key = source["objectKey"] if "objectKey" in source else ""
+    if raw and isinstance(object_key, str) and object_key.strip():
+        tenant = object_key.strip().lstrip("/").split("/", 1)[0]
+        if raw == tenant:
+            raw = ""
+    candidates = [raw]
+    if runninghub and raw:
+        candidates.append("")
+    return candidates
+
+
+def _is_text_error_body(data: bytes) -> bool:
+    if not data:
+        return True
+    head = data.lstrip()[:24].lower()
+    return head.startswith((b"{", b"[", b"<", b"<!doctype", b"<?xml"))
+
+
+def _looks_like_audio(data: bytes) -> bool:
+    if data.startswith((b"ID3", b"fLaC", b"OggS")):
+        return True
+    if data.startswith(b"RIFF") and (len(data) < 12 or data[8:12] == b"WAVE"):
+        return True
+    if len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0:
+        return True
+    return len(data) >= 12 and data[4:8] == b"ftyp"
+
+
+def _body_matches_filename(data: bytes, filename: str) -> bool:
+    """拒绝空包和 JSON/HTML。音频文件名还要有音频头,避免把错页存成 mp3。"""
+    if _is_text_error_body(data):
+        return False
+    if _is_audio_filename(filename):
+        return _looks_like_audio(data)
+    return True
+
+
+def _remember_output_url(url: str) -> None:
+    from ....core.telemetry.wire_capture import get_vendor_raw, set_vendor_raw, attach_file_url
+
+    set_vendor_raw(attach_file_url(get_vendor_raw(), url))
 
 
 def _pick_output_url(urls: list[str], filename: str) -> str | None:
@@ -566,14 +651,20 @@ class ComfyUIAPI:
             for content in ["gifs", "images"]:
                 if content in node_output:
                     for video in node_output[content]:
-                        if video["type"] == "output":
-                            video_data = await self.get_file(
-                                video["filename"],
-                                video["subfolder"],
-                                video["type"],
-                                prompt_id=prompt_id,
-                            )
-                            output_audios.append({"filename": video["filename"], "data": video_data})
+                        item = _as_str_key_dict(video)
+                        if item is None or "type" not in item or item["type"] != "output":
+                            continue
+                        if "filename" not in item or not isinstance(item["filename"], str):
+                            continue
+                        subfolder = item["subfolder"] if "subfolder" in item else ""
+                        video_data = await self.get_file(
+                            item["filename"],
+                            subfolder if isinstance(subfolder, str) else "",
+                            "output",
+                            prompt_id=prompt_id,
+                            source=item,
+                        )
+                        output_audios.append({"filename": item["filename"], "data": video_data})
         return output_audios
 
     async def get_images(self, prompt_id: str) -> List[Dict[str, Any]]:
@@ -604,14 +695,23 @@ class ComfyUIAPI:
             for content in ["audio", "images"]:
                 if content in node_output:
                     for audio in node_output[content]:
-                        if audio["type"] == "output":
-                            audio_data = await self.get_file(
-                                audio["filename"],
-                                audio["subfolder"],
-                                audio["type"],
-                                prompt_id=prompt_id,
-                            )
-                            output_audios.append({"filename": audio["filename"], "data": audio_data})
+                        item = _as_str_key_dict(audio)
+                        if item is None or "type" not in item or item["type"] != "output":
+                            continue
+                        if "filename" not in item or not isinstance(item["filename"], str):
+                            continue
+                        # SaveAudio 在 RH history 里落在 images,旁边可能还有预览图。
+                        if not _is_audio_filename(item["filename"]):
+                            continue
+                        subfolder = item["subfolder"] if "subfolder" in item else ""
+                        audio_data = await self.get_file(
+                            item["filename"],
+                            subfolder if isinstance(subfolder, str) else "",
+                            "output",
+                            prompt_id=prompt_id,
+                            source=item,
+                        )
+                        output_audios.append({"filename": item["filename"], "data": audio_data})
         return output_audios
 
     async def get_file(
@@ -621,25 +721,37 @@ class ComfyUIAPI:
         folder_type: str,
         *,
         prompt_id: str | None = None,
+        source: dict[str, object] | None = None,
     ) -> bytes:
-        # RH /view 把 subfolder 拼进 COS key;audio/ 子目录经常 NoSuchKey。
-        # 空 subfolder 与 /task/openapi/outputs 才是同一 prompt_id 的可用地址。
-        local_sub = subfolder if isinstance(subfolder, str) else _view_subfolder(subfolder)
-        local_path = Path(local_sub) / filename if local_sub else Path(filename)
-        if local_path.is_file():
-            return await asyncio.to_thread(local_path.read_bytes)
+        # RH /view 把 subfolder 拼进对象键。租户哈希和 audio/ 都会 404 或返回错页。
+        # TOS 直链只试一次;失败或正文不对再走 /view 与 outputs。
+        meta = source if source is not None else {}
+        direct = _direct_output_url(meta) if self.is_runninghub else None
+        if direct:
+            try:
+                hosted = await self._download_url(direct, retry_attempts=1)
+            except (httpx.HTTPError, TimeoutError, OSError) as exc:
+                detail = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__
+                logger.info(f"[ComfyUI] 直链不可用 status={detail} filename={filename}")
+            else:
+                if _body_matches_filename(hosted, filename):
+                    _remember_output_url(direct)
+                    return hosted
+                logger.info(f"[ComfyUI] 直链内容不是媒体 filename={filename}")
 
-        subfolder_str = _view_subfolder(subfolder)
-        candidates = [subfolder_str]
-        if self.is_runninghub and subfolder_str:
-            candidates.append("")
+        if not self.is_runninghub:
+            local_sub = subfolder if isinstance(subfolder, str) else _view_subfolder(subfolder)
+            local_path = Path(local_sub) / filename if local_sub else Path(filename)
+            if local_path.is_file():
+                return await asyncio.to_thread(local_path.read_bytes)
 
+        candidates = _view_candidates(subfolder, meta, self.is_runninghub)
         last_error: httpx.HTTPStatusError | None = None
         for index, sub in enumerate(candidates):
             attempts = 3 if index == len(candidates) - 1 else 1
             for attempt in range(attempts):
                 try:
-                    return await self._fetch_view_once(filename, sub, folder_type)
+                    body = await self._fetch_view_once(filename, sub, folder_type)
                 except httpx.HTTPStatusError as exc:
                     if exc.response.status_code != 404:
                         raise
@@ -653,6 +765,10 @@ class ComfyUIAPI:
                         continue
                     logger.info(f"[ComfyUI] 获取文件 404 filename={filename} subfolder={sub!r}: {exc}")
                     break
+                if _body_matches_filename(body, filename):
+                    return body
+                logger.info(f"[ComfyUI] /view 内容不是媒体 filename={filename} subfolder={sub!r}")
+                break
 
         if self.is_runninghub and prompt_id:
             try:
@@ -677,6 +793,16 @@ class ComfyUIAPI:
         }
         async with RetryingAsyncClient(timeout=6000, follow_redirects=True) as client:
             response = await client.get(f"{self.url}/view", params=params, timeout=60.0)
+            response.raise_for_status()
+            return response.content
+
+    async def _download_url(self, url: str, *, retry_attempts: int = NETWORK_RETRY_ATTEMPTS) -> bytes:
+        async with RetryingAsyncClient(
+            timeout=120.0,
+            follow_redirects=True,
+            retry_attempts=retry_attempts,
+        ) as client:
+            response = await client.get(url, timeout=120.0)
             response.raise_for_status()
             return response.content
 
@@ -712,10 +838,12 @@ class ComfyUIAPI:
         if chosen is None:
             return None
         logger.info(f"[ComfyUI] 改从 RunningHub outputs 下载 taskId={task_id}")
-        async with RetryingAsyncClient(timeout=120.0, follow_redirects=True) as client:
-            file_resp = await client.get(chosen, timeout=120.0)
-            file_resp.raise_for_status()
-            return file_resp.content
+        hosted = await self._download_url(chosen)
+        if not _body_matches_filename(hosted, filename):
+            logger.info(f"[ComfyUI] RunningHub outputs 内容不是媒体 filename={filename}")
+            return None
+        _remember_output_url(chosen)
+        return hosted
 
     async def get_texts(self, prompt_id: str) -> list[str]:
         output_texts: list[str] = []

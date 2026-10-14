@@ -99,6 +99,7 @@ async def prepare_ref_media_request(request: GenerationRequest, cfg: RefMediaPre
             role=ref.role,
             mime_type=mime,
             filename=ref.filename,
+            asset_uris=dict(getattr(ref, "asset_uris", None) or {}),
         )
 
     async def _do_video(ref: MediaRef) -> MediaRef:
@@ -322,6 +323,7 @@ async def _fit_total_duration_budget(
             role=ref.role,
             mime_type="video/mp4",
             filename=ref.filename,
+            asset_uris=dict(getattr(ref, "asset_uris", None) or {}),
         )
         video_durs[key] = float(dur or want)
 
@@ -379,6 +381,7 @@ async def _fit_total_audio_budget(
             role=ref.role,
             mime_type=mime,
             filename=ref.filename,
+            asset_uris=dict(getattr(ref, "asset_uris", None) or {}),
         )
         audio_durs[key] = float(dur or want)
 

@@ -314,10 +314,15 @@ class MediaRef:
     role: Optional[str] = None
     mime_type: Optional[str] = None
     filename: Optional[str] = None
+    # Caller-supplied asset-library URIs (``asset://...``), keyed by a provider
+    # token such as ``volcengine``. A provider may send its own entry instead of
+    # re-hosting ``url`` / ``data``. Unknown tokens are ignored.
+    asset_uris: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # 自动把 str 转为 MediaKind enum
         self.kind = _to_media_kind(self.kind)
+        self.asset_uris = parse_asset_uris(self.asset_uris)
         if self.data is None and self.url is None:
             raise ValueError("MediaRef 必须提供 data 或 url 之一")
         # 纠正误标 kind(例如 mp4 被塞进 images 通道声明为 IMAGE)——
@@ -340,6 +345,20 @@ class MediaRef:
 
     def is_remote(self) -> bool:
         return self.url is not None and self.data is None
+
+
+def parse_asset_uris(raw: Any) -> dict[str, str]:
+    """Keep only ``asset://`` values. Keys are opaque provider tokens."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        uri = value.strip()
+        if uri.lower().startswith("asset://") and len(uri) > len("asset://"):
+            out[key] = uri
+    return out
 
 
 def media_ref_cache_key(ref: MediaRef) -> str:

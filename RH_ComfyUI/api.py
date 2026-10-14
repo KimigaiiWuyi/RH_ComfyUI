@@ -499,6 +499,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
                             role=d.get("role"),
                             mime_type=d.get("mime_type"),
                             filename=d.get("filename"),
+                            asset_uris=d.get("asset_uris") if isinstance(d.get("asset_uris"), dict) else {},
                         )
                     )
                 elif kind == MediaKind.AUDIO:
@@ -509,6 +510,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
                             role=d.get("role"),
                             mime_type=d.get("mime_type"),
                             filename=d.get("filename"),
+                            asset_uris=d.get("asset_uris") if isinstance(d.get("asset_uris"), dict) else {},
                         )
                     )
                 else:
@@ -576,7 +578,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
 
 def _to_media_ref(d: dict[str, Any], kind: MediaKind) -> MediaRef:
     """dict → MediaRef。"""
-    from .utils.core.types import MediaRef
+    from .utils.core.types import MediaRef, parse_asset_uris
 
     data = d.get("data_base64") or d.get("data")
     url = d.get("url")
@@ -591,6 +593,7 @@ def _to_media_ref(d: dict[str, Any], kind: MediaKind) -> MediaRef:
         role=d.get("role"),
         mime_type=d.get("mime_type"),
         filename=d.get("filename"),
+        asset_uris=parse_asset_uris(d.get("asset_uris")),
     )
 
 
@@ -630,6 +633,8 @@ def _to_content_item(d: dict[str, Any]) -> ContentItem:
         "data_base64": d.get("data_base64"),
         "data": d.get("data"),
     }
+    if isinstance(media_payload, dict) and "asset_uris" not in media_payload and isinstance(d.get("asset_uris"), dict):
+        media_payload = {**media_payload, "asset_uris": d.get("asset_uris")}
     media = _to_media_ref(media_payload, declared)
     # MediaRef.__post_init__ 已按 sniff 纠正 kind;ContentItem.type 必须跟 kind 对齐
     type_map = {

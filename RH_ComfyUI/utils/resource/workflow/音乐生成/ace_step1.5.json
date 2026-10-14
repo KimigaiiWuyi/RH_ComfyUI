@@ -1,7 +1,7 @@
 {
   "3": {
     "inputs": {
-      "seed": 397071385453125,
+      "seed": 820704019333172,
       "steps": 8,
       "cfg": 1,
       "sampler_name": "euler",
@@ -26,7 +26,7 @@
     },
     "class_type": "KSampler",
     "_meta": {
-      "title": "KSampler"
+      "title": "K采样器"
     }
   },
   "18": {
@@ -42,7 +42,7 @@
     },
     "class_type": "VAEDecodeAudio",
     "_meta": {
-      "title": "VAE Decode Audio"
+      "title": "VAE解码_Audio"
     }
   },
   "47": {
@@ -54,12 +54,13 @@
     },
     "class_type": "ConditioningZeroOut",
     "_meta": {
-      "title": "ConditioningZeroOut"
+      "title": "条件零化"
     }
   },
   "78": {
     "inputs": {
-      "shift": 3,
+      "shift": 3.0000000000000004,
+      "sampling": "flow",
       "model": [
         "97",
         0
@@ -67,7 +68,7 @@
     },
     "class_type": "ModelSamplingAuraFlow",
     "_meta": {
-      "title": "ModelSamplingAuraFlow"
+      "title": "模型采样算法AuraFlow"
     }
   },
   "94": {
@@ -80,7 +81,7 @@
         "130",
         0
       ],
-      "seed": 397071385453125,
+      "seed": 816124575372942,
       "bpm": 160,
       "duration": [
         "133",
@@ -91,10 +92,10 @@
       "keyscale": "E minor",
       "generate_audio_codes": true,
       "cfg_scale": 2,
-      "temperature": 0.85,
-      "top_p": 0.9,
+      "temperature": 0.8500000000000002,
+      "top_p": 0.9000000000000001,
       "top_k": 0,
-      "min_p": 0.0,
+      "min_p": 0,
       "clip": [
         "97",
         1
@@ -111,7 +112,7 @@
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
-      "title": "Load Checkpoint"
+      "title": "Checkpoint加载器(简易)"
     }
   },
   "98": {
@@ -127,9 +128,36 @@
       "title": "Empty Ace Step 1.5 Latent Audio"
     }
   },
-  "104": {
+  "130": {
     "inputs": {
-      "filename_prefix": "ComfyUI",
+      "value": ""
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Text (Multiline)"
+    }
+  },
+  "131": {
+    "inputs": {
+      "value": "燃爽劲爆"
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Text (Multiline)"
+    }
+  },
+  "133": {
+    "inputs": {
+      "value": 40
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float"
+    }
+  },
+  "134": {
+    "inputs": {
+      "filename_prefix": "ace_step",
       "quality": "V0",
       "audioUI": "",
       "audio": [
@@ -140,33 +168,6 @@
     "class_type": "SaveAudioMP3",
     "_meta": {
       "title": "Save Audio (MP3)"
-    }
-  },
-  "130": {
-    "inputs": {
-      "value": ""
-    },
-    "class_type": "PrimitiveStringMultiline",
-    "_meta": {
-      "title": "String (Multiline)"
-    }
-  },
-  "131": {
-    "inputs": {
-      "value": "动感的节拍"
-    },
-    "class_type": "PrimitiveStringMultiline",
-    "_meta": {
-      "title": "String (Multiline)"
-    }
-  },
-  "133": {
-    "inputs": {
-      "value": 40
-    },
-    "class_type": "PrimitiveFloat",
-    "_meta": {
-      "title": "Float"
     }
   }
 }

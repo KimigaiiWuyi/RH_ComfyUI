@@ -200,7 +200,7 @@ def test_wide_jpeg_pads_white_border_to_max_aspect():
     assert img.size[1] > 1000
     _assert_seedance_aspect_ok(*img.size)
     assert abs(img.size[0] / img.size[1] - SEEDANCE_ASPECT_MAX) < 0.02
-    # 原图内容原样落在画布中央
+    # 原图内容原样落在成图中央
     assert img.getpixel((10, 500)) == (20, 180, 90)
     # 补出来的上下边是纯白
     assert img.getpixel((10, 5)) == (255, 255, 255)
@@ -251,14 +251,14 @@ def test_pad_rgba_transparent_pixels_fall_on_white():
 
 
 def test_extreme_long_strip_downscales_before_pad():
-    """极端长条图补边会撑爆画布,先整体等比缩小再补边。"""
+    """极端长条图补边会撑爆成图,先整体等比缩小再补边。"""
     raw = _jpeg(8000, 100)
     out, info = pad_to_seedance_aspect(raw)
     assert info
     img = _open(out)
     assert max(img.size) <= SEEDANCE_ASPECT_PAD_MAX_SIDE
     _assert_seedance_aspect_ok(*img.size)
-    # 缩小后原图宽高仍在画布内完整保留,没有被裁掉
+    # 缩小后原图宽高仍在成图内完整保留,没有被裁掉
     assert img.size[0] < 8000
     # 过宽图补上下白边:中间是原图,上下是白
     assert img.getpixel((img.size[0] // 2, img.size[1] // 2)) == (20, 180, 90)
@@ -267,7 +267,7 @@ def test_extreme_long_strip_downscales_before_pad():
 
 
 def test_extreme_tall_strip_downscales_then_pads_sides():
-    """极端竖长条图:左右补白,画布不超上限。"""
+    """极端竖长条图:左右补白,成图不超上限。"""
     raw = _jpeg(100, 8000)
     out, info = pad_to_seedance_aspect(raw)
     assert info
