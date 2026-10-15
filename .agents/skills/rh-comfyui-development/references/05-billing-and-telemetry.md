@@ -23,8 +23,8 @@
 能力:`supports_cancel` / `supports_remote_cancel`;**`rh_app` 永不 remote cancel**,
 `comfyui` 可以(勿与共用 `RH_apikey` 混谈)。
 
-**resume-poll**:`bind_vendor_cancel` 持久化 `extra_params_json.vendor_task_id`;
-宿主重启后 `resume_poll(...)`(不走 dispatch、不二次扣费)。
+**resume-poll**:`bind_vendor_cancel` 持久化 `vendor_task_id`，并把通道写入进行中行的
+`backend_provider`；宿主重启后 `resume_poll(...)`(不走 dispatch、不二次扣费)。
 
 **统计 wire**:backend POST 前 `set_wire_from_http_body`;`record_task` 终态
 `prompt` / `request_body_json` **优先最终上游载荷**,非调用方入参原文。
@@ -83,7 +83,10 @@ elapsed_ms / error / request_body_json / extra_params_json`。
 规则:
 - **`prompt` / `request_body_json` 终态以 wire 为准**(§二十 §20.4);
   `begin_task` 仅写 running 快照,可被 UPDATE 覆盖;
-- `extra_params_json` 可含 `vendor_task_id` / `vendor_channel`(resume 用);
+- 上游接单（`bind_vendor_task`）时，进行中行的 `backend_provider` 写成通道名；
+  同一次写入 `extra_params_json` 的 `vendor_task_id` / `vendor_channel`（resume 用）。
+  终态若带上 `output.metadata.channel` 会再覆盖供应商列；空通道名不会把该列清掉。
+  厂商模型 ID 与凭证脱敏仍在终态写入；
 - 外部通道走同一 record_dispatch,只落 `channel` 名,**不落私有密钥**;
   wire body 中 base64 须 `mask_body`;
 - 加统计维度:先在 `RHComfyuiTaskRecord` 加列(带默认值,依赖

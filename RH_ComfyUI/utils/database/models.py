@@ -2413,9 +2413,9 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         vendor_task_id: str,
         channel_name: str = "",
     ) -> bool:
-        """把上游任务号合并进 extra_params_json。行不存在返回 False。
+        """把上游任务号合并进 extra_params_json，并给进行中行写入通道名。
 
-        锁冲突由 ``@with_session`` 退避重试；其它异常原样抛出。
+        行不存在返回 False。锁冲突由 ``@with_session`` 退避重试；其它异常原样抛出。
         """
         if record_id <= 0 or not vendor_task_id:
             return False
@@ -2431,8 +2431,18 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             vendor_task_id=vendor_task_id,
             channel_name=channel_name,
         )
+        # 接单即知通道。终态若没有新通道名，空值不会把这一列清掉。
+        cls.stamp_accepted_channel(row, channel_name)
         session.add(row)
         return True
+
+    @staticmethod
+    def stamp_accepted_channel(row: RHComfyuiTaskRecord, channel_name: str) -> None:
+        """进行中的行写入已接单通道。终态不改，避免盖掉结算时的供应商。"""
+        name = channel_name.strip()
+        if not name or row.status != RHComfyuiTaskStatus.RUNNING.value:
+            return
+        row.backend_provider = name[:32]
 
     @classmethod
     @with_session

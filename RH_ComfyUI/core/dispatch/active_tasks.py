@@ -146,6 +146,7 @@ class ActiveTaskRegistry:
         """写入上游 task_id 并 await 落库;可选挂远程 cancel。
 
         ``cancel_remote=None`` 时只持久化 id(如 rh_app 可 resume 但无 cancel API)。
+        进行中的消费行同时把 ``channel_name`` 写入 ``backend_provider``。
         """
         target = ag or self.current()
         if target is None:

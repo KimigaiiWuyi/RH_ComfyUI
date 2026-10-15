@@ -124,7 +124,8 @@ cancel_generation(trace_id | record_id)
 ### 持久化
 
 `bind_vendor_cancel(vendor_task_id=…, channel_name=…)` 除挂内存 cancel 外,
-异步把字段合并进当前 `RHComfyuiTaskRecord.extra_params_json`:
+把字段合并进当前 `RHComfyuiTaskRecord.extra_params_json`,并把通道名写入
+进行中行的 `backend_provider`(终态空通道名不覆盖该列):
 
 ```json
 {
