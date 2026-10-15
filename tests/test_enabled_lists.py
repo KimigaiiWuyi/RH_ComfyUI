@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from RH_ComfyUI.rh_config.service_config import SERVICE_CONFIG_DEFAULT
-from gsuid_core.utils.plugins_config.models import GsListStrConfig
+from gsuid_core.utils.plugins_config.models import GsStrConfig, GsListStrConfig, GsRepeatGroupConfig
 from RH_ComfyUI.utils.backends.enabled_list import is_model_enabled
 from RH_ComfyUI.utils.backends.seedance.config import is_seedance_model_enabled_on
 
@@ -67,7 +67,12 @@ def test_gemini_enabled_list_keeps_banana2_and_21():
     assert item.options == ["banana1", "banana2", "banana2.1", "banana_pro"]
     assert item.data == item.options
     pool = SERVICE_CONFIG_DEFAULT["OpenAI_Image_Providers"]
-    names = pool.template["models"].template["model_real_name"].options
+    assert isinstance(pool, GsRepeatGroupConfig)
+    models = pool.template["models"]
+    assert isinstance(models, GsRepeatGroupConfig)
+    real_name = models.template["model_real_name"]
+    assert isinstance(real_name, GsStrConfig)
+    names = real_name.options
     assert "banana2" in names and "banana2.1" in names
 
 

@@ -61,37 +61,33 @@ class _GatewayTerminalError(Protocol):
     user_message: str
 
 
-def _loaded_gateway_error_type() -> type[BaseException] | None:
+def _loaded_gateway_error_types() -> list[type[BaseException]]:
     """网关类只从已加载模块取，避免 RH 单测硬导入 aigc 插件。"""
     import sys
 
-    names = [
-        name
-        for name in sys.modules
-        if name == "aigc_system.seedance_gateway.unified" or name.endswith(".seedance_gateway.unified")
-    ]
-    for name in names:
-        module = sys.modules[name]
-        if "GatewayUnifiedError" not in module.__dict__:
+    found: list[type[BaseException]] = []
+    for name, module in sys.modules.items():
+        if name != "aigc_system.seedance_gateway.unified" and not name.endswith(".seedance_gateway.unified"):
+            continue
+        if module is None or "GatewayUnifiedError" not in module.__dict__:
             continue
         cls = module.__dict__["GatewayUnifiedError"]
         if isinstance(cls, type) and issubclass(cls, BaseException):
-            return cls
-    return None
+            found.append(cls)
+    return found
 
 
 def _gateway_terminal(error: BaseException) -> ResumeFailedError | None:
-    gateway_type = _loaded_gateway_error_type()
-    if gateway_type is None:
+    for gateway_type in _loaded_gateway_error_types():
+        gateway = error if isinstance(error, gateway_type) else error.__cause__
+        if not isinstance(gateway, gateway_type) or not isinstance(gateway, _GatewayTerminalError):
+            continue
+        # retryable 只表示首次提交可换通道。这条任务号已失败，再查结果相同。
+        if gateway.code == "TASK_FAILED":
+            return ResumeFailedError(gateway.user_message, definitive=True)
+        if gateway.code == "TASK_CANCELLED":
+            return ResumeCancelledError(gateway.user_message)
         return None
-    gateway = error if isinstance(error, gateway_type) else error.__cause__
-    if not isinstance(gateway, gateway_type) or not isinstance(gateway, _GatewayTerminalError):
-        return None
-    # retryable 只表示首次提交可换通道。这条任务号已失败，再查结果相同。
-    if gateway.code == "TASK_FAILED":
-        return ResumeFailedError(gateway.user_message, definitive=True)
-    if gateway.code == "TASK_CANCELLED":
-        return ResumeCancelledError(gateway.user_message)
     return None
 
 

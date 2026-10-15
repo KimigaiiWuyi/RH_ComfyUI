@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import base64
 import asyncio
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from gsuid_core.logger import logger
+
+if TYPE_CHECKING:
+    from google.genai.types import ThinkingLevel
 
 from ..http_retry import download_with_network_retry
 from ....core.base.errors import VendorTaskNotDurable
@@ -54,6 +57,22 @@ def _canonical_image_model(model: str) -> str:
     if name.endswith("-agent"):
         return name[: -len("-agent")]
     return name
+
+
+def _sdk_thinking_level(level: str) -> ThinkingLevel | None:
+    """产品面小写档位 → SDK 的 ThinkingLevel。认不出则不发 thinking_config。"""
+    from google.genai import types
+
+    key = level.strip().lower()
+    if key == "minimal":
+        return types.ThinkingLevel.MINIMAL
+    if key == "low":
+        return types.ThinkingLevel.LOW
+    if key == "medium":
+        return types.ThinkingLevel.MEDIUM
+    if key == "high":
+        return types.ThinkingLevel.HIGH
+    return None
 
 
 class GeminiImageAPI:
@@ -181,7 +200,11 @@ class GeminiImageAPI:
             "image_config": types.ImageConfig(**image_config_kw),
         }
         if thinking_level:
-            config_kw["thinking_config"] = types.ThinkingConfig(thinking_level=thinking_level)
+            parsed_level = _sdk_thinking_level(thinking_level)
+            if parsed_level is None:
+                logger.warning(f"[Gemini-Image] 忽略无法识别的 thinking_level={thinking_level!r}")
+            else:
+                config_kw["thinking_config"] = types.ThinkingConfig(thinking_level=parsed_level)
         config = types.GenerateContentConfig(**config_kw)
 
         from ....core.telemetry.wire_capture import set_vendor_raw, set_wire_audit

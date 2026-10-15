@@ -1010,33 +1010,43 @@ def test_real_provider_poll_preserves_confirmed_and_uncertain_outcomes(
 
 def test_gateway_task_failed_is_definitive_resume_error() -> None:
     import sys
-    from pathlib import Path
+    import types
 
-    plugin_root = Path(__file__).resolve().parents[2] / "aigc_system"
-    entry = str(plugin_root)
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
-    # plugins/ 在 path 上时 aigc_system 是外层空包，内层才有 seedance_gateway。
-    loaded = sys.modules["aigc_system"] if "aigc_system" in sys.modules else None
-    stub = plugin_root / "__init__.py"
-    if loaded is not None and loaded.__file__ is not None and Path(loaded.__file__).resolve() == stub.resolve():
-        for name in [key for key in sys.modules if key == "aigc_system" or key.startswith("aigc_system.")]:
-            del sys.modules[name]
-    from aigc_system.seedance_gateway.unified import GatewayUnifiedError
+    class GatewayUnifiedError(RuntimeError):
+        def __init__(
+            self,
+            message: str,
+            *,
+            code: str = "",
+            retryable: bool = False,
+            user_message: str | None = None,
+        ) -> None:
+            super().__init__(message)
+            self.code = code
+            self.retryable = retryable
+            self.user_message = message if user_message is None else user_message
 
-    from RH_ComfyUI.core.dispatch.resume import provider_terminal_error
+    # resume 按模块名认已加载的网关异常,单测不硬导入宿主插件。
+    module_name = "_rh_gateway_fixture.seedance_gateway.unified"
+    module = types.ModuleType(module_name)
+    setattr(module, "GatewayUnifiedError", GatewayUnifiedError)
+    sys.modules[module_name] = module
+    try:
+        from RH_ComfyUI.core.dispatch.resume import provider_terminal_error
 
-    failed = GatewayUnifiedError(
-        "Invalid value: 'webp'",
-        code="TASK_FAILED",
-        retryable=True,
-        user_message="Invalid value: 'webp'",
-    )
-    terminal = provider_terminal_error(failed)
-    assert terminal is not None and terminal.definitive is True
-    assert str(terminal) == "Invalid value: 'webp'"
-    network = GatewayUnifiedError("poll down", code="POLL_NETWORK_ERROR", retryable=False)
-    assert provider_terminal_error(network) is None
+        failed = GatewayUnifiedError(
+            "Invalid value: 'webp'",
+            code="TASK_FAILED",
+            retryable=True,
+            user_message="Invalid value: 'webp'",
+        )
+        terminal = provider_terminal_error(failed)
+        assert terminal is not None and terminal.definitive is True
+        assert str(terminal) == "Invalid value: 'webp'"
+        network = GatewayUnifiedError("poll down", code="POLL_NETWORK_ERROR", retryable=False)
+        assert provider_terminal_error(network) is None
+    finally:
+        del sys.modules[module_name]
 
 
 def test_provider_supports_remote_cancel_fail_closed():

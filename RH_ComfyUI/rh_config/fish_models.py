@@ -9,6 +9,8 @@ from __future__ import annotations
 from typing import Literal
 from dataclasses import dataclass
 
+from gsuid_core.utils.plugins_config.models import GsStrConfig, GsListStrConfig
+
 FishTask = Literal["speech", "asr"]
 
 LEGACY_FISH_TTS = "fish_tts"
@@ -106,23 +108,20 @@ def migrate_stored_fish_enabled() -> None:
     if "FishAudio_Enabled_Models" not in SERVICE_CONFIG.config:
         return
     item = SERVICE_CONFIG.config["FishAudio_Enabled_Models"]
-    raw = item.data
-    names: list[str] = []
-    if isinstance(raw, str):
-        if raw.strip():
-            names.append(raw.strip())
-    elif isinstance(raw, list):
-        for entry in raw:
-            if isinstance(entry, str) and entry.strip():
-                names.append(entry.strip())
-    else:
+    # 磁盘上的配置是 GSC 联合类型,只有字符串列表能写回档位名。
+    if not isinstance(item, GsListStrConfig):
         return
+    names: list[str] = []
+    for entry in item.data:
+        text = entry.strip()
+        if text:
+            names.append(text)
     if LEGACY_FISH_TTS not in names and LEGACY_FISH_ASR not in names:
         return
     legacy = ""
     if "FishAudio_Model" in SERVICE_CONFIG.config:
-        stored = SERVICE_CONFIG.config["FishAudio_Model"].data
-        if isinstance(stored, str):
-            legacy = stored
+        stored_item = SERVICE_CONFIG.config["FishAudio_Model"]
+        if isinstance(stored_item, GsStrConfig):
+            legacy = stored_item.data
     item.data = expand_legacy_fish_enabled(names, legacy)
     SERVICE_CONFIG.write_config()

@@ -467,7 +467,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
     # 关键:若 bytes/mime/扩展名实为视频/音频,不得继续走 image 通道 —— 否则
     # Seedance content[] 会以 type=image_url 发出,上游返回
     # "image format is not supported"(VID-4001)。
-    from .utils.core.types import MediaRef, sniff_media_kind
+    from .utils.core.types import MediaRef, parse_asset_uris, sniff_media_kind
 
     video_refs: list = list(req_kwargs["video_refs"])
     audio_refs: list = list(req_kwargs["audio_refs"])
@@ -491,6 +491,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
                     )
                     or MediaKind.IMAGE
                 )
+                asset_uris = parse_asset_uris(d["asset_uris"] if "asset_uris" in d else None)
                 if kind == MediaKind.VIDEO:
                     video_refs.append(
                         MediaRef(
@@ -499,7 +500,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
                             role=d.get("role"),
                             mime_type=d.get("mime_type"),
                             filename=d.get("filename"),
-                            asset_uris=d.get("asset_uris") if isinstance(d.get("asset_uris"), dict) else {},
+                            asset_uris=asset_uris,
                         )
                     )
                 elif kind == MediaKind.AUDIO:
@@ -510,7 +511,7 @@ async def _build_request(*, task_type: str, prompt: str, kwargs: dict[str, Any])
                             role=d.get("role"),
                             mime_type=d.get("mime_type"),
                             filename=d.get("filename"),
-                            asset_uris=d.get("asset_uris") if isinstance(d.get("asset_uris"), dict) else {},
+                            asset_uris=asset_uris,
                         )
                     )
                 else:

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol
+
 from .overrides import FishAsrModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType, GenerationRequest
@@ -39,7 +41,13 @@ def _asr_point_range() -> tuple[int, int]:
     return (calculate_asr_points(b"\x00" * 16_000), calculate_asr_points(b"\x00" * 57_600_000))
 
 
-def _build_fish_asr(spec: FishModelSpec) -> type[FishAsrModel]:
+class _FishAsrCtor(Protocol):
+    """档位类自己组 NodeDef。type[FishAsrModel] 会要求调用方传入 node。"""
+
+    def __call__(self) -> FishAsrModel: ...
+
+
+def _build_fish_asr(spec: FishModelSpec) -> _FishAsrCtor:
     """同一 ASR 执行链按上游 model header 拆成可独立启停的模型。"""
     engine = spec.name
 
@@ -114,7 +122,7 @@ def _build_fish_asr(spec: FishModelSpec) -> type[FishAsrModel]:
     return Def
 
 
-_FISH_ASR_BY_NAME: dict[str, type[FishAsrModel]] = {spec.name: _build_fish_asr(spec) for spec in FISH_ASR_MODELS}
+_FISH_ASR_BY_NAME: dict[str, _FishAsrCtor] = {spec.name: _build_fish_asr(spec) for spec in FISH_ASR_MODELS}
 FishAsrDef = _FISH_ASR_BY_NAME["transcribe-1"]
 
 ALL_MODELS = list(_FISH_ASR_BY_NAME.values())

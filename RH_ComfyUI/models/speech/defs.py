@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol
+
 from ..bridge import SpeechPipelineModel
 from .overrides import FishTtsModel, IndexTTS2Model, IndexTTS25Model, MinimaxSpeechModel
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
@@ -377,7 +379,13 @@ def _fish_tts_knowledge(spec: FishModelSpec) -> str:
     )
 
 
-def _build_fish_tts(spec: FishModelSpec) -> type[FishTtsModel]:
+class _FishTtsCtor(Protocol):
+    """档位类自己组 NodeDef。type[FishTtsModel] 会要求调用方传入 node。"""
+
+    def __call__(self) -> FishTtsModel: ...
+
+
+def _build_fish_tts(spec: FishModelSpec) -> _FishTtsCtor:
     """同一 TTS 执行链按上游 model 拆成可独立启停的模型。"""
     engine = spec.name
     is_free = spec.free
@@ -472,7 +480,7 @@ def _build_fish_tts(spec: FishModelSpec) -> type[FishTtsModel]:
     return Def
 
 
-_FISH_TTS_BY_NAME: dict[str, type[FishTtsModel]] = {spec.name: _build_fish_tts(spec) for spec in FISH_TTS_MODELS}
+_FISH_TTS_BY_NAME: dict[str, _FishTtsCtor] = {spec.name: _build_fish_tts(spec) for spec in FISH_TTS_MODELS}
 FishTtsDef = _FISH_TTS_BY_NAME["s2.1-pro"]
 FishTtsFreeDef = _FISH_TTS_BY_NAME["s2.1-pro-free"]
 

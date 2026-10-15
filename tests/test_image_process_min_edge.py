@@ -235,7 +235,9 @@ def test_pad_keeps_rgba_original_transparency():
     # 补出来的区域是不透明白
     assert img.getpixel((2, 400)) == (255, 255, 255, 255)
     # 原图半透明像素合成到白底:RGB 各通道向 255 靠拢且 alpha 变实
-    r, g, b, a = img.getpixel((img.size[0] // 2, 400))
+    pixel = img.getpixel((img.size[0] // 2, 400))
+    assert isinstance(pixel, tuple) and len(pixel) == 4
+    r, g, b, a = pixel[0], pixel[1], pixel[2], pixel[3]
     assert a == 255
     assert r > 0 and g > 128 and b == 255
 
