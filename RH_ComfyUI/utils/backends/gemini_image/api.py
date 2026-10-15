@@ -219,7 +219,8 @@ class GeminiImageAPI:
         if uri:
             logger.info(f"[Gemini-Image] 图片为外链,下载: {uri}")
             return await _download(uri)
-        raise RuntimeError(f"Gemini 响应未包含图片: {_summarize_generate(response)}")
+        # 调用方认 finish_reason= / block_reason=，不要只留 parts=(空)。
+        raise RuntimeError(f"Gemini 响应未包含图片: {_missing_image_detail(response)}")
 
     async def cancel_interaction(self, interaction_id: str) -> None:
         """取消 background interaction: ``POST .../interactions/{id}/cancel``。"""
@@ -398,6 +399,56 @@ def _gemini_vendor_payload(response: object) -> dict[str, object]:
                 copied[raw_key] = item
         return copied
     return {"summary": _summarize_generate(response)}
+
+
+_IGNORED_STOP_REASONS = frozenset(
+    {
+        "",
+        "NONE",
+        "NULL",
+        "UNSPECIFIED",
+        "FINISH_REASON_UNSPECIFIED",
+        "BLOCK_REASON_UNSPECIFIED",
+    }
+)
+
+
+def _enum_token(value: object) -> str:
+    """SDK 枚举收成 PROHIBITED_CONTENT 这种稳定记号。"""
+    named = getattr(value, "name", None)
+    if isinstance(named, str) and named.strip():
+        token = named.strip()
+    else:
+        text = str(value).strip()
+        if text.startswith("<") and ":" in text:
+            text = text.split(":", 1)[0]
+        if "." in text:
+            text = text.rsplit(".", 1)[-1]
+        token = text.strip(" <>'\"")
+    if token.upper() in _IGNORED_STOP_REASONS:
+        return ""
+    if not token.replace("_", "").isalnum():
+        return ""
+    return token.upper()
+
+
+def _missing_image_detail(response: object) -> str:
+    """无图时优先给出供应商结束原因，供调用方原样提交。"""
+    feedback = getattr(response, "prompt_feedback", None)
+    if feedback is not None:
+        block = getattr(feedback, "block_reason", None)
+        if block is not None:
+            token = _enum_token(block)
+            if token:
+                return f"block_reason={token}"
+    candidates = getattr(response, "candidates", None)
+    if isinstance(candidates, list) and candidates:
+        reason = getattr(candidates[0], "finish_reason", None)
+        if reason is not None:
+            token = _enum_token(reason)
+            if token:
+                return f"finish_reason={token}"
+    return _summarize_generate(response)
 
 
 def _summarize_generate(response: Any) -> str:

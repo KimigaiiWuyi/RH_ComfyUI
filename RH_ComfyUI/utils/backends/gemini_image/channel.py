@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from .api import gemini_image_api
@@ -17,6 +18,29 @@ from ...core.types import NodeOutput
 from ....core.base.errors import ChannelError
 from ...mappers.gemini_image import gemini_flash_image_mapper
 from ....core.channels.channel import ProviderChannel
+
+# 调用方按 finish_reason= / block_reason= 映射文案，不要改写成笼统「请稍后重试」。
+_IMAGE_STOP_RE = re.compile(r"\b(finish_reason|block_reason)=([A-Z0-9_]+)")
+# 换通道也出不了图：策略/安全/版权拦截是这条请求的问题。
+_NON_RETRY_CODES = frozenset(
+    {
+        "PROHIBITED_CONTENT",
+        "IMAGE_PROHIBITED_CONTENT",
+        "SAFETY",
+        "IMAGE_SAFETY",
+        "RECITATION",
+        "IMAGE_RECITATION",
+        "BLOCKLIST",
+        "SPII",
+    }
+)
+
+
+def _image_stop_signal(exc: BaseException) -> tuple[str, str] | None:
+    found = _IMAGE_STOP_RE.search(str(exc))
+    if found is None:
+        return None
+    return found.group(1), found.group(2)
 
 
 def _is_rate_limited(exc: BaseException) -> bool:
@@ -112,6 +136,19 @@ class GeminiImageChannel(ProviderChannel):
             output = await gemini_flash_image_mapper(request, self._api)
         except Exception as exc:  # noqa: BLE001 - 统一翻译成可切换/可排队的通道错误
             rate_limited = _is_rate_limited(exc)
+            signal = None if rate_limited else _image_stop_signal(exc)
+            if signal is not None:
+                kind, code = signal
+                # block_reason 与策略类 finish 都是内容决定，换通道不会出图。
+                policy = kind == "block_reason" or code in _NON_RETRY_CODES
+                raise ChannelError(
+                    f"Gemini 生图失败: {exc}",
+                    retryable=not policy,
+                    transient=False,
+                    channel=self.name,
+                    code=code,
+                    user_message=f"Gemini {kind}={code}",
+                ) from exc
             raise ChannelError(
                 f"Gemini 生图失败: {exc}",
                 retryable=True,

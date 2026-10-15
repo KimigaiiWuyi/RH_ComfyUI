@@ -539,3 +539,58 @@ def test_banana_pro_keeps_compat_channel_when_gemini_disabled(monkeypatch):
     assert "gpt-image-2" in names
     gemini = next(b.channel for b in pro.channel_bindings() if b.channel.name == "gemini")
     assert asyncio.run(gemini.check_available()) is False
+
+
+def test_missing_image_detail_prefers_block_then_finish_reason():
+    blocked = SimpleNamespace(
+        prompt_feedback=SimpleNamespace(block_reason=SimpleNamespace(name="OTHER")),
+        candidates=[SimpleNamespace(finish_reason=SimpleNamespace(name="PROHIBITED_CONTENT"))],
+    )
+    assert gapi._missing_image_detail(blocked) == "block_reason=OTHER"
+
+    no_image = SimpleNamespace(
+        prompt_feedback=None,
+        candidates=[SimpleNamespace(finish_reason=SimpleNamespace(name="NO_IMAGE"))],
+    )
+    assert gapi._missing_image_detail(no_image) == "finish_reason=NO_IMAGE"
+
+    empty = SimpleNamespace(prompt_feedback=None, candidates=[], parts=None)
+    assert gapi._missing_image_detail(empty) == "parts=(空)"
+
+
+def test_invoke_exposes_finish_reason_to_user_message(monkeypatch):
+    import RH_ComfyUI.utils.backends.gemini_image.channel as gchan
+    from RH_ComfyUI.core.base.errors import ChannelError
+    from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
+
+    monkeypatch.setattr(gapi, "SERVICE_CONFIG", _FakeConfig({"Gemini_Image_apikey": "AIzaKEY"}))
+
+    async def _prohibited(request, api):
+        _ = (request, api)
+        raise RuntimeError("Gemini 响应未包含图片: finish_reason=PROHIBITED_CONTENT")
+
+    monkeypatch.setattr(gchan, "gemini_flash_image_mapper", _prohibited)
+    ch = GeminiImageChannel()
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    try:
+        asyncio.run(ch.invoke(request=req, vendor_model="gemini-nano-banana-2.1"))
+    except ChannelError as exc:
+        assert exc.code == "PROHIBITED_CONTENT"
+        assert exc.retryable is False
+        assert exc.user_message == "Gemini finish_reason=PROHIBITED_CONTENT"
+    else:
+        raise AssertionError("prohibited content must surface as ChannelError")
+
+    async def _no_image(request, api):
+        _ = (request, api)
+        raise RuntimeError("Gemini 响应未包含图片: finish_reason=NO_IMAGE")
+
+    monkeypatch.setattr(gchan, "gemini_flash_image_mapper", _no_image)
+    try:
+        asyncio.run(ch.invoke(request=req, vendor_model="gemini-nano-banana-2.1"))
+    except ChannelError as exc:
+        assert exc.code == "NO_IMAGE"
+        assert exc.retryable is True
+        assert exc.user_message == "Gemini finish_reason=NO_IMAGE"
+    else:
+        raise AssertionError("NO_IMAGE must stay retryable and keep the reason")

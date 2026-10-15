@@ -102,6 +102,11 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
   uri**)。`usage.output_tokens_by_modality` 里有 image 即已出图。`steps` 是 SDK
   未声明的 extra 字段,取值要 `getattr` + `model_extra` 兜底,内层是原始 dict。
   提取器见 `gemini_image/api.py::_find_image`(先 outputs 再 steps,兼容 data/uri)。
+- **无图要把结束原因交给调用方**。`generate_content` 返回 200 但 `parts` 为空时，
+  异常文案带 `finish_reason=` 或 `block_reason=`（如 `PROHIBITED_CONTENT` /
+  `NO_IMAGE`）。`GeminiImageChannel` 把它原样放进 `user_message`
+  （`Gemini finish_reason=CODE`）。策略/安全/版权类 `retryable=False`，
+  不再改写成「请稍后重试」。调用方错误映射认这个记号。
 - **`Gemini_Enabled_Models`**:与 MiniMax 同构的 GsListStrConfig。banana1 / banana2 /
   banana2.1 / banana_pro 的 Gemini 通道仅在列表勾选后才 `check_available`。
   已保存的旧列表不会自动勾上 `banana2.1`。banana_pro 的
