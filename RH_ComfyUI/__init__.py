@@ -60,6 +60,12 @@ async def init_pipeline_system() -> None:
     register_resync_hook("openai_image", sync_openai_image_providers)
     bind_config_resync(SERVICE_CONFIG, frozenset({"OpenAI_Image_Providers"}))
 
+    from .utils.backends.azure_image.setup import register_azure_image
+
+    register_azure_image()
+    register_resync_hook("azure_image", register_azure_image)
+    bind_config_resync(SERVICE_CONFIG, frozenset({"Azure_Image_Enable", "Azure_Image_Deployment"}))
+
     # 3. 注册 AI 知识库
     from .rh_generate._knowledge import register_pipeline_knowledge
 

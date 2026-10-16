@@ -20,6 +20,7 @@ from gsuid_core.utils.plugins_config.models import (
 )
 
 from .fish_models import FISH_MODEL_NAMES
+from ..utils.backends.azure_image.catalog import AZURE_IMAGE_MODEL_NAMES, AZURE_IMAGE_DEFAULT_MODELS
 
 # 下拉项用静态常量,避免配置模块加载期 import defs 触发循环导入;新增模型时同步此表。
 _IMAGE_MODEL_REAL_NAMES = [
@@ -355,6 +356,47 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
                 },
             ),
         },
+    ),
+    "divider_azure_image": GsDivider(
+        "Azure GPT-Image",
+        "Azure OpenAI 生图,挂到 gpt-image-2 / gpt-image-2.5-sunburst / gpt-image-2.5-flare。"
+        "部署名必须与 Foundry 里的 deployment 完全一致。",
+        "Azure GPT-Image",
+    ),
+    "Azure_Image_Enable": GsBoolConfig(
+        "启用 Azure GPT-Image",
+        "关闭后不参与 gpt-image 家族的负载均衡。",
+        False,
+    ),
+    "Azure_Image_Deployment": GsListStrConfig(
+        "Azure 服务的模型",
+        "勾选走本通道的模型。每项同时是 Foundry 部署名,"
+        "须与门户 deployment 完全一致"
+        "(gpt-image-2 / gpt-image-2.5-sunburst / gpt-image-2.5-flare)。"
+        "默认勾选 2.5 两款。未勾选的不走本通道。改完即时生效。",
+        list(AZURE_IMAGE_DEFAULT_MODELS),
+        options=list(AZURE_IMAGE_MODEL_NAMES),
+    ),
+    "Azure_Image_apikey": GsStrConfig(
+        "Azure API Key",
+        "Azure OpenAI 资源的 API Key。为空则本通道不可用。",
+        "",
+    ),
+    "Azure_Image_Endpoint": GsStrConfig(
+        "Azure 终结点",
+        "Azure OpenAI 终结点,如 https://xxx.openai.azure.com(不含路径)。",
+        "",
+        options=["https://xxx.openai.azure.com"],
+    ),
+    "Azure_Image_ApiVersion": GsStrConfig(
+        "API 版本",
+        "Azure /openai/v1/images 的 api-version。v1 路径用 preview;旧值 2025-04-01-preview 会自动改写成 preview。",
+        "preview",
+    ),
+    "Azure_Image_Max_Concurrency": GsStrConfig(
+        "最大并发",
+        "在途请求达到此数则本通道暂时不可用,交给其它通道。按同一 Azure 资源计,勾选的多个部署共用这个上限。",
+        "2",
     ),
     "divider_happyhorse": GsDivider(
         "DashScope 视频生成(HappyHorse / 万相 3.0)",

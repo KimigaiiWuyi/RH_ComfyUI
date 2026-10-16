@@ -19,6 +19,7 @@ backends/
 │   ├── __init__.py
 │   ├── api.py           # GPTImage2API HTTP 客户端
 │   └── executor.py      # GPTImage2Adapter 执行器
+├── azure_image/         # Azure Foundry v1 生图通道(非 Adapter,见该目录 README)
 ├── rh_app/              # RunningHub 原生 AI 应用后端
 │   ├── __init__.py
 │   ├── api.py           # RHAppAPI HTTP 客户端
