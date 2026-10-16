@@ -68,7 +68,7 @@ def test_every_section_has_model_list_with_defaults():
 def test_gemini_enabled_list_keeps_banana2_and_21():
     item = SERVICE_CONFIG_DEFAULT["Gemini_Enabled_Models"]
     assert isinstance(item, GsListStrConfig)
-    assert item.options == ["banana1", "banana2", "banana2.1", "banana_pro"]
+    assert item.options == ["banana1", "banana2", "banana2.1", "banana2.lite", "banana_pro"]
     assert item.data == item.options
     pool = SERVICE_CONFIG_DEFAULT["OpenAI_Image_Providers"]
     assert isinstance(pool, GsRepeatGroupConfig)
@@ -77,7 +77,7 @@ def test_gemini_enabled_list_keeps_banana2_and_21():
     real_name = models.template["model_real_name"]
     assert isinstance(real_name, GsStrConfig)
     names = real_name.options
-    assert "banana2" in names and "banana2.1" in names
+    assert "banana2" in names and "banana2.1" in names and "banana2.lite" in names
 
 
 def test_fish_enabled_list_is_upstream_tiers():

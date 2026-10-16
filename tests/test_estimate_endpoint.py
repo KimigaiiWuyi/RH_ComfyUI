@@ -20,6 +20,16 @@ def _register_models():
     model_registry.clear()
 
 
+def test_estimate_banana2_lite_flat_1k():
+    """/models 估算:Lite 只有 1K,传 4K 也不加价。"""
+    listed = asyncio.run(estimate_model_points("banana2.lite"))
+    assert listed["model"] == "banana2.lite"
+    assert listed["point_cost"] == 4
+    assert listed["point_range"] == {"min": 4, "max": 4}
+    bigger = asyncio.run(estimate_model_points("banana2.lite", image_size="4K"))
+    assert bigger["point_cost"] == 4
+
+
 def test_estimate_gpt_image2_dynamic():
     """gpt-image-2 走动态计费,不同参数返回不同积分"""
     r_default = asyncio.run(estimate_model_points("gpt-image-2"))
@@ -41,9 +51,7 @@ def test_estimate_gpt_image25_token_anchors_and_keeps_own_name():
     r_sun_max = asyncio.run(
         estimate_model_points("gpt-image-2.5-sunburst", ratio="1:1", image_size="2K", quality="max")
     )
-    r_flare_max = asyncio.run(
-        estimate_model_points("gpt-image-2.5-flare", ratio="1:1", image_size="2K", quality="max")
-    )
+    r_flare_max = asyncio.run(estimate_model_points("gpt-image-2.5-flare", ratio="1:1", image_size="2K", quality="max"))
     r_sun_high = asyncio.run(
         estimate_model_points("gpt-image-2.5-sunburst", ratio="1:1", image_size="2K", quality="high")
     )

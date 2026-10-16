@@ -43,22 +43,36 @@ GEMINI_ASPECT_RATIOS: tuple[str, ...] = (
 )
 
 
-# Nano Banana 2.1 官方思考档。其他生图模型不发 thinking_config。
+# Nano Banana 2.1 官方思考档。Lite 另有一套,其余生图模型不发 thinking_config。
 _NANO_BANANA_21_THINKING: tuple[str, ...] = ("minimal", "medium", "high")
+# Flash Lite Image 官方只有 minimal / high,默认 minimal。medium 会发上去被拒。
+_NANO_BANANA_2_LITE_THINKING: tuple[str, ...] = ("minimal", "high")
+
+
+def _is_flash_lite_image(model: str) -> bool:
+    return "flash-lite-image" in model
 
 
 def _default_image_size(model: str) -> Optional[str]:
     """尺寸档默认值。一代不支持 image_size,整个字段不发。
-    2.1 官方默认 1K;其余 3.x(banana_pro 等)保持 2K。"""
+    2.1 与 2 Lite 官方默认 1K;其余 3.x(banana_pro 等)保持 2K。"""
     if "2.5" in model:
         return None
-    if "nano-banana-2.1" in model:
+    if "nano-banana-2.1" in model or _is_flash_lite_image(model):
         return "1K"
     return "2K"
 
 
 def _thinking_level(model: str, request: GenerationRequest) -> Optional[str]:
-    """2.1 才发思考档;缺省或非法值用官方默认 medium。"""
+    """2.1 默认 medium;2 Lite 只发 minimal/high,缺省或非法值用 minimal。"""
+    if _is_flash_lite_image(model):
+        if "thinking_level" not in request.params:
+            return "minimal"
+        raw = request.params["thinking_level"]
+        text = str(raw).strip().lower() if raw else "minimal"
+        if text not in _NANO_BANANA_2_LITE_THINKING:
+            return "minimal"
+        return text
     if "nano-banana-2.1" not in model:
         return None
     raw = request.params.get("thinking_level")
@@ -122,8 +136,12 @@ async def gemini_flash_image_mapper(
         from gsuid_core.logger import logger
 
         logger.info(f"[Gemini-Image] aspect_ratio {raw_ratio} 不在上游白名单,改发 {ratio}")
-    raw_size = request.params.get("image_size")
-    image_size = str(raw_size) if raw_size else _default_image_size(model)
+    # Lite 官方只接受 1K。2K/4K 会被上游拒绝,不按请求原样转发。
+    if _is_flash_lite_image(model):
+        image_size: str | None = "1K"
+    else:
+        raw_size = request.params.get("image_size")
+        image_size = str(raw_size) if raw_size else _default_image_size(model)
     thinking_level = _thinking_level(model, request)
 
     data = await api.generate(

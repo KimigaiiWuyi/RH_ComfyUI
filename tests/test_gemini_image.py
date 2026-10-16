@@ -5,6 +5,8 @@ import base64
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 import RH_ComfyUI.utils.backends.gemini_image.api as gapi
 from RH_ComfyUI.core import channel_registry
 from RH_ComfyUI.utils.audit_key import mask_api_key
@@ -206,6 +208,83 @@ def test_banana21_served_by_gemini_only():
     assert "1:4" not in (Banana2Def().input_schema()["ratio"].values or [])
 
 
+def test_banana2_lite_served_by_gemini_only():
+    from RH_ComfyUI.core.base.errors import ValidationError
+    from RH_ComfyUI.models.image.defs import Banana2LiteDef
+    from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
+
+    channel_registry.clear()
+    model = Banana2LiteDef()
+    assert model.name == "banana2.lite"
+    assert model.display_name == "Nano Banana 2 Lite"
+    names = [b.channel.name for b in model.channel_bindings()]
+    assert names == ["gemini"]
+    assert model.channel_bindings()[0].vendor_model == "gemini-3.1-flash-lite-image"
+    schema = model.input_schema()
+    assert schema["image_size"].values == ["1K"]
+    assert schema["image_size"].default == "1K"
+    assert schema["thinking_level"].values == ["minimal", "high"]
+    assert schema["thinking_level"].default == "minimal"
+    assert schema["images"].max_items == 3
+    assert "8:5" not in (schema["ratio"].values or [])
+    assert "1:4" in (schema["ratio"].values or [])
+    ok = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat", ratio="1:1")
+    ok.params["image_size"] = "1K"
+    ok.params["thinking_level"] = "high"
+    model.validate(ok)
+    blocked = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    blocked.params["image_size"] = "2K"
+    with pytest.raises(ValidationError, match="1K"):
+        model.validate(blocked)
+    medium = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    medium.params["thinking_level"] = "medium"
+    with pytest.raises(ValidationError, match="minimal"):
+        model.validate(medium)
+
+
+def test_models_catalog_lists_banana2_lite():
+    from RH_ComfyUI.models import discover_builtin_models
+    from RH_ComfyUI.rh_models.api import get_models_by_task
+    from RH_ComfyUI.utils.backends import init_backends
+    from RH_ComfyUI.core.routing.registry import model_registry
+
+    init_backends()
+    discover_builtin_models()
+    try:
+        catalog = asyncio.run(get_models_by_task("image"))
+    finally:
+        model_registry.clear()
+    found: dict[str, object] | None = None
+    models = catalog["models"]
+    assert isinstance(models, list)
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        if "name" not in item or item["name"] != "banana2.lite":
+            continue
+        found = item
+        break
+    assert found is not None
+    assert found["display_name"] == "Nano Banana 2 Lite"
+    assert found["backend_model"] == "gemini-3.1-flash-lite-image"
+    assert found["point_cost"] == 4
+    assert found["point_range"] == {"min": 4, "max": 4}
+    schema = found["input_schema"]
+    assert isinstance(schema, dict)
+    size = schema["image_size"]
+    assert isinstance(size, dict)
+    assert size["values"] == ["1K"]
+    assert size["default"] == "1K"
+    thinking = schema["thinking_level"]
+    assert isinstance(thinking, dict)
+    assert thinking["values"] == ["minimal", "high"]
+    channels = found["channels"]
+    assert isinstance(channels, list)
+    first = channels[0]
+    assert isinstance(first, dict)
+    assert first["vendor_model"] == "gemini-3.1-flash-lite-image"
+
+
 def test_banana1_served_by_gemini_first_gen():
     # Nano Banana 1 = 一代 Gemini 模型(gemini-2.5-flash-image),与 banana2
     # 共用同一条 GeminiImageChannel;外部插件可经 channel_registry 追加供应商
@@ -298,6 +377,12 @@ def test_mapper_omits_image_size_for_first_gen(monkeypatch):
     asyncio.run(gmapper.gemini_flash_image_mapper(req5, _FakeApi()))
     assert captured[4] == "2K"
 
+    lite = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    lite.params["model"] = "gemini-3.1-flash-lite-image"
+    lite.params["image_size"] = "4K"
+    asyncio.run(gmapper.gemini_flash_image_mapper(lite, _FakeApi()))
+    assert captured[5] == "1K"
+
 
 def test_mapper_sends_thinking_only_for_nano_banana_21():
     from typing import Optional
@@ -344,6 +429,13 @@ def test_mapper_sends_thinking_only_for_nano_banana_21():
     default.params["model"] = "gemini-nano-banana-2.1"
     asyncio.run(gmapper.gemini_flash_image_mapper(default, _FakeApi()))
     assert captured[3] == "medium"
+
+    lite = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    lite.params["model"] = "gemini-3.1-flash-lite-image"
+    lite.params["image_size"] = "4K"
+    lite.params["thinking_level"] = "medium"
+    asyncio.run(gmapper.gemini_flash_image_mapper(lite, _FakeApi()))
+    assert captured[4] == "minimal"
 
 
 def test_nano_banana_21_generate_content_config(monkeypatch):

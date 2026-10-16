@@ -157,7 +157,7 @@ class GeminiImageAPI:
         """生成一张图并返回原始字节;失败抛 RuntimeError(带上游文案)。
 
         image_size=None 时整个字段不发(一代 gemini-2.5-flash-image 不支持
-        image_config.image_size,发了会被上游拒)。thinking_level 只在 2.1 传入。
+        image_config.image_size,发了会被上游拒)。thinking_level 由映射层按模型决定。
 
         ``background`` / ``poll_*`` 仅兼容旧调用方,生图已改为单次
         ``generate_content``,不再创建 interaction。

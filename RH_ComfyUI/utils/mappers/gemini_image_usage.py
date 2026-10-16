@@ -1,4 +1,4 @@
-"""Gemini 生图回包 → 分项 token,供 banana2 / banana2.1 后结算。
+"""Gemini 生图回包 → 分项 token,供 banana2 / banana2.1 / banana2.lite 后结算。
 
 预扣仍按输出分辨率估算。成功后按厂商实扣:
 输入(文本/图片同价)、图片输出、文本输出与思考 token 各用自己的单价。

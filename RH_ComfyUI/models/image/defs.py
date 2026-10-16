@@ -34,6 +34,10 @@ from ...utils.mappers.minimax_text2image import minimax_image01_mapper as _minim
 from ...utils.mappers.nanobanana1_billing import estimate_nanobanana1_points
 from ...utils.mappers.nanobanana2_billing import settle_nanobanana2_points, estimate_nanobanana2_points
 from ...utils.mappers.nanobanana21_billing import settle_nanobanana21_points, estimate_nanobanana21_points
+from ...utils.mappers.nanobanana2_lite_billing import (
+    settle_nanobanana2_lite_points,
+    estimate_nanobanana2_lite_points,
+)
 
 # ── CameraAngleDef 参数范围 — 复用 RunningHub 工作流 2080138749291356162 的合法域 ──
 CAMERA_ANGLE_HORIZ_MIN: float = 0.0
@@ -1109,6 +1113,123 @@ class Banana21Def(ImagePipelineModel):
         )
 
 
+class Banana2LiteDef(ImagePipelineModel):
+    """Nano Banana 2 Lite — 与 banana2 / banana2.1 并存
+
+    目录名 banana2.lite,上游 gemini-3.1-flash-lite-image。须在
+    「启用的 Gemini 模型」单独勾选。只出 1K,思考档只有 minimal / high。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="banana2.lite",
+            display_name="Nano Banana 2 Lite",
+            task_type=TaskType("image"),
+            backend="gemini-image",
+            point_cost=4,
+            description="最快最省,只出 1K",
+            knowledge_content=(
+                "Nano Banana 2 Lite 图像生成/编辑模型"
+                "(gemini-3.1-flash-lite-image,原生 generate_content)。"
+                "\n"
+                "与 banana2、banana2.1 不是同一个模型。只出 1K,不支持 2K/4K。"
+                "\n"
+                "思考深度只有 minimal / high,默认 minimal。预扣按 1K 出图;"
+                "成功后按回传的输入、出图、文本和思考 token 结算。"
+                "\n"
+                "参考图最多 3 张。官方说明该模型不面向多张参考和多轮连续编辑。"
+                "\n"
+                "凭证:须在「启用的 Gemini 模型」勾选 banana2.lite;"
+                "与其它 Banana 共用 Gemini 配置。"
+                "\n"
+            ),
+            requirements=["gemini_image_apikey"],
+            backend_model="gemini-3.1-flash-lite-image",
+            inputs={
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述或编辑指令"),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=3,
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description="0 张=文生图,1~3 张=编辑。不面向大量参考图",
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="9:16",
+                    values=list(GEMINI_ASPECT_RATIOS),
+                    title="宽高比",
+                    description="官方 14 档宽高比",
+                ),
+                "image_size": PortSpec(
+                    type=PortType.ENUM,
+                    default="1K",
+                    values=["1K"],
+                    title="尺寸档位",
+                    description="只支持 1K",
+                ),
+                "thinking_level": PortSpec(
+                    type=PortType.ENUM,
+                    default="minimal",
+                    values=["minimal", "high"],
+                    title="思考深度",
+                    description="官方只支持 minimal 与 high,默认 minimal",
+                ),
+            },
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="sync",
+                priority=73,
+            ),
+        )
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...core.channels.registry import channel_registry
+        from ...utils.backends.gemini_image.channel import GeminiImageChannel
+
+        bindings = [
+            ChannelBinding(
+                GeminiImageChannel(logical_model=self.name),
+                vendor_model=self.node.backend_model,
+            )
+        ]
+        bindings.extend(channel_registry.bindings_for(self.name))
+        return bindings
+
+    async def unavailable_reason(self) -> str:
+        notes: list[str] = []
+        for binding in self.channel_bindings():
+            if await binding.channel.check_available():
+                continue
+            notes.append(f"{binding.channel.name}: {await binding.channel.unavailable_reason()}")
+        if notes:
+            return f"{self.display_name} 暂不可用({'; '.join(notes)})"
+        return f"{self.display_name} 暂不可用:请配置 Gemini,或由外部插件接入"
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """预扣按唯一的 1K 档。2K/4K 在校验阶段拒绝,估算也不另计价。"""
+        image_size = request.params["image_size"] if "image_size" in request.params else None
+        text = image_size if isinstance(image_size, str) else None
+        return estimate_nanobanana2_lite_points(text)
+
+    def settle_cost(self, request: GenerationRequest, usage: dict) -> int | None:
+        """按厂商 usage 分项实扣;没有 token 时维持预扣。"""
+        return settle_nanobanana2_lite_points(usage)
+
+    def point_range(self) -> tuple[int, int]:
+        """只有 1K 一档,上下限相同。"""
+        points = estimate_nanobanana2_lite_points("1K")
+        return (points, points)
+
+
 class Banana1Def(ImagePipelineModel):
     """Nano Banana 1 — 一代模型(gemini-2.5-flash-image),走同一条 Gemini 通道
 
@@ -1889,6 +2010,7 @@ ALL_MODELS = [
     Banana1Def,
     Banana2Def,
     Banana21Def,
+    Banana2LiteDef,
     BananaProDef,
     CameraAngleDef,
     ImageMattingDef,

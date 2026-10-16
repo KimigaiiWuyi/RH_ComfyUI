@@ -137,6 +137,7 @@ def test_image_catalog_order_gpt_then_banana_then_seed():
         BananaProDef,
         GptImage2Def,
         Seedream5Def,
+        Banana2LiteDef,
         Seedream5ProDef,
         GptImage25FlareDef,
         GptImage25SunburstDef,
@@ -150,7 +151,13 @@ def test_image_catalog_order_gpt_then_banana_then_seed():
         return cls.node_def().capabilities.priority
 
     gpt = [_priority(GptImage2Def), _priority(GptImage25SunburstDef), _priority(GptImage25FlareDef)]
-    banana = [_priority(Banana21Def), _priority(Banana2Def), _priority(BananaProDef), _priority(Banana1Def)]
+    banana = [
+        _priority(Banana21Def),
+        _priority(Banana2Def),
+        _priority(Banana2LiteDef),
+        _priority(BananaProDef),
+        _priority(Banana1Def),
+    ]
     seed = [_priority(Seedream5ProDef), _priority(Seedream5Def)]
     assert min(gpt) > max(banana)
     assert min(banana) > max(seed)

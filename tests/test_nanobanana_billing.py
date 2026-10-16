@@ -2,7 +2,7 @@
 
 import pytest
 
-from RH_ComfyUI.models.image.defs import Banana1Def, Banana2Def, Banana21Def, BananaProDef
+from RH_ComfyUI.models.image.defs import Banana1Def, Banana2Def, Banana21Def, BananaProDef, Banana2LiteDef
 from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.banana_pro_billing import (
     OUTPUT_TOKENS_BY_SIZE as BPRO_OUTPUT_TOKENS_BY_SIZE,
@@ -31,6 +31,14 @@ from RH_ComfyUI.utils.mappers.nanobanana21_billing import (
     calculate_output_points as nb21_calculate_output_points,
     settle_nanobanana21_points,
     estimate_nanobanana21_points,
+)
+from RH_ComfyUI.utils.mappers.nanobanana2_lite_billing import (
+    TEXT_POINTS_PER_MILLION as LITE_TEXT_POINTS_PER_MILLION,
+    INPUT_POINTS_PER_MILLION as LITE_INPUT_POINTS_PER_MILLION,
+    POINTS_PER_MILLION_TOKENS as LITE_POINTS_PER_MILLION_TOKENS,
+    calculate_output_points as lite_calculate_output_points,
+    settle_nanobanana2_lite_points,
+    estimate_nanobanana2_lite_points,
 )
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -314,6 +322,29 @@ def test_banana2_and_21_prices_differ_at_same_size():
     assert new.point_range() == (4, 12)
     assert old.point_cost == 2
     assert new.point_cost == 4
+
+
+def test_banana2_lite_only_bills_1k():
+    """Lite 图片输出与 2.1 的 1K 同价,但没有 2K/4K,输入和思考更便宜。"""
+    assert LITE_POINTS_PER_MILLION_TOKENS == 3_000
+    assert LITE_INPUT_POINTS_PER_MILLION == 25
+    assert LITE_TEXT_POINTS_PER_MILLION == 150
+    assert lite_calculate_output_points("1K") == 4
+    assert lite_calculate_output_points(None) == 4
+    assert lite_calculate_output_points("2K") == 4
+    assert lite_calculate_output_points("4K") == 4
+    lite = Banana2LiteDef()
+    assert lite.estimate_cost(_make_request()) == estimate_nanobanana2_lite_points("1K")
+    assert lite.estimate_cost(_make_request(image_size="4K")) == 4
+    assert lite.point_range() == (4, 4)
+    assert lite.point_cost == 4
+    # 1120 出图 + 5000 思考:5000*150 + 1120*3000 = 4_110_000 → 5
+    usage = {
+        "usage_metadata": {"candidates_token_count": 1120, "thoughts_token_count": 5000, "total_token_count": 6120}
+    }
+    assert settle_nanobanana2_lite_points(usage) == 5
+    assert lite.settle_cost(_make_request(), usage) == 5
+    assert settle_nanobanana2_lite_points({}) is None
 
 
 # ═══════════════════════════════════════════════════════════════════════
