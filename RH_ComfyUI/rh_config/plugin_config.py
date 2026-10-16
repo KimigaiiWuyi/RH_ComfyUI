@@ -24,7 +24,7 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "Channel_Concurrency": GsIntConfig(
         "供应商通道并发数（每通道一把闸，作为 (model, channel) 闸的基线）",
-        "非 RunningHub 供应商通道（ark / gateway / aifoundation / azure / fishaudio / "
+        "非 RunningHub 供应商通道（ark / gateway / aifoundation / azure / kling / fishaudio / "
         "minimax / gemini-image / gpt-image-2 / mimo 等）使用此基线；"
         "本地 ComfyUI 工作流自带 max_concurrency=1，会被 (model, channel) 闸自动收窄为 1。"
         "改动即刻生效",

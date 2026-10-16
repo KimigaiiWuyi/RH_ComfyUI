@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from .kling import KLING_IMAGE_MODELS
 from ..bridge import ImagePipelineModel
 from .overrides import GptImageFamilyModel, Seedream5ProImageModel
 from ...core.base.errors import ValidationError
@@ -1902,4 +1903,5 @@ ALL_MODELS = [
     Qwen2512Def,
     Seedream5Def,
     Seedream5ProDef,
+    *KLING_IMAGE_MODELS,
 ]

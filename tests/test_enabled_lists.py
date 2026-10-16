@@ -35,6 +35,7 @@ def test_enable_controls_are_first_in_each_section():
     assert first["divider_seedance_runninghub"] == "Seedance_Enable_runninghub"
     assert first["divider_openai_image_pool"] == "OpenAI_Image_Enable"
     assert first["divider_azure_image"] == "Azure_Image_Enable"
+    assert first["divider_kling"] == "Kling_Enable"
     assert first["divider_happyhorse"] == "HappyHorse_Enable_dashscope"
     assert first["divider_tx_aiart"] == "TX_AIArt_Enable"
     assert "divider_openai_image" not in first
@@ -53,6 +54,7 @@ def test_every_section_has_model_list_with_defaults():
         "Seedance_Enabled_Models",
         "Seedance_Enabled_Models_runninghub",
         "Azure_Image_Deployment",
+        "Kling_Enabled_Models",
         "DashScope_Enabled_Models",
         "TX_AIArt_Enabled_Models",
     ]

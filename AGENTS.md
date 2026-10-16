@@ -73,10 +73,11 @@ uv run python -m pytest tests/ -q
 uv run python -m pytest tests/test_cancel_generation.py tests/test_statistics_request_body.py tests/test_http_contract.py -q
 uv run ruff check RH_ComfyUI tests
 uv run ruff format --check RH_ComfyUI tests
+uv run basedpyright
 ```
 
 `ruff.toml`：`line-length = 120`，`target-version = "py310"`，lint `E/F/I/W`。
-`pyrightconfig.json` 的 `extraPaths` 按「本目录 = `gsuid_core/plugins/RH_ComfyUI`」指到 Core 根。
+`pyrightconfig.json` 的 `extraPaths` 按「本目录 = `gsuid_core/plugins/RH_ComfyUI`」指到 Core 根。基于 Pyright 的检查用 Core 根 `.venv` 里的 `basedpyright`（读这份配置）。
 框架已有的 fastapi / pydantic / gsuid-core / sqlmodel **不要**再写进 `dependencies`。
 
 ## Code style
@@ -102,6 +103,7 @@ uv run ruff format --check RH_ComfyUI tests
 
 本插件额外：
 
+- 改过的 Python 必须同时通过 Ruff（`E/F/I/W`，且 `ruff format --check`）和 Pyright（`basedpyright`，`pyrightconfig.json`）。不能留下类型标红。禁止用 `type: ignore` / `cast()` 把标红消掉（§1.3、§1.2）。`dict[str, object]` 的值先赋给局部变量再 `isinstance`：对同一个下标连写两次，收窄不到第二次。
 - 不绕过 `dispatch()` 调 `model.run()`。
 - `check_available()` / `validate()` 零网络、零副作用。
 - HTTP 契约只增不改（`tests/test_http_contract.py`）。

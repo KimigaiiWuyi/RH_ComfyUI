@@ -146,6 +146,7 @@ def test_can_resume_requires_vendor_task_id():
     assert can_resume(backend="rh_app", vendor_task_id="tid-1") is True
     assert can_resume(backend="comfyui", vendor_task_id="pid") is True
     assert can_resume(backend="minimax-h3", vendor_task_id="tid-1") is True
+    assert can_resume(backend="kling", vendor_task_id="v:tid-1") is True
     assert can_resume(backend="seedance", vendor_task_id="") is False
 
 

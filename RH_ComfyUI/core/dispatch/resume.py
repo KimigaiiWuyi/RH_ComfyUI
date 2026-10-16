@@ -7,6 +7,7 @@ RHComfyuiTaskRecord 终态。
   - seedance (ark / runninghub / 网关通道)
   - happyhorse (dashscope 等)
   - minimax-h3 (官方 MiniMax H3 视频)
+  - kling (可灵视频/图片 query — **可 resume,但无 remote cancel**)
   - rh_app (AI 应用 query — **可 resume,但无 remote cancel**)
   - comfyui (local history / RH 工作流代理 history)
   - gemini-image (background interactions)
@@ -221,6 +222,8 @@ def _channel_implies_backend(channel: str) -> str:
         return "happyhorse"
     if ch in ("minimax-h3",) or ch.startswith("minimax-h3"):
         return "minimax-h3"
+    if ch == "kling":
+        return "kling"
     if ch == "rh_app" or ch.startswith("rh_app"):
         return "rh_app"
     if ch in ("comfyui", "comfyui-local"):
@@ -264,6 +267,8 @@ def _infer_backend(*, backend: str, model: str, channel: str) -> str:
         return "happyhorse"
     if "minimax_h3" in m or m == "minimax_h3":
         return "minimax-h3"
+    if m.startswith("kling-"):
+        return "kling"
     # runninghub 无 model/backend 时 fail-closed 空串,避免误走 comfy/seedance
     if ch == "runninghub":
         if "seedance" in m:
@@ -310,6 +315,11 @@ def _kind_for_model(model: str, backend: str) -> str:
         return "video"
     if backend in ("mimo", "minimax", "fishaudio") or "tts" in m or "speech" in m:
         return "speech"
+    # 图片模型 id 以 kling-image 开头;其余 kling-* 都是视频。
+    if m.startswith("kling-image"):
+        return "image"
+    if backend == "kling" or m.startswith("kling-"):
+        return "video"
     return "image"
 
 
@@ -423,13 +433,7 @@ async def _finalize_record(
             entry = (row.entry_point or "").strip().lower()
             # http = ExternalPrepaid: 宿主钱包,引擎只记 status
             wallet_is_rhbind = entry != "http"
-            want_refund = (
-                need_refund
-                and wallet_is_rhbind
-                and not bool(row.refunded)
-                and cost > 0
-                and bool(uid)
-            )
+            want_refund = need_refund and wallet_is_rhbind and not bool(row.refunded) and cost > 0 and bool(uid)
             if status == "ok" and actual_cost is not None:
                 try:
                     n = int(actual_cost)
@@ -450,9 +454,7 @@ async def _finalize_record(
                 col(RHComfyuiTaskRecord.id) == rid,
                 col(RHComfyuiTaskRecord.status) == "running",
             ]
-            result = await session.execute(
-                update(RHComfyuiTaskRecord).where(*where).values(**values)
-            )
+            result = await session.execute(update(RHComfyuiTaskRecord).where(*where).values(**values))
             await session.commit()
             claimed = _update_claimed_rows(result)
 
@@ -475,18 +477,12 @@ async def _finalize_record(
                             reason=f"resume_settle:record={rid}",
                         )
                     logger.info(
-                        f"[resume_poll] 后结算差额 record_id={rid} prepaid={cost} "
-                        f"actual={settled} delta={delta}"
+                        f"[resume_poll] 后结算差额 record_id={rid} prepaid={cost} actual={settled} delta={delta}"
                     )
                 except Exception as settle_exc:  # noqa: BLE001
-                    logger.warning(
-                        f"[resume_poll] 后结算差额失败(统计已写 actual) record_id={rid}: {settle_exc}"
-                    )
+                    logger.warning(f"[resume_poll] 后结算差额失败(统计已写 actual) record_id={rid}: {settle_exc}")
         elif claimed and settled is not None and not wallet_is_rhbind:
-            logger.info(
-                f"[resume_poll] entry_point=http 后结算只记账 record_id={rid} "
-                f"prepaid={cost} actual={settled}"
-            )
+            logger.info(f"[resume_poll] entry_point=http 后结算只记账 record_id={rid} prepaid={cost} actual={settled}")
 
         if want_refund and claimed:
             try:
@@ -499,8 +495,7 @@ async def _finalize_record(
             except Exception as refund_exc:  # noqa: BLE001
                 # 已终态但未退到账:保持 refunded=False 便于对账/人工补退
                 logger.error(
-                    f"[resume_poll] 终态已写但退款失败 record_id={rid} "
-                    f"user={uid} bot={bid} cost={cost}: {refund_exc}"
+                    f"[resume_poll] 终态已写但退款失败 record_id={rid} user={uid} bot={bid} cost={cost}: {refund_exc}"
                 )
                 return
             async with async_maker() as session:
@@ -514,21 +509,12 @@ async def _finalize_record(
                 )
                 await session.commit()
                 if not _update_claimed_rows(mark):
-                    logger.info(
-                        f"[resume_poll] refunded 标记未写入(可能已标) record_id={rid}"
-                    )
-            logger.info(
-                f"[resume_poll] 已退积分 record_id={rid} user={uid} bot={bid} "
-                f"+{cost} status={status}"
-            )
+                    logger.info(f"[resume_poll] refunded 标记未写入(可能已标) record_id={rid}")
+            logger.info(f"[resume_poll] 已退积分 record_id={rid} user={uid} bot={bid} +{cost} status={status}")
         elif want_refund and not claimed:
-            logger.info(
-                f"[resume_poll] finalize 未抢到 record_id={rid}(并发/已终态),跳过退款"
-            )
+            logger.info(f"[resume_poll] finalize 未抢到 record_id={rid}(并发/已终态),跳过退款")
         elif need_refund and not wallet_is_rhbind:
-            logger.info(
-                f"[resume_poll] entry_point=http 不退 RHBind(宿主钱包) record_id={rid}"
-            )
+            logger.info(f"[resume_poll] entry_point=http 不退 RHBind(宿主钱包) record_id={rid}")
         elif need_refund and wallet_is_rhbind and cost > 0 and not uid:
             logger.warning(f"[resume_poll] 无法退积分:record_id={rid} 无 user_id")
     except Exception as exc:  # noqa: BLE001
@@ -558,16 +544,12 @@ def _resolve_seedance_channel(channel: str, model: str) -> tuple[Any, str]:
     if requested:
         ch = ch_map.get(requested)
         if ch is None:
-            raise ResumeNotSupportedError(
-                f"Seedance 通道不存在: {requested!r}(可用: {sorted(ch_map.keys())})"
-            )
+            raise ResumeNotSupportedError(f"Seedance 通道不存在: {requested!r}(可用: {sorted(ch_map.keys())})")
         return ch, requested
     # 兼容遗留行:未记 vendor_channel 时默认 ark
     ch = ch_map.get("ark")
     if ch is None:
-        raise ResumeNotSupportedError(
-            f"Seedance 未指定 channel 且无 ark 默认通道(可用: {sorted(ch_map.keys())})"
-        )
+        raise ResumeNotSupportedError(f"Seedance 未指定 channel 且无 ark 默认通道(可用: {sorted(ch_map.keys())})")
     return ch, "ark"
 
 
@@ -597,9 +579,7 @@ def _resume_client_from_channel(ch: Any, ch_name: str) -> Any:
         client = None
     if client is not None:
         return client
-    raise ResumeNotSupportedError(
-        f"通道 {ch_name} 无可 resume 的 poll client(非异步网关图?)"
-    )
+    raise ResumeNotSupportedError(f"通道 {ch_name} 无可 resume 的 poll client(非异步网关图?)")
 
 
 def _provider_has_api_key(provider: object | None) -> bool:
@@ -674,9 +654,7 @@ def _resolve_happyhorse_channel(channel: str, model: str) -> tuple[Any, str]:
     if requested:
         ch = ch_map.get(requested)
         if ch is None:
-            raise ResumeNotSupportedError(
-                f"HappyHorse 通道不存在: {requested!r}(可用: {sorted(ch_map.keys())})"
-            )
+            raise ResumeNotSupportedError(f"HappyHorse 通道不存在: {requested!r}(可用: {sorted(ch_map.keys())})")
         return ch, requested
     return ch_map["dashscope"], "dashscope"
 
@@ -733,6 +711,41 @@ async def _resume_happyhorse(
         usage=dict(final.usage or {}, task_id=final.id, provider=ch_name),
         raw=final.raw,
         metadata={"task_id": final.id, "channel": ch_name, "resumed": True},
+    )
+
+
+async def _resume_kling(
+    *,
+    vendor_task_id: str,
+    model: str,
+    kind: str,
+    on_progress: Optional[ProgressCallback],
+) -> GenerationResult:
+    """可灵:按任务号前缀继续轮询。不发起第二次创建。"""
+    from ..base.errors import ChannelError
+    from ...utils.backends.kling.api import KlingAPI
+
+    resolved = kind if kind in {"image", "video"} else _kind_for_model(model, "kling")
+    await _emit(on_progress, "resuming", 10, "恢复可灵轮询")
+    try:
+        output = await KlingAPI().resume(vendor_task_id, model_name=model, kind=resolved)
+    except ChannelError as exc:
+        # 任务已失败或成功但没有地址,再查结果相同。网络错误留给上层记为不确定。
+        if exc.code in {"TASK_FAILED", "EMPTY_RESULT"}:
+            raise ResumeFailedError(exc.user_message or str(exc), definitive=True) from exc
+        raise
+    meta = dict(output.metadata)
+    meta["channel"] = "kling"
+    meta["resumed"] = True
+    return GenerationResult(
+        kind=resolved,
+        model=model,
+        backend="kling",
+        data=output.data,
+        mime_type=output.mime_type,
+        usage=dict(output.usage),
+        raw=output.raw,
+        metadata=meta,
     )
 
 
@@ -945,9 +958,7 @@ async def _resume_gateway_image(
 
     client = _resume_client_from_channel(ch, ch_name)
     if not isinstance(client, _HasPollUntilDone):
-        raise ResumeNotSupportedError(
-            f"通道 {ch_name} 无可 resume 的 poll client(非异步网关图?)"
-        )
+        raise ResumeNotSupportedError(f"通道 {ch_name} 无可 resume 的 poll client(非异步网关图?)")
 
     await _emit(on_progress, "resuming", 10, f"恢复网关图任务轮询({ch_name})")
     info = await _call_async(client.poll_until_done, vendor_task_id)
@@ -1065,9 +1076,7 @@ async def resume_poll(
         channel = (channel or "").strip()
         backend = _infer_backend(backend=backend, model=model, channel=channel)
         if not backend:
-            raise ResumeNotSupportedError(
-                f"无法推断 backend model={model!r} channel={channel!r}"
-            )
+            raise ResumeNotSupportedError(f"无法推断 backend model={model!r} channel={channel!r}")
 
         if backend == "seedance":
             # 先拿 provider 再 bind cancel
@@ -1097,6 +1106,32 @@ async def resume_poll(
                 trace_id=trace_id,
                 record_id=record_id,
             )
+        elif backend == "kling":
+            # 可灵没有取消接口。只把任务号挂上,继续查,不重新创建。
+            from .active_tasks import get_active_task_registry
+
+            reg = get_active_task_registry()
+            ag = await reg.register(
+                model_name=model,
+                trace_id=trace_id,
+                record_id=record_id,
+                allow_cancel=False,
+            )
+            await reg.bind_vendor_task(
+                vendor_task_id=vendor_task_id,
+                channel_name="kling",
+                cancel_remote=None,
+                ag=ag,
+            )
+            try:
+                result = await _resume_kling(
+                    vendor_task_id=vendor_task_id,
+                    model=model,
+                    kind=kind,
+                    on_progress=on_progress,
+                )
+            finally:
+                await reg.unregister(ag)
         elif backend == "rh_app":
             # 仅 resume 继续轮询;禁止 cancel(allow_cancel=False)
             from .active_tasks import get_active_task_registry
@@ -1150,8 +1185,7 @@ async def resume_poll(
             )
         elif backend == "gpt-image-2":
             raise ResumeNotSupportedError(
-                "gpt-image-2 原生同步端不支持 resume-poll;"
-                "网关异步图请传 vendor_channel=gateway_slot*_gpt_image_*"
+                "gpt-image-2 原生同步端不支持 resume-poll;网关异步图请传 vendor_channel=gateway_slot*_gpt_image_*"
             )
         else:
             raise ResumeNotSupportedError(f"backend={backend!r} 暂不支持 resume-poll")
@@ -1303,9 +1337,7 @@ def _resolve_minimax_h3_channel(channel: str, model: str) -> tuple[Any, str]:
     if requested:
         ch = ch_map.get(requested)
         if ch is None:
-            raise ResumeNotSupportedError(
-                f"MiniMax H3 通道不存在: {requested!r}(可用: {sorted(ch_map.keys())})"
-            )
+            raise ResumeNotSupportedError(f"MiniMax H3 通道不存在: {requested!r}(可用: {sorted(ch_map.keys())})")
         return ch, requested
     return ch_map["minimax-h3"], "minimax-h3"
 
@@ -1544,6 +1576,7 @@ def can_resume(*, backend: str = "", model: str = "", channel: str = "", vendor_
         "seedance",
         "happyhorse",
         "minimax-h3",
+        "kling",
         "rh_app",
         "comfyui",
         "gemini-image",

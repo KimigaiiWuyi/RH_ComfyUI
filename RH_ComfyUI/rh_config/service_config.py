@@ -21,6 +21,11 @@ from gsuid_core.utils.plugins_config.models import (
 
 from .fish_models import FISH_MODEL_NAMES
 from ..utils.backends.azure_image.catalog import AZURE_IMAGE_MODEL_NAMES, AZURE_IMAGE_DEFAULT_MODELS
+from ..utils.backends.kling.catalog import (
+    DEFAULT_ENDPOINT,
+    KLING_MODEL_NAMES,
+    SINGAPORE_ENDPOINT,
+)
 
 # 下拉项用静态常量,避免配置模块加载期 import defs 触发循环导入;新增模型时同步此表。
 _IMAGE_MODEL_REAL_NAMES = [
@@ -396,6 +401,54 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     "Azure_Image_Max_Concurrency": GsStrConfig(
         "最大并发",
         "在途请求达到此数则本通道暂时不可用,交给其它通道。按同一 Azure 资源计,勾选的多个部署共用这个上限。",
+        "2",
+    ),
+    "divider_kling": GsDivider(
+        "可灵 Kling",
+        "可灵视频与图片。优先填 API Key;留空时用 Access Key 与 Secret Key 签发 JWT。"
+        "关闭「启用可灵」后不参与分发。改完即时生效。",
+        "可灵",
+    ),
+    "Kling_Enable": GsBoolConfig(
+        "启用可灵",
+        "关闭后视频和图片都不走可灵。",
+        False,
+    ),
+    "Kling_Enabled_Models": GsListStrConfig(
+        "启用的可灵模型",
+        "勾选要开放的模型。视频:kling-3.0-turbo / kling-3.0 / kling-o1 / kling-2.6 / kling-2.5-turbo。"
+        "图片:kling-image-3.0 / kling-image-o1 / kling-image-common(通用) / kling-image-2.1。"
+        "未勾选的不可用。改完即时生效。",
+        list(KLING_MODEL_NAMES),
+        options=list(KLING_MODEL_NAMES),
+    ),
+    "Kling_API_Key": GsStrConfig(
+        "API Key",
+        "可灵 API Key。填写后直接作为 Bearer。与下方 Access Key 同时存在时,以 API Key 为准。",
+        "",
+        secret=True,
+    ),
+    "Kling_Access_Key": GsStrConfig(
+        "Access Key",
+        "旧版 Access Key。仅当 API Key 为空,且 Secret Key 也填写时,用来签发 JWT。",
+        "",
+        secret=True,
+    ),
+    "Kling_Secret_Key": GsStrConfig(
+        "Secret Key",
+        "旧版 Secret Key,与 Access Key 成对使用。",
+        "",
+        secret=True,
+    ),
+    "Kling_Endpoint": GsStrConfig(
+        "接口地址",
+        "可灵 API 根地址,不含路径。默认北京;新加坡站点可改成对应域名。",
+        DEFAULT_ENDPOINT,
+        options=[DEFAULT_ENDPOINT, SINGAPORE_ENDPOINT],
+    ),
+    "Kling_Max_Concurrency": GsStrConfig(
+        "最大并发",
+        "在途请求达到此数则暂时不可用。视频和图片共用这个上限。",
         "2",
     ),
     "divider_happyhorse": GsDivider(

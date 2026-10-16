@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from .kling import KLING_VIDEO_MODELS
 from .overrides import (
     Wan22VideoModel,
     Wan30VideoModel,
@@ -1537,4 +1538,5 @@ ALL_MODELS = [
     Wan30Def,
     MiniMaxH3Def,
     Wan22VideogenDef,
+    *KLING_VIDEO_MODELS,
 ]
