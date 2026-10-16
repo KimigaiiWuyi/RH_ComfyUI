@@ -91,10 +91,17 @@ class AdapterChannel(ProviderChannel):
             vendor_disabled_reason,
         )
 
+        if self.name == "gemini_speech":
+            from ..utils.backends.gemini_image.config import gemini_disabled_reason
+
+            label = model_name or workflow_file
+            return gemini_disabled_reason(label, label)
+
         adapter_vendors = {
             "mimo": ("MIMO_Enable", "MiMo 栏"),
             "fishaudio": ("FishAudio_Enable", "Fish Audio 栏"),
             "tx_aiart": ("TX_AIArt_Enable", "腾讯云混元栏"),
+            "dashscope_tts": ("HappyHorse_Enable_dashscope", "DashScope 栏"),
         }
         vendor = adapter_vendors.get(self.name)
         if vendor is not None:
@@ -107,6 +114,7 @@ class AdapterChannel(ProviderChannel):
             "fishaudio": ("FishAudio_Enabled_Models", "Fish Audio 栏"),
             "tx_aiart": ("TX_AIArt_Enabled_Models", "腾讯云混元栏"),
             "seedream": ("Seedance_Enabled_Models", "火山官方 Seedance / Seedream 栏"),
+            "dashscope_tts": ("DashScope_Enabled_Models", "DashScope 栏"),
         }
         spec = adapter_lists.get(self.name)
         if spec is None:

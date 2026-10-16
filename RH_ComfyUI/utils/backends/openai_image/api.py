@@ -14,7 +14,7 @@ from __future__ import annotations
 import base64
 import asyncio
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, field
+from dataclasses import field, dataclass
 
 import httpx
 import aiohttp

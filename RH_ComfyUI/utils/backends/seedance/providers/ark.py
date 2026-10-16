@@ -25,7 +25,7 @@ from ..provider import (
     SeedanceProviderError,
     normalize_usage,
 )
-from ....core.types import MediaKind, MediaRef, media_ref_cache_key
+from ....core.types import MediaRef, MediaKind, media_ref_cache_key
 from ....core.media_labels import append_spaced_media_ref
 
 # Seedance / 方舟 content[] 协议:每种媒体的 type 键与 payload 键同名。

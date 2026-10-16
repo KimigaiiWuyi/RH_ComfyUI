@@ -47,9 +47,11 @@ def init_backends() -> AdapterRegistry:
     from .comfyui.executor import ComfyUIAdapter
     from .minimax.executor import MiniMaxAdapter
     from .seedream.executor import SeedreamAdapter
+    from .tx_aiart.executor import TxAiartAdapter
     from .fishaudio.executor import FishAudioAdapter
     from .gpt_image2.executor import GPTImage2Adapter
-    from .tx_aiart.executor import TxAiartAdapter
+    from .gemini_speech.executor import GeminiSpeechAdapter
+    from .dashscope.speech_executor import DashScopeTtsAdapter
 
     backend_registry.register(ComfyUIAdapter())
     backend_registry.register(RHAppAdapter())
@@ -60,8 +62,10 @@ def init_backends() -> AdapterRegistry:
     # Seedream 5.0(Lite / Pro):复用 Seedance_apikey_ark / Seedance_BaseURL_ark
     backend_registry.register(SeedreamAdapter())
     backend_registry.register(TxAiartAdapter())
-    # Seedance / Gemini 不是 Adapter:各供应商 = 一个 ProviderChannel,
-    # 由通用 LoadBalancer 统一调度(见 seedance/channel.py、gemini_image/channel.py)。
+    backend_registry.register(GeminiSpeechAdapter())
+    backend_registry.register(DashScopeTtsAdapter())
+    # Seedance / Gemini 生图不是 Adapter,走 ProviderChannel + LoadBalancer
+    # (见 seedance/channel.py、gemini_image/channel.py)。
 
     return backend_registry
 

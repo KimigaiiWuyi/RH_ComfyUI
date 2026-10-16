@@ -17,10 +17,10 @@
 
 from __future__ import annotations
 
+import math
 import atexit
 import asyncio
 import hashlib
-import math
 import threading
 from io import BytesIO
 from typing import Any, TypeVar, Callable

@@ -7,12 +7,23 @@ emotion_style(内联/自然语言/枚举),新增模型挑一个风格即可,无�
 from __future__ import annotations
 
 from ..bridge import SpeechPipelineModel
+from ...core.base.errors import ValidationError
 from ...core.schema.card import ModelCard
 from ...core.base.emotion import EmotionStyle
+from ...utils.core.request import GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...utils.backends.minimax.config import (
     minimax_disabled_reason,
     is_minimax_model_enabled,
+)
+from ...utils.mappers.qwen_tts_billing import QWEN_INSTRUCTION_LIMIT, qwen_weighted_chars
+from ...utils.backends.dashscope.config import (
+    dashscope_disabled_reason,
+    is_dashscope_model_enabled,
+)
+from ...utils.backends.gemini_image.config import (
+    gemini_disabled_reason,
+    is_gemini_model_enabled,
 )
 
 
@@ -106,4 +117,58 @@ class FishTtsModel(SpeechPipelineModel):
         )
 
 
-__all__ = ["IndexTTS2Model", "IndexTTS25Model", "MinimaxSpeechModel", "FishTtsModel"]
+class GeminiTtsModel(SpeechPipelineModel):
+    """Gemini 3.8 Flash-Lite TTS:风格走 mood,不进正文。"""
+
+    emotion_style = EmotionStyle.NATURAL_LANGUAGE
+    max_text_length = 4000
+
+    async def check_available(self) -> bool:
+        if not is_gemini_model_enabled(self.name):
+            return False
+        return await super().check_available()
+
+    async def unavailable_reason(self) -> str:
+        disabled = gemini_disabled_reason(self.name, self.display_name)
+        if disabled is not None:
+            return disabled
+        return await super().unavailable_reason()
+
+
+class QwenTtsModel(SpeechPipelineModel):
+    """Qwen-Audio TTS:风格走 instruction,汉字按 2 计,上限 100。"""
+
+    emotion_style = EmotionStyle.NATURAL_LANGUAGE
+    max_text_length = 20000
+
+    def validate(self, request: GenerationRequest) -> None:
+        super().validate(request)
+        mood = request.mood
+        if not isinstance(mood, str) or not mood.strip():
+            return
+        units = qwen_weighted_chars(mood)
+        if units > QWEN_INSTRUCTION_LIMIT:
+            raise ValidationError(
+                f"{self.display_name} 的风格指令长度为 {units},超过 {QWEN_INSTRUCTION_LIMIT}(汉字按 2 计)"
+            )
+
+    async def check_available(self) -> bool:
+        if not is_dashscope_model_enabled(self.name):
+            return False
+        return await super().check_available()
+
+    async def unavailable_reason(self) -> str:
+        disabled = dashscope_disabled_reason(self.name, self.display_name)
+        if disabled is not None:
+            return disabled
+        return await super().unavailable_reason()
+
+
+__all__ = [
+    "IndexTTS2Model",
+    "IndexTTS25Model",
+    "MinimaxSpeechModel",
+    "FishTtsModel",
+    "GeminiTtsModel",
+    "QwenTtsModel",
+]

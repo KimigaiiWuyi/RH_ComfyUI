@@ -8,19 +8,43 @@
 from __future__ import annotations
 
 from typing import Protocol
+from dataclasses import dataclass
 
 from ..bridge import SpeechPipelineModel
-from .overrides import FishTtsModel, IndexTTS2Model, IndexTTS25Model, MinimaxSpeechModel
+from .overrides import (
+    FishTtsModel,
+    QwenTtsModel,
+    GeminiTtsModel,
+    IndexTTS2Model,
+    IndexTTS25Model,
+    MinimaxSpeechModel,
+)
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.speech import index_tts2_mapper as _index_tts2_mapper
 from ...rh_config.fish_models import FISH_TTS_MODELS, FishModelSpec
+from ...utils.mappers.qwen_tts import qwen_tts_mapper_for as _qwen_tts_mapper_for
+from ...utils.mappers.gemini_tts import gemini_tts_mapper_for as _gemini_tts_mapper_for
 from ...utils.mappers.mimo_speech import mimo_tts_mapper as _mimo_tts_mapper
 from ...utils.mappers.extra_billing import estimate_mimo_tts_points, estimate_minimax_t2a_points
 from ...utils.mappers.minimax_speech import minimax_t2a_speech_mapper as _minimax_t2a_speech_mapper
 from ...utils.mappers.speech_billing import estimate_fish_tts_points, estimate_index_tts2_points
+from ...utils.mappers.qwen_tts_voices import (
+    QWEN_TTS_31,
+    QWEN_TTS_PLUS,
+    QWEN_TTS_FLASH,
+    QWEN_VOICES_BY_MODEL,
+    QWEN_DEFAULT_VOICE_BY_MODEL,
+)
 from ...utils.mappers.fishaudio_speech import fishaudio_tts_mapper_for as _fishaudio_tts_mapper_for
+from ...utils.mappers.qwen_tts_billing import settle_qwen_tts_points, estimate_qwen_tts_points
+from ...utils.mappers.gemini_tts_billing import settle_gemini_tts_points, estimate_gemini_tts_points
+from ...utils.backends.gemini_speech.voices import (
+    GEMINI_TTS_VOICES,
+    GEMINI_TTS_DEFAULT_VOICE,
+    GEMINI_TTS_UPSTREAM_MODEL,
+)
 
 
 class IndexTTS2Def(IndexTTS2Model):
@@ -484,10 +508,241 @@ _FISH_TTS_BY_NAME: dict[str, _FishTtsCtor] = {spec.name: _build_fish_tts(spec) f
 FishTtsDef = _FISH_TTS_BY_NAME["s2.1-pro"]
 FishTtsFreeDef = _FISH_TTS_BY_NAME["s2.1-pro-free"]
 
+
+def _usage_blob(usage: dict) -> dict[str, object]:
+    blob: dict[str, object] = {}
+    for key, value in usage.items():
+        if isinstance(key, str):
+            blob[key] = value
+    return blob
+
+
+class GeminiTtsDef(GeminiTtsModel):
+    """Gemini 3.8 Flash-Lite TTS。勾选名 gemini_tts,凭证与生图共用。"""
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="gemini_tts",
+            display_name="Gemini 3.8 Flash-Lite TTS",
+            task_type=TaskType("speech"),
+            backend="gemini_speech",
+            backend_model=GEMINI_TTS_UPSTREAM_MODEL,
+            point_cost=1,
+            description="单说话人预置音色,输出 WAV",
+            knowledge_content=(
+                "Gemini 3.8 Flash-Lite TTS(gemini_tts) —— 单说话人朗读。"
+                "\n"
+                "30 个预置音色,默认 Kore。风格写在 mood,不会被读出来。"
+                "正文里的尖括号事件保留。不支持语速、参考音频、多说话人。"
+                "\n"
+                "输出 WAV。2026-12-31 及以前按 Standard:输入文本 50 积分/百万 token,音频 600。"
+                "2027-01-01 起输入 100、音频 1200。1 美元 = 100 积分,向上取整,最少 1。"
+                "预扣按字数估算时长;成功后按 usage 实扣。"
+                "\n"
+                "适用场景:配音、口播、有声内容。"
+                "\n"
+                "不适用场景:音乐生成、多说话人、音色设计。"
+                "\n"
+            ),
+            requirements=["gemini_image_apikey"],
+            mode="programmatic",
+            mapper_func=_gemini_tts_mapper_for(GEMINI_TTS_UPSTREAM_MODEL),
+            inputs={
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=True,
+                    title="合成文本",
+                    description="待合成文本,最长 4000 字",
+                ),
+                "voice_id": PortSpec(
+                    type=PortType.ENUM,
+                    values=list(GEMINI_TTS_VOICES),
+                    default=GEMINI_TTS_DEFAULT_VOICE,
+                    required=False,
+                    title="预置音色",
+                    description="留空使用 Kore",
+                ),
+                "mood": PortSpec(
+                    type=PortType.STRING,
+                    required=False,
+                    title="风格",
+                    description="自然语言风格,不写入正文",
+                ),
+            },
+            outputs={
+                "audio": PortSpec(type=PortType.OUTPUT_AUDIO, description="生成的语音"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["speech"],
+                mode="sync",
+                priority=66,
+            ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        return estimate_gemini_tts_points(request.prompt)
+
+    def settle_cost(self, request: GenerationRequest, usage: dict) -> int | None:
+        return settle_gemini_tts_points(_usage_blob(usage))
+
+    def point_range(self) -> tuple[int, int]:
+        return (
+            estimate_gemini_tts_points(""),
+            estimate_gemini_tts_points("你" * self.max_text_length),
+        )
+
+
+@dataclass(frozen=True)
+class _QwenTtsSpec:
+    name: str
+    display_name: str
+    priority: int
+    description: str
+    bill: str
+
+
+_QWEN_TTS_SPECS: tuple[_QwenTtsSpec, ...] = (
+    _QwenTtsSpec(
+        QWEN_TTS_31,
+        "Qwen-Audio 3.1 TTS Flash",
+        64,
+        "系统音色,按 token 计费",
+        "按 token 计费。北京输入 150 积分/百万 token、输出 1200;"
+        "国际站输入 167.7、输出 1363.6,向上取整。"
+        "预扣按字数估算时长,成功后有 usage 才改实扣。",
+    ),
+    _QwenTtsSpec(
+        QWEN_TTS_PLUS,
+        "Qwen-Audio TTS Plus",
+        63,
+        "系统音色,按字计费",
+        "按输入字符计费,输出不计。北京 140 积分/万字,国际站 1.49884 元/万字。汉字计 2。",
+    ),
+    _QwenTtsSpec(
+        QWEN_TTS_FLASH,
+        "Qwen-Audio TTS Flash",
+        62,
+        "系统音色,按字计费",
+        "按输入字符计费,输出不计。北京 100 积分/万字,国际站 1.12413 元/万字。汉字计 2。",
+    ),
+)
+
+
+class _QwenTtsCtor(Protocol):
+    def __call__(self) -> QwenTtsModel: ...
+
+
+def _qwen_tts_knowledge(spec: _QwenTtsSpec) -> str:
+    return (
+        f"{spec.display_name}({spec.name}) —— 单说话人朗读。"
+        "\n"
+        "只用该模型自己的系统音色。风格写在 mood,作为 instruction,不进正文;"
+        "汉字按 2 计,上限 100。语速 0.5~2.0。"
+        "\n"
+        f"{spec.bill}"
+        "\n"
+        "输出 MP3。地区跟当前 DashScope 根地址:主机名含 dashscope-intl 用国际站价格,否则北京。"
+        "已保存的启用列表不会自动勾上这个模型。"
+        "\n"
+        "适用场景:配音、口播、有声内容。"
+        "\n"
+        "不适用场景:音乐生成、音色克隆。"
+        "\n"
+    )
+
+
+def _build_qwen_tts(spec: _QwenTtsSpec) -> _QwenTtsCtor:
+    engine = spec.name
+    voices = QWEN_VOICES_BY_MODEL[engine]
+    default_voice = QWEN_DEFAULT_VOICE_BY_MODEL[engine]
+
+    class Def(QwenTtsModel):
+        def __init__(self) -> None:
+            super().__init__(self.node_def())
+
+        @staticmethod
+        def node_def() -> NodeDef:
+            return NodeDef(
+                name=engine,
+                display_name=spec.display_name,
+                task_type=TaskType("speech"),
+                backend="dashscope_tts",
+                backend_model=engine,
+                point_cost=1,
+                description=spec.description,
+                knowledge_content=_qwen_tts_knowledge(spec),
+                requirements=["HappyHorse_apikey_dashscope"],
+                mode="programmatic",
+                mapper_func=_qwen_tts_mapper_for(engine, voices, default_voice),
+                inputs={
+                    "prompt": PortSpec(
+                        type=PortType.TEXT,
+                        required=True,
+                        title="合成文本",
+                        description="待合成文本,单次最长 20000 字",
+                    ),
+                    "voice_id": PortSpec(
+                        type=PortType.ENUM,
+                        values=list(voices),
+                        default=default_voice,
+                        required=False,
+                        title="系统音色",
+                        description=f"留空使用 {default_voice}。不能换成另一个模型的音色",
+                    ),
+                    "mood": PortSpec(
+                        type=PortType.STRING,
+                        required=False,
+                        title="风格",
+                        description="自然语言风格,不写入正文。汉字按 2 计,上限 100",
+                    ),
+                    "speed": PortSpec(
+                        type=PortType.NUMBER,
+                        default=1.0,
+                        minimum=0.5,
+                        maximum=2.0,
+                        title="语速",
+                        description="语速,0.5~2.0",
+                    ),
+                },
+                outputs={
+                    "audio": PortSpec(type=PortType.OUTPUT_AUDIO, description="生成的语音"),
+                },
+                capabilities=CapabilityManifest(
+                    supported_tasks=["speech"],
+                    mode="sync",
+                    priority=spec.priority,
+                ),
+            )
+
+        def estimate_cost(self, request: GenerationRequest) -> int:
+            return estimate_qwen_tts_points(engine, request.prompt)
+
+        def settle_cost(self, request: GenerationRequest, usage: dict) -> int | None:
+            return settle_qwen_tts_points(engine, _usage_blob(usage))
+
+        def point_range(self) -> tuple[int, int]:
+            return (
+                estimate_qwen_tts_points(engine, ""),
+                estimate_qwen_tts_points(engine, "你" * self.max_text_length),
+            )
+
+    Def.__name__ = "QwenTts_" + engine.replace(".", "_").replace("-", "_")
+    Def.__qualname__ = Def.__name__
+    return Def
+
+
+_QWEN_TTS_BY_NAME: dict[str, _QwenTtsCtor] = {spec.name: _build_qwen_tts(spec) for spec in _QWEN_TTS_SPECS}
+
 ALL_MODELS = [
     IndexTTS2Def,
     IndexTTS25Def,
     MimoTtsDef,
     MinimaxT2aSpeechDef,
+    GeminiTtsDef,
+    *_QWEN_TTS_BY_NAME.values(),
     *_FISH_TTS_BY_NAME.values(),
 ]

@@ -13,10 +13,16 @@ from dataclasses import dataclass
 
 DASHSCOPE_MODEL_HAPPYHORSE = "happyhorse1.1"
 DASHSCOPE_MODEL_WAN30 = "wan3.0"
+DASHSCOPE_MODEL_QWEN_TTS_FLASH = "qwen-audio-3.0-tts-flash"
+DASHSCOPE_MODEL_QWEN_TTS_PLUS = "qwen-audio-3.0-tts-plus"
+DASHSCOPE_MODEL_QWEN_TTS_31 = "qwen-audio-3.1-tts-flash"
 
 DASHSCOPE_MODEL_OPTIONS: tuple[str, ...] = (
     DASHSCOPE_MODEL_HAPPYHORSE,
     DASHSCOPE_MODEL_WAN30,
+    DASHSCOPE_MODEL_QWEN_TTS_FLASH,
+    DASHSCOPE_MODEL_QWEN_TTS_PLUS,
+    DASHSCOPE_MODEL_QWEN_TTS_31,
 )
 
 DASHSCOPE_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/api/v1"
@@ -77,16 +83,16 @@ def dashscope_disabled_reason(name: str, display_name: str) -> str | None:
     """未勾选时返回人话原因;已启用返回 None。"""
     if is_dashscope_model_enabled(name):
         return None
-    return (
-        f"{display_name} 未启用:请在 Web 控制台 DashScope 栏的"
-        f"「启用的 DashScope 模型」中添加 {name}"
-    )
+    return f"{display_name} 未启用:请在 Web 控制台 DashScope 栏的「启用的 DashScope 模型」中添加 {name}"
 
 
 __all__ = [
     "DASHSCOPE_DEFAULT_BASE_URL",
     "DASHSCOPE_MODEL_HAPPYHORSE",
     "DASHSCOPE_MODEL_OPTIONS",
+    "DASHSCOPE_MODEL_QWEN_TTS_31",
+    "DASHSCOPE_MODEL_QWEN_TTS_FLASH",
+    "DASHSCOPE_MODEL_QWEN_TTS_PLUS",
     "DASHSCOPE_MODEL_WAN30",
     "ProviderCredentials",
     "dashscope_credentials",

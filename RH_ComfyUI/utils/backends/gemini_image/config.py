@@ -14,6 +14,7 @@ GEMINI_MODEL_BANANA2 = "banana2"
 GEMINI_MODEL_BANANA21 = "banana2.1"
 GEMINI_MODEL_BANANA2_LITE = "banana2.lite"
 GEMINI_MODEL_BANANA_PRO = "banana_pro"
+GEMINI_MODEL_TTS = "gemini_tts"
 
 GEMINI_MODEL_OPTIONS: tuple[str, ...] = (
     GEMINI_MODEL_BANANA1,
@@ -21,6 +22,7 @@ GEMINI_MODEL_OPTIONS: tuple[str, ...] = (
     GEMINI_MODEL_BANANA21,
     GEMINI_MODEL_BANANA2_LITE,
     GEMINI_MODEL_BANANA_PRO,
+    GEMINI_MODEL_TTS,
 )
 
 
@@ -75,6 +77,7 @@ __all__ = [
     "GEMINI_MODEL_BANANA21",
     "GEMINI_MODEL_BANANA2_LITE",
     "GEMINI_MODEL_BANANA_PRO",
+    "GEMINI_MODEL_TTS",
     "GEMINI_MODEL_OPTIONS",
     "gemini_enabled_models",
     "is_gemini_vendor_enabled",

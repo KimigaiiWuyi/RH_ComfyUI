@@ -25,7 +25,9 @@ from ..utils.backends.kling.catalog import (
     KLING_MODEL_NAMES,
     SINGAPORE_ENDPOINT,
 )
+from ..utils.backends.dashscope.config import DASHSCOPE_MODEL_OPTIONS
 from ..utils.backends.azure_image.catalog import AZURE_IMAGE_MODEL_NAMES, AZURE_IMAGE_DEFAULT_MODELS
+from ..utils.backends.gemini_image.config import GEMINI_MODEL_OPTIONS
 
 # 下拉项用静态常量,避免配置模块加载期 import defs 触发循环导入;新增模型时同步此表。
 _IMAGE_MODEL_REAL_NAMES = [
@@ -57,7 +59,7 @@ _RH_APP_NAMES = [
     "rh_image_outpaint",
     "IndexTTS2.5",
 ]
-_GEMINI_MODEL_NAMES = ["banana1", "banana2", "banana2.1", "banana2.lite", "banana_pro"]
+_GEMINI_MODEL_NAMES = list(GEMINI_MODEL_OPTIONS)
 _MINIMAX_MODEL_NAMES = ["minimax_t2a_speech", "minimax_image01", "minimax_h3"]
 _MIMO_MODEL_NAMES = ["mimo_tts"]
 _SEEDANCE_ARK_MODEL_NAMES = [
@@ -75,7 +77,7 @@ _SEEDANCE_RH_MODEL_NAMES = [
     "seedance2_mini",
     "seedance2_fast",
 ]
-_DASHSCOPE_MODEL_NAMES = ["happyhorse1.1", "wan3.0"]
+_DASHSCOPE_MODEL_NAMES = list(DASHSCOPE_MODEL_OPTIONS)
 _TX_AIART_MODEL_NAMES = ["tx_image_outpaint"]
 
 # ── ComfyUI 服务 ────────────────────────────────────────────────
@@ -117,24 +119,27 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "",
     ),
     "divider_gemini_image": GsDivider(
-        "Gemini 生图(generate_content,走 google-genai SDK)",
-        "Gemini 生图(banana1 / banana2 / banana2.1 / banana2.lite / banana_pro 的 Gemini 通道)。"
+        "Gemini 生图 / 语音(generate_content,走 google-genai SDK)",
+        "Gemini 生图(banana1 / banana2 / banana2.1 / banana2.lite / banana_pro 的 Gemini 通道)与语音 gemini_tts。"
         "banana2、banana2.1 与 banana2.lite 是三个模型,价格和参数都不同,须分别勾选。"
+        "gemini_tts 是语音合成,须单独勾选,不走生图通道。"
         "默认 AI Studio(API Key);打开 VertexAI 走组织版。"
         "须打开「启用 Gemini 供应商」,并在模型列表勾选后才走 Gemini 通道。",
-        "Gemini 生图服务配置",
+        "Gemini 生图 / 语音服务配置",
     ),
     "Gemini_Enable": GsBoolConfig(
         "启用 Gemini 供应商",
-        "是否启用 Gemini 生图通道。关闭后 banana1 / banana2 / banana2.1 / banana2.lite / banana_pro 均不走 Gemini。",
+        "是否启用 Gemini 生图通道。关闭后 banana1 / banana2 / banana2.1 / "
+        "banana2.lite / banana_pro / gemini_tts 均不走 Gemini。",
         True,
     ),
     "Gemini_Enabled_Models": GsListStrConfig(
         "启用的 Gemini 模型",
         "从列表勾选要走 Gemini 通道的内部模型;可自由添加内部模型名。"
         "留空则全部不走 Gemini。共用下方 Gemini 凭证。"
-        "可选:banana1 / banana2 / banana2.1 / banana2.lite / banana_pro。"
-        "已保存的旧列表不会自动勾上 banana2.1 或 banana2.lite,需要手动加上。"
+        "可选:banana1 / banana2 / banana2.1 / banana2.lite / banana_pro / gemini_tts。"
+        "已保存的旧列表不会自动勾上 banana2.1、banana2.lite 或 gemini_tts,需要手动加上。"
+        "gemini_tts 是语音合成,须单独勾选,不走生图通道。"
         "banana2.lite 只生成 1K。"
         "banana_pro 未勾选时仍可通过 OpenAI 兼容供应商池使用。",
         list(_GEMINI_MODEL_NAMES),
@@ -454,33 +459,39 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "2",
     ),
     "divider_happyhorse": GsDivider(
-        "DashScope 视频生成(HappyHorse / 万相 3.0)",
-        "阿里云 DashScope / 千问AI 视频:HappyHorse 1.1 与万相 3.0 共用下方 API Key。"
+        "DashScope(HappyHorse / 万相 3.0 / Qwen-Audio TTS)",
+        "阿里云 DashScope / 千问AI:HappyHorse 1.1、万相 3.0 与"
+        " qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus / qwen-audio-3.1-tts-flash 共用下方 API Key。"
         "须在上方启用列表勾选后才分发;供应商总开关关闭则全部不可用。"
         "改完即时生效。",
-        "DashScope 视频服务配置",
+        "DashScope 视频 / 语音服务配置",
     ),
     "HappyHorse_Enable_dashscope": GsBoolConfig(
         "启用 DashScope 供应商",
-        "是否启用官方 DashScope 通道。禁用后官方 happyhorse1.1 / wan3.0 通道不参与分发;若已挂外部插件通道,模型仍可用。",
+        "是否启用官方 DashScope 通道。禁用后官方 happyhorse1.1 / wan3.0 /"
+        " qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus / qwen-audio-3.1-tts-flash 通道不参与分发;"
+        "若已挂外部插件通道,模型仍可用。",
         True,
     ),
     "DashScope_Enabled_Models": GsListStrConfig(
         "启用的 DashScope 模型",
         "勾选要走官方 DashScope 通道的模型;可自由添加内部模型名。"
         "留空则官方通道全关。happyhorse1.1 / wan3.0 若已挂外部插件通道,模型本身仍可用。"
-        "可选:happyhorse1.1 / wan3.0。",
+        "可选:happyhorse1.1 / wan3.0 / qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus / qwen-audio-3.1-tts-flash。"
+        "这三个 qwen-audio 名称是语音合成,已保存的旧列表不会自动勾上,需要手动加上。",
         list(_DASHSCOPE_MODEL_NAMES),
         options=list(_DASHSCOPE_MODEL_NAMES),
     ),
     "HappyHorse_apikey_dashscope": GsStrConfig(
         "DashScope API Key",
-        "阿里云 DashScope / 千问AI 平台 API Key,HappyHorse 1.1 与万相 3.0 共用。",
+        "阿里云 DashScope / 千问AI 平台 API Key,HappyHorse 1.1、万相 3.0 与"
+        " qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus / qwen-audio-3.1-tts-flash 共用。",
         "",
     ),
     "HappyHorse_BaseURL_dashscope": GsStrConfig(
         "DashScope Base URL",
-        "DashScope API 根地址(不含尾斜杠)。默认华北2北京;国际站等可改为对应 region 地址。",
+        "DashScope API 根地址(不含尾斜杠)。默认华北2北京;国际站等可改为对应 region 地址。"
+        "语音合成的 WebSocket 换成同主机的 /api-ws/v1/inference;这里填不了带业务空间 ID 的 maas 域名。",
         "https://dashscope.aliyuncs.com/api/v1",
         options=[
             "https://dashscope.aliyuncs.com/api/v1",
