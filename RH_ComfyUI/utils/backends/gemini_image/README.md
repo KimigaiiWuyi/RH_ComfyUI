@@ -13,7 +13,8 @@ banana2 / banana2.1 / banana2.lite / banana_pro 共用的供应商通道,走官�
 双模(显式开关 `Gemini_Image_Use_Vertex`,SDK 限制 project 与 api_key 互斥):
 - 关(默认)= AI Studio → `Client(api_key=Gemini_Image_apikey)`;
 - 开 = VertexAI → `Client(vertexai=True, project, location)`,鉴权走 ADC 或
-  `Gemini_Image_SA_File` 服务账号 JSON,忽略 api_key。
+  控制台上传的服务账号 JSON(`Gemini_Image_SA_File`,保存为
+  `data/RHComfyUI/gemini/vertex_sa.json`),忽略 api_key。留空走 ADC。
 
 维护须知:
 - **通道内一切凭证守卫用 `is_configured()`,不要按 `api_key` 判**(Vertex 无 key);

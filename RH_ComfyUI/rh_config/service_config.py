@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from typing import Dict
 
+from gsuid_core.data_store import get_res_path
 from gsuid_core.utils.plugins_config.models import (
     GSC,
     GsDivider,
     GsStrConfig,
     GsBoolConfig,
     GsListStrConfig,
+    GsFileUploadConfig,
     GsRepeatGroupConfig,
 )
 
@@ -175,11 +177,15 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "global",
         options=["global", "us-central1"],
     ),
-    "Gemini_Image_SA_File": GsStrConfig(
-        "VertexAI 服务账号 JSON 路径(可选)",
-        "VertexAI 鉴权用的服务账号 JSON 文件绝对路径;留空则用环境 ADC"
+    "Gemini_Image_SA_File": GsFileUploadConfig(
+        "VertexAI 服务账号 JSON(可选)",
+        "上传服务账号 JSON,保存到插件数据目录 gemini/vertex_sa.json。"
+        "留空则用环境 ADC"
         "(GOOGLE_APPLICATION_CREDENTIALS / gcloud auth application-default login)。",
         "",
+        str(get_res_path(["RHComfyUI", "gemini"])),
+        "vertex_sa",
+        "json",
     ),
     "divider_minimax": GsDivider(
         "MiniMax（文生图 / 图生图 / T2A 语音 / H3 视频）",

@@ -102,7 +102,7 @@ class GeminiImageAPI:
 
     @property
     def sa_file(self) -> str:
-        """VertexAI 服务账号 JSON 路径(可选);留空则走 ADC。"""
+        """已上传的服务账号 JSON 绝对路径;留空则走 ADC。"""
         return str(SERVICE_CONFIG.get_config("Gemini_Image_SA_File").data or "").strip()
 
     @property

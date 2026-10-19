@@ -85,7 +85,9 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
   `Gemini_Image_Use_Vertex`:
   - 关(默认)= AI Studio → `Client(api_key=Gemini_Image_apikey)`;
   - 开 = VertexAI → `Client(vertexai=True, project, location)`,鉴权走 ADC 或
-    `Gemini_Image_SA_File` 服务账号 JSON,**忽略 api_key**。
+    控制台上传的 `Gemini_Image_SA_File` 服务账号 JSON
+    (保存到 `data/RHComfyUI/gemini/vertex_sa.json`),**忽略 api_key**。
+    留空走 ADC。旧的路径字符串不保留,类型变化后该项为空。
   - **别再用"填了 project_id 就走 Vertex"推断** —— 用户填了 key+project 会被迫
     走 Vertex、报 ADC 缺失(踩坑现场)。
 - **直连不到 Google 就填 `Gemini_Image_BaseURL`(中转地址)**:经
