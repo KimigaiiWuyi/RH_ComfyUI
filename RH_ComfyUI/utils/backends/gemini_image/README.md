@@ -15,6 +15,8 @@ banana2 / banana2.1 / banana2.lite / banana_pro 共用的供应商通道,走官�
 - 开 = VertexAI → `Client(vertexai=True, project, location)`,鉴权走 ADC 或
   控制台上传的服务账号 JSON(`Gemini_Image_SA_File`,保存为
   `data/RHComfyUI/gemini/vertex_sa.json`),忽略 api_key。留空走 ADC。
+- 模型 ID 两边相同(`gemini-3.1-flash-image` / `gemini-3-pro-image` /
+  `gemini-nano-banana-2.1` 等)。开关只换 Client,不改 `generate_content` 的 model。
 
 维护须知:
 - **通道内一切凭证守卫用 `is_configured()`,不要按 `api_key` 判**(Vertex 无 key);

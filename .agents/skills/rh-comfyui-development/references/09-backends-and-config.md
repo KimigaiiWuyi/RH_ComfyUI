@@ -17,9 +17,10 @@ aiohttp 路径包 `call_with_network_retry`;不要在 poll 循环再叠一层。
 
 > **Gemini 不是 Adapter**:`gemini_image/` 提供一个 `GeminiImageChannel`,内部走
 > **官方 google-genai SDK 的 `models.generate_content`**(不手拼 REST,也不要走
-> `interactions.create`:它会把 preview 生图 ID 改写成 `…-agent`,参考图 400)。
+> `interactions.create`:它会把生图 ID 改写成 `…-agent`,参考图 400)。
 > 双模由 `Gemini_Image_Use_Vertex` 决定,不要再用「填了 Project ID 就走 Vertex」。
-> banana2(`gemini-3.1-flash-image-preview`)与 banana2.1(`gemini-nano-banana-2.1`)
+> 模型 ID 两边相同,开关不改 `generate_content` 的 model。
+> banana2(`gemini-3.1-flash-image`)与 banana2.1(`gemini-nano-banana-2.1`)
 > 共用这条通道,参数和价格分开,各自在 `channel_bindings()` 里挂上。
 | `rh_app` | `rh_app/` | RunningHub **AI 应用** | webapp id=`workflow_file`;与 comfyui **不同 API**;**无** remote cancel;可 query resume |
 | `minimax` | `minimax/` | MiniMax | 图片 + 语音(T2A);H3 视频走独立 `minimax-h3` 通道 |
@@ -72,7 +73,7 @@ ComfyUI 字段注入。
 | 文件 | 服务的模型 |
 |---|---|
 | `gpt_image2.py` | banana2 / banana_pro / gpt-image-2 |
-| `gemini_image.py` | banana1 / banana2 / banana2.1 / banana_pro(generate_content;2=`gemini-3.1-flash-image-preview`,2.1=`gemini-nano-banana-2.1`) |
+| `gemini_image.py` | banana1 / banana2 / banana2.1 / banana_pro(generate_content;2=`gemini-3.1-flash-image`,2.1=`gemini-nano-banana-2.1`,pro=`gemini-3-pro-image`) |
 | `image_edit.py` | qwen_2511(图片编辑) |
 | `minimax_text2image.py` | minimax_image01 |
 | `video.py` | wan2.2_videogen(含 t2v/i2v 工作流切换) |

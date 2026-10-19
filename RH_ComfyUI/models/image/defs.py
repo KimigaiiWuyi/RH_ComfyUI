@@ -871,9 +871,9 @@ class TxImageOutpaintDef(ImagePipelineModel):
 class Banana2Def(ImagePipelineModel):
     """Nano Banana 2 — 走原生 Gemini generate_content(非 OpenAI 兼容网关)
 
-    独立于 gpt-image-2,也独立于 banana2.1。唯一通道是 GeminiImageChannel
-    (填 Project ID 走 VertexAI,留空走 AI Studio)。上游模型是
-    gemini-3.1-flash-image-preview,价格与 2.1 不是同一条曲线。
+    独立于 gpt-image-2,也独立于 banana2.1。唯一通道是 GeminiImageChannel。
+    上游 gemini-3.1-flash-image,AI Studio 与 Vertex 用同一个 ID,
+    只拨 Gemini_Image_Use_Vertex。价格与 2.1 不是同一条曲线。
     """
 
     def __init__(self) -> None:
@@ -900,12 +900,12 @@ class Banana2Def(ImagePipelineModel):
                 "不适用场景:需要极高细节的专业商业图(建议用 banana_pro);"
                 "需要 2.1 的全景比例或更低单价时用 banana2.1。"
                 "\n"
-                "凭证:须在「启用的 Gemini 模型」勾选 banana2;"
-                "VertexAI(填 Project ID)或 AI Studio(仅需 key)。"
+                "凭证:须在「启用的 Gemini 模型」勾选 banana2。"
+                "AI Studio 与 Vertex 共用模型 ID,只拨「使用 VertexAI」开关。"
                 "\n"
             ),
             requirements=["gemini_image_apikey"],
-            backend_model="gemini-3.1-flash-image-preview",
+            backend_model="gemini-3.1-flash-image",
             inputs={
                 "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述或编辑指令"),
                 "images": PortSpec(
@@ -1331,7 +1331,8 @@ class BananaProDef(ImagePipelineModel):
     """Nano Banana Pro — 高质量 Nano Banana
 
     通道:
-    1. 原生 Gemini(``gemini-3-pro-image-preview``),与 banana1/2 共用 Gemini_* 配置;
+    1. 原生 Gemini(``gemini-3-pro-image``),与 banana1/2 共用 Gemini_* 配置;
+       AI Studio 与 Vertex 用同一个 ID,只拨 Gemini_Image_Use_Vertex;
     2. 内置 OpenAI 兼容 gpt-image-2 适配(``nano-banana-2-2k``);
     3. 外部插件经 channel_registry 注入(如 aifoundation NBP)。
 
@@ -1344,7 +1345,7 @@ class BananaProDef(ImagePipelineModel):
     """
 
     # 原生 Gemini 侧的 vendor model id(与 banana2 的 flash 代际区分)
-    GEMINI_VENDOR_MODEL = "gemini-3-pro-image-preview"
+    GEMINI_VENDOR_MODEL = "gemini-3-pro-image"
 
     def __init__(self) -> None:
         super().__init__(self.node_def())

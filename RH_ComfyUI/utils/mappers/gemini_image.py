@@ -129,7 +129,7 @@ async def gemini_flash_image_mapper(
     api: GeminiImageClient,
 ) -> NodeOutput:
     """有图走图生图(编辑),无图走文生图。Gemini 只吃 aspect_ratio + image_size。"""
-    model = request.params.get("model") or "gemini-3.1-flash-image-preview"
+    model = request.params.get("model") or "gemini-3.1-flash-image"
     raw_ratio = (request.ratio or "").strip() or "auto"
     ratio = _gemini_ratio(request)
     if ratio != raw_ratio and raw_ratio.lower() != "auto":

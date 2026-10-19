@@ -6,8 +6,12 @@
   ADC 或服务账号 JSON(SDK 限制:project 与 api_key 互斥,Vertex 不能用 API Key)。
 
 生图必须走 ``models.generate_content``。``interactions.create`` 会把
-``gemini-3.1-flash-image-preview`` 改写成 ``…-preview-agent``,该变体
-**不接受参考图**(Image input modality is not enabled)。
+生图模型改写成 ``…-agent``,该变体**不接受参考图**
+(Image input modality is not enabled)。
+
+AI Studio 与 Vertex 使用同一套模型 ID。``Gemini_Image_Use_Vertex``
+只决定 ``_build_client``(api_key,或 project/location/凭证);
+``generate_content`` 的 model 与 image_config 不随开关变化。
 
 进程重启后若统计里还留着旧 interaction id,``resume_interaction`` /
 ``cancel_interaction`` 仍走 Interactions,仅用于历史任务。

@@ -160,8 +160,80 @@ def test_mapper_snaps_8_5_before_generate(monkeypatch):
 
 
 def test_canonical_image_model_strips_agent_suffix():
-    assert gapi._canonical_image_model("gemini-3.1-flash-image-preview-agent") == ("gemini-3.1-flash-image-preview")
-    assert gapi._canonical_image_model("gemini-3.1-flash-image-preview") == ("gemini-3.1-flash-image-preview")
+    assert gapi._canonical_image_model("gemini-3.1-flash-image-agent") == "gemini-3.1-flash-image"
+    assert gapi._canonical_image_model("gemini-3-pro-image-agent") == "gemini-3-pro-image"
+    assert gapi._canonical_image_model("gemini-3.1-flash-image") == "gemini-3.1-flash-image"
+
+
+def test_vertex_toggle_keeps_the_same_model_id(monkeypatch):
+    """拨 Gemini_Image_Use_Vertex 只换 Client,generate_content 的模型与图像配置不变。"""
+    from google.genai import types
+
+    seen: list[tuple[str, types.GenerateContentConfig]] = []
+    clients: list[str] = []
+
+    class _Part:
+        def __init__(self) -> None:
+            self.inline_data = type("D", (), {"data": b"\x89PNG", "uri": None})()
+            self.file_data = None
+            self.text = None
+
+    class _AioModels:
+        async def generate_content(self, **kwargs: object):
+            model = kwargs["model"]
+            config = kwargs["config"]
+            assert isinstance(model, str)
+            assert isinstance(config, types.GenerateContentConfig)
+            seen.append((model, config))
+            return type(
+                "R",
+                (),
+                {"candidates": [type("C", (), {"content": type("K", (), {"parts": [_Part()]})()})()]},
+            )()
+
+    class _Aio:
+        models = _AioModels()
+
+    class _Client:
+        aio = _Aio()
+
+    def _build(self):
+        clients.append("vertex" if self.is_vertex else "studio")
+        return _Client()
+
+    monkeypatch.setattr(gapi.GeminiImageAPI, "_build_client", _build)
+
+    async def _once(mapping: dict) -> None:
+        monkeypatch.setattr(gapi, "SERVICE_CONFIG", _FakeConfig(mapping))
+        api = gapi.GeminiImageAPI()
+        data = await api.generate(
+            model="gemini-3-pro-image",
+            prompt="cat",
+            aspect_ratio="16:9",
+            image_size="2K",
+        )
+        assert data == b"\x89PNG"
+
+    asyncio.run(_once({"Gemini_Image_apikey": "AIzaKEY", "Gemini_Image_Use_Vertex": False}))
+    asyncio.run(
+        _once(
+            {
+                "Gemini_Image_Use_Vertex": True,
+                "Gemini_Image_Project_ID": "proj-1",
+                "Gemini_Image_apikey": "AIzaKEY",
+            }
+        )
+    )
+    assert clients == ["studio", "vertex"]
+    assert len(seen) == 2
+    assert seen[0][0] == seen[1][0] == "gemini-3-pro-image"
+    studio_cfg = seen[0][1]
+    vertex_cfg = seen[1][1]
+    assert studio_cfg.response_modalities == vertex_cfg.response_modalities == ["IMAGE"]
+    assert studio_cfg.image_config is not None and vertex_cfg.image_config is not None
+    assert studio_cfg.image_config.aspect_ratio == vertex_cfg.image_config.aspect_ratio == "16:9"
+    assert studio_cfg.image_config.image_size == vertex_cfg.image_config.image_size == "2K"
+    assert studio_cfg.thinking_config is None and vertex_cfg.thinking_config is None
 
 
 def test_banana2_served_by_gemini_only():
@@ -173,7 +245,7 @@ def test_banana2_served_by_gemini_only():
     names = [b.channel.name for b in banana2.channel_bindings()]
     assert names == ["gemini"]
     assert "gpt-image-2" not in names
-    assert banana2.channel_bindings()[0].vendor_model == "gemini-3.1-flash-image-preview"
+    assert banana2.channel_bindings()[0].vendor_model == "gemini-3.1-flash-image"
     assert banana2.node.backend == "gemini-image"
     assert banana2.execution_mode == "sync"
     schema = banana2.input_schema()
@@ -310,9 +382,9 @@ def test_banana_pro_includes_gemini_pro_image():
     bindings = pro.channel_bindings()
     names = [b.channel.name for b in bindings]
     assert names[0] == "gemini"
-    assert bindings[0].vendor_model == "gemini-3-pro-image-preview"
+    assert bindings[0].vendor_model == "gemini-3-pro-image"
     assert "gpt-image-2" in names
-    assert pro.GEMINI_VENDOR_MODEL == "gemini-3-pro-image-preview"
+    assert pro.GEMINI_VENDOR_MODEL == "gemini-3-pro-image"
     assert pro.execution_mode == "sync"
 
 
@@ -355,7 +427,7 @@ def test_mapper_omits_image_size_for_first_gen(monkeypatch):
     assert captured[0] is None
 
     req2 = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
-    req2.params["model"] = "gemini-3-pro-image-preview"
+    req2.params["model"] = "gemini-3-pro-image"
     asyncio.run(gmapper.gemini_flash_image_mapper(req2, _FakeApi()))
     assert captured[1] == "2K"
 
@@ -371,9 +443,9 @@ def test_mapper_omits_image_size_for_first_gen(monkeypatch):
     asyncio.run(gmapper.gemini_flash_image_mapper(req4, _FakeApi()))
     assert captured[3] == "4K"
 
-    # banana2 的 flash preview 保持默认 2K
+    # banana2 的正式 flash ID 保持默认 2K
     req5 = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
-    req5.params["model"] = "gemini-3.1-flash-image-preview"
+    req5.params["model"] = "gemini-3.1-flash-image"
     asyncio.run(gmapper.gemini_flash_image_mapper(req5, _FakeApi()))
     assert captured[4] == "2K"
 
@@ -408,13 +480,13 @@ def test_mapper_sends_thinking_only_for_nano_banana_21():
             return b"IMG"
 
     old = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
-    old.params["model"] = "gemini-3-pro-image-preview"
+    old.params["model"] = "gemini-3-pro-image"
     old.params["thinking_level"] = "high"
     asyncio.run(gmapper.gemini_flash_image_mapper(old, _FakeApi()))
     assert captured[0] is None
 
     flash = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
-    flash.params["model"] = "gemini-3.1-flash-image-preview"
+    flash.params["model"] = "gemini-3.1-flash-image"
     flash.params["thinking_level"] = "high"
     asyncio.run(gmapper.gemini_flash_image_mapper(flash, _FakeApi()))
     assert captured[1] is None
@@ -545,7 +617,7 @@ def test_vertex_invoke_passes_guard_without_api_key(monkeypatch):
     monkeypatch.setattr(gchan, "gemini_flash_image_mapper", _fake_mapper)
     ch = GeminiImageChannel()
     req = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
-    out = asyncio.run(ch.invoke(request=req, vendor_model="gemini-3.1-flash-image-preview"))
+    out = asyncio.run(ch.invoke(request=req, vendor_model="gemini-3.1-flash-image"))
     assert out.data == b"IMG"
     assert out.metadata["channel"] == "gemini-vertex"
 

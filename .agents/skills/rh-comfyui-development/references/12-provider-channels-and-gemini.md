@@ -68,16 +68,21 @@ Gemini 已**不是** Adapter(不在 `backend_registry` 里)。
 ## 3. Gemini 生图(banana2 与 banana2.1 并存,价格不同)
 
 - **走官方 `google-genai` SDK 的 `client.aio.models.generate_content`**,不要手拼
-  REST/URL/鉴权,也**不要**走 `interactions.create`。Interactions 会把带
-  `-preview` 的生图 ID 改写成 `…-agent`,该变体报
-  `Image input modality is not enabled`(参考图 400)。正式 ID 没有 `-agent`。
+  REST/URL/鉴权,也**不要**走 `interactions.create`。Interactions 会把生图 ID
+  改写成 `…-agent`,该变体报 `Image input modality is not enabled`(参考图 400)。
+  正式 ID 没有 `-agent`,也没有 `-preview`。
+- **AI Studio 与 Vertex 用同一套模型 ID**。`Gemini_Image_Use_Vertex` 只换
+  Client(api_key,或 project/location/凭证)。`generate_content` 的 model、
+  `image_config`、`thinking_config` 不随开关变化。用户来回切不改模型、不清 Project ID。
 - **不要把 banana2 改成 2.1**。两条目录、两套 schema、两条计费曲线:
-  - `banana2`:vendor `gemini-3.1-flash-image-preview`。尺寸 512/1K/2K/4K,
+  - `banana2`:vendor `gemini-3.1-flash-image`。尺寸 512/1K/2K/4K,
     默认 2K。比例是原来那 9 档,没有思考档。价格 60 美元/1M → 5/7/11/16 积分。
   - `banana2.1`:vendor `gemini-nano-banana-2.1`。尺寸 1K/2K/4K,默认 1K。
     思考档 `thinking_config.thinking_level`(`minimal` / `medium` 默认 / `high`),
     **不改变积分**。比例用官方全景表,产品面另留 8:5(mapper 折成 3:2)。
     价格 30 美元/1M → 4/6/12 积分。4K token 用价格页 **3780**,不是 2 代的 2520。
+  - `banana_pro` 的 Gemini 通道:vendor `gemini-3-pro-image`。gpt-image-2 通道仍是
+    `nano-banana-2-2k`,不随 Vertex 开关变化。
 - 已安装 SDK 的 `GenerateContentConfig` 没有 `response_format`,不要改去发那个字段。
   思考档只在 vendor id 含 `nano-banana-2.1` 时发送。
 - **双模互斥(SDK 硬约束)**:`Client(vertexai=True, project=…, api_key=…)` 会抛
@@ -143,7 +148,7 @@ input 端口**。现全部 Seedance 变体端口已对齐。
 |---|---|---|
 | anima / minimax_image01 / qwen_2512 | 无 | 纯文生图(拒图) |
 | banana1 | images(≤3) | 一代 Gemini(gemini-2.5-flash-image),图生/编辑;无 image_size 端口(一代不支持尺寸档,mapper 对 2.5 系自动不发该字段) |
-| banana2 | images(≤14) | Nano Banana 2(`gemini-3.1-flash-image-preview`),512/1K/2K/4K 默认 2K |
+| banana2 | images(≤14) | Nano Banana 2(`gemini-3.1-flash-image`),512/1K/2K/4K 默认 2K |
 | banana2.1 | images(≤14) | Nano Banana 2.1(`gemini-nano-banana-2.1`),1K/2K/4K 默认 1K + thinking_level |
 | banana_pro / gpt-image-2 / qwen_2511 | images | 图生/编辑 |
 | seedance*(全变体)| images/video_refs/audio_refs | 多模态视频 |

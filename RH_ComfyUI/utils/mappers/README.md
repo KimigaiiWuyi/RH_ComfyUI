@@ -54,7 +54,7 @@ async def xxx_mapper(
 - `0 张图` → 文生图，自动计算宽高比（`_calculate_aspect_ratio()`，支持 21:9、16:9、4:3、1:1、3:4、9:16）
 - `1+ 张图` → 图片编辑，参考图随 image_list 传入
 
-Pipeline YAML 通过 `backend_model` 字段声明厂商模型 ID（如 `gemini-3.1-flash-image-preview`、`nano-banana-2-2k`），Adapter 在执行前注入到 `request.params["model"]`。
+Pipeline YAML 通过 `backend_model` 字段声明厂商模型 ID（如 `gemini-3.1-flash-image`、`nano-banana-2-2k`），Adapter 在执行前注入到 `request.params["model"]`。
 
 ### [`image_edit.py`](RH_ComfyUI/utils/mappers/image_edit.py:1) — ComfyUI 图片编辑
 

@@ -392,9 +392,9 @@ def test_gemini_generate_content_uses_canonical_model(monkeypatch):
 
     monkeypatch.setattr(gapi.GeminiImageAPI, "_build_client", lambda self: _Client())
     api = gapi.GeminiImageAPI()
-    data = asyncio.run(api.generate(model="gemini-3.1-flash-image-preview-agent", prompt="cat"))
+    data = asyncio.run(api.generate(model="gemini-3.1-flash-image-agent", prompt="cat"))
     assert data == b"\x89PNG"
-    assert seen["model"] == "gemini-3.1-flash-image-preview"
+    assert seen["model"] == "gemini-3.1-flash-image"
 
 
 def test_happyhorse_cancel_uses_dashscope_post_cancel():

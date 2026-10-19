@@ -168,12 +168,12 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "Gemini_Image_Project_ID": GsStrConfig(
         "VertexAI Project ID",
-        "填写即走 VertexAI 组织版;留空走 AI Studio 个人版。",
+        "组织版项目 ID。只在打开「使用 VertexAI」后使用;关掉开关即回到 AI Studio,不必清空此项。",
         "",
     ),
     "Gemini_Image_Location": GsStrConfig(
         "VertexAI 区域",
-        "VertexAI 区域(仅 Project ID 非空时生效)。",
+        "打开「使用 VertexAI」后使用的区域,默认 global。",
         "global",
         options=["global", "us-central1"],
     ),
