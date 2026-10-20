@@ -29,9 +29,7 @@ def test_cache_key_stable_for_sliding_days() -> None:
     """days=N 窗口不把 now() 写进键。"""
     t0 = datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc)
     t1 = t0 + timedelta(seconds=1)
-    a = stats_cache.make_cache_key(
-        "summary", bot_id="canvas", start_time=t0, end_time=t1, days=14
-    )
+    a = stats_cache.make_cache_key("summary", bot_id="canvas", start_time=t0, end_time=t1, days=14)
     b = stats_cache.make_cache_key(
         "summary",
         bot_id="canvas",
@@ -46,9 +44,7 @@ def test_cache_key_stable_for_sliding_days() -> None:
 
 def test_cache_key_all_history_ignores_clock() -> None:
     a = stats_cache.make_cache_key("summary", bot_id="canvas")
-    b = stats_cache.make_cache_key(
-        "summary", bot_id="canvas", start_time=None, end_time=None, days=None
-    )
+    b = stats_cache.make_cache_key("summary", bot_id="canvas", start_time=None, end_time=None, days=None)
     assert a == b
     custom = stats_cache.make_cache_key(
         "summary",

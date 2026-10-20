@@ -71,10 +71,7 @@ def minimax_disabled_reason(name: str, display_name: str) -> str | None:
         return f"{display_name} 未启用:请在 Web 控制台打开「启用 MiniMax 供应商」"
     if is_minimax_model_enabled(name):
         return None
-    return (
-        f"{display_name} 未启用:请在 Web 控制台 MiniMax 栏的"
-        f"「启用的 MiniMax 模型」中添加 {name}"
-    )
+    return f"{display_name} 未启用:请在 Web 控制台 MiniMax 栏的「启用的 MiniMax 模型」中添加 {name}"
 
 
 def minimax_dry_run() -> bool:

@@ -24,9 +24,9 @@ core/
 
 ```python
 class TaskType(str, Enum):
-    IMAGE = "image"    # 图片生成(文生图 / 图生图 / 图片编辑 统一,按 inputs 端口自动切换)
-    VIDEO = "video"    # 视频生成(文生 / 图生 / 首尾帧 / 多模态 统一,按 inputs 端口自动切换)
-    MUSIC = "music"    # 音乐生成
+    IMAGE = "image"  # 图片生成(文生图 / 图生图 / 图片编辑 统一,按 inputs 端口自动切换)
+    VIDEO = "video"  # 视频生成(文生 / 图生 / 首尾帧 / 多模态 统一,按 inputs 端口自动切换)
+    MUSIC = "music"  # 音乐生成
     SPEECH = "speech"  # 语音生成
 ```
 
@@ -34,9 +34,9 @@ class TaskType(str, Enum):
 
 ```python
 class OutputType(str, Enum):
-    IMAGE = "image"   # 图片输出
-    VIDEO = "video"   # 视频输出
-    AUDIO = "audio"   # 音频输出
+    IMAGE = "image"  # 图片输出
+    VIDEO = "video"  # 视频输出
+    AUDIO = "audio"  # 音频输出
 ```
 
 #### 统一请求 [`GenerationRequest`](RH_ComfyUI/utils/core/request.py:64)
@@ -63,13 +63,13 @@ class OutputType(str, Enum):
 ```python
 @dataclass
 class GenerationResult:
-    output_type: OutputType   # 输出类型
-    data: bytes               # 生成的数据（图片/视频/音频字节）
-    mime_type: str            # MIME 类型
-    model_used: str           # 使用的模型显示名
-    pipeline_used: str        # 使用的 Pipeline 名
-    cost_points: int          # 消耗的积分
-    metadata: dict            # 扩展元数据
+    output_type: OutputType  # 输出类型
+    data: bytes  # 生成的数据（图片/视频/音频字节）
+    mime_type: str  # MIME 类型
+    model_used: str  # 使用的模型显示名
+    pipeline_used: str  # 使用的 Pipeline 名
+    cost_points: int  # 消耗的积分
+    metadata: dict  # 扩展元数据
 ```
 
 ### 2. Pipeline 注册表 [`pipeline.py`](RH_ComfyUI/utils/core/pipeline.py:1)
@@ -79,19 +79,19 @@ class GenerationResult:
 ```python
 @dataclass
 class PipelineDef:
-    name: str                    # Pipeline 唯一名称
-    display_name: str            # 显示名称
-    task_type: TaskType          # 任务类型
-    backend: str                 # 后端标识（"comfyui" | "gpt_image2" | "rh_app" | "minimax" | "mimo" | "seedance"）
-    point_cost: int              # 积分消耗
-    description: str             # 简短描述
-    knowledge_content: str       # 详细说明（AI 知识库用）
-    requirements: list[str]      # 依赖配置项
-    workflow_file: Optional[str] # 工作流文件名/应用ID
-    mode: str                    # 映射模式（"declarative" | "programmatic"）
-    mappings: dict               # 声明式映射规则
+    name: str  # Pipeline 唯一名称
+    display_name: str  # 显示名称
+    task_type: TaskType  # 任务类型
+    backend: str  # 后端标识（"comfyui" | "gpt_image2" | "rh_app" | "minimax" | "mimo" | "seedance"）
+    point_cost: int  # 积分消耗
+    description: str  # 简短描述
+    knowledge_content: str  # 详细说明（AI 知识库用）
+    requirements: list[str]  # 依赖配置项
+    workflow_file: Optional[str]  # 工作流文件名/应用ID
+    mode: str  # 映射模式（"declarative" | "programmatic"）
+    mappings: dict  # 声明式映射规则
     mapper_func: Optional[Callable]  # 编程式映射函数
-    yaml_path: Path              # YAML 文件路径
+    yaml_path: Path  # YAML 文件路径
 ```
 
 #### 注册表 [`PipelineRegistry`](RH_ComfyUI/utils/core/pipeline.py:41)
@@ -134,10 +134,10 @@ YAML 加载支持两种映射模式：
 # 同一类内部分形态(0/1/N 张图、文生/图生/多模态)由节点
 # inputs 端口自动匹配。
 PRIORITY = {
-    TaskType.IMAGE:    ["qwen_2512", "banana2", "banana_pro", "anima", "qwen_2511", "gpt_image2"],
-    TaskType.VIDEO:    ["seedance2", "seedance15_pro", "wan2.2_videogen"],
-    TaskType.MUSIC:    ["ace_step1.5"],
-    TaskType.SPEECH:   ["IndexTTS2"],
+    TaskType.IMAGE: ["qwen_2512", "banana2", "banana_pro", "anima", "qwen_2511", "gpt_image2"],
+    TaskType.VIDEO: ["seedance2", "seedance15_pro", "wan2.2_videogen"],
+    TaskType.MUSIC: ["ace_step1.5"],
+    TaskType.SPEECH: ["IndexTTS2"],
 }
 ```
 
@@ -156,8 +156,8 @@ PRIORITY = {
 ```python
 async def execute_generation(request, pipeline) -> GenerationResult:
     backend = backend_registry.get(pipeline.backend)  # 获取后端
-    sem = _get_semaphore()                             # 获取并发信号量
-    async with sem:                                    # 受限流控制
+    sem = _get_semaphore()  # 获取并发信号量
+    async with sem:  # 受限流控制
         result = await backend.execute(request, pipeline)  # 分发执行
         result.pipeline_used = pipeline.name
         result.model_used = pipeline.display_name

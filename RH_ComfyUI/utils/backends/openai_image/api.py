@@ -290,4 +290,11 @@ async def _extract_image(data: Any, model: str, *, output_format: Optional[str] 
     return await _to_png_bytes_async(raw)
 
 
-__all__ = ["OpenAIImageError", "OpenAIImageResult", "generate_image", "generate_image_result", "size_for", "ratio_from_wh"]
+__all__ = [
+    "OpenAIImageError",
+    "OpenAIImageResult",
+    "generate_image",
+    "generate_image_result",
+    "size_for",
+    "ratio_from_wh",
+]

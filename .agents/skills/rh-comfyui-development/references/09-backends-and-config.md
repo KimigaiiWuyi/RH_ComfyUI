@@ -166,11 +166,13 @@ def api_key(self) -> str:
 def __init__(self) -> None:
     self._api_key: Optional[str] = None  # sentinel,首次访问才读
 
+
 @property
 def api_key(self) -> str:
     if self._api_key is None:
         self._api_key = SERVICE_CONFIG.get_config("OpenAI_Image_apikey").data or ""
     return self._api_key
+
 
 def refresh_config(self) -> None:
     self._api_key = None  # 下次访问重读
@@ -214,6 +216,7 @@ def _headers(self) -> Dict[str, str]:
     if self.api_key:  # 空 key 不要拼 Bearer,让上游按 401/403 报清晰错误
         headers["Authorization"] = f"Bearer {self.api_key}"
     return headers
+
 
 def _require_api_key(self) -> str:
     """业务入口前置守卫,key 为空时抛友好中文错误而不是 LocalProtocolError"""

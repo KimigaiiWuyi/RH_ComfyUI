@@ -197,8 +197,7 @@ class MiniMaxH3Provider:
             )
         if n_img + n_vid + n_aud > self.max_reference_total:
             raise MiniMaxH3ProviderError(
-                f"MiniMax H3 参考素材合计最多 {self.max_reference_total} 个,"
-                f"当前 {n_img + n_vid + n_aud}",
+                f"MiniMax H3 参考素材合计最多 {self.max_reference_total} 个,当前 {n_img + n_vid + n_aud}",
                 code="MEDIA_OVERFLOW",
                 provider=self.name,
             )
@@ -341,9 +340,7 @@ class MiniMaxH3Provider:
         raw_task = resp_json["task"] if "task" in resp_json else resp_json
         task = raw_task if isinstance(raw_task, dict) else {}
         raw_status = str(task["status"] if "status" in task else "").lower()
-        status = (
-            self.STATUS_MAP[raw_status] if raw_status in self.STATUS_MAP else NormalizedStatus.RUNNING
-        )
+        status = self.STATUS_MAP[raw_status] if raw_status in self.STATUS_MAP else NormalizedStatus.RUNNING
         content = _as_dict(task["content"] if "content" in task else None)
         video_url = content["url"] if "url" in content else None
         error = None
@@ -465,8 +462,7 @@ class MiniMaxH3Provider:
             method, url, headers, body = await self.render_create(spec, model=model)
         masked = mask_body(body)
         logger.info(
-            f"[MiniMaxH3] 创建任务: model={model or self.VENDOR_MODEL}, endpoint={url}\n"
-            f"  request:\n{dump_body(masked)}"
+            f"[MiniMaxH3] 创建任务: model={model or self.VENDOR_MODEL}, endpoint={url}\n  request:\n{dump_body(masked)}"
         )
         from ....core.telemetry.wire_capture import set_wire_from_http_body
 
@@ -534,10 +530,7 @@ class MiniMaxH3Provider:
             from ....core.dispatch.active_tasks import remote_cancel_already_attempted
 
             if remote_cancel_already_attempted():
-                logger.debug(
-                    f"[MiniMaxH3] 跳过 CancelledError 兜底 cancel"
-                    f"(cancel_generation 已尝试上游): {task_id}"
-                )
+                logger.debug(f"[MiniMaxH3] 跳过 CancelledError 兜底 cancel(cancel_generation 已尝试上游): {task_id}")
                 return
         except Exception:  # noqa: BLE001
             pass

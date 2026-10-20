@@ -22,8 +22,8 @@ from RH_ComfyUI.core.schema.types import (
     ContentItemType,
 )
 from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
-from RH_ComfyUI.core.channels.channel import LocalChannel, ChannelBinding
 from RH_ComfyUI.utils.image_process import VIDEO_REF_MAX_LONG_EDGE
+from RH_ComfyUI.core.channels.channel import LocalChannel, ChannelBinding
 
 
 def _big_png(width: int = 4000, height: int = 2000) -> bytes:

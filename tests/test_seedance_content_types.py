@@ -164,9 +164,9 @@ def test_ark_collapses_duplicate_audio_segments_without_classify():
     """classify 漏去重时,ark 仍只发一条 audio_url 并复用序号。"""
     from RH_ComfyUI.utils.backends.seedance.spec import (
         MediaRole,
-        OrderedSegment,
         SpecMedia,
         VideoGenSpec,
+        OrderedSegment,
         VideoTaskShape,
     )
 

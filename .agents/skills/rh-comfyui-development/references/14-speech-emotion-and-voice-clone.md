@@ -35,11 +35,12 @@
 
 ```python
 emotion_style: EmotionStyle = EmotionStyle.NATURAL_LANGUAGE  # 默认自然语言
-emotion_enum: list[str] = []                                 # 仅 ENUM 风格用
+emotion_enum: list[str] = []  # 仅 ENUM 风格用
 
-def normalize(self, request):                 # run() 生命周期第 2 步的钩子
+
+def normalize(self, request):  # run() 生命周期第 2 步的钩子
     request = super().normalize(request)
-    return self._apply_emotion(request)       # 按 emotion_style 整形 prompt / mood
+    return self._apply_emotion(request)  # 按 emotion_style 整形 prompt / mood
 ```
 
 `normalize()` 是 `AIGCGenerationBase.run()` 模板方法里既有的钩子(校验后、执行前),**三入口
@@ -52,15 +53,16 @@ def normalize(self, request):                 # run() 生命周期第 2 步的�
 
 ```python
 class IndexTTS2Model(SpeechPipelineModel):
-    emotion_style = EmotionStyle.NATURAL_LANGUAGE   # 情绪走独立自由文本
+    emotion_style = EmotionStyle.NATURAL_LANGUAGE  # 情绪走独立自由文本
+
 
 class MinimaxSpeechModel(SpeechPipelineModel):
-    emotion_style = EmotionStyle.ENUM               # 收敛到固定枚举
-    emotion_enum = ["happy", "sad", "angry", "fearful", "disgusted",
-                    "surprised", "calm", "fluent", "whisper"]
+    emotion_style = EmotionStyle.ENUM  # 收敛到固定枚举
+    emotion_enum = ["happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm", "fluent", "whisper"]
+
 
 class FishTtsModel(SpeechPipelineModel):
-    emotion_style = EmotionStyle.INLINE_BRACKET      # 正文内联 [tag],可句中定位/叠加
+    emotion_style = EmotionStyle.INLINE_BRACKET  # 正文内联 [tag],可句中定位/叠加
 ```
 
 `defs.py` 的模型类继承对应基类即可(如 `class FishTtsDef(FishTtsModel)`)。**新增语音模型时不用

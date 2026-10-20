@@ -67,9 +67,7 @@ def test_video_without_edit_does_not_change_shape():
 
 
 def test_video_only_without_edit_is_t2v():
-    spec = classify_happyhorse(
-        _req(video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")])
-    )
+    spec = classify_happyhorse(_req(video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://ex.com/v.mp4")]))
     assert spec.shape == VideoTaskShape.TEXT2VIDEO
 
 

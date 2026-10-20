@@ -50,7 +50,7 @@ if info:
 # 同步上下文
 from RH_ComfyUI.utils.image_process import compress_to_max_pixels
 
-compressed, info = compress_to_max_pixels(raw_bytes, "image/png", max_pixels=1280*720)
+compressed, info = compress_to_max_pixels(raw_bytes, "image/png", max_pixels=1280 * 720)
 ```
 
 ## 设计约束

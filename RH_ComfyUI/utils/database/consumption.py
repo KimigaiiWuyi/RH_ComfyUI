@@ -195,6 +195,7 @@ def _beijing_day_window(days: int) -> tuple[datetime, datetime]:
     end = datetime(today.year, today.month, today.day, 23, 59, 59, 999999, tzinfo=BEIJING_TZ)
     return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
 
+
 _EMPTY_SUMMARY: dict[str, Any] = {
     "total": 0,
     "success": 0,

@@ -140,12 +140,8 @@ def test_h3_and_wan_locked_to_gateway_family():
     channel_registry.clear()
     h3 = MiniMaxH3VideoModel(replace(MiniMaxH3Def.node_def(), provider="gateway"))
     wan = Wan30VideoModel(replace(Wan30Def.node_def(), provider="gateway"))
-    channel_registry.register_binding(
-        "minimax_h3", LocalChannel("gateway_slot1_minimax_h3"), vendor_model="MiniMax-H3"
-    )
-    channel_registry.register_binding(
-        "wan3.0", LocalChannel("gateway_slot2_wan30"), vendor_model="wan3.0-video"
-    )
+    channel_registry.register_binding("minimax_h3", LocalChannel("gateway_slot1_minimax_h3"), vendor_model="MiniMax-H3")
+    channel_registry.register_binding("wan3.0", LocalChannel("gateway_slot2_wan30"), vendor_model="wan3.0-video")
     assert [b.channel.name for b in h3.channel_bindings()] == ["gateway_slot1_minimax_h3"]
     assert [b.channel.name for b in wan.channel_bindings()] == ["gateway_slot2_wan30"]
     assert h3.channel_bindings()[0].vendor_model == "MiniMax-H3"

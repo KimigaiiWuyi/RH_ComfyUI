@@ -49,14 +49,10 @@ class ChannelExtensionRegistry:
                 if old.vendor_model == vendor_model and old.channel.weight == channel.weight:
                     return False
                 existing[i] = binding
-                logger.debug(
-                    f"[ChannelRegistry] 覆盖 {model_name}/{channel.name} vendor={vendor_model or '-'}"
-                )
+                logger.debug(f"[ChannelRegistry] 覆盖 {model_name}/{channel.name} vendor={vendor_model or '-'}")
                 return True
             existing.append(binding)
-        logger.debug(
-            f"[ChannelRegistry] 追加 {model_name}/{channel.name} vendor={vendor_model or '-'}"
-        )
+        logger.debug(f"[ChannelRegistry] 追加 {model_name}/{channel.name} vendor={vendor_model or '-'}")
         return True
 
     def bindings_for(self, model_name: str) -> list[ChannelBinding]:

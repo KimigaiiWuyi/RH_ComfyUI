@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import inspect
-import asyncio
 import base64
+import asyncio
+import inspect
 
 from RH_ComfyUI.utils import offload
-from RH_ComfyUI.utils.mappers import seedream as seedream_mod
-from RH_ComfyUI.utils.mappers import minimax_image2image as minimax_i2i
+from RH_ComfyUI.utils.mappers import seedream as seedream_mod, minimax_image2image as minimax_i2i
 from RH_ComfyUI.utils.backends.mimo import api as mimo_api
-from RH_ComfyUI.utils.backends.gpt_image2 import api as gpt_api
 from RH_ComfyUI.utils.backends.minimax import api as minimax_api
+from RH_ComfyUI.utils.backends.gpt_image2 import api as gpt_api
 
 
 def test_b64ascii_matches_stdlib() -> None:

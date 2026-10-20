@@ -145,11 +145,11 @@ from RH_ComfyUI import resume_poll
 result = await resume_poll(
     model="seedance2",
     vendor_task_id="...",
-    channel="ark",          # 可选;丢失时 seedance 优先 ark
-    backend="seedance",     # 可选;可从 model/channel 推断
-    kind="video",           # 可选
+    channel="ark",  # 可选;丢失时 seedance 优先 ark
+    backend="seedance",  # 可选;可从 model/channel 推断
+    kind="video",  # 可选
     trace_id="same-as-submit",  # 恢复期间仍可 cancel_generation
-    record_id=123,          # 可选;成功/失败更新该统计行
+    record_id=123,  # 可选;成功/失败更新该统计行
     on_progress=...,
 )
 # → api.GenerationResult(kind/data/mime/metadata…);不走 dispatch,不二次扣费

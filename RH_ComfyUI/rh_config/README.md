@@ -39,7 +39,7 @@ rh_config/
 ```python
 RHCOMFYUI_CONFIG = StringConfig(
     "RHComfyUI",
-    CONFIG_PATH,        # data/RHComfyUI/config.json
+    CONFIG_PATH,  # data/RHComfyUI/config.json
     CONFIG_DEFAULT,
 )
 ```

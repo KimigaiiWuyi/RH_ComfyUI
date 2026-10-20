@@ -9,11 +9,11 @@ from PIL import Image
 from RH_ComfyUI.utils.image_process import (
     OUTPAINT_MAX_SIDE,
     OUTPAINT_WORKFLOW_MIN_PAD,
-    bump_zero_outpaint_pads,
+    plan_outpaint_scale,
     crop_image_to_aspect,
     expand_pads_to_aspect,
     pick_tx_outpaint_ratio,
-    plan_outpaint_scale,
+    bump_zero_outpaint_pads,
     preprocess_for_outpaint,
     scale_and_crop_outpaint,
     source_matches_tx_ratio,
@@ -96,14 +96,14 @@ def test_workflow_send_never_zero_after_scale():
 def test_expand_pads_restores_16x9_after_lift():
     # 496x864 → 16:9 用户 pad 520/520/0/0,抬 100 后须再加左右,输出回到 16:9
     send, _crop = bump_zero_outpaint_pads(0, 520, 520, 0)
-    t, l, r, b = expand_pads_to_aspect(496, 864, *send, 16 / 9)
+    t, pad_l, pad_r, b = expand_pads_to_aspect(496, 864, *send, 16 / 9)
     assert t == 100 and b == 100
-    assert l > 520 and r > 520
-    out_w = 496 + l + r
+    assert pad_l > 520 and pad_r > 520
+    out_w = 496 + pad_l + pad_r
     out_h = 864 + t + b
     assert abs(out_w / out_h - 16 / 9) < 0.02
-    assert l == 698 or abs(l - 698) <= 2
-    assert r == 698 or abs(r - 698) <= 2
+    assert pad_l == 698 or abs(pad_l - 698) <= 2
+    assert pad_r == 698 or abs(pad_r - 698) <= 2
     assert t == 100 and b == 100
 
 

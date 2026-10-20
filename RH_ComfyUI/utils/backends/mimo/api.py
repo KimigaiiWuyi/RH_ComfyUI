@@ -110,9 +110,7 @@ class MIMOAPI:
                                 return resp.status
                             return await resp.json()
 
-                resp_or_status = await call_with_network_retry(
-                    _once, label=f"POST {self.chat_url}"
-                )
+                resp_or_status = await call_with_network_retry(_once, label=f"POST {self.chat_url}")
                 if isinstance(resp_or_status, int):
                     if resp_or_status in (401, 403):
                         logger.error("[MiMo] API Key 无效或未配置，请在 Web 控制台配置 MIMO_apikey")

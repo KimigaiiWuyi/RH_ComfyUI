@@ -66,7 +66,11 @@ def is_deployment_enabled(model_name: str) -> bool:
 
 
 def max_concurrency() -> int:
-    raw = _cfg("Azure_Image_Max_Concurrency") or "2"
+    raw = _cfg("Azure_Image_Max_Concurrency")
+    if not raw:
+        return 2
+    if not isinstance(raw, (int, float, str)):
+        return 2
     try:
         return max(1, int(raw))
     except (TypeError, ValueError):

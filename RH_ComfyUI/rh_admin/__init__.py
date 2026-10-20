@@ -45,9 +45,7 @@ async def refresh_providers(bot: Bot, ev: Event) -> None:
     enabled = [e for e in entries if e.enable]
     bindings = sum(len(e.models) for e in enabled)
     hooks = ", ".join(ran) if ran else "(无)"
-    await bot.send(
-        f"✅ 通道绑定已刷新: {len(enabled)} 家 OpenAI 供应商 / {bindings} 条池绑定; 钩子 {hooks}"
-    )
+    await bot.send(f"✅ 通道绑定已刷新: {len(enabled)} 家 OpenAI 供应商 / {bindings} 条池绑定; 钩子 {hooks}")
 
 
 @sv_admin.on_command(("供应商统计", "供应商对账"), block=True)

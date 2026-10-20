@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from RH_ComfyUI.utils.core.types import ContentItem, ContentItemType, MediaKind, MediaRef, image_ref
+from RH_ComfyUI.utils.core.types import MediaRef, MediaKind, ContentItem, ContentItemType, image_ref
 from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.video import interpolate_prompt_refs
 from RH_ComfyUI.utils.core.media_labels import (

@@ -66,9 +66,7 @@ class ModelRegistry:
             return True
         old_key = f"{type(existing).__module__}.{type(existing).__qualname__}"
         if old_key != new_key:
-            logger.warning(
-                f"[ModelRegistry] 模型 {model.name} 被重复注册,新实现 {new_key} 覆盖旧实现"
-            )
+            logger.warning(f"[ModelRegistry] 模型 {model.name} 被重复注册,新实现 {new_key} 覆盖旧实现")
         return False
 
     def unregister(self, name: str) -> None:

@@ -99,10 +99,7 @@ class Wan30Channel(ProviderChannel):
     async def check_available(self) -> bool:
         creds = self._resolve_creds()
         return bool(
-            creds.enabled
-            and creds.api_key
-            and creds.base_url
-            and is_dashscope_model_enabled(DASHSCOPE_MODEL_WAN30)
+            creds.enabled and creds.api_key and creds.base_url and is_dashscope_model_enabled(DASHSCOPE_MODEL_WAN30)
         )
 
     async def unavailable_reason(self) -> str:

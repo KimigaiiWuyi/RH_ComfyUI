@@ -11,9 +11,9 @@
 ```python
 ctx = DispatchContext(
     billing=BillingContext(user_id=ev.user_id, bot_id=ev.bot_id, entry_point=entry_point),
-    policy=_POINTS_POLICY,                  # PointsBillingPolicy 单例
-    on_progress=...,                        # 进度播报回调
-    on_model_selected=...,                  # 扣费成功后播报"使用模型X,扣N积分"
+    policy=_POINTS_POLICY,  # PointsBillingPolicy 单例
+    on_progress=...,  # 进度播报回调
+    on_model_selected=...,  # 扣费成功后播报"使用模型X,扣N积分"
 )
 result = await dispatch(request, ctx)
 ```
@@ -136,6 +136,7 @@ Agent 智能选型的数据源(用户没指定模型时):
 # 错:给单一模型开关加 dataclass 字段
 class GenerationRequest:
     frame_mode: Optional[str] = None
+
 
 # 错:validate 读顶层,但 submit 把未知键放进了 params
 fm = request.frame_mode  # 永远 None

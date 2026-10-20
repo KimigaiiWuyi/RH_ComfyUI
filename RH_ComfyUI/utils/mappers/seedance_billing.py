@@ -284,9 +284,7 @@ def estimate_seedance2_points(
     in_dur = resolve_input_video_duration(video_refs, input_video_duration=input_video_duration)
     has_input = in_dur > 0 or _has_input_video(video_refs)
 
-    tokens = _calculate_tokens(
-        _token_input_duration(in_dur, has_input), float(output_duration), width, height, fps
-    )
+    tokens = _calculate_tokens(_token_input_duration(in_dur, has_input), float(output_duration), width, height, fps)
     rate = _SEEDANCE2_RATES.get(resolution, _SEEDANCE2_RATES["720p"])
     rate_yuan = rate[1] if has_input else rate[0]
 
@@ -305,9 +303,7 @@ def estimate_seedance2_fast_points(
     in_dur = resolve_input_video_duration(video_refs, input_video_duration=input_video_duration)
     has_input = in_dur > 0 or _has_input_video(video_refs)
 
-    tokens = _calculate_tokens(
-        _token_input_duration(in_dur, has_input), float(output_duration), width, height, fps
-    )
+    tokens = _calculate_tokens(_token_input_duration(in_dur, has_input), float(output_duration), width, height, fps)
     rate = _SEEDANCE2_FAST_RATES.get(resolution, _SEEDANCE2_FAST_RATES["720p"])
     rate_yuan = rate[1] if has_input else rate[0]
 
@@ -326,9 +322,7 @@ def estimate_seedance2_mini_points(
     in_dur = resolve_input_video_duration(video_refs, input_video_duration=input_video_duration)
     has_input = in_dur > 0 or _has_input_video(video_refs)
 
-    tokens = _calculate_tokens(
-        _token_input_duration(in_dur, has_input), float(output_duration), width, height, fps
-    )
+    tokens = _calculate_tokens(_token_input_duration(in_dur, has_input), float(output_duration), width, height, fps)
     rate = _SEEDANCE2_MINI_RATES.get(resolution, _SEEDANCE2_MINI_RATES["720p"])
     rate_yuan = rate[1] if has_input else rate[0]
 

@@ -69,13 +69,15 @@ sv_gen = SV("AI生成")
 
 ```python
 for p in pipeline_registry.all_pipelines():
-    ai_entity(KnowledgePoint(
-        id=f"rh_comfyui_pipeline_{p.name}",
-        plugin="RH_ComfyUI",
-        title=f"{p.display_name} - {p.task_type.value}",
-        content=f"...基本信息、描述、详细说明、使用方式...",
-        tags=["RH_ComfyUI", "AIGC", p.task_type.value, p.name, p.display_name],
-    ))
+    ai_entity(
+        KnowledgePoint(
+            id=f"rh_comfyui_pipeline_{p.name}",
+            plugin="RH_ComfyUI",
+            title=f"{p.display_name} - {p.task_type.value}",
+            content=f"...基本信息、描述、详细说明、使用方式...",
+            tags=["RH_ComfyUI", "AIGC", p.task_type.value, p.name, p.display_name],
+        )
+    )
 ```
 
 这使得 AI 在 RAG 检索时能找到各模型的详细信息，从而做出更好的模型推荐。

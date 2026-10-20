@@ -474,9 +474,7 @@ class ComfyUIAPI:
             "Host": "www.runninghub.cn",
         }
         payload = {"apiKey": api_key, "taskId": str(task_id)}
-        logger.info(
-            f"[ComfyUI] 上游 cancel POST {url} taskId={task_id}"
-        )
+        logger.info(f"[ComfyUI] 上游 cancel POST {url} taskId={task_id}")
         async with RetryingAsyncClient(timeout=30.0, follow_redirects=True) as client:
             resp = await client.post(url, headers=headers, json=payload)
             # 业务码:0=成功;807=任务不存在(可视为已结束,不抛)
@@ -484,9 +482,7 @@ class ComfyUIAPI:
                 body = resp.json()
             except Exception:
                 body = {"raw": resp.text[:500]}
-            logger.info(
-                f"[ComfyUI] 上游 cancel 响应 HTTP {resp.status_code} body={body}"
-            )
+            logger.info(f"[ComfyUI] 上游 cancel 响应 HTTP {resp.status_code} body={body}")
             if resp.status_code >= 400:
                 raise RuntimeError(f"[ComfyUI] RunningHub 取消 HTTP {resp.status_code}: {body}")
             code = body.get("code") if isinstance(body, dict) else None
@@ -543,16 +539,11 @@ class ComfyUIAPI:
             if in_running:
                 try:
                     r2 = await client.post(f"{base}/interrupt", headers=headers, json={})
-                    logger.info(
-                        f"[ComfyUI] 本地 interrupt(全局,目标 running) prompt_id={pid}: "
-                        f"HTTP {r2.status_code}"
-                    )
+                    logger.info(f"[ComfyUI] 本地 interrupt(全局,目标 running) prompt_id={pid}: HTTP {r2.status_code}")
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(f"[ComfyUI] 本地 interrupt 失败: {exc}")
             else:
-                logger.info(
-                    f"[ComfyUI] 跳过全局 interrupt(prompt 不在 running): prompt_id={pid}"
-                )
+                logger.info(f"[ComfyUI] 跳过全局 interrupt(prompt 不在 running): prompt_id={pid}")
 
     @staticmethod
     def _prompt_in_comfy_queue(queue_items: Any, prompt_id: str) -> bool:
@@ -600,10 +591,7 @@ class ComfyUIAPI:
             from ....core.dispatch.active_tasks import remote_cancel_already_attempted
 
             if remote_cancel_already_attempted():
-                logger.debug(
-                    f"[ComfyUI] 跳过 CancelledError 兜底 cancel"
-                    f"(cancel_generation 已尝试上游): {prompt_id}"
-                )
+                logger.debug(f"[ComfyUI] 跳过 CancelledError 兜底 cancel(cancel_generation 已尝试上游): {prompt_id}")
                 return
         except Exception:  # noqa: BLE001
             pass

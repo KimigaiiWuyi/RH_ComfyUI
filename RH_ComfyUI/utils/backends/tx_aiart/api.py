@@ -53,20 +53,9 @@ def sign_tc3(
     """构造 TC3-HMAC-SHA256 请求头。payload 必须是将要发送的 UTF-8 JSON 原文。"""
     date = datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
     hashed_payload = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    canonical_headers = (
-        f"content-type:{CONTENT_TYPE}\n"
-        f"host:{host}\n"
-        f"x-tc-action:{action.lower()}\n"
-    )
+    canonical_headers = f"content-type:{CONTENT_TYPE}\nhost:{host}\nx-tc-action:{action.lower()}\n"
     signed_headers = "content-type;host;x-tc-action"
-    canonical_request = (
-        "POST\n"
-        "/\n"
-        "\n"
-        f"{canonical_headers}\n"
-        f"{signed_headers}\n"
-        f"{hashed_payload}"
-    )
+    canonical_request = f"POST\n/\n\n{canonical_headers}\n{signed_headers}\n{hashed_payload}"
     credential_scope = f"{date}/{service}/tc3_request"
     string_to_sign = (
         "TC3-HMAC-SHA256\n"
@@ -185,9 +174,7 @@ class TxAiartAPI:
     def require_credentials(self) -> tuple[str, str]:
         sid, skey = self.secret_id, self.secret_key
         if not sid or not skey:
-            raise RuntimeError(
-                "未配置腾讯云混元扩图凭证,请在 Web 控制台填写 TX_AIArt_secret_id / TX_AIArt_secret_key"
-            )
+            raise RuntimeError("未配置腾讯云混元扩图凭证,请在 Web 控制台填写 TX_AIArt_secret_id / TX_AIArt_secret_key")
         return sid, skey
 
     async def image_outpainting(

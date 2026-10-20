@@ -184,17 +184,16 @@ def test_minimax_h3_validate_t2v_and_mix_conflict():
             duration=5,
         )
     )
-    with pytest.raises(ValidationError) as ei:
-        model.validate(
-            GenerationRequest(
-                task_type=TaskType.VIDEO,
-                prompt="x",
-                ratio="adaptive",
-                resolution="2k",
-                duration=5,
-            )
-        )
-    assert "adaptive" in str(ei.value)
+    # H3 的目录与上游都不吃 adaptive/auto:validate 时钳到 16:9,不报错。
+    adaptive_req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="x",
+        ratio="adaptive",
+        resolution="2k",
+        duration=5,
+    )
+    model.validate(adaptive_req)
+    assert adaptive_req.ratio == "16:9"
     with pytest.raises(ValidationError) as ei2:
         model.validate(
             GenerationRequest(

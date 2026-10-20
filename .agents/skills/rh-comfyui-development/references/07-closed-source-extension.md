@@ -11,6 +11,7 @@
 # 外部插件 RH_ExtPlugin/__init__.py
 from gsuid_core.server import on_core_start
 
+
 @on_core_start
 async def register_ext_models() -> None:
     from RH_ComfyUI.core import model_registry
@@ -49,12 +50,20 @@ def provide_models() -> list[type]:
 
 ```python
 from RH_ComfyUI.core import (
-    ModelCard, PortSpec, PortType, NodeOutput, ChannelError,
-    ChannelBinding, ProviderChannel, GenerationRequest, VideoGenerationBase,
+    ModelCard,
+    PortSpec,
+    PortType,
+    NodeOutput,
+    ChannelError,
+    ChannelBinding,
+    ProviderChannel,
+    GenerationRequest,
+    VideoGenerationBase,
 )
 
+
 class InternalGatewayChannel(ProviderChannel):
-    name = "internal-gateway"      # 统计表只落这个名字
+    name = "internal-gateway"  # 统计表只落这个名字
     weight = 10
 
     async def check_available(self) -> bool:
@@ -62,9 +71,10 @@ class InternalGatewayChannel(ProviderChannel):
 
     async def invoke(self, **kwargs) -> NodeOutput:
         try:
-            ...                    # 内部 URL / 签名逻辑,私有细节不出本包
+            ...  # 内部 URL / 签名逻辑,私有细节不出本包
         except TimeoutError as e:
             raise ChannelError(f"网关超时: {e}", retryable=True)
+
 
 class ExtSeedanceModel(VideoGenerationBase):
     name = "seedance2"
@@ -76,6 +86,7 @@ class ExtSeedanceModel(VideoGenerationBase):
     def input_schema(self) -> dict[str, PortSpec]: ...
     def channel_bindings(self) -> list[ChannelBinding]:
         return [ChannelBinding(InternalGatewayChannel(), vendor_model="sd2-internal")]
+
     async def execute_on_channel(self, request, binding, *, on_progress=None):
         return await binding.channel.invoke(request=request, on_progress=on_progress)
 ```
@@ -89,9 +100,11 @@ bytes 变成上游可 GET 的公网 URL 时,走 `core` 的 media publisher:
 # 宿主插件 @on_core_start
 from RH_ComfyUI.core import set_media_publisher
 
+
 async def my_publish(data: bytes, mime: str = "image/png") -> str:
     # 上传对象存储,返回 https URL;失败抛异常即可
     ...
+
 
 set_media_publisher(my_publish)
 ```
@@ -128,9 +141,11 @@ set_media_publisher(my_publish)
 ```python
 from RH_ComfyUI.core import register_resync_hook, bind_config_resync
 
+
 def my_register() -> None:
     # 先 unregister 本层历史绑定,再按当前配置 register_binding
     ...
+
 
 register_resync_hook("my_gateway", my_register)
 bind_config_resync(MY_CONFIG, frozenset({"Slot_Enable", "Slot_Models"}))

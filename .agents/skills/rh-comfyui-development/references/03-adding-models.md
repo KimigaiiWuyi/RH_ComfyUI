@@ -20,22 +20,20 @@ class NewImageDef(ImagePipelineModel):
     @staticmethod
     def node_def() -> NodeDef:
         return NodeDef(
-            name="new_image",                    # 三入口与统计的唯一主键,慎改
+            name="new_image",  # 三入口与统计的唯一主键,慎改
             display_name="新模型",
             task_type=TaskType("image"),
-            backend="comfyui",                   # 对应 utils/backends 注册名
-            point_cost=2,                        # 积分价格
+            backend="comfyui",  # 对应 utils/backends 注册名
+            point_cost=2,  # 积分价格
             description="一句话简介(HTTP 清单 / 调用方下拉,十几个字内单行)",
-            knowledge_content=(                  # AI 知识库:Agent 选型的依据
-                "优势:...\n"
-                "适用场景:...\n"
-                "不适用场景:...\n"
+            knowledge_content=(  # AI 知识库:Agent 选型的依据
+                "优势:...\n适用场景:...\n不适用场景:...\n"
             ),
-            requirements=["comfyui_url"],        # 仅 HTTP 清单展示用(informational);
-                                                 # 实际可用性由通道 check_available() 判定
-            workflow_file="new_image.json",      # ComfyUI 工作流(如适用)
-            mode="declarative",                  # declarative | programmatic
-            mappings=[                           # declarative:字段 → workflow 节点
+            requirements=["comfyui_url"],  # 仅 HTTP 清单展示用(informational);
+            # 实际可用性由通道 check_available() 判定
+            workflow_file="new_image.json",  # ComfyUI 工作流(如适用)
+            mode="declarative",  # declarative | programmatic
+            mappings=[  # declarative:字段 → workflow 节点
                 {"source": "prompt", "target": "108.inputs.text"},
             ],
             # mode="programmatic" 时改用:
@@ -48,8 +46,8 @@ class NewImageDef(ImagePipelineModel):
             outputs={"image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片")},
             capabilities=CapabilityManifest(
                 supported_tasks=["image"],
-                mode="sync",                     # sync | async_poll
-                priority=60,                     # 路由优先级,越大越优先
+                mode="sync",  # sync | async_poll
+                priority=60,  # 路由优先级,越大越优先
             ),
         )
 ```
@@ -72,7 +70,7 @@ class NewVideoModel(VideoPipelineModel):
         self.card = ModelCard(description="...", strengths=[...], categories=[...])
 
     def validate(self, request: GenerationRequest) -> None:
-        super().validate(request)      # ★ 先跑 schema 通用校验
+        super().validate(request)  # ★ 先跑 schema 通用校验
         if request.generate_audio:
             raise ValidationError(f"{self.display_name} 不支持生成有声视频")
 ```
@@ -117,7 +115,10 @@ ruff check RH_ComfyUI/models
 再做一次启动冒烟(不发真实请求):
 
 ```python
-from RH_ComfyUI.utils.backends import init_backends; init_backends()
+from RH_ComfyUI.utils.backends import init_backends
+
+init_backends()
 from RH_ComfyUI.models import discover_builtin_models
-discover_builtin_models()   # 看日志确认新模型已注册
+
+discover_builtin_models()  # 看日志确认新模型已注册
 ```

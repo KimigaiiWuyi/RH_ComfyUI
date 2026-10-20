@@ -19,11 +19,12 @@
 ```python
 class MyGatewayChannel(ProviderChannel):
     name = "my-gateway"
-    weight = 5                     # weighted 策略权重:官方直连高,代理低
+    weight = 5  # weighted 策略权重:官方直连高,代理低
 
     async def check_available(self) -> bool:
         # ★ 只读配置,禁止网络探测(路由阶段批量调用)
         from ...rh_config.comfyui_config import SERVICE_CONFIG
+
         return bool(SERVICE_CONFIG.get_config("my_gateway_key").data)
 
     async def unavailable_reason(self) -> str:
@@ -36,7 +37,7 @@ class MyGatewayChannel(ProviderChannel):
             # 瞬时限流/过载:原通道退避重试一次比切通道整单重跑省钱
             raise ChannelError(f"限流: {e}", retryable=True, transient=True)
         except TimeoutError as e:
-            raise ChannelError(f"网关超时: {e}", retryable=True)   # 可切下一通道
+            raise ChannelError(f"网关超时: {e}", retryable=True)  # 可切下一通道
         except UpstreamRejectedError as e:
             raise ChannelError(f"参数被拒: {e}", retryable=False)  # 直接透传用户
 ```
@@ -80,6 +81,7 @@ Seedance 系列(`SeedanceVideoModel`)已改为多 ChannelBinding:
 
 ```python
 from RH_ComfyUI.core import channel_registry
+
 channel_registry.register_binding("gpt-image-2", MyAzureChannel())
 ```
 

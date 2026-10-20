@@ -76,10 +76,7 @@ def comfyui_disabled_reason(name: str, display_name: str) -> str | None:
     if is_comfyui_workflow_enabled(name):
         return None
     label = (name or "").strip() or display_name
-    return (
-        f"{display_name} 未启用:请在 Web 控制台 ComfyUI 栏的"
-        f"「启用的 ComfyUI 工作流」中添加 {label}"
-    )
+    return f"{display_name} 未启用:请在 Web 控制台 ComfyUI 栏的「启用的 ComfyUI 工作流」中添加 {label}"
 
 
 __all__ = [

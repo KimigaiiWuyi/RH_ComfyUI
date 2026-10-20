@@ -822,25 +822,25 @@ def expand_pads_to_aspect(
     """抬升 0 边后若输出比例偏离目标,在已扩展方向补 pad,让送出尺寸回到目标比例。"""
     w = max(1, int(src_w))
     h = max(1, int(src_h))
-    t, l, r, b = (max(0, int(top)), max(0, int(left)), max(0, int(right)), max(0, int(bottom)))
+    t, pad_l, pad_r, b = (max(0, int(top)), max(0, int(left)), max(0, int(right)), max(0, int(bottom)))
     if not (target_ar > 0):
-        return t, l, r, b
-    send_w = w + l + r
+        return t, pad_l, pad_r, b
+    send_w = w + pad_l + pad_r
     send_h = h + t + b
     send_ar = send_w / float(send_h)
     if abs(send_ar - target_ar) / target_ar < 0.01:
-        return t, l, r, b
+        return t, pad_l, pad_r, b
     if send_ar < target_ar:
         extra = max(0.0, send_h * target_ar - send_w)
-        sl = l + r
-        dl = extra * (l / sl) if sl > 0 else extra / 2.0
+        sl = pad_l + pad_r
+        dl = extra * (pad_l / sl) if sl > 0 else extra / 2.0
         dr = extra - dl
-        return t, int(round(l + dl)), int(round(r + dr)), b
+        return t, int(round(pad_l + dl)), int(round(pad_r + dr)), b
     extra = max(0.0, send_w / target_ar - send_h)
     st = t + b
     dt = extra * (t / st) if st > 0 else extra / 2.0
     db = extra - dt
-    return int(round(t + dt)), l, r, int(round(b + db))
+    return int(round(t + dt)), pad_l, pad_r, int(round(b + db))
 
 
 def bump_zero_outpaint_pads(
@@ -959,8 +959,6 @@ def scale_and_crop_outpaint(
     intended_w: int,
     intended_h: int,
     *,
-    pre_w: int = 0,
-    pre_h: int = 0,
     crop_top: int | None = None,
     crop_left: int | None = None,
     crop_right: int | None = None,
@@ -974,21 +972,9 @@ def scale_and_crop_outpaint(
 
     返回 (png 字节, (sx, sy, sw, sh)),坐标在回图像素空间。
     """
+    # crop_* 只是旧规划的入口,裁切窗按回图实际像素 + user_* 抬升边算,这里不用。
     iw = max(2, int(intended_w))
     ih = max(2, int(intended_h))
-    floor = OUTPAINT_WORKFLOW_MIN_PAD
-
-    def _crop(explicit: int | None, user_pad: int) -> int:
-        if explicit is None:
-            return floor if int(user_pad) <= 0 else 0
-        return max(0, int(explicit))
-
-    ct = _crop(crop_top, user_top)
-    cl = _crop(crop_left, user_left)
-    cr = _crop(crop_right, user_right)
-    cb = _crop(crop_bottom, user_bottom)
-    pw = max(1, int(pre_w) if pre_w else iw + cl + cr)
-    ph = max(1, int(pre_h) if pre_h else ih + ct + cb)
 
     try:
         from PIL import Image
@@ -1069,8 +1055,6 @@ def crop_image_to_aspect(
         data,
         intended_w,
         intended_h,
-        pre_w=int(intended_w) + cl + cr,
-        pre_h=int(intended_h) + ct + cb,
         crop_top=ct,
         crop_left=cl,
         crop_right=cr,

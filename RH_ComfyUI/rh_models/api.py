@@ -150,11 +150,7 @@ class ModelEntry:
             execution_mode=str(data.get("execution_mode") or "sync"),
             accepts_images=bool(data.get("accepts_images", False)),
             max_input_images=int(data.get("max_input_images", 0) or 0),
-            point_range=(
-                dict(point_range_raw)
-                if isinstance(point_range_raw, dict)
-                else {"min": 0, "max": 0}
-            ),
+            point_range=(dict(point_range_raw) if isinstance(point_range_raw, dict) else {"min": 0, "max": 0}),
             catalog_group=str(data.get("catalog_group") or data.get("task_type") or ""),
             supports_cancel=bool(data.get("supports_cancel", False)),
             supports_remote_cancel=bool(data.get("supports_remote_cancel", False)),
@@ -336,9 +332,7 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
         for b in model_obj.channel_bindings():
             ch_name = b.channel.name
             ch_local = _channel_supports_cancel(model_obj, ch_name)
-            ch_remote = _channel_supports_remote_cancel(
-                model_obj, ch_name, channel=b.channel
-            )
+            ch_remote = _channel_supports_remote_cancel(model_obj, ch_name, channel=b.channel)
             channels.append(
                 {
                     "name": ch_name,

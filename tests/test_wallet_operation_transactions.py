@@ -27,6 +27,10 @@ if TYPE_CHECKING:
 
 _SANDBOX_ENV = "RH_COMFYUI_WALLET_TEST_DB"
 
+# spawn 子进程要重导入整个插件栈 + 初始化数据库,机器慢或并行跑时要 1 分钟以上。
+# 超时给太紧会让 barrier 先断,测出来的失败跟业务逻辑无关。
+_MULTIPROC_TIMEOUT = 180
+
 
 def _aio(fn: Callable[..., Awaitable[None]]) -> Callable[..., None]:
     @wraps(fn)
@@ -479,7 +483,7 @@ def _process_wallet_requests(
         except Exception:
             barrier.abort()
             raise
-        await asyncio.to_thread(barrier.wait, 40)
+        await asyncio.to_thread(barrier.wait, _MULTIPROC_TIMEOUT)
 
         async def request(index: int) -> str:
             if mode == "quota":
@@ -549,9 +553,9 @@ async def run_two_processes(user_id: str, modes: tuple[str, str]) -> list[list[s
     try:
         for process in processes:
             process.start()
-        await asyncio.to_thread(barrier.wait, 40)
+        await asyncio.to_thread(barrier.wait, _MULTIPROC_TIMEOUT)
         for process in processes:
-            await asyncio.to_thread(process.join, 40)
+            await asyncio.to_thread(process.join, _MULTIPROC_TIMEOUT)
             assert process.exitcode == 0
         packed = [output.get(timeout=2) for _ in processes]
         failed = [item[1] for item in packed if item[0] == "err"]
@@ -752,7 +756,7 @@ async def test_killed_after_commit_is_recovered_by_fresh_processes() -> None:
     process = context.Process(target=_process_commit_before_ack, args=(key, committed, hold_ack))
     try:
         process.start()
-        assert await asyncio.to_thread(committed.wait, 40)
+        assert await asyncio.to_thread(committed.wait, _MULTIPROC_TIMEOUT)
         receipt = await RHWalletOperation.get_operation(f"{key}:charge:v1")
         assert receipt is not None
         process.terminate()

@@ -254,4 +254,3 @@ def test_prepare_ref_video_if_clamping_uses_context(monkeypatch):
     assert out.url is None
     assert seen["max_s"] == 15.0
     assert seen["min_pixels"] == 0
-
