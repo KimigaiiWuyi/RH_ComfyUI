@@ -9,6 +9,7 @@ from RH_ComfyUI.models.image.defs import (
     Qwen2512Def,
     BananaProDef,
     GptImage2Def,
+    MossImageDef,
     MinimaxImage01Def,
     GptImage25FlareDef,
     GptImage25SunburstDef,
@@ -41,7 +42,7 @@ def test_banana_pro_exposes_nbp_image_size_tiers():
     assert size.default == "2K"
 
 
-@pytest.mark.parametrize("cls", [AnimaDef, MinimaxImage01Def, Qwen2512Def])
+@pytest.mark.parametrize("cls", [AnimaDef, MinimaxImage01Def, MossImageDef, Qwen2512Def])
 def test_text_only_image_models_have_no_image_port_and_reject_images(cls):
     m = cls()
     assert m.supports_edit is False
@@ -172,7 +173,7 @@ def test_gpt_image2_family_exposes_all_billing_ratios_including_1_2(cls):
     assert "1:2" in ratio.values and "2:1" in ratio.values
 
 
-@pytest.mark.parametrize("cls", [AnimaDef, Qwen2512Def, Wan22VideogenDef])
+@pytest.mark.parametrize("cls", [AnimaDef, MossImageDef, Qwen2512Def, Wan22VideogenDef])
 def test_pixel_based_models_keep_wh(cls):
     # ComfyUI 工作流 / rh_app 是真实消费像素宽高的,width/height 端口保留
     node = cls.node_def()

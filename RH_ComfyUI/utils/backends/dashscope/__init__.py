@@ -1,7 +1,7 @@
-"""阿里云 DashScope 共用配置(HappyHorse / 万相 3.0 / Qwen-Audio TTS)
+"""阿里云 DashScope 共用配置(HappyHorse / 万相 3.0 / Qwen-Audio / Qwen-Image)
 
 凭证读 SERVICE_CONFIG 的 HappyHorse_*_dashscope 键;模型启用由
-``DashScope_Enabled_Models`` 勾选。语音客户端不在这里 import。
+``DashScope_Enabled_Models`` 勾选。语音和图像客户端不在这里 import。
 """
 
 from .config import (

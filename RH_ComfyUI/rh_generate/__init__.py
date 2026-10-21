@@ -131,7 +131,8 @@ async def _current_point(ev: Event) -> int:
               格式2（指定模型）: "qwen 一只可爱的猫咪"
               格式3（指定 Anima 二次元模型，必须使用小写模型名前缀）: "anima 蕾米莉亚的图"
               格式4（指定 MiniMax 模型）: "image01 一只可爱的猫咪"
-              常用模型名: qwen, banana, banana_pro, anima, image01（即 minimax_image01）, gpt
+              常用模型名: qwen, banana, banana_pro, anima, image01（即 minimax_image01）, gpt, moss-image
+              moss-image 只做文生图,不要附参考图。它有 comfyui 与 rh_app 两个供应商,命令不区分通道。
               当用户明确要求 Anima / anima 模型，或需求是二次元、动漫角色、插画、萌系头像时，text 必须以 "anima " 开头。
               当用户明确要求 image01 / minimax 模型时，text 必须以 "image01 " 开头。
         image_id: 可选，参考图片的资源ID（img_xxxxxxxx），有则按编辑处理。

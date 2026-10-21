@@ -3,7 +3,7 @@
 网页控制台 ``DashScope_Enabled_Models``(GsListStrConfig)决定哪些内部
 模型走 DashScope;列表为空则全部关闭。API Key / Base URL / 供应商总开关
 仍读 ``HappyHorse_apikey_dashscope`` / ``HappyHorse_BaseURL_dashscope`` /
-``HappyHorse_Enable_dashscope``,改完即时生效。
+``HappyHorse_Enable_dashscope``,改完即时生效。图像走同步 HTTP,语音仍是 WebSocket。
 """
 
 from __future__ import annotations
@@ -17,12 +17,19 @@ DASHSCOPE_MODEL_QWEN_TTS_FLASH = "qwen-audio-3.0-tts-flash"
 DASHSCOPE_MODEL_QWEN_TTS_PLUS = "qwen-audio-3.0-tts-plus"
 DASHSCOPE_MODEL_QWEN_TTS_31 = "qwen-audio-3.1-tts-flash"
 
+# 图像名与目录 QWEN_IMAGE_NAMES 同序。不 import mappers,以免配置加载拉起整包。
 DASHSCOPE_MODEL_OPTIONS: tuple[str, ...] = (
     DASHSCOPE_MODEL_HAPPYHORSE,
     DASHSCOPE_MODEL_WAN30,
     DASHSCOPE_MODEL_QWEN_TTS_FLASH,
     DASHSCOPE_MODEL_QWEN_TTS_PLUS,
     DASHSCOPE_MODEL_QWEN_TTS_31,
+    "qwen-image-3.0-pro",
+    "qwen-image-3.0",
+    "qwen-image-2.1-pro",
+    "qwen-image-2.1-turbo",
+    "qwen-image-2.0-pro",
+    "qwen-image-2.0",
 )
 
 DASHSCOPE_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/api/v1"

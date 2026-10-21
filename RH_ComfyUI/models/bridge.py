@@ -102,6 +102,7 @@ class AdapterChannel(ProviderChannel):
             "fishaudio": ("FishAudio_Enable", "Fish Audio 栏"),
             "tx_aiart": ("TX_AIArt_Enable", "腾讯云混元栏"),
             "dashscope_tts": ("HappyHorse_Enable_dashscope", "DashScope 栏"),
+            "dashscope_image": ("HappyHorse_Enable_dashscope", "DashScope 栏"),
         }
         vendor = adapter_vendors.get(self.name)
         if vendor is not None:
@@ -115,6 +116,7 @@ class AdapterChannel(ProviderChannel):
             "tx_aiart": ("TX_AIArt_Enabled_Models", "腾讯云混元栏"),
             "seedream": ("Seedance_Enabled_Models", "火山官方 Seedance / Seedream 栏"),
             "dashscope_tts": ("DashScope_Enabled_Models", "DashScope 栏"),
+            "dashscope_image": ("DashScope_Enabled_Models", "DashScope 栏"),
         }
         spec = adapter_lists.get(self.name)
         if spec is None:

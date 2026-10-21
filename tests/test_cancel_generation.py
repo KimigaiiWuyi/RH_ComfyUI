@@ -329,13 +329,14 @@ def test_comfyui_and_gemini_models_declare_remote_cancel():
         AnimaDef,
         Banana2Def,
         Qwen2512Def,
+        MossImageDef,
         CameraAngleDef,
     )
     from RH_ComfyUI.models.music.defs import AceStep15Def
     from RH_ComfyUI.models.video.defs import Wan22VideogenDef
     from RH_ComfyUI.models.speech.defs import IndexTTS2Def, IndexTTS25Def
 
-    for cls in (Qwen2512Def, Wan22VideogenDef, IndexTTS2Def, AceStep15Def):
+    for cls in (Qwen2512Def, MossImageDef, Wan22VideogenDef, IndexTTS2Def, AceStep15Def):
         m = cls()
         assert m.supports_cancel is True, m.name
         assert m.supports_remote_cancel is True, f"{m.name} backend={m.node.backend}"

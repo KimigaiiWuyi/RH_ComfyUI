@@ -185,6 +185,7 @@ async def estimate_model_cost(
     num_input_images: int = 0,
     num_video_refs: int = 0,
     input_video_duration: Optional[float] = None,
+    n: Optional[int] = None,
 ) -> dict[str, object]:
     """根据用户实时选择的参数,估算某模型消耗的积分。
 
@@ -202,6 +203,8 @@ async def estimate_model_cost(
     estimate_cost 只取 len()/bool 不读内容,不会触发真实媒体下载。
     input_video_duration 为输入参考视频总时长(秒),用于 Seedance token 公式中的
     「输入视频时长」;未传时按每段默认 5 秒 × 段数估算。
+    n 为出图张数。未传时不放进 params,按 1 张估算。
+    例:``GET /models/estimate?model=qwen-image-2.1-turbo&ratio=1:1&image_size=1K&n=2``
 
     对未覆盖 ``estimate_cost()`` 的模型,返回其静态 point_cost。
     """
@@ -216,6 +219,7 @@ async def estimate_model_cost(
         num_input_images=num_input_images,
         num_video_refs=num_video_refs,
         input_video_duration=input_video_duration,
+        n=n,
     )
 
 

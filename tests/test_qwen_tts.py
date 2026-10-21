@@ -40,7 +40,7 @@ _INTL = "https://dashscope-intl.aliyuncs.com/api/v1"
 
 
 def test_dashscope_options_include_three_tts_names():
-    assert QWEN_TTS_MODELS == DASHSCOPE_MODEL_OPTIONS[2:]
+    assert QWEN_TTS_MODELS == DASHSCOPE_MODEL_OPTIONS[2:5]
     item = SERVICE_CONFIG_DEFAULT["DashScope_Enabled_Models"]
     assert isinstance(item, GsListStrConfig)
     assert item.options == list(DASHSCOPE_MODEL_OPTIONS)

@@ -707,6 +707,7 @@ async def estimate_model_points(
     num_input_images: int = 0,
     num_video_refs: int = 0,
     input_video_duration: Optional[float] = None,
+    n: Optional[int] = None,
 ) -> dict[str, Any]:
     """根据用户实时选择的参数,估算某模型消耗的积分。
 
@@ -729,6 +730,7 @@ async def estimate_model_points(
         input_video_duration: 输入参考视频总时长(秒)。Seedance token 公式:
             (输入视频时长+输出时长)×宽×高×fps/1024;调用方探测到后传入,
             未传时按「每段默认 5s × 段数」估算。
+        n: 出图张数。未传时不放进 params,由模型按 1 张估算。
 
     Returns:
         {
@@ -749,6 +751,7 @@ async def estimate_model_points(
                 "num_input_images": int,
                 "num_video_refs": int,
                 "input_video_duration": float|null,
+                "n": int|null,
             },
         }
     """
@@ -772,6 +775,7 @@ async def estimate_model_points(
                 num_input_images=num_input_images,
                 num_video_refs=num_video_refs,
                 input_video_duration=input_video_duration,
+                n=n,
             ),
         }
 
@@ -788,6 +792,8 @@ async def estimate_model_points(
         params["generate_audio"] = generate_audio
     if input_video_duration is not None:
         params["input_video_duration"] = input_video_duration
+    if n is not None:
+        params["n"] = n
 
     # 占位:estimate_cost 只调 len() 不读内容,避免下载真实媒体
     placeholder_images = [b""] * max(num_input_images, 0) if num_input_images > 0 else []
@@ -826,6 +832,7 @@ async def estimate_model_points(
                 num_input_images=num_input_images,
                 num_video_refs=num_video_refs,
                 input_video_duration=input_video_duration,
+                n=n,
             ),
         }
 
@@ -852,6 +859,7 @@ async def estimate_model_points(
             num_input_images=num_input_images,
             num_video_refs=num_video_refs,
             input_video_duration=input_video_duration,
+            n=n,
         ),
     }
 
@@ -867,6 +875,7 @@ def _build_echo_params(
     num_input_images: int,
     num_video_refs: int,
     input_video_duration: Optional[float] = None,
+    n: Optional[int] = None,
 ) -> dict[str, Any]:
     """构造 estimate 返回值里的 params echo 字典,所有路径共用避免漂移。"""
     return {
@@ -879,6 +888,7 @@ def _build_echo_params(
         "num_input_images": num_input_images,
         "num_video_refs": num_video_refs,
         "input_video_duration": input_video_duration,
+        "n": n,
     }
 
 

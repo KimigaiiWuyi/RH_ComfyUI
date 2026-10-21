@@ -51,6 +51,7 @@ def init_backends() -> AdapterRegistry:
     from .fishaudio.executor import FishAudioAdapter
     from .gpt_image2.executor import GPTImage2Adapter
     from .gemini_speech.executor import GeminiSpeechAdapter
+    from .dashscope.image_executor import DashScopeImageAdapter
     from .dashscope.speech_executor import DashScopeTtsAdapter
 
     backend_registry.register(ComfyUIAdapter())
@@ -64,6 +65,7 @@ def init_backends() -> AdapterRegistry:
     backend_registry.register(TxAiartAdapter())
     backend_registry.register(GeminiSpeechAdapter())
     backend_registry.register(DashScopeTtsAdapter())
+    backend_registry.register(DashScopeImageAdapter())
     # Seedance / Gemini 生图不是 Adapter,走 ProviderChannel + LoadBalancer
     # (见 seedance/channel.py、gemini_image/channel.py)。
 

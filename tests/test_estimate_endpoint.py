@@ -119,6 +119,7 @@ def test_estimate_params_normalized():
         "num_input_images": 0,
         "num_video_refs": 0,
         "input_video_duration": None,
+        "n": None,
     }
 
 
@@ -135,6 +136,7 @@ def test_estimate_partial_params():
         "num_input_images": 0,
         "num_video_refs": 0,
         "input_video_duration": None,
+        "n": None,
     }
     r_default = asyncio.run(estimate_model_points("gpt-image-2"))
     assert r["point_cost"] > r_default["point_cost"]

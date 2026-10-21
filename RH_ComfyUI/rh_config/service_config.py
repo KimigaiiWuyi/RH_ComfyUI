@@ -41,6 +41,7 @@ _IMAGE_MODEL_REAL_NAMES = [
     "banana_pro",
     "gpt-image-2",
     "minimax_image01",
+    "moss-image",
     "qwen_2511",
     "qwen_2512",
     "seedream5",
@@ -49,6 +50,7 @@ _IMAGE_MODEL_REAL_NAMES = [
 _COMFYUI_WORKFLOW_NAMES = [
     "qwen_2511",
     "qwen_2512",
+    "moss-image",
     "wan2.2_videogen",
     "IndexTTS2",
     "ace_step1.5",
@@ -60,6 +62,7 @@ _RH_APP_NAMES = [
     "rh_image_upscale",
     "rh_image_outpaint",
     "IndexTTS2.5",
+    "moss-image",
 ]
 _GEMINI_MODEL_NAMES = list(GEMINI_MODEL_OPTIONS)
 _MINIMAX_MODEL_NAMES = ["minimax_t2a_speech", "minimax_image01", "minimax_h3"]
@@ -93,7 +96,8 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "启用的 ComfyUI 工作流",
         "从列表勾选要启用的 ComfyUI 工作流;可自由添加内部模型名或 json 文件名。"
         "留空则全部不启用。改完即时生效,无需重启。"
-        "可选:qwen_2511 / qwen_2512 / wan2.2_videogen / IndexTTS2 / ace_step1.5。",
+        "可选:qwen_2511 / qwen_2512 / moss-image / wan2.2_videogen / IndexTTS2 / ace_step1.5。"
+        "已保存的旧列表不会自动勾上 moss-image,需要手动加上。",
         list(_COMFYUI_WORKFLOW_NAMES),
         options=list(_COMFYUI_WORKFLOW_NAMES),
     ),
@@ -102,7 +106,9 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "从列表勾选要启用的 RH AI 应用;可自由添加内部模型名或 webappId。"
         "默认全部启用。留空则全部不启用。改完即时生效,无需重启。"
         "可选:anima / rh_camera_angle / rh_image_matting / "
-        "rh_image_upscale / rh_image_outpaint / IndexTTS2.5。",
+        "rh_image_upscale / rh_image_outpaint / IndexTTS2.5 / moss-image。"
+        "moss-image 与 ComfyUI 工作流是同一模型的两个供应商。"
+        "已保存的旧列表不会自动勾上 moss-image,需要手动加上。",
         list(_RH_APP_NAMES),
         options=list(_RH_APP_NAMES),
     ),
@@ -465,17 +471,18 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "2",
     ),
     "divider_happyhorse": GsDivider(
-        "DashScope(HappyHorse / 万相 3.0 / Qwen-Audio TTS)",
-        "阿里云 DashScope / 千问AI:HappyHorse 1.1、万相 3.0 与"
-        " qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus / qwen-audio-3.1-tts-flash 共用下方 API Key。"
-        "须在上方启用列表勾选后才分发;供应商总开关关闭则全部不可用。"
+        "DashScope(HappyHorse / 万相 / Qwen-Audio / Qwen-Image)",
+        "阿里云 DashScope:HappyHorse 1.1、万相 3.0、Qwen-Audio TTS 与"
+        " Qwen-Image 2.0 / 2.1 / 3.0 共用下方 API Key。"
+        "图像走同步 multimodal-generation,不建异步任务。"
+        "须在启用列表勾选后才分发;供应商总开关关闭则全部不可用。"
         "改完即时生效。",
-        "DashScope 视频 / 语音服务配置",
+        "DashScope 视频 / 语音 / 图像服务配置",
     ),
     "HappyHorse_Enable_dashscope": GsBoolConfig(
         "启用 DashScope 供应商",
         "是否启用官方 DashScope 通道。禁用后官方 happyhorse1.1 / wan3.0 /"
-        " qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus / qwen-audio-3.1-tts-flash 通道不参与分发;"
+        " Qwen-Audio TTS / Qwen-Image 通道不参与分发;"
         "若已挂外部插件通道,模型仍可用。",
         True,
     ),
@@ -483,21 +490,25 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "启用的 DashScope 模型",
         "勾选要走官方 DashScope 通道的模型;可自由添加内部模型名。"
         "留空则官方通道全关。happyhorse1.1 / wan3.0 若已挂外部插件通道,模型本身仍可用。"
-        "可选:happyhorse1.1 / wan3.0 / qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus / qwen-audio-3.1-tts-flash。"
-        "这三个 qwen-audio 名称是语音合成,已保存的旧列表不会自动勾上,需要手动加上。",
+        "可选:happyhorse1.1 / wan3.0 / qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus /"
+        " qwen-audio-3.1-tts-flash / qwen-image-3.0-pro / qwen-image-3.0 /"
+        " qwen-image-2.1-pro / qwen-image-2.1-turbo / qwen-image-2.0-pro / qwen-image-2.0。"
+        "后加的 qwen-audio 与 qwen-image 名称,已保存的旧列表不会自动勾上,需要手动加上。",
         list(_DASHSCOPE_MODEL_NAMES),
         options=list(_DASHSCOPE_MODEL_NAMES),
     ),
     "HappyHorse_apikey_dashscope": GsStrConfig(
         "DashScope API Key",
-        "阿里云 DashScope / 千问AI 平台 API Key,HappyHorse 1.1、万相 3.0 与"
-        " qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus / qwen-audio-3.1-tts-flash 共用。",
+        "阿里云 DashScope / 千问AI 平台 API Key。HappyHorse 1.1、万相 3.0、Qwen-Audio TTS 与 Qwen-Image 共用。",
         "",
     ),
     "HappyHorse_BaseURL_dashscope": GsStrConfig(
         "DashScope Base URL",
-        "DashScope API 根地址(不含尾斜杠)。默认华北2北京;国际站等可改为对应 region 地址。"
-        "语音合成的 WebSocket 换成同主机的 /api-ws/v1/inference;这里填不了带业务空间 ID 的 maas 域名。",
+        "DashScope API 根地址(不含尾斜杠)。默认华北2北京;国际站改为 dashscope-intl。"
+        "图像同步会在根地址后接 /services/aigc/multimodal-generation/generation。"
+        "主机名含 dashscope-intl 或 ap-southeast 时,图像按新加坡价格计。"
+        "以 /api/v1 结尾的业务空间 maas 域名可以出图;"
+        "语音 WebSocket 仍要 dashscope 或 dashscope-intl 主机名。",
         "https://dashscope.aliyuncs.com/api/v1",
         options=[
             "https://dashscope.aliyuncs.com/api/v1",

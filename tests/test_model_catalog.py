@@ -93,6 +93,25 @@ def test_catalog_cancel_flags_match_channels_and_rh_app():
                 assert ch.get("supports_cancel") is False, (name, ch)
                 assert ch.get("supports_remote_cancel") is False, (name, ch)
 
+        # moss-image:同一名字两个供应商;顶层 OR 为 true,rh_app 通道仍不可取消
+        assert "moss-image" in by_name
+        assert "moss-image-app" not in by_name
+        moss = by_name["moss-image"]
+        assert moss["supports_cancel"] is True
+        assert moss["supports_remote_cancel"] is True
+        moss_channels = moss["channels"]
+        assert isinstance(moss_channels, list)
+        moss_by_name: dict[str, dict[str, object]] = {}
+        for ch in moss_channels:
+            assert isinstance(ch, dict)
+            ch_name = ch["name"]
+            assert isinstance(ch_name, str)
+            moss_by_name[ch_name] = ch
+        assert moss_by_name["comfyui"]["supports_cancel"] is True
+        assert moss_by_name["comfyui"]["supports_remote_cancel"] is True
+        assert moss_by_name["rh_app"]["supports_cancel"] is False
+        assert moss_by_name["rh_app"]["supports_remote_cancel"] is False
+
         # seedance:顶层与通道 OR 一致;ark 可 remote,runninghub 视频端不可
         if "seedance2" in by_name:
             m = by_name["seedance2"]

@@ -7,11 +7,13 @@
 
 from __future__ import annotations
 
+from .qwen import QWEN_IMAGE_MODELS
 from .kling import KLING_IMAGE_MODELS
-from ..bridge import ImagePipelineModel
+from ..bridge import AdapterChannel, ImagePipelineModel
 from .overrides import GptImageFamilyModel, Seedream5ProImageModel
 from ...core.base.errors import ValidationError
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
+from ...core.schema.types import NodeOutput, ProgressCallback
 from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...core.channels.channel import ChannelBinding
@@ -1638,6 +1640,185 @@ class MinimaxImage01Def(ImagePipelineModel):
         )
 
 
+# 工作流 moss-image.json 与 AI 应用 2112878888463462401 节点一致。
+MOSS_IMAGE_APP_ID: str = "2112878888463462401"
+MOSS_IMAGE_WIDTH: int = 1200
+MOSS_IMAGE_HEIGHT: int = 1600
+
+
+def _moss_image_inputs() -> dict[str, PortSpec]:
+    """文生图参数面:提示词 + 像素宽高。不声明 images,基类会拒绝参考图。"""
+    return {
+        "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="生成描述"),
+        "width": PortSpec(
+            type=PortType.INTEGER,
+            default=MOSS_IMAGE_WIDTH,
+            minimum=256,
+            maximum=2048,
+            title="宽度",
+            description="图片宽度",
+        ),
+        "height": PortSpec(
+            type=PortType.INTEGER,
+            default=MOSS_IMAGE_HEIGHT,
+            minimum=256,
+            maximum=2048,
+            title="高度",
+            description="图片高度",
+        ),
+    }
+
+
+class MossImageDef(ImagePipelineModel):
+    """MOSS Image — 同一模型,两个供应商。
+
+    comfyui:工作流 moss-image.json。rh_app:AI 应用 2112878888463462401。
+    参数面一致,仅文生图。固定价格 15 积分/次。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+        self._app_node = self.app_node()
+        self._app_channel = AdapterChannel(
+            "rh_app",
+            model_name=self.name,
+            workflow_file=MOSS_IMAGE_APP_ID,
+        )
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="moss-image",
+            display_name="MOSS Image",
+            task_type=TaskType("image"),
+            backend="comfyui",
+            point_cost=15,
+            description="文生图，像素宽高",
+            knowledge_content=(
+                "MOSS Image 是仅支持文生图的模型,有两个供应商。"
+                "\n"
+                "comfyui:本地/RunningHub ComfyUI 工作流 moss-image.json。"
+                "\n"
+                f"rh_app:RunningHub AI 应用 {MOSS_IMAGE_APP_ID},节点与工作流一致。"
+                "\n"
+                "优势:提示词直接出图,画布按像素宽高控制,默认 1200×1600。"
+                "\n"
+                "适用场景:从零生成图片,不需要参考图。"
+                "\n"
+                "不适用场景:图生图、改图、多参考图。带参考图请改用编辑模型。"
+                "\n"
+                "参数:prompt 写入节点 62 的「编辑文本」;width/height 写入节点 7。"
+                "\n"
+                "指定供应商:channel=comfyui 或 channel=rh_app。不指定则在已启用通道间负载均衡。"
+                "\n"
+                "rh_app 不能取消,只能继续轮询;comfyui 可以取消。"
+                "\n"
+            ),
+            requirements=["comfyui_url", "rh_apikey"],
+            workflow_file="moss-image.json",
+            mode="declarative",
+            mappings=[
+                {"source": "prompt", "target": "62.inputs.编辑文本"},
+                {"source": "width", "target": "7.inputs.width", "default": MOSS_IMAGE_WIDTH},
+                {"source": "height", "target": "7.inputs.height", "default": MOSS_IMAGE_HEIGHT},
+            ],
+            inputs=_moss_image_inputs(),
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="sync",
+                max_concurrency=1,  # 本地 ComfyUI 共用一块 GPU,工作流必须串行
+                priority=62,
+            ),
+        )
+
+    @staticmethod
+    def app_node() -> NodeDef:
+        """RH AI 应用侧节点:同一 name,映射改成 nodeInfoList 的 fieldName。"""
+        node = MossImageDef.node_def()
+        node.backend = "rh_app"
+        node.workflow_file = MOSS_IMAGE_APP_ID
+        node.backend_model = MOSS_IMAGE_APP_ID
+        node.requirements = ["rh_apikey"]
+        node.mappings = [
+            {
+                "source": "prompt",
+                "target": "62.编辑文本",
+                "description": "编辑文本",
+            },
+            {
+                "source": "width",
+                "target": "7.width",
+                "default": MOSS_IMAGE_WIDTH,
+                "description": "width",
+            },
+            {
+                "source": "height",
+                "target": "7.height",
+                "default": MOSS_IMAGE_HEIGHT,
+                "description": "height",
+            },
+        ]
+        node.capabilities = CapabilityManifest(
+            supported_tasks=["image"],
+            mode="async_poll",
+            priority=62,
+        )
+        return node
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...core.channels.registry import channel_registry
+
+        bindings = [
+            ChannelBinding(channel=self._channel, vendor_model="moss-image.json"),
+            ChannelBinding(channel=self._app_channel, vendor_model=MOSS_IMAGE_APP_ID),
+        ]
+        bindings.extend(channel_registry.bindings_for(self.name))
+        return bindings
+
+    def _node_for(self, channel_name: str) -> NodeDef:
+        if channel_name == "rh_app":
+            return self._app_node
+        return self.node
+
+    def _align_cancel(self, channel_name: str) -> None:
+        # rh_app 无取消接口,禁止本地打断;切回 comfyui 时恢复。
+        from ...core.dispatch.active_tasks import get_active_task_registry
+
+        ag = get_active_task_registry().current()
+        if ag is None:
+            return
+        ag.allow_cancel = channel_name != "rh_app"
+
+    async def execute_on_channel(
+        self,
+        request: GenerationRequest,
+        binding: ChannelBinding,
+        *,
+        on_progress: ProgressCallback | None = None,
+    ) -> NodeOutput:
+        self._align_cancel(binding.channel.name)
+        return await binding.channel.invoke(
+            request=request,
+            node=self._node_for(binding.channel.name),
+            on_progress=on_progress,
+            vendor_model=binding.vendor_model,
+        )
+
+    async def unavailable_reason(self) -> str:
+        reasons: list[str] = []
+        for binding in self.channel_bindings():
+            if await binding.channel.check_available():
+                continue
+            reason = await binding.channel.unavailable_reason()
+            reasons.append(f"{binding.channel.name}: {reason}")
+        if not reasons:
+            return "无可用通道"
+        return "; ".join(reasons)
+
+
 class Qwen2511Def(ImagePipelineModel):
     """Qwen-Edit 2511 — 定义迁移自 pipelines YAML(2026-07 起以代码为准)
 
@@ -2018,9 +2199,11 @@ ALL_MODELS = [
     GptImage25SunburstDef,
     GptImage25FlareDef,
     MinimaxImage01Def,
+    MossImageDef,
     Qwen2511Def,
     Qwen2512Def,
     Seedream5Def,
     Seedream5ProDef,
     *KLING_IMAGE_MODELS,
+    *QWEN_IMAGE_MODELS,
 ]
