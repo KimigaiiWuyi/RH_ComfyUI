@@ -420,7 +420,7 @@ def test_prepare_request_clamps_audio_and_inlines(monkeypatch):
 
     async def _fake_audio(data, **kwargs):
         assert data == raw_audio
-        return trimmed, 15.0, "trim"
+        return trimmed, 15.0, "trim", "audio/mpeg"
 
     monkeypatch.setattr(
         "RH_ComfyUI.models.video.overrides.clamp_seedance_ref_audio",
@@ -462,8 +462,8 @@ def test_prepare_request_clamps_audio_total_duration(monkeypatch):
         max_s = float(kwargs.get("max_s") or 15.2)
         calls.append(max_s)
         if max_s >= 15.2:
-            return data, 10.0, None
-        return data + b"|trim", max_s, "trim"
+            return data, 10.0, None, "audio/mpeg"
+        return data + b"|trim", max_s, "trim", "audio/mpeg"
 
     import RH_ComfyUI.utils.audio_process as audio_mod
 
@@ -503,3 +503,24 @@ def test_prepare_request_seedance25_video_uses_30s_max(monkeypatch):
     asyncio.run(Seedance25Def().prepare_request(req))
     assert seen["max_s"] == 30.0
     assert seen["min_pixels"] == 407696
+
+
+def test_prepare_request_seedance25_audio_uses_30s_max(monkeypatch):
+    """2.5 音频上限随模型切到 30.2s,不能再按 2.0 的 15.2s 裁。"""
+    seen: list[float] = []
+
+    async def _fake_audio(data, **kwargs):
+        seen.append(float(kwargs.get("max_s") or 0))
+        return data, 20.0, None, "audio/mpeg"
+
+    import RH_ComfyUI.utils.audio_process as audio_mod
+
+    monkeypatch.setattr(audio_mod, "clamp_seedance_ref_audio", _fake_audio)
+
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt="30 秒配乐",
+        audio_refs=[MediaRef(kind=MediaKind.AUDIO, data=b"AUDIO" * 16)],
+    )
+    asyncio.run(Seedance25Def().prepare_request(req))
+    assert seen == [30.2]

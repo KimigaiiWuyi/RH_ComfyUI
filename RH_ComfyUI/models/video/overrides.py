@@ -56,7 +56,7 @@ class RefMediaPrep:
     h3_audio: bool = False
     total_max_s: float = 0.0
     total_target_s: float = 0.0
-    # Seedance r2v:多段参考音频合计 ≤15.2s(与单段上限分开,不能跟视频总预算混用)
+    # Seedance r2v:多段参考音频合计上限(2.0≤15.2s / 2.5≤30.2s),与视频总预算分开
     audio_total_max_s: float = 0.0
     audio_total_target_s: float = 0.0
     reject_unprobeable_audio: bool = False
@@ -146,13 +146,12 @@ async def prepare_ref_media_request(request: GenerationRequest, cfg: RefMediaPre
                 mime_type=ref.mime_type or "",
             )
         else:
-            new_data, dur, action = await clamp_seedance_ref_audio(
+            new_data, dur, action, mime = await clamp_seedance_ref_audio(
                 raw,
                 max_s=cfg.audio_max_s,
                 trim_target_s=cfg.audio_trim_target_s,
                 mime_type=ref.mime_type or "",
             )
-            mime = "audio/mp4"
         audio_durs[key] = float(dur or 0.0)
         if action is None and new_data is raw:
             out = (
@@ -364,13 +363,12 @@ async def _fit_total_audio_budget(
                 mime_type=ref.mime_type or "",
             )
         else:
-            new_data, dur, action = await clamp_seedance_ref_audio(
+            new_data, dur, action, mime = await clamp_seedance_ref_audio(
                 ref.data,
                 max_s=want,
                 trim_target_s=want,
                 mime_type=ref.mime_type or "",
             )
-            mime = ref.mime_type or "audio/mp4"
         if action is None and new_data is ref.data:
             audio_durs[key] = want
             continue
@@ -400,7 +398,7 @@ class SeedanceVideoModel(VideoPipelineModel):
     ref_video_trim_target_s = 14.5
     # 2.5 r2v 硬限 407696;2.0 同样放大无害
     ref_video_min_pixels = 407696
-    # 2.0 r2v 硬限 15.2s;2.5 同样裁切
+    # 2.0 r2v 硬限 15.2s;2.5 在子类放宽到 30s
     ref_audio_max_s = 15.2
     ref_audio_trim_target_s = 15.0
 
@@ -440,8 +438,9 @@ class SeedanceVideoModel(VideoPipelineModel):
         """提交前预处理:参考视频时长/像素 + 参考音频时长 + 参考图短边/宽高比。
 
         视频:时长钳到 [min, max];像素 < 407696 时等比放大。两步合并进一趟 ffmpeg。
-        音频:单段超过 15.2s 裁到 15.0s;多段合计仍超 15.2s 再按预算裁到 ~15.0s
-        (Seedance r2v 硬限是 audio *total* duration,两段各 10s 也会 400)。
+        音频:单段超过 15.2s(2.5 为 30.2s)裁到 15.0s(2.5 为 30.0s);
+        多段合计仍超上限再按预算裁切(r2v 硬限是 audio *total* duration);
+        2.x 只收 wav/mp3,其余格式转 mp3。
         图片:宽或高 < 300px 时等比放大;宽高比超出 0.40~2.50 时居中裁到 0.41 或 2.49。
         多段参考并发处理,ffmpeg 由全局闸限并发。探测/编解码失败放行原片。
         """
@@ -568,6 +567,9 @@ class Seedance25VideoModel(SeedanceVideoModel):
     # 2.5 参考视频单段可至 30s;像素下限与 2.0 相同
     ref_video_max_s = 30.0
     ref_video_trim_target_s = 29.5
+    # 2.5 官方:参考音频单段 [2,30]s、多段合计 ≤30s;留 0.2s 探测余量
+    ref_audio_max_s = 30.2
+    ref_audio_trim_target_s = 30.0
 
     def __init__(self, node: NodeDef) -> None:
         super().__init__(node)

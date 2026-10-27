@@ -228,6 +228,50 @@ def _guess_mime(data: bytes, kind: MediaKind) -> str:
     return "application/octet-stream"
 
 
+def sniff_mime_for_kind_known(
+    data: bytes,
+    kind: MediaKind,
+    hint: Optional[str] = None,
+) -> Optional[str]:
+    """按文件头返回可确定的 MIME;识别不了返回 None(不猜)。
+
+    hint 只在容器本身无法区分时保留(如 ftyp 的 mov/mp4、Ogg 的音频/视频)。
+    """
+    if not data:
+        return None
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:4] == b"GIF8":
+        return "image/gif"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if data[:3] == b"ID3":
+        return "audio/mpeg"
+    if len(data) >= 2 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0:
+        # ADTS AAC 的 layer bits 为 00;MP3 层号非 0
+        return "audio/aac" if (data[1] >> 1) & 0x03 == 0 else "audio/mpeg"
+    if data[:4] == b"OggS":
+        if kind == MediaKind.VIDEO:
+            return "video/ogg"
+        return "audio/ogg"
+    if len(data) >= 8 and data[4:8] == b"ftyp":
+        if kind == MediaKind.AUDIO:
+            return "audio/mp4"
+        hint_low = (hint or "").strip().lower()
+        if hint_low == "video/quicktime":
+            return hint_low
+        return "video/mp4"
+    if data[:4] == b"\x1a\x45\xdf\xa3":
+        return "video/webm"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"AVI ":
+        return "video/x-msvideo"
+    return None
+
+
 def sniff_media_kind(
     *,
     data: Optional[bytes] = None,
@@ -235,13 +279,33 @@ def sniff_media_kind(
     url: Optional[str] = None,
     filename: Optional[str] = None,
 ) -> Optional[MediaKind]:
-    """从 mime / 文件头 / 扩展名推断媒体 kind;无法判断时返回 None。
+    """从文件头 / mime / 扩展名推断媒体 kind;无法判断时返回 None。
 
     用于纠正"视频/音频误入 images / type=image_url"这类上游传参错误 —
     Seedance content[] 若把 mp4 当成 image_url 会触发上游
     ``image format is not supported``(VID-4001)。
+
+    有字节时,无歧义的文件头优先于调用方 MIME(frontend 可能按扩展名误标);
+    ftyp / Ogg 这类容器同时可能是音频或视频,仍交给 MIME 判断。
     """
+    if data:
+        if data[:3] == b"ID3" or (len(data) >= 2 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
+            return MediaKind.AUDIO
+        if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+            return MediaKind.AUDIO
+        if data[:8] == b"\x89PNG\r\n\x1a\n" or data[:3] == b"\xff\xd8\xff" or data[:4] == b"GIF8":
+            return MediaKind.IMAGE
+        if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return MediaKind.IMAGE
+        if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"AVI ":
+            return MediaKind.VIDEO
+        if data[:4] == b"\x1a\x45\xdf\xa3":
+            return MediaKind.VIDEO
+
     m = (mime or "").strip().lower()
+    # ftyp 只可能是视频/音频容器,绝不可能是图片
+    if data and len(data) >= 8 and data[4:8] == b"ftyp" and m.startswith("image/"):
+        return MediaKind.VIDEO
     if m.startswith("video/"):
         return MediaKind.VIDEO
     if m.startswith("audio/"):
@@ -339,9 +403,13 @@ class MediaRef:
                     self.mime_type = None
                 elif corrected == MediaKind.IMAGE and (m.startswith("video/") or m.startswith("audio/")):
                     self.mime_type = None
-        # 自动推断 mime_type
-        if self.mime_type is None and self.data is not None:
-            self.mime_type = _guess_mime(self.data, self.kind)
+        # 自动推断 mime_type:有字节时以文件头为准,调用方 MIME 只作提示
+        if self.data is not None:
+            sniffed_mime = sniff_mime_for_kind_known(self.data, self.kind, self.mime_type)
+            if sniffed_mime is not None:
+                self.mime_type = sniffed_mime
+            elif self.mime_type is None:
+                self.mime_type = _guess_mime(self.data, self.kind)
 
     def is_remote(self) -> bool:
         return self.url is not None and self.data is None

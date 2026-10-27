@@ -1,7 +1,9 @@
 """Seedance 参考音频预处理 — r2v 时长裁切
 
-上游 Seedance 2.0 r2v 硬限:参考音频 duration ≤ 15.2s。
-过长时从开头裁到 15.0s(留 0.2s 余量)。探测/编码失败放行原片。
+上游硬限:Seedance 2.0 单段/合计 ≤15.2s;2.5 放宽到单段/合计 ≤30s。
+过长时从开头裁到上限(留 0.2s 余量)。Seedance 只接受 wav / mp3:
+保留这两种容器,其余格式(m4a/aac/ogg/...)统一转 mp3。
+探测/编码失败放行原片。
 
 与 ``video_process`` 共用 ffmpeg 并发闸,避免音视频同时重编码打满 CPU。
 """
@@ -23,12 +25,48 @@ SEEDANCE_REF_AUDIO_TRIM_TARGET_S = 15.0
 
 _FFMPEG_TIMEOUT_S = 60.0
 
+_AUDIO_MIME_BY_SUFFIX = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".ogg": "audio/ogg",
+}
+
+
+def _audio_mime(suffix: str) -> str:
+    return _AUDIO_MIME_BY_SUFFIX.get(suffix, "audio/mpeg")
+
+
+def _output_suffix(src_suffix: str) -> str:
+    """Seedance 只收 wav/mp3:保留这两种容器,其余统一转 mp3。"""
+    return src_suffix if src_suffix in (".mp3", ".wav") else ".mp3"
+
+
+def _encode_args(out_suffix: str) -> list[str]:
+    if out_suffix == ".wav":
+        return ["-c:a", "pcm_s16le"]
+    return ["-c:a", "libmp3lame", "-b:a", "128k"]
+
 
 def _which(name: str) -> Optional[str]:
     return shutil.which(name)
 
 
 def _guess_suffix(data: bytes, mime: str = "") -> str:
+    """判断音频容器;文件头优先,调用方 MIME 只作提示(扩展名可能和内容不一致)。"""
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return ".wav"
+    if data[:3] == b"ID3":
+        return ".mp3"
+    if len(data) >= 2 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0:
+        # ADTS AAC 的 layer bits 为 00;MP3 层号非 0
+        return ".aac" if (data[1] >> 1) & 0x03 == 0 else ".mp3"
+    if len(data) >= 8 and data[4:8] == b"ftyp":
+        return ".m4a"
+    if data[:4] == b"OggS":
+        return ".ogg"
+
     low = (mime or "").lower()
     if "mpeg" in low or low.endswith("/mp3"):
         return ".mp3"
@@ -38,14 +76,6 @@ def _guess_suffix(data: bytes, mime: str = "") -> str:
         return ".ogg"
     if "aac" in low:
         return ".aac"
-    if data[:4] == b"ftyp" or data[4:8] == b"ftyp":
-        return ".m4a"
-    if data[:3] == b"ID3" or data[:2] == b"\xff\xfb":
-        return ".mp3"
-    if data[:4] == b"RIFF":
-        return ".wav"
-    if data[:4] == b"OggS":
-        return ".ogg"
     return ".m4a"
 
 
@@ -110,96 +140,101 @@ async def clamp_seedance_ref_audio(
     max_s: float = SEEDANCE_REF_AUDIO_MAX_S,
     trim_target_s: float = SEEDANCE_REF_AUDIO_TRIM_TARGET_S,
     mime_type: str = "",
-) -> tuple[bytes, float, Optional[str]]:
-    """参考音频超过 max_s 时裁到 trim_target_s。
+) -> tuple[bytes, float, Optional[str], str]:
+    """把参考音频裁到上限,并规整为 Seedance 支持的容器。
+
+    Seedance 只接受 wav / mp3:源为 wav/mp3 时保留原容器;
+    其它格式(m4a/aac/ogg/...)统一转 mp3。超长才裁,否则只转容器。
 
     Returns:
-        ``(bytes, duration_after, action)`` action 为 None 或 ``"trim"``。
+        ``(bytes, duration_after, action, mime)``;
+        action 为 None / ``"trim"`` / ``"transcode"``。
     """
-    if not data:
-        return data, 0.0, None
-    if not _which("ffmpeg") or not _which("ffprobe"):
-        logger.warning("[audio_process] ffmpeg/ffprobe 不可用,跳过参考音频裁切")
-        return data, 0.0, None
-
     suffix = _guess_suffix(data, mime_type)
+    input_mime = _audio_mime(suffix)
+    if not data:
+        return data, 0.0, None, input_mime
+    if not _which("ffmpeg") or not _which("ffprobe"):
+        logger.warning("[audio_process] ffmpeg/ffprobe 不可用,跳过参考音频处理")
+        return data, 0.0, None, input_mime
+
     duration = await probe_audio_duration(data, suffix=suffix)
     if duration <= 0:
-        logger.warning("[audio_process] 无法探测参考音频时长,跳过裁切 size=%d", len(data))
-        return data, 0.0, None
-    if duration <= max_s:
-        return data, duration, None
+        logger.warning("[audio_process] 无法探测参考音频时长,跳过处理 size=%d", len(data))
+        return data, 0.0, None, input_mime
 
+    supported = suffix in (".mp3", ".wav")
+    needs_trim = duration > max_s
+    if supported and not needs_trim:
+        return data, duration, None, input_mime
+
+    out_suffix = _output_suffix(suffix)
+    out_mime = _audio_mime(out_suffix)
+    action = "trim" if needs_trim else "transcode"
     src_path: Optional[Path] = None
     dst_path: Optional[Path] = None
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as src:
             src.write(data)
             src_path = Path(src.name)
-        fd, dst_name = tempfile.mkstemp(suffix=".m4a")
+        fd, dst_name = tempfile.mkstemp(suffix=out_suffix)
         os.close(fd)
         dst_path = Path(dst_name)
 
-        # 先尝试 stream copy(几乎零 CPU);失败再 aac 重编码
-        copy_ok = True
-        try:
-            await _run_ffmpeg(
-                [
-                    "-y",
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-threads",
-                    str(ffmpeg_thread_count()),
-                    "-i",
-                    str(src_path),
-                    "-t",
-                    f"{trim_target_s:.3f}",
-                    "-map",
-                    "0:a:0",
-                    "-c:a",
-                    "copy",
-                    str(dst_path),
-                ]
-            )
-        except VideoProcessError:
-            copy_ok = False
+        # 同容器裁切优先 stream copy(几乎零 CPU);换容器或 copy 失败再重编码
+        copy_ok = False
+        if needs_trim and out_suffix == suffix:
+            try:
+                await _run_ffmpeg(
+                    [
+                        "-y",
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-threads",
+                        str(ffmpeg_thread_count()),
+                        "-i",
+                        str(src_path),
+                        "-t",
+                        f"{trim_target_s:.3f}",
+                        "-map",
+                        "0:a:0",
+                        "-c:a",
+                        "copy",
+                        str(dst_path),
+                    ]
+                )
+                copy_ok = bool(dst_path.stat().st_size)
+            except VideoProcessError:
+                copy_ok = False
 
-        if not copy_ok or not dst_path.stat().st_size:
-            await _run_ffmpeg(
-                [
-                    "-y",
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-threads",
-                    str(ffmpeg_thread_count()),
-                    "-i",
-                    str(src_path),
-                    "-t",
-                    f"{trim_target_s:.3f}",
-                    "-map",
-                    "0:a:0",
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "128k",
-                    "-movflags",
-                    "+faststart",
-                    str(dst_path),
-                ]
-            )
+        if not copy_ok:
+            encode_args: list[str] = [
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-threads",
+                str(ffmpeg_thread_count()),
+                "-i",
+                str(src_path),
+            ]
+            if needs_trim:
+                encode_args += ["-t", f"{trim_target_s:.3f}"]
+            encode_args += ["-map", "0:a:0", *_encode_args(out_suffix), str(dst_path)]
+            await _run_ffmpeg(encode_args)
 
         out = dst_path.read_bytes()
-        new_dur = await probe_audio_duration(out, suffix=".m4a") or trim_target_s
+        new_dur = await probe_audio_duration(out, suffix=out_suffix) or (trim_target_s if needs_trim else duration)
         logger.info(
-            f"[audio_process] 参考音频裁切 {duration:.2f}s → {new_dur:.2f}s "
-            f"(target={trim_target_s:.2f}) size={len(data)}→{len(out)}"
+            f"[audio_process] 参考音频处理 action={action} "
+            f"{duration:.2f}s → {new_dur:.2f}s src={suffix} fmt={out_suffix} "
+            f"size={len(data)}→{len(out)}"
         )
-        return out, new_dur, "trim"
+        return out, new_dur, action, out_mime
     except VideoProcessError as exc:
-        logger.warning("[audio_process] 参考音频裁切失败,放行原片: %s", exc)
-        return data, duration, None
+        logger.warning("[audio_process] 参考音频处理失败,放行原片: %s", exc)
+        return data, duration, None, input_mime
     finally:
         for p in (src_path, dst_path):
             if p is not None:

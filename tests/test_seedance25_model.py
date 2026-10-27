@@ -26,6 +26,16 @@ def test_node_def_identity_and_backend_model():
     assert "runninghub" not in (node.backend_models or {})
 
 
+def test_seedance25_reference_audio_limit_is_30s():
+    """官方 2.5:参考音频单段 [2,30]s、合计 ≤30s;不能沿用 2.0 的 15.2s。"""
+    model = Seedance25Def()
+    assert model.ref_audio_max_s == 30.2
+    assert model.ref_audio_trim_target_s == 30.0
+    # 2.0 保持官方 15.2s
+    assert Seedance2Def().ref_audio_max_s == 15.2
+    assert Seedance2Def().ref_audio_trim_target_s == 15.0
+
+
 def test_schema_ports_and_limits():
     node = Seedance25Def.node_def()
     for port in (

@@ -918,19 +918,27 @@ class RHWalletOperation(BaseIDModel, table=True):
         """新协议统计与差额共用原 settle；无回执旧行仍由旧维护路径处理。"""
         validate_wallet_points(actual)
         await RHBind.begin_write(session)
-        record = (
+        # 对账只用这三列。整行会把厂商回包读进写事务。
+        found = (
             await session.execute(
-                select(RHComfyuiTaskRecord).where(col(RHComfyuiTaskRecord.id) == record_id).with_for_update()
+                select(
+                    col(RHComfyuiTaskRecord.trace_id),
+                    col(RHComfyuiTaskRecord.user_id),
+                    col(RHComfyuiTaskRecord.bot_id),
+                ).where(col(RHComfyuiTaskRecord.id) == record_id)
             )
-        ).scalar_one_or_none()
-        if record is None or not record.trace_id:
+        ).one_or_none()
+        if found is None:
+            return None
+        trace_id, user_id, bot_id = found
+        if not trace_id:
             return None
         charges = list(
             (
                 await session.execute(
                     select(cls)
                     .where(
-                        col(cls.external_ref) == record.trace_id,
+                        col(cls.external_ref) == trace_id,
                         col(cls.kind) == "charge",
                     )
                     .limit(2)
@@ -944,7 +952,7 @@ class RHWalletOperation(BaseIDModel, table=True):
         if not charges:
             return None
         charge = charges[0]
-        if charge.user_id != record.user_id or charge.bot_id != record.bot_id:
+        if charge.user_id != user_id or charge.bot_id != bot_id:
             raise WalletOperationConflict("WALLET_BILLING_CONTEXT_CONFLICT")
         if charge.status != "committed":
             raise WalletOperationConflict("WALLET_COMMITTED_CHARGE_REQUIRED")
@@ -973,8 +981,12 @@ class RHWalletOperation(BaseIDModel, table=True):
             await session.execute(select(cls).where(col(cls.operation_key) == command.operation_key))
         ).scalar_one_or_none()
         operation = await cls.apply_in_session(session, command)
-        record.point_cost = operation.net_after_points
-        session.add(record)
+        await session.execute(
+            update(RHComfyuiTaskRecord)
+            .where(col(RHComfyuiTaskRecord.id) == record_id)
+            .values(point_cost=operation.net_after_points)
+            .execution_options(synchronize_session=False)
+        )
         await session.flush()
         return operation, prior is not None
 
@@ -2185,45 +2197,47 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
         """按主键更新任务记录(执行中 → 终态)。
 
         仅 ``status=running`` 可写。已终态返回 False，避免后完成的请求盖掉先完成的结果。
+        直接 UPDATE 短列，不把 raw_response_json 整行读进写事务。
         """
         if record_id <= 0:
             return False
-        stmt = select(cls).where(
-            col(cls.id) == record_id,
-            col(cls.status) == RHComfyuiTaskStatus.RUNNING.value,
-        )
-        row = (await session.execute(stmt)).scalar_one_or_none()
-        if row is None:
-            return False
-        row.status = status[:16]
+        changes: dict[str, object] = {"status": status[:16]}
         if elapsed_ms is not None:
-            row.elapsed_ms = elapsed_ms
+            changes["elapsed_ms"] = elapsed_ms
         if error_message:
-            row.error_message = error_message
+            changes["error_message"] = error_message
         if raw_response_json:
-            row.raw_response_json = raw_response_json
+            changes["raw_response_json"] = raw_response_json
         if saved_files_json:
-            row.saved_files_json = saved_files_json
+            changes["saved_files_json"] = saved_files_json
         if backend:
-            row.backend = backend[:32]
+            changes["backend"] = backend[:32]
         if backend_model:
-            row.backend_model = backend_model[:128]
+            changes["backend_model"] = backend_model[:128]
         if backend_provider:
-            row.backend_provider = backend_provider[:32]
+            changes["backend_provider"] = backend_provider[:32]
         if backend_key_prefix:
-            row.backend_key_prefix = backend_key_prefix[:16]
+            changes["backend_key_prefix"] = backend_key_prefix[:16]
         if point_cost is not None:
-            row.point_cost = int(point_cost)
+            changes["point_cost"] = int(point_cost)
         if extra_params_json is not None:
-            row.extra_params_json = extra_params_json
+            changes["extra_params_json"] = extra_params_json
         if request_body_json is not None:
-            row.request_body_json = request_body_json
+            changes["request_body_json"] = request_body_json
         if prompt is not None:
-            row.prompt = str(prompt)[:4000]
+            changes["prompt"] = str(prompt)[:4000]
         if refunded is not None:
-            row.refunded = bool(refunded)
-        session.add(row)
-        return True
+            changes["refunded"] = bool(refunded)
+        result = await session.execute(
+            update(cls)
+            .where(
+                col(cls.id) == record_id,
+                col(cls.status) == RHComfyuiTaskStatus.RUNNING.value,
+            )
+            .values(**changes)
+            .execution_options(synchronize_session=False)
+        )
+        return isinstance(result, CursorResult) and result.rowcount == 1
 
     @classmethod
     def _key_prefix_lacks_mask(cls) -> ColumnElement[bool]:
