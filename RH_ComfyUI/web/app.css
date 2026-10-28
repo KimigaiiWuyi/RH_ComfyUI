@@ -1,0 +1,802 @@
+/* RH_ComfyUI 模型与供应商看板
+ * 布局:图谱(模型 → 供应商 双列连线)为主视图,供应商状态表为辅。
+ * 配色全部走 Hub token(HSL 三元组),只在本文件补三个状态色:
+ * 可用 / 熔断 / 未继承。切主题时由 SDK 的 gshub:theme 事件驱动重绘。
+ */
+
+:root {
+  /* Hub token 兜底值(取自 Hub 亮色主题)。
+   * Hub 是通过 postMessage 把变量写到 <html> 的 inline style 上,首帧可能还没到;
+   * 没有兜底会让 hsl(var(--destructive)) 整条失效(格子变透明)。
+   * inline style 优先级高于本规则,Hub 一旦注入就会盖掉这些兜底值。 */
+  --background: 240 4% 95%;
+  --foreground: 240 5% 10%;
+  --card: 0 0% 98%;
+  --card-foreground: 240 5% 10%;
+  --border: 240 4% 83%;
+  --primary: 333 71% 50%;
+  --primary-foreground: 327 73% 97%;
+  --muted: 240 4% 83%;
+  --muted-foreground: 240 5% 10%;
+  --destructive: 0 72% 50%;
+  --ring: 333 71% 50%;
+  --secondary: 240 5% 33%;
+  --accent: 355 100% 97%;
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+
+  /* 本插件自己的状态色(Hub 不提供 success/warn 两个语义) */
+  --ok: 142 71% 45%;
+  --warn: 38 92% 50%;
+  --off: 240 4% 62%;
+  --radius: 8px;
+}
+
+html.dark {
+  --background: 240 5% 10%;
+  --foreground: 0 0% 98%;
+  --card: 240 4% 14%;
+  --card-foreground: 0 0% 98%;
+  --border: 240 4% 22%;
+  --primary: 327 73% 62%;
+  --primary-foreground: 240 5% 10%;
+  --muted: 240 4% 22%;
+  --muted-foreground: 240 5% 70%;
+  --destructive: 0 72% 58%;
+  --ring: 327 73% 62%;
+  --secondary: 240 5% 80%;
+  --accent: 355 60% 14%;
+
+  --ok: 142 69% 58%;
+  --warn: 38 92% 62%;
+  --off: 240 4% 42%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 作者层的 display 会盖掉 UA 的 [hidden]{display:none};
+   .status / .main 都设了 display,必须显式兜住,否则 hidden 形同虚设。 */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  padding: 0 0 48px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* 页面占满 Hub 给的 iframe 宽度。
+   之前限宽 1280px,宽屏下左右各留一大片空白,图谱被挤在中间,看着像没铺开。 */
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 0 20px;
+}
+
+/* ── 顶栏 ── */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 20px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 0 12px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.sub {
+  margin-top: 2px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12.5px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+input[type="search"] {
+  width: 230px;
+  padding: 6px 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: 13px;
+}
+
+input[type="search"]:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+}
+
+.switch {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: hsl(var(--muted-foreground));
+  font-size: 12.5px;
+  user-select: none;
+  cursor: pointer;
+}
+
+.btn {
+  padding: 6px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+}
+
+.btn.ghost {
+  padding: 4px 10px;
+}
+
+/* ── 快照元信息 ── */
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 10px 0 8px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.meta-row b {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+
+/* ── 筛选条 ── */
+.filters {
+  padding: 0 0 12px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: hsl(var(--primary));
+}
+
+.chip.active {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.chip-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip.active .chip-count {
+  background: hsl(var(--primary-foreground));
+  color: hsl(var(--primary));
+}
+
+/* ── 状态区 ── */
+.status {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 0;
+  color: hsl(var(--muted-foreground));
+}
+
+.status.error {
+  color: hsl(var(--destructive));
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid hsl(var(--border));
+  border-top-color: hsl(var(--primary));
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── KPI ── */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.kpi {
+  padding: 12px 14px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+}
+
+.kpi .k-label {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.kpi .k-value {
+  margin-top: 2px;
+  font-size: 22px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.kpi .k-sub {
+  color: hsl(var(--muted-foreground));
+  font-size: 11.5px;
+}
+
+/* ── 面板 ── */
+.panel {
+  margin-bottom: 16px;
+  padding: 14px 16px 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+}
+
+/* 正文纵向弹性布局:图谱面板吃掉剩余高度,整页基本不用上下滚 */
+#main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#main > .kpis,
+#main > .panel {
+  flex: 0 0 auto;
+}
+
+#main > .graph-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  /* 图谱是主视图,高度不能被下方表格挤掉 */
+  min-height: 52vh;
+}
+
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.hint {
+  margin: 2px 0 10px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11.5px;
+}
+
+.legend span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dot.ok {
+  background: hsl(var(--ok));
+}
+
+.dot.bad {
+  background: hsl(var(--destructive));
+}
+
+.dot.off {
+  background: hsl(var(--off));
+}
+
+.dot.warn {
+  background: hsl(var(--warn));
+}
+
+/* ── 图谱 ── */
+.graph-wrap {
+  overflow-x: auto;
+  /* 纵向滚动条常驻占位:否则渲染前后 clientWidth 会因滚动条出现/消失而抖动,
+     图谱宽度跟着抖,右侧列会被裁掉一截。 */
+  overflow-y: scroll;
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+}
+
+.graph-wrap svg {
+  display: block;
+}
+
+.graph-wrap .link {
+  fill: none;
+  stroke-linecap: round;
+  transition: stroke-opacity 0.12s ease, stroke-width 0.12s ease;
+}
+
+.graph-wrap .link.ok {
+  stroke: hsl(var(--ok));
+}
+
+.graph-wrap .link.bad {
+  stroke: hsl(var(--destructive));
+}
+
+.graph-wrap .link.broken {
+  stroke: hsl(var(--warn));
+}
+
+.graph-wrap .link.dim {
+  stroke-opacity: 0.12;
+}
+
+.graph-wrap .link.hot {
+  stroke-opacity: 1;
+  stroke-width: 2.6;
+}
+
+.node {
+  cursor: pointer;
+}
+
+.node rect {
+  fill: hsl(var(--card));
+  stroke: hsl(var(--border));
+  stroke-width: 1;
+  transition: fill 0.12s ease, stroke 0.12s ease;
+}
+
+.node:hover rect {
+  stroke: hsl(var(--primary));
+}
+
+.node.sel rect {
+  fill: hsl(var(--accent));
+  stroke: hsl(var(--primary));
+  stroke-width: 1.6;
+}
+
+.node.dim {
+  opacity: 0.22;
+}
+
+.node text {
+  fill: hsl(var(--foreground));
+  font-size: 13px;
+  dominant-baseline: middle;
+}
+
+.node .n-sub {
+  fill: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.node .badge {
+  font-size: 10px;
+  font-weight: 600;
+  fill: hsl(var(--card));
+}
+
+.node .badge.ok {
+  fill: hsl(var(--ok));
+}
+
+.node .badge.bad {
+  fill: hsl(var(--destructive));
+}
+
+.node .badge.warn {
+  fill: hsl(var(--warn));
+}
+
+.node .badge.off {
+  fill: hsl(var(--off));
+}
+
+.group-label {
+  fill: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* 模态分组背景带:让「模型 → 供应商」的层级一眼可辨 */
+.graph-wrap .group-band {
+  fill: hsl(var(--muted) / 0.5);
+}
+
+.graph-wrap .col-head {
+  fill: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* 供应商声明顺序徽标 */
+.graph-wrap .n-order {
+  fill: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.group-rule {
+  stroke: hsl(var(--border));
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+/* ── 供应商表 ── */
+.table-wrap {
+  overflow: auto;
+  max-height: 28vh;
+  margin-top: 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+}
+
+table.providers {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+}
+
+table.providers th,
+table.providers td {
+  padding: 6px 10px;
+  border-bottom: 1px solid hsl(var(--border));
+  text-align: left;
+  vertical-align: middle;
+}
+
+table.providers thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+table.providers tbody tr {
+  cursor: pointer;
+}
+
+table.providers tbody tr:hover {
+  background: hsl(var(--accent));
+}
+
+table.providers tbody tr.sel {
+  background: hsl(var(--accent));
+  box-shadow: inset 2px 0 0 hsl(var(--primary));
+}
+
+table.providers tbody tr.dim {
+  opacity: 0.3;
+}
+
+td.num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+td.order {
+  width: 34px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11.5px;
+  text-align: right;
+}
+
+.pname {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pname .p-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pname .p-sub {
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pill.ok {
+  border-color: hsl(var(--ok));
+  color: hsl(var(--ok));
+}
+
+.pill.bad {
+  border-color: hsl(var(--destructive));
+  color: hsl(var(--destructive));
+}
+
+.pill.warn {
+  border-color: hsl(var(--warn));
+  color: hsl(var(--warn));
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  max-width: 420px;
+}
+
+.tag {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tag.ok {
+  background: hsl(var(--ok));
+  color: hsl(var(--background));
+}
+
+.tag.bad {
+  background: hsl(var(--destructive));
+  color: hsl(var(--background));
+}
+
+.tag.more {
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ── 详情抽屉 ── */
+.detail {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 92vw);
+  height: 100vh;
+  border-left: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  box-shadow: -8px 0 24px hsl(var(--shadow, 240 5% 60% / 0.25));
+}
+
+.detail-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.detail-title h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.detail-sub {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.detail-body {
+  overflow: auto;
+  padding: 14px 18px 28px;
+}
+
+.d-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px solid hsl(var(--border));
+  font-size: 12.5px;
+}
+
+.d-row .d-label {
+  flex: 0 0 84px;
+  color: hsl(var(--muted-foreground));
+}
+
+.d-row .d-value {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.d-reason {
+  margin: 8px 0 14px;
+  padding: 8px 10px;
+  border: 1px solid hsl(var(--destructive));
+  border-radius: var(--radius);
+  color: hsl(var(--destructive));
+  font-size: 12px;
+}
+
+.d-section {
+  margin: 16px 0 8px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.chain {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chain-item {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 7px 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+}
+
+.chain-item.ok {
+  border-color: hsl(var(--ok));
+}
+
+.chain-item.bad {
+  border-color: hsl(var(--destructive));
+}
+
+.chain-item.broken {
+  border-color: hsl(var(--warn));
+}
+
+.chain-idx {
+  flex: 0 0 20px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.chain-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.chain-name {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chain-sub {
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: hsl(240 5% 10% / 0.35);
+}
+
+.empty {
+  padding: 26px 0;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+}

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RH_ComfyUI</title>
+    <link rel="stylesheet" href="./app.css" />
+    <script src="/plugin-pages/_sdk/gshub-plugin.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <h1 id="title">RH_ComfyUI</h1>
+          <div class="sub" id="subtitle"></div>
+        </div>
+        <div class="toolbar">
+          <div class="field">
+            <input id="search" type="search" autocomplete="off" />
+          </div>
+          <label class="switch">
+            <input id="only-issue" type="checkbox" />
+            <span id="only-issue-label"></span>
+          </label>
+          <label class="switch">
+            <input id="auto-refresh" type="checkbox" checked />
+            <span id="auto-refresh-label"></span>
+          </label>
+          <button type="button" class="btn" id="btn-refresh"></button>
+        </div>
+      </header>
+
+      <div class="meta-row" id="meta-row"></div>
+
+      <div class="filters">
+        <div class="chips" id="modality-chips"></div>
+      </div>
+
+      <div id="status" class="status">
+        <div class="spinner" aria-hidden="true"></div>
+        <p id="status-text"></p>
+      </div>
+
+      <main id="main" hidden>
+        <section class="kpis" id="kpis"></section>
+
+        <section class="panel graph-panel">
+          <div class="panel-head">
+            <h2 id="sec-graph"></h2>
+            <div class="legend" id="graph-legend"></div>
+          </div>
+          <p class="hint" id="graph-hint"></p>
+          <div class="graph-wrap" id="graph-wrap"></div>
+        </section>
+
+        <section class="panel table-panel">
+          <h2 id="sec-providers"></h2>
+          <div class="table-wrap" id="provider-table"></div>
+        </section>
+      </main>
+    </div>
+
+    <aside class="detail" id="detail" hidden>
+      <div class="detail-head">
+        <div class="detail-title">
+          <h3 id="detail-name"></h3>
+          <div class="detail-sub" id="detail-id"></div>
+        </div>
+        <button type="button" class="btn ghost" id="detail-close"></button>
+      </div>
+      <div class="detail-body" id="detail-body"></div>
+    </aside>
+
+    <div class="scrim" id="scrim" hidden></div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

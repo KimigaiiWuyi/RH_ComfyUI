@@ -1,0 +1,76 @@
+{
+  "title": "Model & Provider Board",
+  "subtitle": "RH_ComfyUI models, provider status, routing order and inheritance",
+  "search": "Search models / providers",
+  "autoRefresh": "Auto refresh",
+  "onlyIssue": "Issues only",
+  "refresh": "Refresh",
+  "loading": "Loading snapshot…",
+  "error": "Failed to load",
+  "updatedAt": "Snapshot",
+  "balanceMode": "Load balance",
+  "failureThreshold": "Failure threshold",
+  "circuitSeconds": "Breaker cooldown",
+  "seconds": "{n}s",
+  "all": "All",
+  "meta": {
+    "global": "Global available models"
+  },
+  "kpi": {
+    "models": "Available models",
+    "modelsAvailable": "available / total",
+    "providers": "Healthy providers",
+    "providersHealthy": "healthy / total",
+    "links": "Available links",
+    "linksAvailable": "available / total",
+    "circuitOpen": "Open circuits",
+    "inflight": "In flight"
+  },
+  "sections": {
+    "graph": "Model → Provider graph",
+    "providers": "Provider status"
+  },
+  "graph": {
+    "hint": "Hover to trace links, click a model for details, click a provider to highlight its models; # is the declared provider order",
+    "available": "Available",
+    "unavailable": "Unavailable",
+    "circuitOpen": "Circuit open",
+    "empty": "No matching models",
+    "columnModels": "Models",
+    "columnProviders": "Providers"
+  },
+  "table": {
+    "order": "Order",
+    "provider": "Provider",
+    "available": "Available",
+    "inherited": "Inherited",
+    "weight": "Weight",
+    "load": "In flight / limit",
+    "capability": "Capability",
+    "models": "Inherited models"
+  },
+  "provider": {
+    "weight": "Weight",
+    "remoteCancel": "Remote cancel",
+    "circuitOpen": "Circuit",
+    "failureCount": "{n} failures"
+  },
+  "model": {
+    "status": "Status",
+    "modality": "Modality",
+    "priority": "Priority",
+    "points": "Points",
+    "pointsRange": "{min} ~ {max}",
+    "mode": "Execution mode",
+    "backend": "Backend",
+    "reason": "Reason",
+    "order": "Provider order (fallback chain)",
+    "noChannel": "No channel declared",
+    "available": "Available",
+    "unavailable": "Unavailable",
+    "close": "Close"
+  },
+  "empty": {
+    "providers": "No matching providers"
+  }
+}

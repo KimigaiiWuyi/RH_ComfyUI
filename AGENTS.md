@@ -42,6 +42,8 @@ AIGC 统一生成：图片 / 视频 / 音乐 / TTS / ASR。2026-07 起全编程�
     │   └── bridge.py
     ├── rh_generate/                            # 命令 + to_ai + 知识库
     ├── rh_models/                              # FastAPI /api/RH_ComfyUI/models*
+    ├── rh_webconsole/                          # Web 控制台页(模型 / 供应商看板)
+    ├── web/                                   # 插件页静态资源(index/app/css/locales)
     ├── rh_agent/  rh_admin/  rh_help/  rh_config/
     └── utils/
         ├── backends/                           # comfyui / gemini / seedance / …
@@ -52,7 +54,7 @@ AIGC 统一生成：图片 / 视频 / 音乐 / TTS / ASR。2026-07 起全编程�
         └── module_identity.py / ai_tools.py / image_process.py / …
 ```
 
-内层 `__init__.py` **显式** import：`core, utils, models, rh_help, rh_admin, rh_agent, rh_models, rh_generate`，再 `unify_module_identity`。`rh_config` 通过 `PLUGIN_CONFIG` / `SERVICE_CONFIG` 装载。
+内层 `__init__.py` **显式** import：`core, utils, models, rh_help, rh_admin, rh_agent, rh_models, rh_generate, rh_webconsole`，再 `unify_module_identity`。`rh_config` 通过 `PLUGIN_CONFIG` / `SERVICE_CONFIG` 装载。
 
 ## Skills
 
@@ -127,6 +129,7 @@ uv run basedpyright
 - 加模型：`models/<模态>/defs.py` + `ALL_MODELS`；跨字段约束写 `overrides.py`。
 - 加供应商：`channel_bindings()` 或网页 `OpenAI_Image_Providers` + `rh 刷新供应商`。
 - 配置每次调用再读。运行时在 `data/RH_ComfyUI/`，不进 git。
+- Web 页：`rh_webconsole/` 登记页面 + `web/` 放静态资源。页面挂在 Hub `/plugins`（插件配置界面）的按钮上，接口走 `PluginAPI(prefix="/api/RH_ComfyUI/...")`。看板只读，别在上面加写操作。
 
 ## 坑点
 
@@ -139,6 +142,8 @@ uv run basedpyright
 7. 重启丢异步任务：`vendor_task_id` + `resume_poll`。
 8. 上游只吃 `ratio` 的模型禁止假装暴露 `width`/`height`。
 9. catalog 档位(`frame_mode` / `image_size` / `task_mode` 等)不是 `GenerationRequest` 字段,进 `params`;validate / estimate_cost 从 params 读。新模型不要为每个 enum 加 dataclass 字段。详见 skill §6.6。
+10. 供应商可用性是 **(模型, 通道)** 粒度,不是供应商粒度:同一家(如 ComfyUI)的启用闸按模型名逐个判。看板上的「供应商可用 N/共 M」是聚合口径,别当成全局开关。
+11. 看板「供应商顺序」= `channel_bindings()` 的声明顺序(负载均衡的输入顺序),不是负载均衡后的实际投递顺序。
 
 ## Security notes
 

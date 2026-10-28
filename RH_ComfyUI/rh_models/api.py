@@ -177,7 +177,7 @@ def _model_node_backend(model_obj: Any) -> str:
     return str(backend or "").lower()
 
 
-def _channel_supports_cancel(model_obj: Any, ch_name: str) -> bool:
+def channel_supports_cancel(model_obj: Any, ch_name: str) -> bool:
     """通道级本地取消(cancel_generation)。rh_app 一律 False(只能 resume)。
 
     未知模型由调用方自行 fail-closed;此处假定 model_obj 已解析成功。
@@ -331,7 +331,7 @@ async def _build_entry(node) -> ModelEntry:  # noqa: ANN001
         supports_cancel = bool(model_obj.supports_cancel)
         for b in model_obj.channel_bindings():
             ch_name = b.channel.name
-            ch_local = _channel_supports_cancel(model_obj, ch_name)
+            ch_local = channel_supports_cancel(model_obj, ch_name)
             ch_remote = _channel_supports_remote_cancel(model_obj, ch_name, channel=b.channel)
             channels.append(
                 {
@@ -437,7 +437,7 @@ async def _build_entry_from_model(model) -> ModelEntry:  # noqa: ANN001
         pass
     for b in bindings:
         ch_name = b.channel.name
-        ch_local = _channel_supports_cancel(model, ch_name)
+        ch_local = channel_supports_cancel(model, ch_name)
         ch_remote = _channel_supports_remote_cancel(model, ch_name, channel=b.channel)
         channels.append(
             {

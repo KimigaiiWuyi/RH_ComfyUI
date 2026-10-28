@@ -13,6 +13,8 @@ Plugins(
 # 其余业务子包在此显式装载(顺序确定),配合下方模块身份统一,
 # 无论本树经哪条路径先被 import(嵌套加载器 / 跨插件 re-export / 测试),
 # 加载器后续的 cached_import 都会直接复用,不再 exec 出第二棵模块树。
+# rh_webconsole 在 import 时登记 Web 页面(Hub 插件配置界面的「模型与供应商看板」按钮)
+# 并挂 /api/RH_ComfyUI/dashboard/overview。
 from . import (  # noqa: F401, E402
     core,
     utils,
@@ -22,6 +24,7 @@ from . import (  # noqa: F401, E402
     rh_agent,
     rh_models,  # noqa: F401, E402
     rh_generate,
+    rh_webconsole,  # noqa: F401, E402
 )
 
 # ── 模块身份统一:三种 import 前缀共享同一棵模块树 ──

@@ -24,7 +24,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator
+from typing import Sequence, AsyncIterator
 from contextlib import asynccontextmanager
 
 from gsuid_core.logger import logger
@@ -62,11 +62,16 @@ def _normalize_channel_key(channel_name: str) -> str:
     return key
 
 
-def _channel_limit(channel_name: str) -> int:
-    """通道并发上限:RH 共享池一档,其余供应商一档。"""
-    if _normalize_channel_key(channel_name) == _RH_SHARED_KEY:
+def _limit_for_pool_key(pool_key: str) -> int:
+    """并发上限(按归一化后的通道池 key):RH 共享池一档,其余供应商一档。"""
+    if pool_key == _RH_SHARED_KEY:
         return _read_int_config("RH_Channel_Concurrency", 1)
     return _read_int_config("Channel_Concurrency", 10)
+
+
+def _channel_limit(channel_name: str) -> int:
+    """通道并发上限:RH 共享池一档,其余供应商一档。"""
+    return _limit_for_pool_key(_normalize_channel_key(channel_name))
 
 
 def _channel_baseline() -> int:
@@ -152,4 +157,25 @@ def channel_has_capacity(channel_name: str) -> bool:
     return _channel_inflight.get(key, 0) < _channel_limit(channel_name)
 
 
-__all__ = ["channel_slot", "channel_slot_for_model", "channel_has_capacity"]
+def channel_load_snapshot(channel_names: Sequence[str]) -> dict[str, dict[str, int]]:
+    """供应商负载快照(只读):通道名 → 在途请求数 / 并发上限。
+
+    供 Web 控制台展示供应商繁忙程度;不改变任何闸状态。
+    RH 通道(runninghub / rh_app / comfyui)共用一把闸,快照里上限相同。
+    """
+    out: dict[str, dict[str, int]] = {}
+    for name in channel_names:
+        key = _normalize_channel_key(name)
+        out[name] = {
+            "inflight": _channel_inflight.get(key, 0),
+            "limit": _limit_for_pool_key(key),
+        }
+    return out
+
+
+__all__ = [
+    "channel_slot",
+    "channel_slot_for_model",
+    "channel_has_capacity",
+    "channel_load_snapshot",
+]

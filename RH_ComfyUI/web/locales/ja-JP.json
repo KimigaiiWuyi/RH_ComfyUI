@@ -1,0 +1,76 @@
+{
+  "title": "モデル・プロバイダボード",
+  "subtitle": "RH_ComfyUI の全モデル、プロバイダ状態、ルーティング順、継承関係",
+  "search": "モデル / プロバイダを検索",
+  "autoRefresh": "自動更新",
+  "onlyIssue": "異常のみ",
+  "refresh": "更新",
+  "loading": "スナップショットを読み込み中…",
+  "error": "読み込みに失敗しました",
+  "updatedAt": "スナップショット",
+  "balanceMode": "負荷分散",
+  "failureThreshold": "障害しきい値",
+  "circuitSeconds": "遮断クールダウン",
+  "seconds": "{n}秒",
+  "all": "すべて",
+  "meta": {
+    "global": "全体の利用可能モデル"
+  },
+  "kpi": {
+    "models": "利用可能モデル",
+    "modelsAvailable": "利用可能 / 全数",
+    "providers": "正常プロバイダ",
+    "providersHealthy": "正常 / 全数",
+    "links": "利用可能接続",
+    "linksAvailable": "利用可能 / 全数",
+    "circuitOpen": "遮断中接続",
+    "inflight": "処理中"
+  },
+  "sections": {
+    "graph": "モデル → プロバイダ グラフ",
+    "providers": "プロバイダ状態"
+  },
+  "graph": {
+    "hint": "ホバーで関連を強調、クリックでモデル詳細 / プロバイダの強調;# はプロバイダ宣言順",
+    "available": "利用可能",
+    "unavailable": "利用不可",
+    "circuitOpen": "遮断中",
+    "empty": "一致するモデルがありません",
+    "columnModels": "モデル",
+    "columnProviders": "プロバイダ"
+  },
+  "table": {
+    "order": "順序",
+    "provider": "プロバイダ",
+    "available": "利用可能",
+    "inherited": "継承数",
+    "weight": "重み",
+    "load": "処理中 / 上限",
+    "capability": "能力",
+    "models": "継承モデル"
+  },
+  "provider": {
+    "weight": "重み",
+    "remoteCancel": "上流キャンセル",
+    "circuitOpen": "遮断",
+    "failureCount": "失敗 {n}"
+  },
+  "model": {
+    "status": "状態",
+    "modality": "モダリティ",
+    "priority": "優先度",
+    "points": "ポイント",
+    "pointsRange": "{min} ~ {max}",
+    "mode": "実行モード",
+    "backend": "バックエンド",
+    "reason": "理由",
+    "order": "プロバイダ順(フォールバック)",
+    "noChannel": "チャネル未宣言",
+    "available": "利用可能",
+    "unavailable": "利用不可",
+    "close": "閉じる"
+  },
+  "empty": {
+    "providers": "一致するプロバイダがありません"
+  }
+}

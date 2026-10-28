@@ -1,0 +1,76 @@
+{
+  "title": "模型与供应商看板",
+  "subtitle": "RH_ComfyUI 全量模型、供应商状态、路由顺序与继承关系",
+  "search": "搜索模型 / 供应商",
+  "autoRefresh": "自动刷新",
+  "onlyIssue": "只看异常",
+  "refresh": "刷新",
+  "loading": "正在加载快照…",
+  "error": "加载失败",
+  "updatedAt": "快照时间",
+  "balanceMode": "负载均衡",
+  "failureThreshold": "熔断阈值",
+  "circuitSeconds": "熔断冷却",
+  "seconds": "{n} 秒",
+  "all": "全部",
+  "meta": {
+    "global": "全局可用模型"
+  },
+  "kpi": {
+    "models": "可用模型",
+    "modelsAvailable": "可用 / 共",
+    "providers": "健康供应商",
+    "providersHealthy": "健康 / 共",
+    "links": "可用连接",
+    "linksAvailable": "可用 / 共",
+    "circuitOpen": "熔断中连接",
+    "inflight": "在途请求"
+  },
+  "sections": {
+    "graph": "模型 → 供应商 图谱",
+    "providers": "供应商状态"
+  },
+  "graph": {
+    "hint": "悬停高亮关联,点击模型看详情,点击供应商高亮它服务的模型;# 为供应商声明顺序",
+    "available": "可用",
+    "unavailable": "不可用",
+    "circuitOpen": "熔断中",
+    "empty": "没有匹配的模型",
+    "columnModels": "模型",
+    "columnProviders": "供应商"
+  },
+  "table": {
+    "order": "顺序",
+    "provider": "供应商",
+    "available": "可用模型",
+    "inherited": "继承数",
+    "weight": "权重",
+    "load": "在途 / 上限",
+    "capability": "能力",
+    "models": "继承模型"
+  },
+  "provider": {
+    "weight": "权重",
+    "remoteCancel": "上游取消",
+    "circuitOpen": "熔断",
+    "failureCount": "失败 {n}"
+  },
+  "model": {
+    "status": "状态",
+    "modality": "模态",
+    "priority": "优先级",
+    "points": "积分",
+    "pointsRange": "{min} ~ {max}",
+    "mode": "执行模式",
+    "backend": "后端",
+    "reason": "原因",
+    "order": "供应商顺序(回退链)",
+    "noChannel": "未声明通道",
+    "available": "可用",
+    "unavailable": "不可用",
+    "close": "关闭"
+  },
+  "empty": {
+    "providers": "没有匹配的供应商"
+  }
+}
