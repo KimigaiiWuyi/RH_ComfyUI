@@ -39,6 +39,19 @@ def test_video_examples_match_published_rates() -> None:
     assert referred == Decimal("4.5")
 
 
+def test_v40_rates_follow_input_video_duration() -> None:
+    plain = video_yuan("kling-4.0", resolution="720p", seconds=5, sound="", ref_video=False)
+    assert plain == Decimal("5.0")
+    hi = video_yuan("kling-4.0", resolution="1080p", seconds=5, sound="", ref_video=False)
+    assert hi == Decimal("7.5")
+    # 输入短于输出:按输出×2 秒计
+    short = video_yuan("kling-4.0", resolution="720p", seconds=5, sound="", ref_video=True, input_seconds=4)
+    assert short == Decimal("6.0")
+    # 输入长于输出:按(输入+输出)秒计
+    long_in = video_yuan("kling-4.0", resolution="1080p", seconds=10, sound="", ref_video=True, input_seconds=20)
+    assert long_in == Decimal("27.0")
+
+
 def test_image_examples_match_published_rates() -> None:
     assert cny_to_points(image_yuan("kling-image-3.0", tier="t2i", resolution="1k", count=1)) == 3
     assert cny_to_points(image_yuan("kling-image-3.0", tier="omni", resolution="4k", count=1)) == 6
@@ -50,6 +63,7 @@ def test_image_examples_match_published_rates() -> None:
 
 
 def test_point_bounds_cover_each_catalog_model() -> None:
+    assert video_point_bounds("kling-4.0") == (42, 756)
     assert video_point_bounds("kling-3.0-turbo") == (34, 210)
     assert video_point_bounds("kling-3.0") == (26, 630)
     assert video_point_bounds("kling-o1") == (26, 168)
@@ -59,7 +73,7 @@ def test_point_bounds_cover_each_catalog_model() -> None:
     assert image_point_bounds("kling-image-o1") == (3, 26)
     assert image_point_bounds("kling-image-2.1") == (2, 51)
     assert image_point_bounds("kling-image-common") == (3, 26)
-    for name in ("kling-3.0-turbo", "kling-3.0", "kling-o1", "kling-2.6", "kling-2.5-turbo"):
+    for name in ("kling-4.0", "kling-3.0-turbo", "kling-3.0", "kling-o1", "kling-2.6", "kling-2.5-turbo"):
         low, high = video_point_bounds(name)
         assert low < high
     for name in ("kling-image-3.0", "kling-image-o1", "kling-image-2.1", "kling-image-common"):

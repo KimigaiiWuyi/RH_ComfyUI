@@ -26,6 +26,10 @@ from .catalog import (
 )
 from ....core.base.errors import ValidationError
 from ....utils.core.request import GenerationRequest
+from ....utils.mappers.seedance_billing import (
+    resolve_input_video_duration,
+    input_video_duration_from_params,
+)
 
 JsonScalar = str | int | float | bool | None
 JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
@@ -34,6 +38,8 @@ _VIDEO_NAMES = {name for name, _title in KLING_VIDEO_MODELS}
 _IMAGE_NAMES = {name for name, _title in KLING_IMAGE_MODELS}
 _TITLES = dict(KLING_VIDEO_MODELS + KLING_IMAGE_MODELS)
 _VIDEO_RATIO_SET = {"16:9", "9:16", "1:1"}
+_VIDEO_RATIO_40_SET = {"16:9", "9:16", "1:1", "21:9"}
+_VIDEO_RATIO_40_OMNI = {*_VIDEO_RATIO_40_SET, "adaptive"}
 _IMAGE_RATIO_SET = set(IMAGE_RATIOS)
 _IMAGE_RATIO_AUTO = set(IMAGE_RATIOS_WITH_AUTO)
 
@@ -81,9 +87,9 @@ def _images(request: GenerationRequest, *, maximum: int, label: str) -> list[str
     return [_b64(blob, label) for blob in request.images]
 
 
-def _video_urls(request: GenerationRequest, label: str) -> list[str]:
-    if len(request.video_refs) > 1:
-        raise ValidationError(f"{label} 最多 1 段参考视频")
+def _video_urls(request: GenerationRequest, label: str, maximum: int = 1) -> list[str]:
+    if len(request.video_refs) > maximum:
+        raise ValidationError(f"{label} 最多 {maximum} 段参考视频")
     urls: list[str] = []
     for ref in request.video_refs:
         url = ref.url.strip() if isinstance(ref.url, str) else ""
@@ -197,7 +203,7 @@ def _element_value(text: str) -> JsonValue:
     return text
 
 
-def _voice_ids(request: GenerationRequest, label: str) -> list[str]:
+def _voice_ids(request: GenerationRequest, label: str, maximum: int = 2) -> list[str]:
     found: list[str] = []
     if isinstance(request.voice_id, str) and request.voice_id.strip():
         found.append(request.voice_id.strip())
@@ -214,8 +220,8 @@ def _voice_ids(request: GenerationRequest, label: str) -> list[str]:
             text = item.strip()
             if text not in found:
                 found.append(text)
-    if len(found) > 2:
-        raise ValidationError(f"{label} 最多 2 个音色,当前 {len(found)} 个")
+    if len(found) > maximum:
+        raise ValidationError(f"{label} 最多 {maximum} 个音色,当前 {len(found)} 个")
     return found
 
 
@@ -322,8 +328,8 @@ def _frame_item(kind: str, blob: str, index: int) -> dict[str, JsonValue]:
     return {"type": kind, "url": blob, "id": f"image_{index}"}
 
 
-def _video_item(kind: str, url: str) -> dict[str, JsonValue]:
-    return {"type": kind, "url": url, "id": "video_1"}
+def _video_item(kind: str, url: str, index: int = 1) -> dict[str, JsonValue]:
+    return {"type": kind, "url": url, "id": f"video_{index}"}
 
 
 def _element_item(element_id: str, index: int) -> dict[str, JsonValue]:
@@ -351,6 +357,9 @@ def _prepare_video(model: str, request: GenerationRequest, *, for_estimate: bool
     _reject_ordered_media(request, label)
     if request.audio_refs:
         raise ValidationError(f"{label} 不支持参考音频")
+    if model == "kling-4.0":
+        prompt = _prompt_40(request, required=not for_estimate, label=label)
+        return _video_40(request, prompt, label)
     limit = 3072 if model in {"kling-3.0-turbo", "kling-3.0"} else 2500
     prompt = _prompt(request, limit=limit, required=not for_estimate, label=label)
     if model == "kling-3.0-turbo":
@@ -401,6 +410,229 @@ def _video_turbo(request: GenerationRequest, prompt: str, label: str) -> KlingSu
         kind="video",
         prompt=prompt,
         yuan=yuan,
+    )
+
+
+def _prompt_40(request: GenerationRequest, *, required: bool, label: str) -> str:
+    """4.0 按字符加权:英文 ≤26000、非英文 ≤11000,E/26000 + N/11000 ≤ 1。"""
+    text = request.prompt or ""
+    if required and not text.strip():
+        raise ValidationError(f"{label} 必须填写提示词")
+    english = sum(1 for ch in text if ord(ch) < 128)
+    others = len(text) - english
+    if english / 26000 + others / 11000 > 1:
+        raise ValidationError(f"{label} 提示词超长(英文 ≤26000 字符,非英文 ≤11000 字符)")
+    return text
+
+
+_FRAME_ROLE_ALIASES: dict[str, str] = {
+    "first": "first_frame",
+    "first_frame": "first_frame",
+    "middle": "middle_frame",
+    "middle_frame": "middle_frame",
+    "last": "last_frame",
+    "last_frame": "last_frame",
+    "refer": "refer_image",
+    "refer_image": "refer_image",
+    "reference": "refer_image",
+}
+
+
+def _frame_roles(request: GenerationRequest, count: int, label: str) -> list[str]:
+    """每张参考图的角色。缺省按位置:首图首帧、末图尾帧、其余中间帧。"""
+    if count == 0:
+        if "frame_roles" in request.params:
+            raise ValidationError(f"{label} 的 frame_roles 需要至少 1 张参考图")
+        return []
+    if "frame_roles" not in request.params:
+        if count == 1:
+            return ["first_frame"]
+        return ["first_frame", *(["middle_frame"] * (count - 2)), "last_frame"]
+    raw = request.params["frame_roles"]
+    if not isinstance(raw, list):
+        raise ValidationError(f"{label} 的 frame_roles 必须是字符串列表")
+    if len(raw) != count:
+        raise ValidationError(f"{label} 的 frame_roles 须与参考图片一一对应(当前 {count} 张图,{len(raw)} 个角色)")
+    roles: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            raise ValidationError(f"{label} 的 frame_roles 必须是字符串列表")
+        role = _FRAME_ROLE_ALIASES.get(item.strip().lower())
+        if role is None:
+            raise ValidationError(f"{label} 的 frame_roles 只支持 first/middle/last/refer")
+        roles.append(role)
+    keyframes = [role for role in roles if role != "refer_image"]
+    expected = (
+        (["first_frame"] if "first_frame" in keyframes else [])
+        + ["middle_frame"] * keyframes.count("middle_frame")
+        + (["last_frame"] if "last_frame" in keyframes else [])
+    )
+    if keyframes != expected:
+        raise ValidationError(f"{label} 的关键帧顺序须为 首帧→中间帧→尾帧,首帧与尾帧各最多 1 张")
+    return roles
+
+
+def _video_40(request: GenerationRequest, prompt: str, label: str) -> KlingSubmit:
+    blobs = _images(request, maximum=10, label=label)
+    videos = _video_urls(request, label, maximum=5)
+    elements = _element_ids(request, label)
+    voices = _voice_ids(request, label, maximum=3)
+    roles = _frame_roles(request, len(blobs), label)
+    if len(elements) > 7:
+        raise ValidationError(f"{label} 最多 7 个主体,当前 {len(elements)} 个")
+    role = ""
+    if videos:
+        role = _choice(request, "video_role", {"feature", "base"}, "feature", label)
+        if role == "base":
+            if len(videos) > 1:
+                raise ValidationError(f"{label} 的待编辑视频只能传 1 段")
+            if any(item != "refer_image" for item in roles):
+                raise ValidationError(f"{label} 的待编辑视频不能同时传关键帧")
+        input_seconds = resolve_input_video_duration(
+            request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
+        )
+        if not 3 <= input_seconds <= 30:
+            raise ValidationError(f"{label} 的输入视频总时长须为 3~30 秒")
+    total = len(blobs) + len(videos) + len(elements) + len(voices)
+    if total > 15:
+        raise ValidationError(f"{label} 图片、视频、主体与音色合计最多 15 个,当前 {total} 个")
+    resolution = _resolution(request, {"720p", "1080p"}, default="1080p", label=label)
+    duration = _duration(request, set(range(3, 31)), label)
+    has_refer = "refer_image" in roles
+    if not (videos or elements or voices or has_refer):
+        if not blobs:
+            explicit = (request.ratio or "").strip()
+            if explicit != "adaptive":
+                ratio = _ratio(request, _VIDEO_RATIO_40_SET, default="16:9", label=label)
+                yuan = _video_40_yuan(request, resolution=resolution, seconds=duration, has_video=False)
+                body: dict[str, JsonValue] = {
+                    "prompt": prompt,
+                    "settings": {"resolution": resolution, "aspect_ratio": ratio, "duration": duration},
+                    "options": _options(request, label),
+                }
+                return _submit(
+                    path="/text-to-video/kling-4.0",
+                    poll_token=POLL_TASKS,
+                    body=body,
+                    kind="video",
+                    prompt=prompt,
+                    yuan=yuan,
+                )
+            # 文生 + adaptive:Omni 同样接受纯提示词,且只有它认 adaptive。
+            return _video_40_omni(
+                request,
+                prompt,
+                label,
+                blobs=blobs,
+                roles=roles,
+                videos=videos,
+                elements=elements,
+                voices=voices,
+                resolution=resolution,
+                duration=duration,
+                video_role=role,
+            )
+        return _video_40_i2v(
+            request,
+            prompt,
+            label,
+            blobs=blobs,
+            roles=roles,
+            resolution=resolution,
+            duration=duration,
+        )
+    return _video_40_omni(
+        request,
+        prompt,
+        label,
+        blobs=blobs,
+        roles=roles,
+        videos=videos,
+        elements=elements,
+        voices=voices,
+        resolution=resolution,
+        duration=duration,
+        video_role=role,
+    )
+
+
+def _video_40_yuan(request: GenerationRequest, *, resolution: str, seconds: int, has_video: bool) -> Decimal:
+    if not has_video:
+        return video_yuan("kling-4.0", resolution=resolution, seconds=seconds, sound="", ref_video=False)
+    input_seconds = resolve_input_video_duration(
+        request.video_refs,
+        input_video_duration=input_video_duration_from_params(request.params),
+    )
+    return video_yuan(
+        "kling-4.0",
+        resolution=resolution,
+        seconds=seconds,
+        sound="",
+        ref_video=True,
+        input_seconds=input_seconds,
+    )
+
+
+def _video_40_i2v(
+    request: GenerationRequest,
+    prompt: str,
+    label: str,
+    *,
+    blobs: list[str],
+    roles: list[str],
+    resolution: str,
+    duration: int,
+) -> KlingSubmit:
+    contents: list[JsonValue] = [_prompt_item(prompt)]
+    for index, (blob, kind) in enumerate(zip(blobs, roles), start=1):
+        contents.append(_frame_item(kind, blob, index))
+    yuan = _video_40_yuan(request, resolution=resolution, seconds=duration, has_video=False)
+    body: dict[str, JsonValue] = {
+        "contents": contents,
+        "settings": {"resolution": resolution, "duration": duration},
+        "options": _options(request, label),
+    }
+    return _submit(
+        path="/image-to-video/kling-4.0",
+        poll_token=POLL_TASKS,
+        body=body,
+        kind="video",
+        prompt=prompt,
+        yuan=yuan,
+    )
+
+
+def _video_40_omni(
+    request: GenerationRequest,
+    prompt: str,
+    label: str,
+    *,
+    blobs: list[str],
+    roles: list[str],
+    videos: list[str],
+    elements: list[str],
+    voices: list[str],
+    resolution: str,
+    duration: int,
+    video_role: str,
+) -> KlingSubmit:
+    contents: list[JsonValue] = [_prompt_item(prompt)]
+    for index, (blob, kind) in enumerate(zip(blobs, roles), start=1):
+        contents.append(_frame_item(kind, blob, index))
+    video_kind = "base_video" if video_role == "base" else "feature_video"
+    for index, url in enumerate(videos, start=1):
+        contents.append(_video_item(video_kind, url, index))
+    for index, element_id in enumerate(elements, start=1):
+        contents.append(_element_item(element_id, index))
+    for index, voice_id in enumerate(voices, start=1):
+        contents.append(_voice_item(voice_id, index))
+    ratio = _ratio(request, _VIDEO_RATIO_40_OMNI, default="adaptive", label=label)
+    settings: dict[str, JsonValue] = {"resolution": resolution, "aspect_ratio": ratio, "duration": duration}
+    yuan = _video_40_yuan(request, resolution=resolution, seconds=duration, has_video=bool(videos))
+    body: dict[str, JsonValue] = {"contents": contents, "settings": settings, "options": _options(request, label)}
+    return _submit(
+        path="/omni-video/kling-4.0", poll_token=POLL_TASKS, body=body, kind="video", prompt=prompt, yuan=yuan
     )
 
 

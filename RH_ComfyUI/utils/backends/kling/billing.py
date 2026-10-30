@@ -4,6 +4,8 @@
 插件积分按 $1 = 100,这里取 $1 ≈ ¥7.2,即 1 元 = 14 积分,向上取整,最少 1。
 
 视频单价(元/秒):
+- 4.0 无输入视频:720p 1.0 / 1080p 1.5
+- 4.0 有输入视频:720p 0.6 / 1080p 0.9,输入>输出按(输入+输出)秒,否则按输出×2 秒
 - 3.0 Turbo 只有有声:720p 0.8 / 1080p 1.0
 - 3.0 无参考无声 0.6/0.8/3.0,有声 0.9/1.2/3.0(720/1080/4k)
 - 3.0 Omni 无参考无声 0.6/0.8/3.0,无参考有声 0.8/1.0/3.0
@@ -33,6 +35,8 @@ _O1_PLAIN = {"720p": Decimal("0.6"), "1080p": Decimal("0.8")}
 _O1_REF = {"720p": Decimal("0.9"), "1080p": Decimal("1.2")}
 _SILENT_26 = {"720p": Decimal("0.3"), "1080p": Decimal("0.5")}
 _TURBO = {"720p": Decimal("0.8"), "1080p": Decimal("1.0")}
+_V40_PLAIN = {"720p": Decimal("1.0"), "1080p": Decimal("1.5")}
+_V40_REF = {"720p": Decimal("0.6"), "1080p": Decimal("0.9")}
 
 
 def cny_to_points(yuan: Decimal) -> int:
@@ -55,13 +59,20 @@ def video_yuan(
     sound: str,
     ref_video: bool,
     omni: bool = False,
+    input_seconds: float = 0.0,
 ) -> Decimal:
     """``sound`` 取 always / native / silent / voice。
 
     3.0 标准有声和 Omni 无参考有声不是同一行单价。
+    4.0 没有有声档位,``sound`` 忽略;``input_seconds`` 是输入视频总秒数。
     """
     if seconds < 1:
         raise ValueError("时长至少 1 秒")
+    if model == "kling-4.0":
+        if not ref_video:
+            return _rate(_V40_PLAIN, resolution) * Decimal(seconds)
+        billed = seconds * 2 if input_seconds <= seconds else input_seconds + seconds
+        return _rate(_V40_REF, resolution) * Decimal(str(billed))
     if model == "kling-3.0-turbo":
         rate = _rate(_TURBO, resolution)
     elif model == "kling-3.0":
@@ -118,7 +129,17 @@ def image_yuan(
 
 
 def video_point_bounds(model: str) -> tuple[int, int]:
-    if model == "kling-3.0-turbo":
+    if model == "kling-4.0":
+        low = video_yuan(model, resolution="720p", seconds=3, sound="", ref_video=False)
+        high = video_yuan(
+            model,
+            resolution="1080p",
+            seconds=30,
+            sound="",
+            ref_video=True,
+            input_seconds=30.0,
+        )
+    elif model == "kling-3.0-turbo":
         low = video_yuan(model, resolution="720p", seconds=3, sound="always", ref_video=False)
         high = video_yuan(model, resolution="1080p", seconds=15, sound="always", ref_video=False)
     elif model == "kling-3.0":

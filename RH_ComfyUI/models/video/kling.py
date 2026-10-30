@@ -10,11 +10,12 @@ from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...core.channels.channel import ChannelBinding
 from ...utils.backends.kling.billing import cny_to_points, video_point_bounds
-from ...utils.backends.kling.catalog import VIDEO_RATIOS
+from ...utils.backends.kling.catalog import VIDEO_RATIOS, VIDEO_RATIOS_40
 from ...utils.backends.kling.channel import bindings_for
 from ...utils.backends.kling.payload import prepare
 
 _RATIOS = list(VIDEO_RATIOS)
+_RATIOS_40 = list(VIDEO_RATIOS_40)
 
 
 class _KlingVideo(VideoPipelineModel):
@@ -28,9 +29,13 @@ class _KlingVideo(VideoPipelineModel):
     _duration: ClassVar[tuple[int, int]] = (3, 15)
     _max_images: ClassVar[int] = 1
     _allow_video: ClassVar[bool] = False
+    _max_videos: ClassVar[int] = 1
+    _ratios: ClassVar[list[str]] = _RATIOS
     _point_cost: ClassVar[int] = 56
     _priority: ClassVar[int] = 48
     _audio_help: ClassVar[str] = "是否生成有声视频"
+    _images_help: ClassVar[str] = "0 张为文生。1 张为首帧。支持尾帧的模型可以再给 1 张。"
+    _video_role_help: ClassVar[str] = "feature: 特征参考,只可配首帧且无声。base: 编辑该视频,不能配首尾帧。"
 
     def __init__(self) -> None:
         super().__init__(self.node_def())
@@ -47,12 +52,12 @@ class _KlingVideo(VideoPipelineModel):
                 min_items=0,
                 max_items=cls._max_images,
                 title="参考图片",
-                description="0 张为文生。1 张为首帧。支持尾帧的模型可以再给 1 张。",
+                description=cls._images_help,
             ),
             "ratio": PortSpec(
                 type=PortType.ENUM,
                 default="16:9",
-                values=list(_RATIOS),
+                values=list(cls._ratios),
                 title="宽高比",
                 description="文生视频使用。图生视频跟随首帧,不单独传纵横比。",
             ),
@@ -88,7 +93,7 @@ class _KlingVideo(VideoPipelineModel):
             inputs["video_refs"] = PortSpec(
                 type=PortType.LIST,
                 item_type=PortType.VIDEO,
-                max_items=1,
+                max_items=cls._max_videos,
                 title="参考视频",
                 description="只接受可访问的 URL。video_role=feature 为特征参考,base 为待编辑视频。",
             )
@@ -97,7 +102,18 @@ class _KlingVideo(VideoPipelineModel):
                 default="feature",
                 values=["feature", "base"],
                 title="视频角色",
-                description="feature: 特征参考,只可配首帧且无声。base: 编辑该视频,不能配首尾帧。",
+                description=cls._video_role_help,
+            )
+        if cls._name == "kling-4.0":
+            inputs["frame_roles"] = PortSpec(
+                type=PortType.LIST,
+                item_type=PortType.TEXT,
+                max_items=10,
+                title="关键帧角色",
+                description=(
+                    "与参考图片一一对应:first/middle/last/refer。"
+                    "缺省按位置:首图首帧、末图尾帧、其余中间帧。refer 为纯参考图(走 Omni)。"
+                ),
             )
         if cls._name == "kling-3.0":
             inputs["multi_shot"] = PortSpec(
@@ -147,6 +163,33 @@ class _KlingVideo(VideoPipelineModel):
                 continue
             return await binding.channel.unavailable_reason()
         return f"{self.display_name} 暂不可用"
+
+
+class Kling40Video(_KlingVideo):
+    _name = "kling-4.0"
+    _display = "Kling 4.0 & 4.0 Omni"
+    _description = "文生、灵活关键帧(最多 10 帧)或 Omni 参考,3~30 秒,720p/1080p"
+    _knowledge = (
+        "0 张文生;图片默认首图=首帧、末图=尾帧、其余=中间帧,frame_roles 可逐张指定 "
+        "first/middle/last/refer。refer 图、参考视频(URL,至多 5 段)、主体或音色(至多 3 个)"
+        "走 Omni,素材合计 ≤15。文生选 adaptive 宽高比也走 Omni。素材在提示词里用 "
+        "@image_N/@video_N/@element_N/@voice_N 引用。声音写进提示词,没有独立开关和静音档。"
+        "有参考视频时按 input_video_duration 计入输入时长计费。"
+    )
+    _resolutions = ["1080p", "720p"]
+    _duration = (3, 30)
+    _max_images = 10
+    _max_videos = 5
+    _allow_video = True
+    _ratios = _RATIOS_40
+    _point_cost = 105
+    _audio_help = "4.0 的声音写在提示词(对白/环境声/配乐),没有独立开关;此项不改变上游请求与积分。"
+    _images_help = (
+        "0~10 张。0 张文生;默认首图=首帧、末图=尾帧、其余=中间帧;"
+        "frame_roles 可逐张指定 first/middle/last/refer(纯参考图)。"
+    )
+    _video_role_help = "feature: 特征参考,至多 5 段,可与关键帧同用。base: 待编辑视频,只能 1 段,不能配关键帧。"
+    _priority = 53
 
 
 class Kling30TurboVideo(_KlingVideo):
@@ -211,6 +254,7 @@ class Kling25TurboVideo(_KlingVideo):
 
 
 KLING_VIDEO_MODELS = [
+    Kling40Video,
     Kling30TurboVideo,
     Kling30Video,
     KlingO1Video,
@@ -224,5 +268,6 @@ __all__ = [
     "Kling26Video",
     "Kling30TurboVideo",
     "Kling30Video",
+    "Kling40Video",
     "KlingO1Video",
 ]

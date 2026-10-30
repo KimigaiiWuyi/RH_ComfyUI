@@ -435,7 +435,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "Kling_Enabled_Models": GsListStrConfig(
         "启用的可灵模型",
-        "勾选要开放的模型。视频:kling-3.0-turbo / kling-3.0 / kling-o1 / kling-2.6 / kling-2.5-turbo。"
+        "勾选要开放的模型。视频:kling-4.0 / kling-3.0-turbo / kling-3.0 / kling-o1 / kling-2.6 / kling-2.5-turbo。"
         "图片:kling-image-3.0 / kling-image-o1 / kling-image-common(通用) / kling-image-2.1。"
         "未勾选的不可用。改完即时生效。",
         list(KLING_MODEL_NAMES),

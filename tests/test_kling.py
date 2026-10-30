@@ -146,6 +146,7 @@ def _b64() -> str:
 
 def test_catalog_matches_console_menus() -> None:
     assert VIDEO_CATALOG == [
+        ("kling-4.0", "Kling 4.0 & 4.0 Omni"),
         ("kling-3.0-turbo", "Kling 3.0 Turbo"),
         ("kling-3.0", "Kling 3.0 & 3.0 Omni"),
         ("kling-o1", "Kling O1"),
@@ -425,6 +426,205 @@ def test_video_options_prompt_limit_and_ordered_media() -> None:
     )
     with pytest.raises(ValidationError, match="images"):
         prepare("kling-2.5-turbo", ordered)
+
+
+def test_v40_text_to_video_paths_and_limits() -> None:
+    text = prepare("kling-4.0", _video(duration=8, resolution="720p", ratio="21:9"))
+    assert text.path == "/text-to-video/kling-4.0"
+    assert text.poll_token == "v"
+    assert text.body["prompt"] == "一只猫"
+    assert _settings(text) == {"resolution": "720p", "aspect_ratio": "21:9", "duration": 8}
+    assert cny_to_points(text.yuan) == 112
+    assert "contents" not in text.body
+
+    defaults = prepare("kling-4.0", _video(duration=5))
+    assert defaults.path == "/text-to-video/kling-4.0"
+    assert _settings(defaults) == {"resolution": "1080p", "aspect_ratio": "16:9", "duration": 5}
+    assert cny_to_points(defaults.yuan) == 105
+
+    adaptive = prepare("kling-4.0", _video(ratio="adaptive"))
+    assert adaptive.path == "/omni-video/kling-4.0"
+    assert _settings(adaptive)["aspect_ratio"] == "adaptive"
+    assert [item["type"] for item in _items(adaptive.body["contents"])] == ["prompt"]
+
+    marked = prepare("kling-4.0", _video(watermark=True, params={"callback_url": "https://hook.example"}))
+    options = _obj(marked.body["options"])
+    assert options["watermark_info"] == {"enabled": True}
+    assert options["callback_url"] == "https://hook.example"
+    assert "audio" not in _settings(marked)
+    assert "multi_shot" not in _settings(marked)
+
+    with pytest.raises(ValidationError, match="4:3"):
+        prepare("kling-4.0", _video(ratio="4:3"))
+    with pytest.raises(ValidationError, match="时长不支持 31"):
+        prepare("kling-4.0", _video(duration=31))
+    with pytest.raises(ValidationError, match="时长不支持 2"):
+        prepare("kling-4.0", _video(duration=2))
+    with pytest.raises(ValidationError, match="不支持分辨率"):
+        prepare("kling-4.0", _video(resolution="4k"))
+    with pytest.raises(ValidationError, match="11000"):
+        prepare("kling-4.0", _video("猫" * 11001))
+
+
+def test_v40_keyframes_and_frame_roles() -> None:
+    frames = prepare("kling-4.0", _video(images=[_PNG] * 4, duration=12))
+    assert frames.path == "/image-to-video/kling-4.0"
+    contents = _items(frames.body["contents"])
+    assert [item["type"] for item in contents] == [
+        "prompt",
+        "first_frame",
+        "middle_frame",
+        "middle_frame",
+        "last_frame",
+    ]
+    assert [item["id"] for item in contents[1:]] == ["image_1", "image_2", "image_3", "image_4"]
+    assert contents[1]["url"] == _b64()
+    assert "aspect_ratio" not in _settings(frames)
+    assert _settings(frames)["duration"] == 12
+    assert cny_to_points(frames.yuan) == 252
+
+    single = prepare("kling-4.0", _video(images=[_PNG]))
+    assert [item["type"] for item in _items(single.body["contents"])] == ["prompt", "first_frame"]
+    two = prepare("kling-4.0", _video(images=[_PNG, _PNG]))
+    assert [item["type"] for item in _items(two.body["contents"])] == ["prompt", "first_frame", "last_frame"]
+
+    explicit = prepare(
+        "kling-4.0",
+        _video(images=[_PNG, _PNG, _PNG], params={"frame_roles": ["first", "middle", "last"]}),
+    )
+    assert explicit.path == "/image-to-video/kling-4.0"
+    assert [item["type"] for item in _items(explicit.body["contents"])] == [
+        "prompt",
+        "first_frame",
+        "middle_frame",
+        "last_frame",
+    ]
+
+    with pytest.raises(ValidationError, match="最多 10 张"):
+        prepare("kling-4.0", _video(images=[_PNG] * 11))
+    with pytest.raises(ValidationError, match="一一对应"):
+        prepare("kling-4.0", _video(images=[_PNG, _PNG], params={"frame_roles": ["first"]}))
+    with pytest.raises(ValidationError, match="first/middle/last/refer"):
+        prepare("kling-4.0", _video(images=[_PNG], params={"frame_roles": ["key"]}))
+    with pytest.raises(ValidationError, match="首帧→中间帧→尾帧"):
+        prepare("kling-4.0", _video(images=[_PNG, _PNG], params={"frame_roles": ["last", "first"]}))
+    with pytest.raises(ValidationError, match="frame_roles"):
+        prepare("kling-4.0", _video(params={"frame_roles": ["first"]}))
+
+
+def test_v40_omni_assets_and_billing() -> None:
+    refer = prepare(
+        "kling-4.0",
+        _video(images=[_PNG, _PNG, _PNG], params={"frame_roles": ["first", "last", "refer"]}),
+    )
+    assert refer.path == "/omni-video/kling-4.0"
+    contents = _items(refer.body["contents"])
+    assert [item["type"] for item in contents] == ["prompt", "first_frame", "last_frame", "refer_image"]
+    assert _settings(refer)["aspect_ratio"] == "adaptive"
+    assert cny_to_points(refer.yuan) == 105
+
+    featured = prepare(
+        "kling-4.0",
+        _video(
+            images=[_PNG, _PNG],
+            video_refs=[video_ref(url="https://cdn.example/a.mp4"), video_ref(url="https://cdn.example/b.mp4")],
+            params={"input_video_duration": 12, "element_ids": ["42"], "voice_ids": ["v1", "v2"]},
+        ),
+    )
+    assert featured.path == "/omni-video/kling-4.0"
+    contents = _items(featured.body["contents"])
+    assert [item["type"] for item in contents] == [
+        "prompt",
+        "first_frame",
+        "last_frame",
+        "feature_video",
+        "feature_video",
+        "element",
+        "voice",
+        "voice",
+    ]
+    assert contents[3]["id"] == "video_1"
+    assert contents[4]["id"] == "video_2"
+    assert contents[5]["element_id"] == 42
+    assert contents[6]["voice_id"] == "v1"
+    assert contents[7]["voice_id"] == "v2"
+    # 1080p,输入 12s > 输出 5s:计费 (12+5)*0.9 = 15.3 元 -> 215 分
+    assert cny_to_points(featured.yuan) == 215
+
+    base = prepare(
+        "kling-4.0",
+        _video(
+            images=[_PNG],
+            video_refs=[video_ref(url="https://cdn.example/a.mp4")],
+            params={"video_role": "base", "frame_roles": ["refer"], "input_video_duration": 8},
+        ),
+    )
+    assert [item["type"] for item in _items(base.body["contents"])] == [
+        "prompt",
+        "refer_image",
+        "base_video",
+    ]
+    # 输入 8s > 输出 5s:(8+5)*0.9 = 11.7 元 -> 164 分
+    assert cny_to_points(base.yuan) == 164
+
+    short_input = prepare(
+        "kling-4.0",
+        _video(
+            video_refs=[video_ref(url="https://cdn.example/a.mp4")],
+            params={"input_video_duration": 4},
+        ),
+    )
+    # 输入 4s < 输出 5s:5*2*0.9 = 9.0 元 -> 126 分
+    assert cny_to_points(short_input.yuan) == 126
+
+
+def test_v40_omni_limits() -> None:
+    with pytest.raises(ValidationError, match="只能传 1 段"):
+        prepare(
+            "kling-4.0",
+            _video(
+                video_refs=[
+                    video_ref(url="https://cdn.example/a.mp4"),
+                    video_ref(url="https://cdn.example/b.mp4"),
+                ],
+                params={"video_role": "base"},
+            ),
+        )
+    with pytest.raises(ValidationError, match="不能同时传关键帧"):
+        prepare(
+            "kling-4.0",
+            _video(
+                images=[_PNG],
+                video_refs=[video_ref(url="https://cdn.example/a.mp4")],
+                params={"video_role": "base"},
+            ),
+        )
+    with pytest.raises(ValidationError, match="最多 5 段"):
+        prepare(
+            "kling-4.0",
+            _video(video_refs=[video_ref(url=f"https://cdn.example/{i}.mp4") for i in range(6)]),
+        )
+    with pytest.raises(ValidationError, match="总时长"):
+        prepare(
+            "kling-4.0",
+            _video(
+                video_refs=[video_ref(url="https://cdn.example/a.mp4")],
+                params={"input_video_duration": 45},
+            ),
+        )
+    with pytest.raises(ValidationError, match="最多 3 个音色"):
+        prepare("kling-4.0", _video(params={"voice_ids": ["v1", "v2", "v3", "v4"]}))
+    with pytest.raises(ValidationError, match="最多 7 个主体"):
+        prepare("kling-4.0", _video(params={"element_ids": [str(i) for i in range(8)]}))
+    with pytest.raises(ValidationError, match="合计最多 15"):
+        prepare(
+            "kling-4.0",
+            _video(
+                images=[_PNG] * 10,
+                video_refs=[video_ref(url=f"https://cdn.example/{i}.mp4") for i in range(5)],
+                params={"element_ids": ["1"]},
+            ),
+        )
 
 
 def test_image_30_picks_generations_or_omni() -> None:
@@ -848,6 +1048,7 @@ def test_invoke_keeps_validation_and_releases_inflight(monkeypatch: pytest.Monke
 
 def test_models_register_with_menu_names_and_estimates() -> None:
     expected = {
+        "kling-4.0": ("Kling 4.0 & 4.0 Omni", 105),
         "kling-3.0-turbo": ("Kling 3.0 Turbo", 56),
         "kling-3.0": ("Kling 3.0 & 3.0 Omni", 63),
         "kling-o1": ("Kling O1", 42),
@@ -891,7 +1092,7 @@ def test_models_register_with_menu_names_and_estimates() -> None:
     common = KLING_IMAGE_MODELS[2]()
     common.validate(_image("", images=[_PNG]))
     assert common.estimate_cost(_image("", images=[_PNG], params={"task_mode": "subject"})) == 7
-    turbo = KLING_VIDEO_MODELS[0]()
+    turbo = next(cls() for cls in KLING_VIDEO_MODELS if cls._name == "kling-3.0-turbo")
     turbo.validate(_video("猫"))
     with pytest.raises(ValidationError):
         turbo.validate(_video("猫", video_refs=[video_ref(url="https://cdn.example/a.mp4")]))

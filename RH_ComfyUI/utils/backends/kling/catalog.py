@@ -7,6 +7,7 @@ from __future__ import annotations
 
 # (模型 id, 展示名)
 KLING_VIDEO_MODELS: list[tuple[str, str]] = [
+    ("kling-4.0", "Kling 4.0 & 4.0 Omni"),
     ("kling-3.0-turbo", "Kling 3.0 Turbo"),
     ("kling-3.0", "Kling 3.0 & 3.0 Omni"),
     ("kling-o1", "Kling O1"),
@@ -45,6 +46,8 @@ DEFAULT_ENDPOINT = "https://api-beijing.klingai.com"
 SINGAPORE_ENDPOINT = "https://api-singapore.klingai.com"
 
 VIDEO_RATIOS: list[str] = ["16:9", "9:16", "1:1"]
+# 4.0 文生/Omni 多 21:9;adaptive 仅 Omni 与文生走 Omni 兜底时可用。
+VIDEO_RATIOS_40: list[str] = ["16:9", "9:16", "1:1", "21:9", "adaptive"]
 IMAGE_RATIOS: list[str] = ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9"]
 IMAGE_RATIOS_WITH_AUTO: list[str] = [*IMAGE_RATIOS, "auto"]
 
@@ -64,4 +67,5 @@ __all__ = [
     "POLL_TASKS",
     "SINGAPORE_ENDPOINT",
     "VIDEO_RATIOS",
+    "VIDEO_RATIOS_40",
 ]
