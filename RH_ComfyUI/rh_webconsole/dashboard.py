@@ -48,6 +48,7 @@ class ModelView(TypedDict):
     catalog_group: str
     group_label: str
     backend: str
+    icon: str
     available: bool
     unavailable_reason: str
     priority: int
@@ -141,6 +142,47 @@ _CHANNEL_LABELS: dict[str, str] = {
 def channel_label(name: str) -> str:
     """通道名 → 显示标签;未登记的通道(外部插件注入)回落到原名。"""
     return _CHANNEL_LABELS.get(name, name)
+
+
+# 模型 → 图标 key 的子串规则,按声明顺序取首个命中;与 web/icons.js 的键对应。
+# haystack 为「模型名 + 显示名 + 后端名」的小写拼接,全部落空时回落 mod:<分组> 字形。
+_MODEL_ICON_RULES: tuple[tuple[str, str], ...] = (
+    ("seedance", "doubao"),
+    ("seedream", "doubao"),
+    ("banana", "gemini"),
+    ("gemini", "gemini"),
+    ("gpt", "openai"),
+    ("kling", "kuaishou"),
+    ("minimax", "minimax"),
+    ("mimo", "xiaomimimo"),
+    ("qwen", "qwen"),
+    ("wan", "qwen"),  # 万相与 Qwen 同属阿里通义系
+    ("hunyuan", "tencent"),
+    ("tx_", "tencent"),
+    ("腾讯", "tencent"),
+    ("deepseek", "deepseek"),
+    ("kimi", "kimi"),
+    ("moonshot", "kimi"),
+    ("zhipu", "zhipu"),
+    ("glm", "zhipu"),
+    ("anthropic", "anthropic"),
+    ("claude", "anthropic"),
+    ("ernie", "baidu"),
+    ("wenxin", "baidu"),
+    ("baidu", "baidu"),
+    ("dashscope", "qwen"),
+)
+
+
+def _model_icon(model: AIGCGenerationBase, catalog_group: str) -> str:
+    """模型图谱图标 key:先按名称/后端命中品牌,否则回落 mod:<目录分组>。"""
+    node = model.node
+    backend = node.backend if node is not None else ""
+    haystack = f"{model.name} {model.display_name} {backend}".lower()
+    for needle, key in _MODEL_ICON_RULES:
+        if needle in haystack:
+            return key
+    return f"mod:{catalog_group}"
 
 
 async def _safe_bindings(model: AIGCGenerationBase) -> list[ChannelBinding]:
@@ -281,6 +323,7 @@ async def build_dashboard_snapshot() -> DashboardSnapshot:
                 catalog_group=group,
                 group_label=CATALOG_GROUP_DISPLAY.get(group, group),
                 backend=node.backend if node is not None else "",
+                icon=_model_icon(model, group),
                 available=available,
                 unavailable_reason=reason,
                 priority=model.priority,

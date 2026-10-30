@@ -27,6 +27,10 @@
 ## 维护须知
 
 - 本目录只读。页面上不要提供任何写操作;改配置请回 WebConsole 的插件配置页。
+- 模型图标:`dashboard.py` 按名称/后端出 `icon` key,字形在 `web/icons.js`
+  (品牌图形提取自 Hub thesvg-icons;无品牌按 `mod:<目录分组>` 回落)。
+- 图谱双模式:容器宽 < 760 时 `app.js` 走 `renderCompactGraph()` 整宽卡片 +
+  通道 chip(不画连线),宽屏保持两列连线图。
 - 静态资源在 `RH_ComfyUI/web/`,三语 locale 的 leaf key 必须对齐
   (`zh-CN` / `en-US` / `ja-JP`)。
 - 新增图表只改 `web/app.js`;后端字段不够时再动 `dashboard.py`,别在页面里硬编码模型名。

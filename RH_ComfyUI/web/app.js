@@ -26,6 +26,16 @@
   var PAD_X = 14;
   var TOP_PAD = 10;
   var PROV_MIN_GAP = 28;
+  /* 紧凑布局(窄屏):宽度放不下两列连线图时,改画整宽模型卡片,
+     通道内联成 chip,不画连线也不产生横向滚动。 */
+  var COMPACT_W = 760;
+  var NAME_H = 24;
+  var ROW_GAP = 8;
+  var CHIP_H = 16;
+  var CHIP_GAP = 5;
+  var CHIP_LINE = 20;
+  var CHIP_CHAR_W = 5.6;
+  var CHIP_MAX_W = 150;
   /* SVG 里没有原生省略号,只能按字符宽度自己截断。
      13px 字号下:拉丁字符约 6.8px,中文按 textWidth() 记 2 个单位(=13.6px)。 */
   var CHAR_W = 6.8;
@@ -315,11 +325,21 @@
     return order;
   }
 
-  /* 图谱可用宽度:量图谱容器本身。
-     .graph-wrap 固定 overflow-y: scroll(滚动条常驻占位),
-     渲染前后 clientWidth 不会因为滚动条出现/消失而抖动。 */
+  /* 图谱可用宽度:量图谱容器本身。.graph-wrap 不内滚
+     (overflow:visible),clientWidth 不受滚动条影响,测完即定。 */
   function containerWidth(wrap) {
     return wrap.clientWidth || COL_MIN * 2 + GAP_MIN + PAD_X * 2;
+  }
+
+  /* 紧凑判定统一量 #main(各面板共同的父容器),两处共用一个结果:
+     各自量容器会因滚动条占位等差 ~15px,曾出现
+     「图谱紧凑、供应商仍表格」的夹缝宽度。 */
+  function pageCompact() {
+    var main = $('main');
+    var w = main && !main.hidden ? main.clientWidth : 0;
+    if (!w && document.documentElement) w = document.documentElement.clientWidth;
+    if (!w) w = window.innerWidth || 0;
+    return w > 0 && w < COMPACT_W;
   }
 
   /* 供应商声明顺序:后端 providers 列表本身就是声明顺序,下标即序号 */
@@ -405,9 +425,19 @@
     graphIndex = { modelLinks: {}, providerLinks: {}, linkById: {} };
 
     var groups = groupModels(models);
+    var avail = containerWidth(wrap);
+    // 窄屏走紧凑卡片布局,两列图谱只在大容器里画。
+    // compact class 顺带把容器改成 overflow:visible:整页滚动而不是内部滚,
+    // 宽屏必须保留 overflow-y:scroll 常驻占位防 clientWidth 抖动。
+    var compact = pageCompact();
+    wrap.classList.toggle('compact', compact);
+    $('graph-panel').classList.toggle('compact', compact);
+    if (compact) {
+      renderCompactGraph(wrap, models, groups, keepTop);
+      return;
+    }
     // 两列按容器宽度自适应,余下宽度全给中间的连线区;
     // 容器太窄时保底宽度,横向滚动而不是把字挤没
-    var avail = containerWidth(wrap);
     var colW = Math.round(Math.min(COL_MAX, Math.max(COL_MIN, avail * COL_RATIO)));
     var modelW = colW;
     var provW = colW;
@@ -613,16 +643,29 @@
       g.appendChild(
         svgEl('rect', { x: modelX, y: row.y, width: modelW, height: NODE_H, rx: 4 })
       );
+      // 品牌/模态图标(icons.js 查表),右下角叠可用性徽标
+      var icon = modelIcon(m);
+      var pic = svgEl('svg', {
+        class: 'm-icon',
+        x: modelX + 5,
+        y: row.y + 3,
+        width: 14,
+        height: 14,
+        viewBox: icon.vb,
+      });
+      if (icon.f) pic.setAttribute('fill', icon.f);
+      pic.innerHTML = icon.b;
+      g.appendChild(pic);
       g.appendChild(
         svgEl('circle', {
-          cx: modelX + 12,
-          cy: row.y + NODE_H / 2,
-          r: 3.5,
+          cx: modelX + 17.5,
+          cy: row.y + 15.5,
+          r: 3.2,
           class: 'badge ' + (m.available ? 'ok' : 'bad'),
         })
       );
-      var label = svgEl('text', { x: modelX + 24, y: row.y + NODE_H / 2 });
-      label.textContent = ellipsize(m.display_name, Math.floor((modelW - 24 - countReserve) / CHAR_W));
+      var label = svgEl('text', { x: modelX + 26, y: row.y + NODE_H / 2 });
+      label.textContent = ellipsize(m.display_name, Math.floor((modelW - 26 - countReserve) / CHAR_W));
       g.appendChild(label);
       var count = svgEl('text', {
         x: modelX + modelW - 9,
@@ -647,6 +690,184 @@
     wrap.scrollTop = keepTop;
     wrap.scrollLeft = keepLeft;
     applyHighlight();
+  }
+
+  /* 紧凑图谱:整宽模型卡片,通道以内联 chip 呈现。
+     chip 走与供应商节点相同的 data-provider 语义,
+     点击/悬停高亮逻辑复用 graphIndex,不单独写一套。 */
+  function renderCompactGraph(wrap, models, groups, keepTop) {
+    var avail = containerWidth(wrap);
+    var nodeW = avail - PAD_X * 2 - 12;
+    var modelX = PAD_X + 6;
+    var orderOf = providerOrderMap();
+    var countReserve = 36;
+
+    // 通道 chip 按可用宽度换行,先量一遍拿行数,卡片高度跟着走
+    function layoutChips(m) {
+      var chips = [];
+      var x = 0;
+      var lines = m.channels.length ? 1 : 0;
+      m.channels.forEach(function (c) {
+        var w = Math.min(CHIP_MAX_W, Math.ceil(textWidth(c.name) * CHIP_CHAR_W) + 22);
+        if (x > 0 && x + w > nodeW - 12) {
+          lines += 1;
+          x = 0;
+        }
+        chips.push({ channel: c, w: w, line: lines - 1, x: x });
+        x += w + CHIP_GAP;
+      });
+      return { chips: chips, nodeH: NAME_H + 4 + (lines ? lines * CHIP_LINE : 2) };
+    }
+
+    var rows = [];
+    var y = HEADER_H;
+    groups.forEach(function (group, gi) {
+      if (gi > 0) y += GROUP_GAP;
+      group.ruleY = y - 6;
+      group.labelY = y + GROUP_LABEL_H / 2;
+      y += GROUP_LABEL_H;
+      group.bandY = y - 3;
+      var start = y;
+      group.models.forEach(function (m) {
+        var lay = layoutChips(m);
+        rows.push({ model: m, lay: lay, y: y });
+        y += lay.nodeH + ROW_GAP;
+      });
+      group.bandH = y - ROW_GAP - start + 6;
+    });
+    var height = y + TOP_PAD;
+
+    var svg = svgEl('svg', {
+      width: avail,
+      height: height,
+      viewBox: '0 0 ' + avail + ' ' + height,
+    });
+
+    var headLeft = svgEl('text', { class: 'col-head', x: modelX, y: HEADER_H / 2 + 3 });
+    headLeft.textContent = t('graph.columnModels') + ' (' + models.length + ')';
+    svg.appendChild(headLeft);
+
+    groups.forEach(function (group, gi) {
+      svg.appendChild(
+        svgEl('rect', {
+          class: 'group-band',
+          x: PAD_X,
+          y: group.bandY,
+          width: avail - PAD_X * 2,
+          height: group.bandH,
+          rx: 6,
+        })
+      );
+      if (gi > 0) {
+        svg.appendChild(
+          svgEl('line', {
+            class: 'group-rule',
+            x1: PAD_X,
+            y1: group.ruleY,
+            x2: avail - PAD_X,
+            y2: group.ruleY,
+          })
+        );
+      }
+      var text = svgEl('text', { class: 'group-label', x: modelX, y: group.labelY });
+      text.textContent = group.label;
+      svg.appendChild(text);
+    });
+
+    rows.forEach(function (row) {
+      var m = row.model;
+      var g = svgEl('g', { class: 'node model-node' });
+      g.setAttribute('data-model', m.name);
+      g.appendChild(
+        svgEl('rect', { x: modelX, y: row.y, width: nodeW, height: row.lay.nodeH, rx: 6 })
+      );
+      var icon = modelIcon(m);
+      var pic = svgEl('svg', {
+        class: 'm-icon',
+        x: modelX + 5,
+        y: row.y + 5,
+        width: 14,
+        height: 14,
+        viewBox: icon.vb,
+      });
+      if (icon.f) pic.setAttribute('fill', icon.f);
+      pic.innerHTML = icon.b;
+      g.appendChild(pic);
+      g.appendChild(
+        svgEl('circle', {
+          cx: modelX + 17.5,
+          cy: row.y + 17.5,
+          r: 3.2,
+          class: 'badge ' + (m.available ? 'ok' : 'bad'),
+        })
+      );
+      var label = svgEl('text', { x: modelX + 26, y: row.y + NAME_H / 2 });
+      label.textContent = ellipsize(m.display_name, Math.floor((nodeW - 26 - countReserve) / CHAR_W));
+      g.appendChild(label);
+      var count = svgEl('text', {
+        x: modelX + nodeW - 9,
+        y: row.y + NAME_H / 2,
+        'text-anchor': 'end',
+        class: 'n-sub',
+      });
+      count.textContent =
+        m.channels.filter(function (c) {
+          return c.available;
+        }).length + '/' + m.channels.length;
+      g.appendChild(count);
+
+      row.lay.chips.forEach(function (chip) {
+        var c = chip.channel;
+        if (!graphIndex.modelLinks[m.name]) graphIndex.modelLinks[m.name] = [];
+        if (!graphIndex.providerLinks[c.name]) graphIndex.providerLinks[c.name] = [];
+        graphIndex.modelLinks[m.name].push(c.name);
+        graphIndex.providerLinks[c.name].push(m.name);
+
+        var cx = modelX + 6 + chip.x;
+        var cy = row.y + NAME_H + 2 + chip.line * CHIP_LINE;
+        var cls = c.circuit_open ? 'broken' : c.available ? 'ok' : 'bad';
+        var cg = svgEl('g', { class: 'node chip-node' });
+        cg.setAttribute('data-provider', c.name);
+        cg.appendChild(
+          svgEl('rect', { class: 'chip-box ' + cls, x: cx, y: cy, width: chip.w, height: CHIP_H, rx: 8 })
+        );
+        cg.appendChild(
+          svgEl('circle', {
+            cx: cx + 8,
+            cy: cy + CHIP_H / 2,
+            r: 2.4,
+            class: 'badge ' + (c.available ? 'ok' : 'bad'),
+          })
+        );
+        var ct = svgEl('text', { class: 'chip-text', x: cx + 15, y: cy + CHIP_H / 2 });
+        ct.textContent = ellipsize(c.name, Math.floor((chip.w - 19) / CHIP_CHAR_W));
+        cg.appendChild(ct);
+        var tip = svgEl('title');
+        tip.textContent =
+          '#' + (orderOf[c.name] || 0) + ' ' + c.name + (c.vendor_model ? ' · ' + c.vendor_model : '');
+        cg.appendChild(tip);
+        g.appendChild(cg);
+      });
+
+      var tip = svgEl('title');
+      tip.textContent = m.display_name + ' · ' + m.name;
+      g.appendChild(tip);
+      svg.appendChild(g);
+    });
+
+    wrap.appendChild(svg);
+    wrap.scrollTop = keepTop;
+    applyHighlight();
+  }
+
+  /* 模型 → 图标:后端给的 key 直查,落空时按模态/通用回落(icons.js 未加载时给空表) */
+  function modelIcon(m) {
+    var table = window.RH_MODEL_ICONS || {};
+    return (
+      table[m.icon] ||
+      table['mod:' + m.catalog_group] ||
+      table['mod:other'] || { vb: '0 0 24 24', f: '', b: '' }
+    );
   }
 
   function legendItem(kind, label) {
@@ -739,9 +960,24 @@
     var keepLeft = box.scrollLeft;
     clear(box);
 
+    // 窄屏:8 列表格放不下,改走卡片列表(同样走 compact class 去掉内部滚动)
+    var compact = pageCompact();
+    box.classList.toggle('compact', compact);
+
     if (!providers.length) {
       box.appendChild(el('div', 'empty', t('empty.providers')));
       box.scrollTop = keepTop;
+      return;
+    }
+
+    var modelByName = {};
+    state.data.models.forEach(function (m) {
+      modelByName[m.name] = m;
+    });
+    var orderOf = providerOrderMap();
+
+    if (compact) {
+      renderProviderCards(box, providers, orderOf, modelByName);
       return;
     }
 
@@ -764,12 +1000,6 @@
     table.appendChild(thead);
 
     var tbody = el('tbody');
-    var modelByName = {};
-    state.data.models.forEach(function (m) {
-      modelByName[m.name] = m;
-    });
-    var orderOf = providerOrderMap();
-
     providers.forEach(function (p) {
       var tr = el('tr');
       if (state.provider === p.name) tr.classList.add('sel');
@@ -831,6 +1061,70 @@
     box.appendChild(table);
     box.scrollTop = keepTop;
     box.scrollLeft = keepLeft;
+  }
+
+  /* 窄屏供应商卡片:表格的 8 列折成「头行 + 统计行 + 能力 pill + 模型 tag」。
+     点击语义与表格行一致(toggleProvider)。 */
+  function renderProviderCards(box, providers, orderOf, modelByName) {
+    var list = el('div', 'p-cards');
+    providers.forEach(function (p) {
+      var card = el('div', 'p-card');
+      if (state.provider === p.name) card.classList.add('sel');
+      else if (state.provider) card.classList.add('dim');
+
+      var head = el('div', 'p-card-head');
+      head.appendChild(el('span', 'order', '#' + (orderOf[p.name] || 0)));
+      var nameBox = el('div', 'pname');
+      nameBox.appendChild(el('div', 'p-title', p.name));
+      nameBox.appendChild(el('div', 'p-sub', p.label));
+      head.appendChild(nameBox);
+      head.appendChild(
+        el(
+          'span',
+          'pill ' + (p.fully_available ? 'ok' : 'bad'),
+          p.available_model_count + ' / ' + p.model_count
+        )
+      );
+      card.appendChild(head);
+
+      var stats = el('div', 'p-stats');
+      stats.appendChild(el('span', null, t('table.inherited') + ' ' + p.model_count));
+      stats.appendChild(el('span', null, t('table.weight') + ' ' + p.weight));
+      stats.appendChild(
+        el('span', null, t('table.load') + ' ' + p.inflight + ' / ' + p.concurrency_limit)
+      );
+      card.appendChild(stats);
+
+      var caps = el('div', 'p-caps');
+      if (p.supports_remote_cancel) {
+        caps.appendChild(el('span', 'pill ok', t('provider.remoteCancel')));
+      }
+      if (p.circuit_open_models.length) {
+        caps.appendChild(
+          el('span', 'pill warn', t('provider.circuitOpen') + ' ' + p.circuit_open_models.length)
+        );
+      }
+      if (p.failure_total > 0) {
+        caps.appendChild(el('span', 'pill bad', t('provider.failureCount', { n: p.failure_total })));
+      }
+      if (caps.children.length) card.appendChild(caps);
+
+      var tags = el('div', 'tags');
+      p.models.slice(0, 8).forEach(function (name) {
+        var m = modelByName[name];
+        tags.appendChild(el('span', 'tag ' + (m && m.available ? 'ok' : 'bad'), name));
+      });
+      if (p.models.length > 8) {
+        tags.appendChild(el('span', 'tag more', '+' + (p.models.length - 8)));
+      }
+      card.appendChild(tags);
+
+      card.addEventListener('click', function () {
+        toggleProvider(p.name);
+      });
+      list.appendChild(card);
+    });
+    box.appendChild(list);
   }
 
   /* ── 详情抽屉 ── */
@@ -943,12 +1237,15 @@
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape') closeDetail();
     });
-    // 容器变宽变窄时重排图谱(等比缩放依赖容器宽度)
+    // 容器变宽变窄时重排图谱与供应商表(紧凑/宽屏模式随容器宽度切换)
     var resizeTimer = null;
     window.addEventListener('resize', function () {
       if (resizeTimer) window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(function () {
-        if (state.data) renderGraph();
+        if (state.data) {
+          renderGraph();
+          renderProviderTable();
+        }
       }, 160);
     });
   }

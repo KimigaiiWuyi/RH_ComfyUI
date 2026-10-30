@@ -55,6 +55,7 @@ async def overview() -> ApiOk:
                     "catalog_group": "video",
                     "group_label": "视频生成",
                     "backend": "seedance",
+                    "icon": "doubao",
                     "available": true,
                     "unavailable_reason": "",
                     "priority": 50,

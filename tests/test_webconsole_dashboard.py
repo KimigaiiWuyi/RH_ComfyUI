@@ -156,6 +156,10 @@ def test_snapshot_reports_model_channel_order_and_provider_inheritance(monkeypat
     assert models["m3"]["available"] is False  # 唯一通道不可用
     assert models["m3"]["unavailable_reason"]
 
+    # 图标 key:无品牌命中的假模型回落模态字形
+    assert models["m1"]["icon"] == "mod:image"
+    assert models["m2"]["icon"] == "mod:video"
+
     # 模态统计按目录分组
     modalities = {m["key"]: m for m in snapshot["modalities"]}
     assert modalities["image"]["total"] == 2
@@ -260,12 +264,25 @@ def test_locales_leaf_keys_aligned():
 
 
 def test_web_static_assets_present():
-    for name in ("index.html", "app.js", "app.css"):
+    for name in ("index.html", "app.js", "app.css", "icons.js"):
         assert (WEB_DIR / name).is_file(), f"缺少静态资源: {name}"
     index = (WEB_DIR / "index.html").read_text(encoding="utf-8")
     assert "/plugin-pages/_sdk/gshub-plugin.js" in index
     assert "./app.js" in index
     assert "./app.css" in index
+    assert "./icons.js" in index
+
+    # 窄屏紧凑布局:容器宽 < COMPACT_W 时图谱走整宽卡片 + 通道 chip,
+    # 供应商表走卡片列表(8 列表格在窄屏放不下)
+    app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+    assert "renderCompactGraph" in app_js
+    assert "renderProviderCards" in app_js
+    assert "pageCompact" in app_js
+    assert "COMPACT_W" in app_js
+    app_css = (WEB_DIR / "app.css").read_text(encoding="utf-8")
+    assert ".chip-box" in app_css
+    assert ".p-card" in app_css
+    assert ".graph-panel.compact" in app_css
 
 
 def test_plugin_page_registered_for_hub():
