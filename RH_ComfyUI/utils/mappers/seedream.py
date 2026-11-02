@@ -9,12 +9,12 @@
 
 from __future__ import annotations
 
-import io
 import base64
 import asyncio
 from typing import TYPE_CHECKING
 
 from ..core.types import NodeOutput
+from ..image_process import encode_pil_image
 
 if TYPE_CHECKING:
     from ..backends.seedream.api import SeedreamAPI
@@ -212,12 +212,8 @@ async def seedream_mapper(request, api: "SeedreamAPI") -> NodeOutput:
     result = await api.generate(body)
 
     pil_image = result["image"]
-    buf = io.BytesIO()
-    # 输出 mime 与 output_format 对齐
-    save_format = "PNG" if (output_format or "").lower() == "png" else "JPEG"
-    pil_image.save(buf, format=save_format)
-    data = buf.getvalue()
-    mime = "image/png" if save_format == "PNG" else "image/jpeg"
+    # PIL 编码是 CPU 重活，下线程；mime 与实际输出格式对齐
+    data, mime = await asyncio.to_thread(encode_pil_image, pil_image, output_format)
 
     return NodeOutput(
         status="ok",

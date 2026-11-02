@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-import io
 import asyncio
 
 from ..core.request import OutputType, GenerationResult, GenerationRequest
+from ..image_process import encode_pil_image
 from ..backends.minimax.api import MiniMaxAPI
 
 
@@ -46,10 +46,10 @@ async def minimax_image01_img2img_mapper(
         raise RuntimeError("MiniMax image-01 图生图失败，未返回图片")
 
     img = images[0]
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    # PIL 编码是 CPU 重活，下线程免得冻事件循环（同 gpt_image2）
+    data, mime = await asyncio.to_thread(encode_pil_image, img, "png")
     return GenerationResult(
         output_type=OutputType.IMAGE,
-        data=buf.getvalue(),
-        mime_type="image/png",
+        data=data,
+        mime_type=mime,
     )

@@ -927,6 +927,17 @@ class ComfyUIAPI:
     async def upload_mp3(self, mp3: Union[Path, bytes]) -> str:
         return await self.upload_image(mp3, "audio/mpeg")
 
+    @staticmethod
+    def _upload_payload(image_path: Union[Path, Image.Image, bytes], suffix: str) -> tuple[bytes, str]:
+        """PIL 编码 / 读盘都下线程做；返回 (上传字节, 文件名)。"""
+        if isinstance(image_path, Image.Image):
+            buffer = io.BytesIO()
+            image_path.save(buffer, format="PNG")
+            return buffer.getvalue(), f"{uuid.uuid4()}.{suffix}"
+        if isinstance(image_path, bytes):
+            return image_path, f"{uuid.uuid4()}.{suffix}"
+        return image_path.read_bytes(), image_path.name
+
     async def upload_image(
         self,
         image_path: Union[Path, Image.Image, bytes],
@@ -937,17 +948,7 @@ class ComfyUIAPI:
         else:
             suffix = "png"
 
-        if isinstance(image_path, Image.Image):
-            buffer = io.BytesIO()
-            image_path.save(buffer, format="PNG")
-            data = buffer.getvalue()
-            image_name = f"{uuid.uuid4()}.{suffix}"
-        elif isinstance(image_path, bytes):
-            data = image_path
-            image_name = f"{uuid.uuid4()}.{suffix}"
-        else:
-            data = image_path.read_bytes()
-            image_name = image_path.name
+        data, image_name = await asyncio.to_thread(self._upload_payload, image_path, suffix)
 
         # RunningHub 代理不暴露 ComfyUI 原生 POST /upload/image(会返回
         # {"code":404,"msg":"NOT_FOUND"}),必须改走 OpenAPI v2 二进制上传接口。

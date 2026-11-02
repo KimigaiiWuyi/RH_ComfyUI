@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import time
+import asyncio
 from typing import Protocol
 
 from PIL import Image
+
+from gsuid_core.logger import logger
 
 from ..core.types import NodeOutput
 from ..core.request import GenerationRequest
@@ -101,7 +105,12 @@ async def gpt_image2_mapper(
     else:
         raise RuntimeError(f"{model} 返回了无法处理的类型: {type(drawn)}")
 
-    data, mime = encode_pil_image(image, output_format)
+    t0 = time.monotonic()
+    data, mime = await asyncio.to_thread(encode_pil_image, image, output_format)
+    enc_ms = (time.monotonic() - t0) * 1000
+    # 2560² PNG 编码 ~1s，慢于此阈值说明又在某个环节冻过主循环
+    if enc_ms >= 500.0:
+        logger.info(f"[gpt_image2] PIL 编码 {enc_ms:.0f}ms {image.size[0]}x{image.size[1]} out={len(data)}B")
 
     return NodeOutput(
         status="ok",
