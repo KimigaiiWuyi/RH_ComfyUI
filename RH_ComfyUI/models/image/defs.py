@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from .qwen import QWEN_IMAGE_MODELS
 from .kling import KLING_IMAGE_MODELS
 from ..bridge import AdapterChannel, ImagePipelineModel
@@ -598,7 +600,7 @@ class ImageOutpaintDef(ImagePipelineModel):
 
     async def run(self, request: GenerationRequest, *, on_progress=None):
         output = await super().run(request, on_progress=on_progress)
-        return self._crop_output(output, request)
+        return await asyncio.to_thread(self._crop_output, output, request)
 
     def _crop_output(self, output, request: GenerationRequest):
         """回图等比铺满 intended,再裁到规划像素。"""
@@ -863,7 +865,7 @@ class TxImageOutpaintDef(ImagePipelineModel):
 
     async def run(self, request: GenerationRequest, *, on_progress=None):
         output = await super().run(request, on_progress=on_progress)
-        return _apply_outpaint_intended_crop(output, request, self._read_pad)
+        return await asyncio.to_thread(_apply_outpaint_intended_crop, output, request, self._read_pad)
 
 
 class Banana2Def(ImagePipelineModel):
