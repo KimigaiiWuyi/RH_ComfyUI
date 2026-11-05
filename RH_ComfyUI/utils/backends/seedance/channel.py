@@ -39,6 +39,7 @@ from ...core.types import NodeOutput, ProgressEvent
 from ...core.request import GenerationRequest
 from ....core.base.errors import ChannelError
 from ....core.channels.channel import ProviderChannel
+from ....core.channels.failure import Phase, FailureKind
 
 # ── 凭证解析 ──
 
@@ -126,6 +127,15 @@ class SeedanceProviderChannel(ProviderChannel):
     def credentials(self) -> ProviderCredentials:
         return self._resolve_creds()
 
+    def health_group(self) -> str:
+        """同一上游端点的通道共享熔断组(生效 base_url 的 host,热读零网络)。"""
+        from urllib.parse import urlparse
+
+        creds = self._resolve_creds()
+        raw = (creds.base_url or self._provider_cls.DEFAULT_BASE_URL or "").rstrip("/")
+        host = urlparse(raw).hostname if raw else None
+        return host or self.name
+
     def _get_provider(self) -> Optional[SeedanceProvider]:
         """获取或创建 provider 实例(带缓存 + 凭证热更新)。"""
         creds = self._resolve_creds()
@@ -204,6 +214,8 @@ class SeedanceProviderChannel(ProviderChannel):
         if provider is None or not provider.api_key:
             raise ChannelError(
                 f"供应商 {self.name} 缺少 API Key",
+                kind=FailureKind.AUTH_OR_QUOTA,
+                phase=Phase.BEFORE_SEND,
                 retryable=True,
                 channel=self.name,
                 user_message="该供应商未配置 API Key。",
@@ -224,6 +236,7 @@ class SeedanceProviderChannel(ProviderChannel):
             # 形态/参数不被该供应商支持 → 不可重试(换通道也解决不了同一形态限制)
             raise ChannelError(
                 f"供应商 {self.name} 不支持该任务: {exc}",
+                kind=FailureKind.INVALID_REQUEST,
                 retryable=False,
                 channel=self.name,
                 code=exc.code or "",
@@ -234,33 +247,33 @@ class SeedanceProviderChannel(ProviderChannel):
             # 直接透传终止,不触发熔断 / 切换。
             raise
         except SeedanceProviderError as exc:
-            # retryable 尊重供应商侧标注(HTTP 状态/网关 data.retryable/raise 点语义):
-            # 参数类失败(4xx/VID-*)换通道也解决不了,不再盲目 failover 烧钱;
-            # 429/503/421(RunningHub 并发满)额外标 transient,run() 先在原通道退避重试一次
-            queue_full = (exc.http_status in (421, 415)) or (
-                (exc.code or "").upper() in {"TASK_QUEUE_MAXED", "TASK_INSTANCE_MAXED"}
-            )
+            # 后端只报事实:透传 kind/phase/http_status,换源与熔断由 run() 统一决策;
+            # 旧式(无 kind)外部 provider 错误仍按显式 retryable/transient 兼容。
             raise ChannelError(
                 str(exc),
+                kind=exc.kind,
+                phase=exc.phase,
+                http_status=exc.http_status,
                 retryable=exc.retryable,
-                transient=exc.retryable and (exc.http_status in (429, 503, 415, 421) or queue_full),
+                transient=exc.transient,
                 channel=self.name,
                 code=exc.code or "",
                 user_message=exc.user_message,
             ) from exc
         except (httpx.HTTPError, asyncio.TimeoutError, OSError) as exc:
-            raise ChannelError(
-                f"{self.name} 网络错误({type(exc).__name__}: {exc})",
-                retryable=True,
+            raise ChannelError.from_transport(
+                exc,
+                stage="other",
                 channel=self.name,
-                code="PROVIDER_NETWORK_ERROR",
+                message=f"{self.name} 网络错误({type(exc).__name__}: {exc})",
                 user_message=_user_msg_for_network_error(exc),
             ) from exc
 
         if not final.video_url:
             raise ChannelError(
                 f"{self.name} 任务成功但未返回 video_url: {final.raw}",
-                retryable=True,
+                kind=FailureKind.TASK_FAILED,
+                phase=Phase.ACCEPTED,
                 channel=self.name,
                 user_message="上游未返回视频结果,请稍后重试。",
             )
@@ -274,6 +287,8 @@ class SeedanceProviderChannel(ProviderChannel):
             # 故 retryable=False,翻译成干净文案而非裸 httpx traceback
             raise ChannelError(
                 f"{self.name} 下载生成结果失败({type(exc).__name__}: {exc})",
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.ACCEPTED,
                 retryable=False,
                 channel=self.name,
                 code="RESULT_DOWNLOAD_FAILED",

@@ -66,6 +66,19 @@ PLUGIN_CONFIG_DEFAULT: Dict[str, GSC] = {
         "3",
         options=["1", "3", "5", "0"],
     ),
+    "Circuit_Base_Cooldown": GsIntConfig(
+        "熔断基础冷却(秒)",
+        "熔断首次冷却秒数;连续熔断按 2^n 指数退避并加 ±20% 抖动;"
+        "鉴权/配额类错误按 max(基础×20, 600) 起步。改动即刻生效。",
+        30,
+        options=[10, 30, 60, 120],
+    ),
+    "Circuit_Max_Cooldown": GsIntConfig(
+        "熔断冷却上限(秒)",
+        "指数退避的冷却秒数上限;到期进入半开,探测成功恢复。改动即刻生效。",
+        1800,
+        options=[300, 600, 1800, 3600],
+    ),
     "_divider_point": GsDivider(
         "积分规则",
         "新用户初始积分 / 各业务积分消耗",

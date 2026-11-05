@@ -11,6 +11,7 @@
   "balanceMode": "负载均衡",
   "failureThreshold": "熔断阈值",
   "circuitSeconds": "熔断冷却",
+  "circuitMax": "冷却上限",
   "seconds": "{n} 秒",
   "all": "全部",
   "meta": {

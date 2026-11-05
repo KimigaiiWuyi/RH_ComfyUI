@@ -90,6 +90,7 @@ class BalancerView(TypedDict):
     mode: str
     failure_threshold: int
     circuit_breaker_seconds: float
+    max_cooldown: float
 
 
 class Totals(TypedDict):
@@ -403,7 +404,9 @@ async def build_dashboard_snapshot() -> DashboardSnapshot:
     balancer_view = BalancerView(
         mode=config.mode,
         failure_threshold=config.failure_threshold,
-        circuit_breaker_seconds=config.circuit_breaker_seconds,
+        # circuit_breaker_seconds 是兼容字段:展示生效的基础冷却
+        circuit_breaker_seconds=config.cooldown_base(),
+        max_cooldown=config.max_cooldown,
     )
 
     return DashboardSnapshot(

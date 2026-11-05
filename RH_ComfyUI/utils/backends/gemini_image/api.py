@@ -23,6 +23,8 @@ import base64
 import asyncio
 from typing import TYPE_CHECKING, Any, Optional
 
+import httpx
+
 from gsuid_core.logger import logger
 
 if TYPE_CHECKING:
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
 
 from ..http_retry import download_with_network_retry
 from ....core.base.errors import VendorTaskNotDurable
+from ....core.channels.polling import PollErrorTolerance
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 # background interaction 终态(官方 Interactions API status 枚举)
@@ -81,6 +84,9 @@ def _sdk_thinking_level(level: str) -> ThinkingLevel | None:
 
 class GeminiImageAPI:
     """Gemini 生图客户端(@property 读配置,改完即时生效)"""
+
+    # 轮询错误容忍窗(秒):已受理任务遇到 5xx/429/传输错先退避续轮,超时再抛
+    poll_error_window_s: float = 600.0
 
     @property
     def api_key(self) -> str:
@@ -337,7 +343,10 @@ class GeminiImageAPI:
             if status in _TERMINAL_STATUSES:
                 return interaction
 
+        from google.genai import errors as genai_errors
+
         poll_n = 0
+        tolerance = PollErrorTolerance(window_s=self.poll_error_window_s)
         while True:
             status = str(getattr(interaction, "status", None) or "").lower()
             if status in _TERMINAL_STATUSES:
@@ -353,7 +362,23 @@ class GeminiImageAPI:
             poll_n += 1
             if not iid:
                 raise RuntimeError("Gemini background interaction 缺少 id,无法轮询")
-            interaction = await client.aio.interactions.get(iid)
+            try:
+                interaction = await client.aio.interactions.get(iid)
+            except genai_errors.APIError as exc:
+                # 429/5xx/408 窗口内退避续轮;4xx 立即抛(参数类,轮询无意义)
+                delay = tolerance.next_delay(http_status=exc.code)
+                if delay is None:
+                    raise
+                await asyncio.sleep(delay)
+                continue
+            except (httpx.HTTPError, asyncio.TimeoutError, OSError):
+                # 传输类错误窗口内容忍;耗尽原样抛
+                delay = tolerance.next_delay(http_status=None)
+                if delay is None:
+                    raise
+                await asyncio.sleep(delay)
+                continue
+            tolerance.reset()
             if poll_n % 10 == 0:
                 logger.info(
                     f"[Gemini-Image] 轮询 interaction_id={iid} status={getattr(interaction, 'status', None)} n={poll_n}"

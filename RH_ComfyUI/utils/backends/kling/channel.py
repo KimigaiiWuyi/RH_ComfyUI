@@ -15,6 +15,7 @@ from ...audit_key import mask_api_key
 from ...core.types import NodeOutput
 from ....core.base.errors import ChannelError, GenerationError
 from ....core.channels.channel import ChannelBinding, ProviderChannel
+from ....core.channels.failure import Phase, FailureKind
 from ....core.channels.registry import channel_registry
 
 
@@ -68,6 +69,8 @@ class KlingChannel(ProviderChannel):
         except Exception as exc:
             raise ChannelError(
                 f"可灵 {self._model_name} 失败: {exc}",
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.AMBIGUOUS,
                 retryable=True,
                 channel=self.name,
                 user_message=f"可灵 {self._model_name} 失败,请稍后重试。",

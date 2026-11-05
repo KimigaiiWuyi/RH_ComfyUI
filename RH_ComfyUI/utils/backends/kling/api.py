@@ -24,6 +24,7 @@ from .payload import KlingSubmit
 from ..http_retry import RetryingAsyncClient, download_with_network_retry
 from ...core.types import NodeOutput
 from ....core.base.errors import ChannelError
+from ....core.channels.failure import Phase, Stage, FailureKind
 from ....core.channels.polling import PollingChannelMixin
 from ....core.telemetry.wire_capture import set_wire_from_http_body
 
@@ -37,7 +38,9 @@ class KlingAPI(PollingChannelMixin):
 
     async def run(self, submit: KlingSubmit, *, model_name: str) -> NodeOutput:
         set_wire_from_http_body(submit.body, prompt=submit.prompt or None)
-        created = await self._exchange("POST", submit.path, json_body=submit.body, timeout=_CREATE_TIMEOUT)
+        created = await self._exchange(
+            "POST", submit.path, json_body=submit.body, timeout=_CREATE_TIMEOUT, stage="create"
+        )
         task_id = created_task_id(created)
         encoded = encode_vendor_task(submit.poll_token, task_id)
         from ....core.dispatch.active_tasks import get_active_task_registry
@@ -59,9 +62,11 @@ class KlingAPI(PollingChannelMixin):
         token, task_id = decode_vendor_task(encoded)
         path = self._poll_path(token, task_id)
         if token == "v":
-            payload = await self._exchange("GET", path, query={"task_ids": task_id}, timeout=_POLL_TIMEOUT)
+            payload = await self._exchange(
+                "GET", path, query={"task_ids": task_id}, timeout=_POLL_TIMEOUT, stage="poll"
+            )
         else:
-            payload = await self._exchange("GET", path, timeout=_POLL_TIMEOUT)
+            payload = await self._exchange("GET", path, timeout=_POLL_TIMEOUT, stage="poll")
         view = parse_poll(payload)
         return view.done, view
 
@@ -77,6 +82,8 @@ class KlingAPI(PollingChannelMixin):
         if not isinstance(final, KlingPoll):
             raise ChannelError(
                 "可灵轮询结果异常",
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.ACCEPTED,
                 retryable=False,
                 channel=_CHANNEL,
                 user_message="可灵任务结果异常,请稍后重试。",
@@ -84,6 +91,8 @@ class KlingAPI(PollingChannelMixin):
         if final.failed:
             raise ChannelError(
                 final.message or "可灵任务失败",
+                kind=FailureKind.TASK_FAILED,
+                phase=Phase.ACCEPTED,
                 retryable=False,
                 channel=_CHANNEL,
                 code="TASK_FAILED",
@@ -92,6 +101,8 @@ class KlingAPI(PollingChannelMixin):
         if not final.urls:
             raise ChannelError(
                 "可灵任务成功但没有结果地址",
+                kind=FailureKind.TASK_FAILED,
+                phase=Phase.ACCEPTED,
                 retryable=False,
                 channel=_CHANNEL,
                 code="EMPTY_RESULT",
@@ -118,6 +129,7 @@ class KlingAPI(PollingChannelMixin):
         json_body: Mapping[str, object] | None = None,
         query: Mapping[str, str] | None = None,
         timeout: httpx.Timeout,
+        stage: "Stage" = "other",
     ) -> dict[str, object]:
         url = f"{endpoint()}{path}"
         headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -129,8 +141,12 @@ class KlingAPI(PollingChannelMixin):
             async with RetryingAsyncClient(timeout=timeout) as client:
                 response = await client.request(method, url, headers=headers, json=json_body, params=query)
         except (httpx.HTTPError, TimeoutError, OSError) as exc:
+            from ....core.channels.failure import FailureKind, classify_transport
+
             raise ChannelError(
                 f"可灵网络错误: {exc}",
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=classify_transport(exc, stage=stage)[1],
                 retryable=True,
                 transient=True,
                 channel=_CHANNEL,
@@ -140,14 +156,19 @@ class KlingAPI(PollingChannelMixin):
         try:
             raw: object = response.json()
         except json.JSONDecodeError as exc:
+            from ....core.channels.failure import FailureKind, classify_http_status
+
+            _, bad_phase = classify_http_status(response.status_code or 500, stage=stage)
             raise ChannelError(
                 f"可灵响应不是 JSON(HTTP {response.status_code})",
-                retryable=True,
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=bad_phase,
+                http_status=response.status_code,
                 channel=_CHANNEL,
                 user_message="可灵返回了无法识别的响应,请稍后重试。",
             ) from exc
         payload = as_object_dict(raw)
-        raise_if_error(response.status_code, payload)
+        raise_if_error(response.status_code, payload, stage=stage)
         return payload
 
     @staticmethod

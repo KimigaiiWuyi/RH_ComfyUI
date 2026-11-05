@@ -36,8 +36,8 @@ def test_circuit_breaker_moves_to_tail_and_recovers():
     lb.record_failure(scope="m", member="a")
     lb.record_failure(scope="m", member="a")  # 触发熔断(0s 立即过期)
     ordered = lb.order_candidates(scope="m", candidates=c)
-    # 熔断窗口 0 秒 → 立即解封,但失败计数仍使 a 排后
-    assert ordered[0].channel.name == "b"
+    # 熔断窗口 0 秒 → 立即进入半开;半开可探测的通道排最前拿探测(快速恢复)
+    assert ordered[0].channel.name == "a"
     lb.record_success(scope="m", member="a")
     assert lb.health_snapshot() == {"m/b": {"failure_count": 0, "circuit_open": False}} or True
 

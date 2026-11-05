@@ -24,6 +24,7 @@ from ..core.schema.request import TaskType, GenerationRequest
 from ..utils.core.pipeline import NodeDef
 from ..core.base.generation import AIGCGenerationBase
 from ..core.channels.channel import ChannelBinding, ProviderChannel
+from ..core.channels.failure import Phase, FailureKind
 from ..core.channels.registry import channel_registry
 
 
@@ -148,13 +149,20 @@ class AdapterChannel(ProviderChannel):
         if disabled is not None:
             raise ChannelError(
                 disabled,
+                kind=FailureKind.CAPABILITY,
+                phase=Phase.BEFORE_SEND,
                 retryable=True,
                 channel=self.name,
                 user_message=disabled,
             )
         adapter = self._adapter()
         if adapter is None:
-            raise ChannelError(f"后端 {self.name} 未注册", retryable=False)
+            raise ChannelError(
+                f"后端 {self.name} 未注册",
+                kind=FailureKind.INVALID_REQUEST,
+                phase=Phase.BEFORE_SEND,
+                retryable=False,
+            )
         try:
             return await adapter.execute(
                 kwargs["request"],
@@ -168,7 +176,8 @@ class AdapterChannel(ProviderChannel):
             # 后端/上游失败翻译成可切换通道错误,让 run() 尝试下一路供应商
             raise ChannelError(
                 f"后端 {self.name} 执行失败: {e}",
-                retryable=True,
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.AMBIGUOUS,
                 channel=self.name,
                 user_message=str(e),
             ) from e

@@ -31,6 +31,14 @@ class ProviderChannel(ABC):
     async def unavailable_reason(self) -> str:
         return f"通道 {self.name} 不可用(缺少配置)"
 
+    def health_group(self) -> str:
+        """健康分组:共享同一上游端点的通道返回同一值,熔断按组生效。
+
+        默认取通道名(每通道独立熔断)。聚合网关/多槽位类通道应覆盖为
+        当前生效 base_url 的 host(每次调用热读配置,零网络,取不到回落 name)。
+        """
+        return self.name
+
     def supports_request(self, request: GenerationRequest) -> bool:
         """判断该通道是否能处理此请求(默认 True,向后兼容)。
 

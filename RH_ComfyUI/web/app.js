@@ -237,6 +237,7 @@
     add(t('balanceMode'), data.balancer.mode);
     add(t('failureThreshold'), data.balancer.failure_threshold);
     add(t('circuitSeconds'), t('seconds', { n: data.balancer.circuit_breaker_seconds }));
+    add(t('circuitMax'), t('seconds', { n: data.balancer.max_cooldown }));
     add(t('meta.global'), t('kpi.modelsAvailable') + ' ' + data.totals.models_available + '/' + data.totals.models);
   }
 

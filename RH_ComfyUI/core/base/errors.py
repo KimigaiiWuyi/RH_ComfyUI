@@ -9,7 +9,10 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from ..channels.failure import Phase, Stage, FailureKind
 
 
 class GenerationError(RuntimeError):
@@ -29,28 +32,119 @@ class ModelUnavailableError(GenerationError):
 
 
 class ChannelError(GenerationError):
-    """通道执行失败;retryable=True 时调度切换下一通道
+    """通道执行失败;后端只上报事实(kind/phase),换源与熔断由 run() 唯一决策
 
-    transient=True 表示"瞬时性失败"(如上游 429 限流 / 503 过载):通道本身健康,
-    原通道指数退避排队(默认最长 1 小时)后大概率成功。排队超时才记失败并切换通道;
-    该标注仅在 retryable=True 时有意义。
+    kind/phase 声明时(推荐):
+    - retryable 推导 = kind != INVALID_REQUEST 且 (phase != ACCEPTED 或 kind == TASK_FAILED);
+    - transient 推导 = retryable 且 (kind == RATE_LIMITED 或 (PROVIDER_FAULT 且 http_status==503));
+    - 显式 retryable/transient 优先于推导(覆盖特殊站点,如某家把 402 当不可重试)。
+
+    旧式构造(无 kind):从显式 retryable/transient 反推 resolved_kind,
+    phase 保持 UNKNOWN(strict 下按 AMBIGUOUS 处理,不换源)。
     """
 
     def __init__(
         self,
         message: str,
         *,
-        retryable: bool = False,
-        transient: bool = False,
+        retryable: Optional[bool] = None,
+        transient: Optional[bool] = None,
+        kind: "FailureKind | None" = None,
+        phase: "Phase | None" = None,
+        http_status: Optional[int] = None,
         channel: str = "",
         code: str = "",
         user_message: Optional[str] = None,
     ) -> None:
+        from ..channels.failure import Phase as _Phase, FailureKind as _FK
+
+        if phase is None:
+            phase = _Phase.UNKNOWN
         super().__init__(message, user_message=user_message)
-        self.retryable = retryable
-        self.transient = transient
+        self.kind = kind
+        self.phase = phase
+        self.http_status = http_status
+        if kind is not None:
+            derived_retryable = kind is not _FK.INVALID_REQUEST and (
+                phase is not _Phase.ACCEPTED or kind is _FK.TASK_FAILED
+            )
+            derived_transient = derived_retryable and (
+                kind is _FK.RATE_LIMITED or (kind is _FK.PROVIDER_FAULT and http_status == 503)
+            )
+            self.retryable = derived_retryable if retryable is None else bool(retryable)
+            self.transient = derived_transient if transient is None else bool(transient)
+        else:
+            self.retryable = bool(retryable)
+            self.transient = bool(transient)
         self.channel = channel
         self.code = code
+
+    @property
+    def resolved_kind(self) -> "FailureKind":
+        """显式 kind,或旧式构造时按 retryable/transient 反推。"""
+        from ..channels.failure import FailureKind
+
+        if self.kind is not None:
+            return self.kind
+        if not self.retryable:
+            return FailureKind.INVALID_REQUEST
+        if self.transient:
+            return FailureKind.RATE_LIMITED
+        return FailureKind.PROVIDER_FAULT
+
+    @classmethod
+    def from_http(
+        cls,
+        status: int,
+        *,
+        stage: "Stage",
+        channel: str,
+        code: str = "HTTP_ERROR",
+        message: str,
+        user_message: Optional[str] = None,
+        kind: "FailureKind | None" = None,
+        retryable: Optional[bool] = None,
+        transient: Optional[bool] = None,
+    ) -> "ChannelError":
+        """HTTP 状态 → ChannelError;kind 可显式覆盖(如网关信封的自定义语义)。"""
+        from ..channels.failure import classify_http_status
+
+        ck, phase = classify_http_status(status, stage=stage)
+        return cls(
+            message,
+            kind=kind if kind is not None else ck,
+            phase=phase,
+            http_status=status,
+            channel=channel,
+            code=code,
+            user_message=user_message,
+            retryable=retryable,
+            transient=transient,
+        )
+
+    @classmethod
+    def from_transport(
+        cls,
+        exc: BaseException,
+        *,
+        stage: "Stage",
+        channel: str,
+        code: str = "PROVIDER_NETWORK_ERROR",
+        message: Optional[str] = None,
+        user_message: Optional[str] = None,
+    ) -> "ChannelError":
+        """传输异常 → ChannelError(kind=PROVIDER_FAULT,phase 由异常链与阶段推)。"""
+        from ..channels.failure import classify_transport
+
+        _kind, _phase = classify_transport(exc, stage=stage)
+        return cls(
+            message if message is not None else f"{type(exc).__name__}: {exc}",
+            kind=_kind,
+            phase=_phase,
+            channel=channel,
+            code=code,
+            user_message=user_message,
+        )
 
 
 class AllChannelsFailedError(GenerationError):

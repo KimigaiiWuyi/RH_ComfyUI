@@ -156,7 +156,17 @@ def test_generate_image_routes_to_edits_endpoint(monkeypatch):
     assert "data" in kwargs  # 统一走 multipart
 
 
-def test_channel_availability():
+def _enable_pool(monkeypatch) -> None:
+    """池总闸热读宿主配置;测试不依赖本机勾选。"""
+    monkeypatch.setattr(
+        "RH_ComfyUI.utils.backends.openai_image.config.is_openai_image_pool_enabled",
+        lambda: True,
+    )
+
+
+def test_channel_availability(monkeypatch):
+    _enable_pool(monkeypatch)
+
     def resolver_ok() -> OpenAIImageCredentials:
         return OpenAIImageCredentials(True, "sk-secret123", "https://qianfan.baidubce.com/v2")
 
@@ -246,6 +256,7 @@ def _providers_config(weight: str = "3") -> GsRepeatGroupConfig:
 
 def test_resolve_and_sync_binding(monkeypatch):
     channel_registry.clear()
+    _enable_pool(monkeypatch)
     monkeypatch.setattr(oprov, "SERVICE_CONFIG", _FakeServiceConfig(_providers_config()))
 
     entries = oprov.resolve_provider_entries()

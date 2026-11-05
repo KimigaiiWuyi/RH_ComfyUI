@@ -11,6 +11,7 @@
   "balanceMode": "Load balance",
   "failureThreshold": "Failure threshold",
   "circuitSeconds": "Breaker cooldown",
+  "circuitMax": "Cooldown cap",
   "seconds": "{n}s",
   "all": "All",
   "meta": {

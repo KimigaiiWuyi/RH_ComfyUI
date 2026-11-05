@@ -916,6 +916,7 @@ def test_resume_polls_image_path_without_post(monkeypatch: pytest.MonkeyPatch) -
         json_body: object = None,
         query: object = None,
         timeout: object = None,
+        stage: object = None,
     ) -> dict[str, object]:
         methods.append(method)
         assert path == "/v1/general/ai-multi-shot/sub-1"

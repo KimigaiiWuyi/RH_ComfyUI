@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from .catalog import POLL_PATHS, POLL_TASKS
 from ....core.base.errors import ChannelError
+from ....core.channels.failure import Phase, Stage, FailureKind, classify_http_status
 
 _CHANNEL = "kling"
 _SUCCESS = {"succeeded", "succeed"}
@@ -64,28 +65,49 @@ def _message(payload: dict[str, object]) -> str:
     return ""
 
 
-def _flags(code: int, http_status: int) -> tuple[bool, bool]:
-    """返回 (retryable, transient)。参数错误不重试,限流和 5xx 可重试。"""
-    if code in range(1302, 1305) or code in {1100, 1101, 1102} or http_status in {429, 503}:
-        return True, True
-    if code in {5000, 5001, 5002} or http_status in {500, 502, 504}:
-        transient = http_status in {503, 504} or code == 5002
-        return True, transient
-    return False, False
+def _classify_business(
+    code: "int | None", http_status: int, stage: "Stage"
+) -> "tuple[FailureKind, Phase, bool | None]":
+    """业务码/HTTP 码 → (kind, phase, transient_override);与旧 _flags 口径一致。"""
+    transient: "bool | None" = None
+    if code in range(1302, 1305) or code in {1100, 1101, 1102} or http_status == 429:
+        kind = FailureKind.RATE_LIMITED
+    elif http_status == 503:
+        kind = FailureKind.PROVIDER_FAULT  # 503 派生 transient,与旧 (True,True) 一致
+    elif code in {5000, 5001} or http_status in {500, 502}:
+        kind = FailureKind.PROVIDER_FAULT
+    elif code == 5002 or http_status == 504:
+        kind = FailureKind.PROVIDER_FAULT
+        transient = True  # 旧 _flags 显式 transient
+    elif http_status in (401, 402, 403):
+        kind = FailureKind.AUTH_OR_QUOTA
+    elif http_status >= 500:
+        kind = FailureKind.PROVIDER_FAULT
+    else:
+        kind = FailureKind.INVALID_REQUEST
+    if http_status >= 400:
+        _, phase = classify_http_status(http_status, stage=stage)
+    elif stage == "create":
+        phase = Phase.REJECTED
+    elif stage in ("poll", "result"):
+        phase = Phase.ACCEPTED
+    else:
+        phase = Phase.UNKNOWN
+    return kind, phase, transient
 
 
-def raise_if_error(http_status: int, payload: dict[str, object]) -> None:
+def raise_if_error(http_status: int, payload: dict[str, object], *, stage: "Stage" = "other") -> None:
     code = _code(payload)
     if http_status == 200 and code == 0:
         return
     business = code if code is not None else http_status
-    retryable, transient = _flags(business if code is not None else 0, http_status)
-    if http_status in {429, 503}:
-        retryable, transient = True, True
+    kind, phase, transient = _classify_business(code, http_status, stage)
     text = _message(payload) or f"HTTP {http_status}"
     raise ChannelError(
         f"可灵 {business}: {text}",
-        retryable=retryable,
+        kind=kind,
+        phase=phase,
+        http_status=http_status or None,
         transient=transient,
         channel=_CHANNEL,
         code=str(business),
@@ -98,7 +120,8 @@ def created_task_id(payload: dict[str, object]) -> str:
     if data is None:
         raise ChannelError(
             "可灵创建响应缺少 data",
-            retryable=True,
+            kind=FailureKind.PROVIDER_FAULT,
+            phase=Phase.REJECTED,
             channel=_CHANNEL,
             user_message="可灵没有返回任务号,请稍后重试。",
         )
@@ -109,7 +132,8 @@ def created_task_id(payload: dict[str, object]) -> str:
         return str(raw)
     raise ChannelError(
         "可灵创建响应缺少任务号",
-        retryable=True,
+        kind=FailureKind.PROVIDER_FAULT,
+        phase=Phase.REJECTED,
         channel=_CHANNEL,
         user_message="可灵没有返回任务号,请稍后重试。",
     )
@@ -221,7 +245,8 @@ def as_object_dict(raw: object) -> dict[str, object]:
     if found is None:
         raise ChannelError(
             "可灵响应不是 JSON 对象",
-            retryable=True,
+            kind=FailureKind.PROVIDER_FAULT,
+            phase=Phase.REJECTED,
             channel=_CHANNEL,
             user_message="可灵返回了无法识别的响应,请稍后重试。",
         )

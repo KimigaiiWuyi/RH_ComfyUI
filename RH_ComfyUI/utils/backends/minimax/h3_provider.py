@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import base64
 import asyncio
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import httpx
+
+if TYPE_CHECKING:
+    from ....core.channels.failure import Stage
 
 from gsuid_core.logger import logger
 
@@ -32,7 +35,6 @@ from ..seedance.provider import (
     DryRunInterrupt,
     NormalizedStatus,
     SeedanceProviderError,
-    http_status_retryable,
 )
 from ....core.base.errors import VendorTaskNotDurable
 
@@ -110,6 +112,8 @@ class MiniMaxH3Provider:
     max_prompt_chars = 7000
     media_prep_concurrency = 5
     poll_interval = 10.0
+    # 轮询错误容忍窗(秒):已受理任务遇到 5xx/429/传输错先退避续轮,超时再抛
+    poll_error_window_s = 600.0
 
     def __init__(
         self,
@@ -250,9 +254,13 @@ class MiniMaxH3Provider:
         try:
             published = await materialize(ref.data, mime)
         except MediaPublishError as exc:
+            from ....core.channels.failure import Phase, FailureKind
+
             raise MiniMaxH3ProviderError(
                 f"媒体外链化失败: {exc}",
                 code="MEDIA_PUBLISH_FAILED",
+                kind=FailureKind.CAPABILITY,
+                phase=Phase.BEFORE_SEND,
                 retryable=True,
                 provider=self.name,
                 user_message="参考素材上传失败,请稍后重试。",
@@ -333,7 +341,7 @@ class MiniMaxH3Provider:
 
     async def get(self, task_id: str) -> NormalizedTask:
         url = f"{self.base_url}{self.QUERY_PATH.format(task_id=task_id)}"
-        resp = await self._request("GET", url, headers=self._headers())
+        resp = await self._request("GET", url, headers=self._headers(), stage="poll")
         return self._parse_task(resp)
 
     def _parse_task(self, resp_json: dict[str, Any]) -> NormalizedTask:
@@ -389,6 +397,7 @@ class MiniMaxH3Provider:
         *,
         headers: Optional[dict[str, str]] = None,
         json: Optional[dict[str, Any]] = None,
+        stage: "Stage" = "other",
     ) -> dict[str, Any]:
         from ....rh_config.comfyui_config import plugin_dry_run
 
@@ -416,32 +425,44 @@ class MiniMaxH3Provider:
         emit = logger.warning if resp.status_code >= 400 else logger.debug
         emit(f"[MiniMaxH3] 响应 {resp.status_code} ({len(resp.content)} bytes)\n  body: {resp_text}")
         if resp.status_code >= 400:
-            raise self._build_http_error(resp, resp_json)
+            raise self._build_http_error(resp, resp_json, stage=stage)
         if method.upper() == "DELETE" and (resp_json is None or not (resp.content or b"").strip()):
             return {}
         if isinstance(resp_json, dict):
             return resp_json
         if method.upper() in ("DELETE", "POST") and not (resp.content or b"").strip():
             return {}
+        from ....core.channels.failure import FailureKind, classify_http_status
+
+        _, bad_phase = classify_http_status(resp.status_code or 500, stage=stage)
         raise MiniMaxH3ProviderError(
             f"MiniMax H3 返回非 JSON: {resp_text[:500]}",
             code="BAD_RESPONSE",
-            retryable=True,
+            kind=FailureKind.PROVIDER_FAULT,
+            phase=bad_phase,
             provider=self.name,
             user_message="上游返回格式异常,请稍后重试。",
         )
 
-    def _build_http_error(self, resp: httpx.Response, resp_json: Any) -> MiniMaxH3ProviderError:
+    def _build_http_error(
+        self, resp: httpx.Response, resp_json: Any, *, stage: "Stage" = "other"
+    ) -> MiniMaxH3ProviderError:
         body = resp_json if isinstance(resp_json, dict) else {"raw": (resp.text or "")[:500]}
         vendor_msg = _pick_oai_message(body, http_status=resp.status_code)
-        retryable = http_status_retryable(resp.status_code)
-        # 参数/审核/余额不可切通道
-        if resp.status_code in (400, 402, 422):
-            retryable = False
+        from ....core.channels.failure import classify_http_status
+
+        kind, phase = classify_http_status(resp.status_code, stage=stage)
+        # 参数/审核/余额(400/402/422)显式不可切通道,保留原语义
+        retryable = False if resp.status_code in (400, 402, 422) else None
+        # 529(MiniMax 专属过载码)沿用旧 transient 语义,kind 推导不含该码
+        transient = True if resp.status_code == 529 else None
         return MiniMaxH3ProviderError(
             f"MiniMax H3 API 错误 {resp.status_code}: {vendor_msg}",
             code="HTTP_ERROR",
+            kind=kind,
+            phase=phase,
             retryable=retryable,
+            transient=transient,
             provider=self.name,
             http_status=resp.status_code,
             user_message=vendor_msg,
@@ -467,13 +488,16 @@ class MiniMaxH3Provider:
         from ....core.telemetry.wire_capture import set_wire_from_http_body
 
         set_wire_from_http_body(masked, prompt=(spec.prompt or "").strip() or None)
-        resp = await self._request(method, url, headers=headers, json=body)
+        resp = await self._request(method, url, headers=headers, json=body, stage="create")
         task_id = self.parse_create(resp)
         if not task_id:
+            from ....core.channels.failure import Phase, FailureKind
+
             raise MiniMaxH3ProviderError(
                 f"MiniMax H3 未返回 task_id: {resp}",
                 code="NO_TASK_ID",
-                retryable=True,
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.REJECTED,
                 provider=self.name,
                 user_message="上游未返回任务 ID,请稍后重试。",
             )
@@ -554,21 +578,46 @@ class MiniMaxH3Provider:
         start = loop.time()
         last_status: Optional[NormalizedStatus] = None
         poll_count = 0
+        from ....core.channels.failure import Phase, FailureKind
+        from ....core.channels.polling import PollErrorTolerance
+
+        tolerance = PollErrorTolerance(window_s=self.poll_error_window_s)
         while True:
             poll_count += 1
             try:
                 task = await self.get(task_id)
+            except MiniMaxH3ProviderError as poll_err:
+                status = poll_err.http_status
+                # 无 http_status 的语义错误(业务拒答/参数类)不可重试的立即抛,
+                # 否则会被当成传输错误白等整个容忍窗
+                if status is None and not poll_err.retryable:
+                    raise
+                delay = tolerance.next_delay(http_status=status)
+                if delay is None:
+                    raise
+                logger.warning(f"[MiniMaxH3] 任务 {task_id} 轮询错误(HTTP {status}),{delay:.1f}s 后重试")
+                await asyncio.sleep(delay)
+                continue
             except (httpx.HTTPError, asyncio.TimeoutError, OSError) as poll_exc:
                 # Transport retry (5× / 5s) already happened in RetryingAsyncClient.
+                delay = tolerance.next_delay(http_status=None)
+                if delay is not None:
+                    logger.warning(
+                        f"[MiniMaxH3] 任务 {task_id} 轮询网络错误({type(poll_exc).__name__}),{delay:.1f}s 后重试"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 elapsed = loop.time() - start
                 raise MiniMaxH3ProviderError(
                     f"MiniMax H3 轮询失败({type(poll_exc).__name__}: {poll_exc}); "
                     f"上次状态={last_status}, 已等待={elapsed:.1f}s",
                     code="POLL_NETWORK_ERROR",
-                    retryable=False,
+                    kind=FailureKind.PROVIDER_FAULT,
+                    phase=Phase.ACCEPTED,
                     provider=self.name,
                     user_message="轮询阶段网络异常,请稍后重试。",
                 ) from poll_exc
+            tolerance.reset()
 
             if task.status != last_status:
                 logger.info(f"[MiniMaxH3] 任务 {task_id} 状态变更: {last_status} → {task.status}")
@@ -594,6 +643,8 @@ class MiniMaxH3Provider:
                     raise MiniMaxH3ProviderError(
                         vendor_msg,
                         code="TASK_FAILED",
+                        kind=FailureKind.TASK_FAILED,
+                        phase=Phase.ACCEPTED,
                         retryable=False,
                         provider=self.name,
                         user_message=vendor_msg,
@@ -602,6 +653,8 @@ class MiniMaxH3Provider:
                     raise MiniMaxH3ProviderError(
                         f"任务 {task.status.value}: {task_id}",
                         code="EXPIRED",
+                        kind=FailureKind.TASK_FAILED,
+                        phase=Phase.ACCEPTED,
                         retryable=False,
                         provider=self.name,
                         user_message=f"任务已{task.status.value}",
@@ -613,7 +666,8 @@ class MiniMaxH3Provider:
                 raise MiniMaxH3ProviderError(
                     f"任务轮询超时({max_wait}s): {task_id}",
                     code="POLL_TIMEOUT",
-                    retryable=False,
+                    kind=FailureKind.PROVIDER_FAULT,
+                    phase=Phase.ACCEPTED,
                     provider=self.name,
                     user_message="视频生成超时,请稍后重试或用 resume-poll 继续查询。",
                 )

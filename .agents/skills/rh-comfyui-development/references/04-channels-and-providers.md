@@ -32,23 +32,40 @@ class MyGatewayChannel(ProviderChannel):
 
     async def invoke(self, **kwargs) -> NodeOutput:
         try:
-            ...  # 调 utils/backends 里的客户端
-        except RateLimitedError as e:
-            # 瞬时限流/过载:原通道退避重试一次比切通道整单重跑省钱
-            raise ChannelError(f"限流: {e}", retryable=True, transient=True)
-        except TimeoutError as e:
-            raise ChannelError(f"网关超时: {e}", retryable=True)  # 可切下一通道
-        except UpstreamRejectedError as e:
-            raise ChannelError(f"参数被拒: {e}", retryable=False)  # 直接透传用户
+            ...  # 调 utils/backends 里的客户端(POST 建单)
+        except httpx.HTTPStatusError as e:
+            raise ChannelError.from_http(
+                e.response.status_code, stage="create",
+                channel=self.name, message=f"上游拒绝: {e}",
+            )
+        except httpx.TransportError as e:
+            raise ChannelError.from_transport(e, stage="create", channel=self.name)
 ```
 
-**错误翻译是通道的义务**:上游异常必须翻译为 `ChannelError`,
-`retryable` 决定 run() 是否切换下一通道并记熔断;参数类错误(换通道也没用)
-必须 `retryable=False`,避免无谓重试烧钱;HTTP 429/503 这类瞬时错误
-**加标 `transient=True`**(retryable 仍为 True),run() 在原通道做指数退避
-排队(初始 `transient_retry_delay=2s`、单次上限 60s、累计最长
-`transient_retry_max_wait=3600s`),排队期间不计熔断;超时后放弃该通道再
-failover / 整单失败。`openai_image` / `gemini` 通道已按限流文案自动标注。
+**错误翻译是通道的义务**:上游异常必须翻译为 `ChannelError`,但**后端只报
+事实**(HTTP 状态码 / 传输异常 / 出错阶段),`retryable` / `transient` /
+换源 / 熔断全部由内核统一推导 —— **不要再手写这两个标志位**。
+
+- HTTP 状态 → `ChannelError.from_http(status, stage=...)`,stage 取
+  `create`(建单 POST)/`poll`(轮询 GET)/`result`(取件下载)/`other`。
+  分类规则(HTTP 状态 → kind × phase)集中在
+  `core/channels/failure.py::classify_http`:
+  401/402/403 → AUTH_OR_QUOTA;408 → PROVIDER_FAULT;429 → RATE_LIMITED;
+  其余 4xx → INVALID_REQUEST(不换源不计健康);≥500 → PROVIDER_FAULT。
+  create 阶段 4xx 与 503 = REJECTED(确定没建单,strict 也换源),
+  其余 5xx(500/502/504)= AMBIGUOUS(可能已建单,strict 不换源);
+  poll/result 阶段一律 ACCEPTED(已有上游任务号,绝不重复建单)。
+- 传输异常 → `ChannelError.from_transport(exc, stage=...)`:
+  连不上(ConnectError/ConnectTimeout/PoolTimeout)= BEFORE_SEND;
+  其他传输错误 create = AMBIGUOUS、poll/result = ACCEPTED。
+- 语义错误显式声明 `kind`/`phase`:NO_TASK_ID → PROVIDER_FAULT+REJECTED;
+  TASK_FAILED → TASK_FAILED+ACCEPTED;MEDIA_UPLOAD_FAILED / 素材不支持 →
+  CAPABILITY+BEFORE_SEND;缺凭证 → AUTH_OR_QUOTA+BEFORE_SEND;
+  参数类 → 不给 kind 的 `retryable=False`(推导 INVALID_REQUEST)。
+- 429/503 仍是 transient(`retryable` 且原通道可退避),但现在是推导值:
+  RATE_LIMITED 或 PROVIDER_FAULT+http_status=503 自动为 transient。
+  有备选通道时 transient **立即换源**;仅单通道时才在原地指数退避
+  (`transient_retry_*`,累计最长 3600s)。
 
 ## 4.3 给现有模型加一家供应商
 
@@ -91,18 +108,32 @@ channel_registry.register_binding("gpt-image-2", MyAzureChannel())
 返回 False 自动让路),`invoke()` 出错抛 `ChannelError(retryable=True)`
 则切下一通道。
 
-## 4.4 负载均衡与熔断(core/routing/balancer.py)
+## 4.4 负载均衡与熔断(core/routing/balancer.py + core/channels/health.py)
 
-- `LoadBalancer` 按 `(scope, member)` 二级 key 记状态,scope=模型名,
-  member=通道名;同一模型的多个通道共享一套熔断计数;
-- `order_candidates()` 按策略(优先级/权重/随机)排序候选;
-- `record_failure()` 达到阈值触发熔断,  冷却期内该通道被排到最后/跳过;
-  `record_success()` 恢复;
-- 策略与阈值读 PLUGIN_CONFIG 通用键 `Load_Balance_Mode` / `Failure_Threshold`;
-  全局单例经 `config_resolver` **每次决策实时读取**,网页控制台改完即生效;
-- 熔断只由 `ChannelError(retryable=True)` 触发,业务校验错误不影响通道健康度
-  —— `run()` 对 `retryable=False` 的失败**不记 record_failure、不切通道**,
-  直接抛给用户(2026-07-10 修正,此前非重试错误也误计入熔断计数)。
+- 健康状态机(`core/channels/health.py::ChannelHealth`)用两级 key:
+  **group 级** `channel.health_group()`(共享同一上游端点的通道返回同值,
+  默认 `self.name`;纯读配置、零网络)→ 吃 PROVIDER_FAULT / AUTH_OR_QUOTA;
+  **member 级** `(模型, 通道)` → 吃 TASK_FAILED 与旧式无 kind 的 record_failure。
+  RATE_LIMITED 只在 member 上写 15s `throttled_until`(降权不熔断);
+  INVALID_REQUEST / CAPABILITY 不写任何健康。
+- 状态:CLOSED →(连续失败 ≥ `Failure_Threshold`,0=不熔断)→ OPEN,
+  冷却 `min(base·2^opens, max) ±20%` 抖动(base=`Circuit_Base_Cooldown` 30s,
+  max=`Circuit_Max_Cooldown` 1800s;AUTH_OR_QUOTA 起步 ×20);
+  到期 → HALF_OPEN 只放一个探测(lease 900s 自动释放);
+  探测成功 → CLOSED 清零,失败 → 立即重 OPEN 且冷却翻倍。
+- `order_candidates(strict=...)` 排序 = [可探测的 HALF_OPEN(strict 下仅当
+  上次失败为 BEFORE_SEND/REJECTED 才排前)] + CLOSED(按策略) + 节流中 +
+  OPEN(按到期升序兜底)+ 不可探测的 HALF_OPEN;全灭兜底语义不变。
+- `begin_attempt()` 在 HALF_OPEN 时原子占探测令牌,被占且还有备选 → 返回
+  None 先跳过(主循环末兜底再试);每次尝试恰以
+  record_success / record_failure / end_attempt 之一收尾(finally 保证)。
+- `health_snapshot()` 保留旧键 `{scope}/{member}` → `failure_count` /
+  `circuit_open`,新增 `state` / `cooldown_remaining` / `last_kind` /
+  `last_phase` / `opens` 及 `group:<名>` 条目。
+- 策略与阈值读 PLUGIN_CONFIG 通用键 `Load_Balance_Mode` / `Failure_Threshold` /
+  `Circuit_Base_Cooldown` / `Circuit_Max_Cooldown`,每次决策实时读取。
+- `run()` 先写健康再决策(strict 也记):INVALID_REQUEST 不记;参数类
+  (`retryable=False`)不换源直接抛 —— 与旧语义一致。
 - **请求钉扎**:`GenerationRequest.channel`(或 `params.channel`)指定
   `GET /models` 的 `channels[].name`。空 / `auto` = 上表负载均衡。
   指定名称则只走该通道名(同名多路仍可互切),不切到其它名称;
@@ -128,5 +159,7 @@ channel_registry.register_binding("gpt-image-2", MyAzureChannel())
   网关 Seedance GET 轮询走同一路径
 - **不要**在 `poll_until_done` 再套一层同样的 5×5s(会变成 25 次)
 
-HTTP 4xx/5xx **响应**不是网络抖动,不走这层;429/503 仍走通道
-`transient` 排队。
+HTTP 4xx/5xx **响应**不是网络抖动,不走这层;轮询 GET 的 408/429/5xx
+由 `PollErrorTolerance`(`core/channels/polling.py`)在窗口内(默认 600s)
+退避吸收 —— 上游已受理的任务不再因轮询抖动被判失败或重复建单;
+窗口耗尽后抛原有错误码(phase=ACCEPTED,推导 retryable=False)。

@@ -21,11 +21,11 @@ run(request)
   ├─ 3. 钉扎 request.channel            # 空/auto=LB;未知或不存在可用实例 → ValidationError
   ├─ 4. balancer.order_candidates()  # 负载均衡排序通道(钉扎后只含该通道名)
   ├─ 5. execute_on_channel(...)      # ★ 子类核心
-  │     ├─ ChannelError(transient=True,如 429/503)→ 原通道指数退避排队
-  │     │   (初始 transient_retry_delay=2s,单次上限 60s,
-  │     │    累计最长 transient_retry_max_wait=3600s=1h;超时放弃该通道;
-  │     │    排队期间不计熔断)
-  │     └─ ChannelError(retryable=True)→ 记熔断 → 换下一通道(钉扎时不换名称)
+  │     ├─ ChannelError(transient,推导:429/503 类)→ 有备选立即换下一通道;
+  │     │   仅当无备选才在原通道指数退避排队(transient_retry_*,上限 3600s)
+  │     ├─ 已绑定 vendor_task_id → phase=ACCEPTED,绝不重复建单
+  │     └─ ChannelError(retryable)→ 先记健康(group/member 两级)→ strict 下
+  │          仅 BEFORE_SEND/REJECTED 可换源,非 strict 全换(钉扎时不换名称)
   └─ 6. postprocess(output)          # 输出归一化(可覆盖)
 ```
 
@@ -93,7 +93,7 @@ run(request)
 | `ValidationError` | 参数校验失败(message 面向用户,写人话) | 不扣费 |
 | `ModelUnavailableError` | 路由无可用模型 | 不扣费 |
 | `BillingDeniedError` | 积分不足等 | 不扣费 |
-| `ChannelError(msg, retryable=bool, transient=bool)` | 通道执行失败;retryable=True 时 run() 自动切下一通道并记熔断;transient=True(429/503 类瞬时错误)先在原通道退避重试一次、不计熔断 | 全部通道失败则退款 |
+| `ChannelError(msg, kind=FailureKind, phase=Phase, http_status)` | 通道执行失败;旧式 retryable/transient 仍兼容(推导规则见 04 章);换源/熔断由 run() 按 kind×phase 统一决策,先记健康后决策 | 全部通道失败则退款 |
 | `AllChannelsFailedError` | 所有通道失败 | 退款 |
 
 ## 2.6 路由(core/routing/router.py 的 route())

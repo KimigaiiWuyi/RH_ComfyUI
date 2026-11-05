@@ -216,7 +216,7 @@ class RunningHubSeedanceProvider(SeedanceProvider):
 
     async def get(self, task_id: str) -> NormalizedTask:
         url = f"{self.base_url}{self.EP_QUERY}"
-        j = await self._request("POST", url, headers=self._auth_headers(), json={"taskId": task_id})
+        j = await self._request("POST", url, headers=self._auth_headers(), stage="poll", json={"taskId": task_id})
         results = j.get("results") or []
         video: Optional[str] = None
         last_frame: Optional[str] = None

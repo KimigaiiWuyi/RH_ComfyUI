@@ -28,6 +28,16 @@ from RH_ComfyUI.utils.backends.seedance.provider import (
     UnsupportedProviderShapeError,
 )
 
+
+@pytest.fixture(autouse=True)
+def _seedance_vendors_all_enabled(monkeypatch: pytest.MonkeyPatch):
+    """启用列表热读宿主配置;绑定组装与本机勾选无关,一律视为全启用。"""
+    monkeypatch.setattr(
+        "RH_ComfyUI.models.video.overrides.is_seedance_model_enabled_on",
+        lambda model, vendor: True,
+    )
+
+
 # ── 测试用 fake provider ──
 
 

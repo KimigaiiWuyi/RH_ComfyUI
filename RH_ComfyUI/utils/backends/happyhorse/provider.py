@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import base64
 import asyncio
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import httpx
+
+if TYPE_CHECKING:
+    from ....core.channels.failure import Stage
 
 from gsuid_core.logger import logger
 
@@ -36,7 +39,6 @@ from ..seedance.provider import (
     DryRunInterrupt,
     NormalizedStatus,
     SeedanceProviderError,
-    http_status_retryable,
 )
 from ....core.base.errors import VendorTaskNotDurable
 
@@ -134,6 +136,8 @@ class HappyHorseProvider:
     max_audios = 0
     media_prep_concurrency = 5
     poll_interval = 15.0  # 官方建议 15s
+    # 轮询错误容忍窗(秒):已受理任务遇到 5xx/429/传输错先退避续轮,超时再抛
+    poll_error_window_s = 600.0
 
     def __init__(
         self,
@@ -438,7 +442,7 @@ class HappyHorseProvider:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        resp = await self._request("GET", url, headers=headers)
+        resp = await self._request("GET", url, headers=headers, stage="poll")
         return self._parse_task(resp)
 
     def _parse_task(self, resp_json: dict[str, Any]) -> NormalizedTask:
@@ -482,6 +486,7 @@ class HappyHorseProvider:
         *,
         headers: Optional[dict[str, str]] = None,
         json: Optional[dict[str, Any]] = None,
+        stage: "Stage" = "other",
     ) -> dict[str, Any]:
         from ....rh_config.comfyui_config import plugin_dry_run
 
@@ -509,7 +514,7 @@ class HappyHorseProvider:
         emit = logger.warning if resp.status_code >= 400 else logger.debug
         emit(f"[HappyHorse:{self.name}] 响应 {resp.status_code} ({len(resp.content)} bytes)\n  body: {resp_text}")
         if resp.status_code >= 400:
-            raise self._build_http_error(resp)
+            raise self._build_http_error(resp, stage=stage)
         # DELETE/空 body 响应
         if method.upper() == "DELETE" and (resp_json is None or not (resp.content or b"").strip()):
             return {}
@@ -520,10 +525,14 @@ class HappyHorseProvider:
             return resp_json
         if method.upper() in ("DELETE", "POST") and not (resp.content or b"").strip():
             return {}
+        from ....core.channels.failure import FailureKind, classify_http_status
+
+        _, bad_phase = classify_http_status(resp.status_code or 500, stage=stage)
         raise HappyHorseProviderError(
             f"{self.name} 返回非 JSON: {resp_text[:500]}",
             code="BAD_RESPONSE",
-            retryable=True,
+            kind=FailureKind.PROVIDER_FAULT,
+            phase=bad_phase,
             provider=self.name,
             user_message="上游返回格式异常,请稍后重试。",
         )
@@ -542,15 +551,18 @@ class HappyHorseProvider:
         if not code or code in ("", "Success", "null"):
             return
         msg = _pick_vendor_message(resp_json)
+        from ....core.channels.failure import Phase, FailureKind
+
         raise HappyHorseProviderError(
             f"DashScope 错误 {code}: {msg}",
             code=code,
-            retryable=False,
+            kind=FailureKind.INVALID_REQUEST,
+            phase=Phase.REJECTED,
             provider=self.name,
             user_message=str(msg),
         )
 
-    def _build_http_error(self, resp: httpx.Response) -> HappyHorseProviderError:
+    def _build_http_error(self, resp: httpx.Response, *, stage: "Stage" = "other") -> HappyHorseProviderError:
         try:
             err_body: Any = resp.json()
         except Exception:
@@ -560,10 +572,14 @@ class HappyHorseProvider:
             if isinstance(err_body, dict)
             else str(resp.status_code)
         )
+        from ....core.channels.failure import classify_http_status
+
+        kind, phase = classify_http_status(resp.status_code, stage=stage)
         return HappyHorseProviderError(
             f"{self.name} API 错误 {resp.status_code}: {err_body}",
             code="HTTP_ERROR",
-            retryable=http_status_retryable(resp.status_code),
+            kind=kind,
+            phase=phase,
             provider=self.name,
             http_status=resp.status_code,
             user_message=vendor_msg,
@@ -587,13 +603,16 @@ class HappyHorseProvider:
         from ....core.telemetry.wire_capture import set_wire_from_http_body
 
         set_wire_from_http_body(masked)
-        resp = await self._request(method, url, headers=headers, json=body)
+        resp = await self._request(method, url, headers=headers, json=body, stage="create")
         task_id = self.parse_create(resp)
         if not task_id:
+            from ....core.channels.failure import Phase, FailureKind
+
             raise HappyHorseProviderError(
                 f"{self.name} 未返回 task id: {resp}",
                 code="NO_TASK_ID",
-                retryable=True,
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.REJECTED,
                 provider=self.name,
                 user_message="上游未返回任务 ID,请稍后重试。",
             )
@@ -696,21 +715,47 @@ class HappyHorseProvider:
         start = loop.time()
         last_status: Optional[NormalizedStatus] = None
         poll_count = 0
+        from ....core.channels.failure import Phase, FailureKind
+        from ....core.channels.polling import PollErrorTolerance
+
+        tolerance = PollErrorTolerance(window_s=self.poll_error_window_s)
         while True:
             poll_count += 1
             try:
                 task = await self.get(task_id)
+            except HappyHorseProviderError as poll_err:
+                status = poll_err.http_status
+                # 无 http_status 的语义错误(业务拒答/参数类)不可重试的立即抛,
+                # 否则会被当成传输错误白等整个容忍窗
+                if status is None and not poll_err.retryable:
+                    raise
+                delay = tolerance.next_delay(http_status=status)
+                if delay is None:
+                    raise
+                logger.warning(f"[HappyHorse:{self.name}] 任务 {task_id} 轮询错误(HTTP {status}),{delay:.1f}s 后重试")
+                await asyncio.sleep(delay)
+                continue
             except (httpx.HTTPError, asyncio.TimeoutError, OSError) as poll_exc:
                 # Transport retry (5× / 5s) already happened in RetryingAsyncClient.
+                delay = tolerance.next_delay(http_status=None)
+                if delay is not None:
+                    logger.warning(
+                        f"[HappyHorse:{self.name}] 任务 {task_id} 轮询网络错误"
+                        f"({type(poll_exc).__name__}),{delay:.1f}s 后重试"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 elapsed = loop.time() - start
                 raise HappyHorseProviderError(
                     f"{self.name} 轮询失败({type(poll_exc).__name__}: {poll_exc}); "
                     f"上次状态={last_status}, 已等待={elapsed:.1f}s",
                     code="POLL_NETWORK_ERROR",
-                    retryable=False,
+                    kind=FailureKind.PROVIDER_FAULT,
+                    phase=Phase.ACCEPTED,
                     provider=self.name,
                     user_message="轮询阶段网络异常,请稍后重试。",
                 ) from poll_exc
+            tolerance.reset()
 
             if task.status != last_status:
                 logger.info(f"[HappyHorse:{self.name}] 任务 {task_id} 状态变更: {last_status} → {task.status}")
@@ -738,7 +783,8 @@ class HappyHorseProvider:
                     raise HappyHorseProviderError(
                         vendor_msg,
                         code="TASK_FAILED",
-                        retryable=True,
+                        kind=FailureKind.TASK_FAILED,
+                        phase=Phase.ACCEPTED,
                         provider=self.name,
                         user_message=vendor_msg,
                     )
@@ -746,6 +792,8 @@ class HappyHorseProvider:
                     raise HappyHorseProviderError(
                         f"任务 {task.status.value}: {task_id}",
                         code=task.status.value.upper(),
+                        kind=FailureKind.TASK_FAILED,
+                        phase=Phase.ACCEPTED,
                         retryable=False,
                         provider=self.name,
                         user_message=f"任务已{task.status.value}",
@@ -757,7 +805,8 @@ class HappyHorseProvider:
                 raise HappyHorseProviderError(
                     f"任务轮询超时({max_wait}s): {task_id}",
                     code="POLL_TIMEOUT",
-                    retryable=False,
+                    kind=FailureKind.PROVIDER_FAULT,
+                    phase=Phase.ACCEPTED,
                     provider=self.name,
                     user_message="生成超时,请稍后重试。",
                 )

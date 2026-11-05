@@ -19,6 +19,7 @@ from ...core.types import NodeOutput
 from ...core.request import GenerationRequest
 from ....core.base.errors import ChannelError
 from ....core.channels.channel import ProviderChannel
+from ....core.channels.failure import Phase, FailureKind
 from ...mappers.gpt_image2_params import mime_for_output_format
 from ...mappers.gpt_image2_billing import sanitize_gpt_image_raw, normalize_gpt_image_usage
 
@@ -53,6 +54,13 @@ class OpenAIImageChannel(ProviderChannel):
         creds = self._resolve()
         return bool(creds.enabled and creds.api_key and creds.base_url)
 
+    def health_group(self) -> str:
+        """同一上游端点的池内通道共享熔断组(每次热读配置,零网络)。"""
+        from urllib.parse import urlparse
+
+        host = urlparse(self._resolve().base_url or "").hostname
+        return host or self.name
+
     async def unavailable_reason(self) -> str:
         from .config import openai_image_pool_disabled_reason
 
@@ -71,6 +79,8 @@ class OpenAIImageChannel(ProviderChannel):
         if not creds.api_key or not creds.base_url:
             raise ChannelError(
                 f"供应商 {self.name} 未配置 API Key/Base URL",
+                kind=FailureKind.AUTH_OR_QUOTA,
+                phase=Phase.BEFORE_SEND,
                 retryable=True,
                 channel=self.name,
                 user_message="该供应商未配置完整凭证。",
@@ -79,6 +89,8 @@ class OpenAIImageChannel(ProviderChannel):
         if not model:
             raise ChannelError(
                 f"供应商 {self.name} 未指定 model",
+                kind=FailureKind.INVALID_REQUEST,
+                phase=Phase.BEFORE_SEND,
                 retryable=False,
                 channel=self.name,
                 user_message="未配置该供应商对应的模型名。",
@@ -109,19 +121,22 @@ class OpenAIImageChannel(ProviderChannel):
                 output_format=output_format,
             )
         except OpenAIImageError as exc:
-            # 429/503 是瞬时限流/过载:标 transient,run() 先在原通道退避重试一次
             raise ChannelError(
                 str(exc),
-                retryable=True,
-                transient=exc.http_status in (429, 503),
+                kind=exc.kind,
+                phase=exc.phase,
+                http_status=exc.http_status,
+                retryable=exc.retryable,
+                transient=exc.transient,
                 channel=self.name,
                 user_message=exc.user_message,
             ) from exc
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
-            raise ChannelError(
-                f"{self.name} 网络错误({type(exc).__name__}: {exc})",
-                retryable=True,
+            raise ChannelError.from_transport(
+                exc,
+                stage="create",
                 channel=self.name,
+                message=f"{self.name} 网络错误({type(exc).__name__}: {exc})",
                 user_message="网络异常,请稍后重试。",
             ) from exc
 

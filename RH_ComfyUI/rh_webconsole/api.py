@@ -20,7 +20,12 @@ async def overview() -> ApiOk:
 
         {
             "generated_at": "2026-07-21 10:00:00",
-            "balancer": {"mode": "round_robin", "failure_threshold": 3, "circuit_breaker_seconds": 120.0},
+            "balancer": {
+                "mode": "round_robin",
+                "failure_threshold": 3,
+                "circuit_breaker_seconds": 30.0,
+                "max_cooldown": 1800.0,
+            },
             "totals": {
                 "models": 32,
                 "models_available": 27,

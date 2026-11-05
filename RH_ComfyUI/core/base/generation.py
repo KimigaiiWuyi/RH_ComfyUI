@@ -24,7 +24,7 @@ from __future__ import annotations
 import time
 import asyncio
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, ClassVar, Optional
+from typing import TYPE_CHECKING, Literal, ClassVar, Optional
 
 from gsuid_core.logger import logger
 
@@ -33,9 +33,11 @@ from ..schema.card import ModelCard
 from ..schema.types import PortSpec, PortType, NodeOutput, ProgressCallback
 from ..schema.request import TaskType, GenerationRequest
 from ..channels.channel import ChannelBinding
+from ..channels.failure import FAILOVER_SAFE_PHASES, Phase, FailureKind
 
 if TYPE_CHECKING:
     # 运行时延迟导入,避免 base ↔ routing 的循环(registry 依赖本模块)
+    from ..channels.health import AttemptLease
     from ..routing.balancer import LoadBalancer
     from ...utils.core.pipeline import NodeDef
 
@@ -91,6 +93,65 @@ def _unknown_channel_message(display_name: str, pin: str, bindings: list[Channel
     if names:
         return f"{display_name} 没有通道 {pin!r},可选: {'、'.join(names)}"
     return f"{display_name} 没有通道 {pin!r}(该模型未声明任何通道)"
+
+
+def effective_retryable(err: ChannelError, phase: Phase) -> bool:
+    """按(可能被覆盖的)phase 重算 retryable;显式 retryable=False 仍优先。"""
+    kind = err.resolved_kind
+    derived = kind is not FailureKind.INVALID_REQUEST and (
+        phase is not Phase.ACCEPTED or kind is FailureKind.TASK_FAILED
+    )
+    return derived and err.retryable
+
+
+def decide_on_failure(
+    err: ChannelError,
+    *,
+    phase: Phase,
+    strict: bool,
+    has_alternative: bool,
+) -> Literal["raise", "failover", "retry_in_place"]:
+    """失败的唯一决策点(纯函数,可单测)。
+
+    1. not retryable → raise;
+    2. strict 且 phase ∉ {BEFORE_SEND, REJECTED} → raise(AMBIGUOUS/UNKNOWN/ACCEPTED 不换源);
+    3. transient 且无备选 → retry_in_place(原通道退避排队);
+    4. 否则 failover。
+    """
+    if not effective_retryable(err, phase):
+        return "raise"
+    if strict and phase not in FAILOVER_SAFE_PHASES:
+        return "raise"
+    if err.transient and not has_alternative:
+        return "retry_in_place"
+    return "failover"
+
+
+def _attempt_phase(err: ChannelError) -> Phase:
+    """本次尝试若已绑定 vendor_task_id → phase 覆盖为 ACCEPTED(任务可能已成)。"""
+    try:
+        from ..dispatch.active_tasks import get_active_task_registry
+
+        ag = get_active_task_registry().current()
+    except Exception:  # noqa: BLE001 - 无事件循环/无登记时按声明 phase
+        return err.phase
+    if ag is not None and ag.vendor_task_id:
+        return Phase.ACCEPTED
+    return err.phase
+
+
+def _reset_attempt_vendor_binding() -> None:
+    """新一次通道尝试前清空 vendor 绑定,让 phase 覆盖只反映本次尝试。"""
+    try:
+        from ..dispatch.active_tasks import get_active_task_registry
+
+        ag = get_active_task_registry().current()
+    except Exception:  # noqa: BLE001
+        return
+    if ag is None:
+        return
+    ag.vendor_task_id = None
+    ag.cancel_remote = None
 
 
 class AIGCGenerationBase(ABC):
@@ -359,7 +420,10 @@ class AIGCGenerationBase(ABC):
             )
         bindings = capable
 
-        ordered = self.balancer().order_candidates(scope=self.name, candidates=bindings)
+        from ...utils.backends.http_retry import is_strict_create_once
+
+        strict = is_strict_create_once()
+        ordered = self.balancer().order_candidates(scope=self.name, candidates=bindings, strict=strict)
 
         from ..dispatch.concurrency import channel_slot, channel_has_capacity, channel_slot_for_model
 
@@ -389,103 +453,145 @@ class AIGCGenerationBase(ABC):
             skipped = "; ".join(skipped_notes) if skipped_notes else "不可用"
             raise ValidationError(f"通道 {pin} 当前不可用: {skipped}")
 
-        for binding in ordered:
-            if not any(b is binding for b in available):
-                if not await binding.channel.check_available():
-                    continue
-                available.append(binding)
-            output = None
-            # 本通道 429/503 排队窗口:从首次 transient 起算,超时放弃该通道
-            transient_started_at: Optional[float] = None
-            transient_attempt = 0
-            while output is None:
-                try:
-                    # 两层闸嵌套:
-                    #   1. 供应商全局闸(channel.name):防同一 channel 被多模型一起打爆
-                    #   2. (model, channel) 闸:防单一模型在单一 channel 上挤爆
-                    #      上限 = min(Channel_Concurrency, model.max_concurrency)
-                    async with channel_slot(binding.channel.name):
-                        async with channel_slot_for_model(self, binding.channel.name):
-                            # 排队仍算未接触厂商；第一次真正执行前才通知宿主收口。
-                            if not vendor_create_notified:
-                                from ..dispatch.vendor_gate import notify_vendor_create_starting
+        probe_skipped: list[ChannelBinding] = []
+        attempts: list[ChannelBinding] = list(ordered)
+        fallback_pass = False
 
-                                await notify_vendor_create_starting()
-                                vendor_create_notified = True
-                            output = await self.execute_on_channel(request, binding, on_progress=on_progress)
-                except ChannelError as e:
-                    last_error = e
-                    from ...utils.backends.http_retry import is_strict_create_once
+        def _health_write(b: ChannelBinding, e: ChannelError, phase: Phase, lease: AttemptLease | None) -> None:
+            """先写健康再决策;kind 路由 group/member,无 kind → member(旧行为)。
 
-                    if is_strict_create_once():
-                        raise
-                    if not e.retryable:
-                        # 参数类失败(换通道也没用)不计入熔断:通道本身是健康的,
-                        # 用户反复提交坏请求不应把通道推入冷却期
-                        raise
-                    if e.transient:
-                        now = time.monotonic()
-                        if transient_started_at is None:
-                            transient_started_at = now
-                        elapsed = now - transient_started_at
-                        max_wait = float(self.transient_retry_max_wait)
-                        if elapsed < max_wait:
-                            # 指数退避:delay * 2^(n-1),封顶 max_delay,且不超过剩余预算
-                            transient_attempt += 1
-                            base = float(self.transient_retry_delay)
-                            cap = float(self.transient_retry_max_delay)
-                            delay = min(base * (2 ** (transient_attempt - 1)), cap, max_wait - elapsed)
-                            delay = max(0.0, delay)
-                            remain = max_wait - elapsed
-                            logger.warning(
-                                f"[{self.name}] 通道 {binding.channel.name} 瞬时限流({e}),"
-                                f"排队第 {transient_attempt} 次,"
-                                f"{delay:.1f}s 后原通道重试"
-                                f"(已等 {elapsed:.0f}s / 上限 {max_wait:.0f}s,剩余 {remain:.0f}s)"
+            参数/能力类(resolved INVALID/CAPABILITY)只释放令牌不计健康:
+            通道本身健康,坏请求不应把它推入冷却(与旧实现一致)。
+            """
+            kind = e.kind
+            if e.resolved_kind in (FailureKind.INVALID_REQUEST, FailureKind.CAPABILITY):
+                self.balancer().end_attempt(lease)
+                return
+            self.balancer().record_failure(
+                scope=self.name,
+                member=b.channel.name,
+                kind=kind,
+                phase=phase,
+                group=b.channel.health_group(),
+                lease=lease,
+            )
+
+        while attempts:
+            for binding in attempts:
+                if not any(b is binding for b in available):
+                    if not await binding.channel.check_available():
+                        continue
+                    available.append(binding)
+                output = None
+                # 本通道 429/503 排队窗口:从首次 transient 起算,超时放弃该通道
+                transient_started_at: Optional[float] = None
+                transient_attempt = 0
+                while output is None:
+                    lease = self.balancer().begin_attempt(scope=self.name, channel=binding.channel)
+                    if lease is None and not fallback_pass:
+                        # HALF_OPEN 探测令牌被占:先跳过,主循环结束后兜底再试
+                        probe_skipped.append(binding)
+                        break
+                    try:
+                        # 两层闸嵌套:
+                        #   1. 供应商全局闸(channel.name):防同一 channel 被多模型一起打爆
+                        #   2. (model, channel) 闸:防单一模型在单一 channel 上挤爆
+                        #      上限 = min(Channel_Concurrency, model.max_concurrency)
+                        async with channel_slot(binding.channel.name):
+                            async with channel_slot_for_model(self, binding.channel.name):
+                                # 排队仍算未接触厂商；第一次真正执行前才通知宿主收口。
+                                if not vendor_create_notified:
+                                    from ..dispatch.vendor_gate import notify_vendor_create_starting
+
+                                    await notify_vendor_create_starting()
+                                    vendor_create_notified = True
+                                _reset_attempt_vendor_binding()
+                                output = await self.execute_on_channel(request, binding, on_progress=on_progress)
+                    except ChannelError as e:
+                        last_error = e
+                        phase = _attempt_phase(e)
+                        _health_write(binding, e, phase, lease)
+                        has_alternative = any(b is not binding for b in available)
+                        decision = decide_on_failure(e, phase=phase, strict=strict, has_alternative=has_alternative)
+                        if decision == "retry_in_place":
+                            now = time.monotonic()
+                            if transient_started_at is None:
+                                transient_started_at = now
+                            elapsed = now - transient_started_at
+                            max_wait = float(self.transient_retry_max_wait)
+                            if elapsed < max_wait:
+                                # 指数退避:delay * 2^(n-1),封顶 max_delay,且不超过剩余预算
+                                transient_attempt += 1
+                                base = float(self.transient_retry_delay)
+                                cap = float(self.transient_retry_max_delay)
+                                delay = min(base * (2 ** (transient_attempt - 1)), cap, max_wait - elapsed)
+                                delay = max(0.0, delay)
+                                remain = max_wait - elapsed
+                                logger.warning(
+                                    f"[{self.name}] 通道 {binding.channel.name} 瞬时限流({e}),"
+                                    f"排队第 {transient_attempt} 次,"
+                                    f"{delay:.1f}s 后原通道重试"
+                                    f"(已等 {elapsed:.0f}s / 上限 {max_wait:.0f}s,剩余 {remain:.0f}s)"
+                                )
+                                await self._emit_transient_progress(
+                                    on_progress,
+                                    channel=binding.channel.name,
+                                    attempt=transient_attempt,
+                                    delay=delay,
+                                    elapsed=elapsed,
+                                    max_wait=max_wait,
+                                )
+                                if delay > 0:
+                                    await asyncio.sleep(delay)
+                                continue
+                            # 排队预算耗尽:记失败并切通道/整单失败
+                            logger.error(
+                                f"[{self.name}] 通道 {binding.channel.name} 限流排队已达上限 {max_wait:.0f}s,放弃该通道"
                             )
-                            await self._emit_transient_progress(
-                                on_progress,
+                            last_error = ChannelError(
+                                f"{binding.channel.name} 限流排队超 {max_wait:.0f}s: {e}",
+                                kind=FailureKind.PROVIDER_FAULT,
+                                phase=phase,
                                 channel=binding.channel.name,
-                                attempt=transient_attempt,
-                                delay=delay,
-                                elapsed=elapsed,
-                                max_wait=max_wait,
+                                code="TRANSIENT_QUEUE_TIMEOUT",
+                                user_message=(f"上游繁忙,排队已超过 {int(max_wait // 60)} 分钟仍未恢复,任务已取消。"),
                             )
-                            if delay > 0:
-                                await asyncio.sleep(delay)
-                            continue
-                        # 排队预算耗尽:记失败并切通道/整单失败(任务移除由 dispatcher 退款落库)
-                        logger.error(
-                            f"[{self.name}] 通道 {binding.channel.name} 429/503 排队已达上限 {max_wait:.0f}s,放弃该通道"
-                        )
-                        last_error = ChannelError(
-                            f"{binding.channel.name} 限流排队超过 {max_wait:.0f}s: {e}",
-                            retryable=True,
-                            transient=False,
-                            channel=binding.channel.name,
-                            code="TRANSIENT_QUEUE_TIMEOUT",
-                            user_message=(f"上游繁忙,排队已超过 {int(max_wait // 60)} 分钟仍未恢复,任务已取消。"),
-                        )
-                    self.balancer().record_failure(scope=self.name, member=binding.channel.name)
-                    available = [b for b in available if b is not binding]
-                    remain = ", ".join(b.channel.name for b in available)
-                    if available:
-                        logger.warning(
-                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),切换下一通道(剩余 {remain})"
-                        )
-                    else:
-                        skipped = f"; 未尝试: {', '.join(skipped_notes)}" if skipped_notes else ""
-                        logger.warning(
-                            f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),无更多可用通道{skipped}"
-                        )
-                    break
-            if output is None:
-                continue
-            self.balancer().record_success(scope=self.name, member=binding.channel.name)
-            output.metadata.setdefault("channel", binding.channel.name)
-            output.metadata.setdefault("vendor_model", binding.vendor_model or "")
-            output.metadata.setdefault("key_prefix", binding.channel.audit_key_prefix())
-            return self.postprocess(output)
+                        elif decision == "raise":
+                            raise
+                        # failover:切下一通道;strict 下只有 BEFORE_SEND/REJECTED 能到这
+                        available = [b for b in available if b is not binding]
+                        remain = ", ".join(b.channel.name for b in available)
+                        if available:
+                            logger.warning(
+                                f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),"
+                                f"切换下一通道(剩余 {remain})"
+                            )
+                        else:
+                            skipped = f"; 未尝试: {', '.join(skipped_notes)}" if skipped_notes else ""
+                            logger.warning(
+                                f"[{self.name}] 通道 {binding.channel.name} 失败({last_error}),无更多可用通道{skipped}"
+                            )
+                        break
+                    except BaseException:
+                        # 非 ChannelError(取消/未标注异常):中性结局,只释放探测令牌
+                        self.balancer().end_attempt(lease)
+                        raise
+                if output is None:
+                    continue
+                self.balancer().record_success(
+                    scope=self.name,
+                    member=binding.channel.name,
+                    group=binding.channel.health_group(),
+                    lease=lease,
+                )
+                output.metadata.setdefault("channel", binding.channel.name)
+                output.metadata.setdefault("vendor_model", binding.vendor_model or "")
+                output.metadata.setdefault("key_prefix", binding.channel.audit_key_prefix())
+                return self.postprocess(output)
+            if not probe_skipped or fallback_pass:
+                break
+            # 探测令牌被占的候选兜底再试一遍(保持熔断通道仍会被尝试的语义)
+            attempts, probe_skipped, fallback_pass = probe_skipped, [], True
 
         skipped = f"; 未尝试: {', '.join(skipped_notes)}" if skipped_notes else ""
         raise AllChannelsFailedError(

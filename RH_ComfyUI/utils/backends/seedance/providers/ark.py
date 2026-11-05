@@ -417,7 +417,7 @@ class ArkSeedanceProvider(ContentArrayMixin, SeedanceProvider):
 
     async def get(self, task_id: str) -> NormalizedTask:
         url = f"{self.base_url}{self._endpoint}/{task_id}"
-        j = await self._request("GET", url, headers=self._auth_headers())
+        j = await self._request("GET", url, headers=self._auth_headers(), stage="poll")
         if self._is_gateway_mode:
             d = self._unwrap(j)
             return NormalizedTask(

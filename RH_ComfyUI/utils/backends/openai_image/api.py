@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import base64
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from dataclasses import field, dataclass
+
+if TYPE_CHECKING:
+    from ....core.channels.failure import Phase, FailureKind
 
 import httpx
 import aiohttp
@@ -35,7 +38,11 @@ _RATIO_TO_SIZE: Dict[str, str] = {ratio: tiers["2K"] for ratio, tiers in _RATIO_
 
 
 class OpenAIImageError(RuntimeError):
-    """上游生图失败(带可选 http 状态与面向用户文案)。"""
+    """上游生图失败(带可选 http 状态、kind/phase 事实与面向用户文案)。
+
+    kind 给出后 retryable/transient 按统一规则推导;旧式(无 kind)
+    回落「一律 retryable」以兼容外部构造点。
+    """
 
     def __init__(
         self,
@@ -43,10 +50,38 @@ class OpenAIImageError(RuntimeError):
         *,
         http_status: Optional[int] = None,
         user_message: Optional[str] = None,
+        kind: Optional["FailureKind"] = None,
+        phase: Optional["Phase"] = None,
     ) -> None:
         super().__init__(message)
         self.http_status = http_status
         self.user_message = user_message or message
+        self.kind = kind
+        self.phase = phase or _ph_unknown()
+
+    @property
+    def retryable(self) -> bool:
+        if self.kind is None:
+            return True
+        from ....core.channels.failure import Phase as _P, FailureKind as _FK
+
+        return self.kind is not _FK.INVALID_REQUEST and (self.phase is not _P.ACCEPTED or self.kind is _FK.TASK_FAILED)
+
+    @property
+    def transient(self) -> bool:
+        if self.kind is None:
+            return self.http_status in (429, 503)
+        from ....core.channels.failure import FailureKind as _FK
+
+        return self.retryable and (
+            self.kind is _FK.RATE_LIMITED or (self.kind is _FK.PROVIDER_FAULT and self.http_status == 503)
+        )
+
+
+def _ph_unknown() -> "Phase":
+    from ....core.channels.failure import Phase
+
+    return Phase.UNKNOWN
 
 
 def ratio_from_wh(width: int, height: int) -> str:
@@ -104,9 +139,13 @@ async def _download(url: str) -> bytes:
     try:
         return await download_with_network_retry(url, timeout=120.0, label="OpenAIImage")
     except httpx.HTTPStatusError as exc:
+        from ....core.channels.failure import Phase, FailureKind
+
         raise OpenAIImageError(
             f"下载结果图失败 HTTP {exc.response.status_code}: {url}",
             http_status=exc.response.status_code,
+            kind=FailureKind.PROVIDER_FAULT,
+            phase=Phase.ACCEPTED,
             user_message="下载生成结果失败,请稍后重试。",
         ) from exc
 
@@ -252,9 +291,14 @@ async def generate_image_result(
                 if resp.status != 200:
                     text = await resp.text()
                     logger.warning(f"[OpenAIImage] HTTP {resp.status}: {text[:300]}")
+                    from ....core.channels.failure import classify_http_status
+
+                    kind, phase = classify_http_status(resp.status, stage="create")
                     raise OpenAIImageError(
                         f"{model} 生图 HTTP {resp.status}: {text[:300]}",
                         http_status=resp.status,
+                        kind=kind,
+                        phase=phase,
                         user_message="生图服务返回错误,请稍后重试。",
                     )
                 return await resp.json()
@@ -266,14 +310,30 @@ async def generate_image_result(
 
 
 async def _extract_image(data: Any, model: str, *, output_format: Optional[str] = None) -> bytes:
+    from ....core.channels.failure import Phase, FailureKind
+
+    # 同步端点 200 回包后的解析失败:请求已发出,结果不明 → AMBIGUOUS
     if not isinstance(data, dict):
-        raise OpenAIImageError(f"{model} 返回非 JSON 对象: {type(data).__name__}")
+        raise OpenAIImageError(
+            f"{model} 返回非 JSON 对象: {type(data).__name__}",
+            kind=FailureKind.PROVIDER_FAULT,
+            phase=Phase.AMBIGUOUS,
+        )
     items = data.get("data")
     if not isinstance(items, list) or not items:
-        raise OpenAIImageError(f"{model} 响应缺少 data: {str(data)[:200]}", user_message="生图服务未返回图片。")
+        raise OpenAIImageError(
+            f"{model} 响应缺少 data: {str(data)[:200]}",
+            user_message="生图服务未返回图片。",
+            kind=FailureKind.PROVIDER_FAULT,
+            phase=Phase.AMBIGUOUS,
+        )
     first = items[0]
     if not isinstance(first, dict):
-        raise OpenAIImageError(f"{model} data[0] 非对象")
+        raise OpenAIImageError(
+            f"{model} data[0] 非对象",
+            kind=FailureKind.PROVIDER_FAULT,
+            phase=Phase.AMBIGUOUS,
+        )
 
     raw: Optional[bytes] = None
     b64 = first.get("b64_json")
@@ -284,7 +344,12 @@ async def _extract_image(data: Any, model: str, *, output_format: Optional[str] 
         if isinstance(result_url, str) and result_url:
             raw = await _download(result_url)
     if raw is None:
-        raise OpenAIImageError(f"{model} data[0] 无 url/b64_json", user_message="生图服务未返回可用图片。")
+        raise OpenAIImageError(
+            f"{model} data[0] 无 url/b64_json",
+            user_message="生图服务未返回可用图片。",
+            kind=FailureKind.PROVIDER_FAULT,
+            phase=Phase.AMBIGUOUS,
+        )
     if output_format:
         return await encode_image_bytes_async(raw, output_format)
     return await _to_png_bytes_async(raw)

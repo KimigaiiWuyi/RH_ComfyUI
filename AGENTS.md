@@ -144,6 +144,7 @@ uv run basedpyright
 9. catalog 档位(`frame_mode` / `image_size` / `task_mode` 等)不是 `GenerationRequest` 字段,进 `params`;validate / estimate_cost 从 params 读。新模型不要为每个 enum 加 dataclass 字段。详见 skill §6.6。
 10. 供应商可用性是 **(模型, 通道)** 粒度,不是供应商粒度:同一家(如 ComfyUI)的启用闸按模型名逐个判。看板上的「供应商可用 N/共 M」是聚合口径,别当成全局开关。
 11. 看板「供应商顺序」= `channel_bindings()` 的声明顺序(负载均衡的输入顺序),不是负载均衡后的实际投递顺序。
+12. 后端只报事实(HTTP status + stage / transport exc):`from_http` / `from_transport` / `classify_*` 统一分类,**禁止手写 `retryable=` / `transient=`**;`strict_create_once` 语义是「不重复建单」而非「不换源」(REJECTED/BEFORE_SEND 仍换源);已受理任务(有 vendor_task_id)绝不换源。
 
 ## Security notes
 

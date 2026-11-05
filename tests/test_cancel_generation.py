@@ -953,6 +953,8 @@ def test_real_provider_poll_preserves_confirmed_and_uncertain_outcomes(
     class FixtureProvider(SeedanceProvider):
         name = "isolated-resume-fixture"
         poll_interval = 0.01
+        # network 场景下真实容忍窗是 600s;压到一次退避即放弃
+        poll_error_window_s = 0.05
 
         async def render_create(
             self, spec: VideoGenSpec, *, model: Optional[str]

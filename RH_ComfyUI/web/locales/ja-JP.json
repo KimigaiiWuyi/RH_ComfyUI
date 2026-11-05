@@ -11,6 +11,7 @@
   "balanceMode": "負荷分散",
   "failureThreshold": "障害しきい値",
   "circuitSeconds": "遮断クールダウン",
+  "circuitMax": "冷却上限",
   "seconds": "{n}秒",
   "all": "すべて",
   "meta": {

@@ -17,8 +17,11 @@ import base64
 import asyncio
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 from dataclasses import field, dataclass
+
+if TYPE_CHECKING:
+    from ....core.channels.failure import Phase, Stage, FailureKind
 
 import httpx
 
@@ -75,6 +78,8 @@ class SeedanceProviderError(RuntimeError):
                       *干净的* 供应商原文(如 ``failReason``)时设置;上游
                       ``外部插件的生成入口`` 会优先用其写库 / 广播,
                       避免调用方看到 ``RuntimeError: ...`` 这类堆栈噪音。
+        kind/phase:  失败分类事实(见 core.channels.failure);给出后
+                      retryable / transient 按统一规则推导,显式仍可覆盖。
     """
 
     def __init__(
@@ -82,18 +87,72 @@ class SeedanceProviderError(RuntimeError):
         message: str,
         *,
         code: Optional[str] = None,
-        retryable: bool = False,
+        retryable: Optional[bool] = None,
         http_status: Optional[int] = None,
         provider: Optional[str] = None,
         user_message: Optional[str] = None,
+        kind: Optional["FailureKind"] = None,
+        phase: Optional["Phase"] = None,
+        transient: Optional[bool] = None,
     ) -> None:
+        from ....core.channels.failure import Phase as _Phase
+
         super().__init__(message)
         self.code = code
-        self.retryable = retryable
         self.http_status = http_status
         self.provider = provider
+        self.kind = kind
+        self.phase = phase if phase is not None else _Phase.UNKNOWN
+        self._explicit_retryable = retryable
+        self._explicit_transient = transient
         # 没显式给 user_message 时,默认用 message 本身(保持向后兼容)。
         self.user_message = user_message if user_message is not None else str(message)
+        self._retryable = self._derive_retryable()
+        self._transient = self._derive_transient()
+
+    def _derive_retryable(self) -> bool:
+        from ....core.channels.failure import Phase as _Phase, FailureKind as _FK
+
+        if self._explicit_retryable is not None:
+            return self._explicit_retryable
+        if self.kind is None:
+            return False
+        return self.kind is not _FK.INVALID_REQUEST and (
+            self.phase is not _Phase.ACCEPTED or self.kind is _FK.TASK_FAILED
+        )
+
+    def _derive_transient(self) -> bool:
+        from ....core.channels.failure import FailureKind as _FK
+
+        if self._explicit_transient is not None:
+            return self._explicit_transient
+        if self.kind is None:
+            # 旧式:沿用通道层旧公式的近似(429/503/队列满 415/421/529)
+            return self.retryable and (self.http_status in (429, 503, 415, 421, 529) or self._queue_full_mark())
+        return self.retryable and (
+            self.kind is _FK.RATE_LIMITED or (self.kind is _FK.PROVIDER_FAULT and self.http_status == 503)
+        )
+
+    def _queue_full_mark(self) -> bool:
+        return (self.code or "").upper() in {"TASK_QUEUE_MAXED", "TASK_INSTANCE_MAXED"}
+
+    @property
+    def retryable(self) -> bool:
+        return self._retryable
+
+    @retryable.setter
+    def retryable(self, value: bool) -> None:
+        self._retryable = value
+        self._explicit_retryable = value
+
+    @property
+    def transient(self) -> bool:
+        return self._transient
+
+    @transient.setter
+    def transient(self, value: bool) -> None:
+        self._transient = value
+        self._explicit_transient = value
 
 
 class UnsupportedProviderShapeError(SeedanceProviderError):
@@ -127,14 +186,15 @@ def _pick_int(d: dict[str, Any], key: str) -> Optional[int]:
 
 
 def http_status_retryable(status: int) -> bool:
-    """HTTP 状态码 → 换通道是否可能解决。
+    """HTTP 状态码 → 换通道是否可能解决(薄封装,委托统一分类器)。
 
-    5xx / 429(限流)/ 408(超时)是上游侧瞬时问题;401/403 换一家供应商
-    (不同 key)可能就通;其余 4xx 属参数类错误,换通道也解决不了。
+    5xx / 429(限流)/ 408(超时)是上游侧瞬时问题;401/402/403 换一家供应商
+    (不同 key/余额)可能就通;其余 4xx 属参数类错误,换通道也解决不了。
+    402 自统一收口起归入 AUTH_OR_QUOTA(旧表为 False,属有意的口径调整)。
     """
-    if status >= 500:
-        return True
-    return status in (401, 403, 408, 429)
+    from ....core.channels.failure import http_status_retryable as _h
+
+    return _h(status)
 
 
 _RH_QUEUE_FULL_CODES = frozenset({415, 421})
@@ -228,6 +288,8 @@ class SeedanceProvider(ABC):
     max_videos: int = 3
     max_audios: int = 3
     media_prep_concurrency: int = 5
+    # 轮询错误容忍窗(秒):已受理任务遇到 5xx/429/传输错先退避续轮,超时再抛
+    poll_error_window_s: float = 600.0
 
     def __init__(
         self,
@@ -337,9 +399,13 @@ class SeedanceProvider(ABC):
         try:
             published = await materialize(data, mime)
         except MediaPublishError as exc:
+            from ....core.channels.failure import Phase, FailureKind
+
             raise SeedanceProviderError(
                 f"参考视频外链化失败: {exc}",
                 code="MEDIA_PUBLISH_FAILED",
+                kind=FailureKind.CAPABILITY,
+                phase=Phase.BEFORE_SEND,
                 retryable=True,
                 provider=self.name,
                 user_message="参考视频上传失败,请稍后重试。",
@@ -515,6 +581,7 @@ class SeedanceProvider(ABC):
         *,
         headers: Optional[dict[str, str]] = None,
         json: Optional[dict[str, Any]] = None,
+        stage: "Stage" = "other",
     ) -> dict[str, Any]:
         # ── Dry-Run 拦截: 不真正发送请求,同时 INFO 级打印完整四元组 ──
         from ....rh_config.comfyui_config import plugin_dry_run
@@ -564,7 +631,7 @@ class SeedanceProvider(ABC):
         resp_emit(f"[Seedance:{self.name}] 响应 {resp.status_code} ({len(resp.content)} bytes)\n  body: {resp_text}")
 
         if resp.status_code >= 400:
-            raise self._build_http_error(resp)
+            raise self._build_http_error(resp, stage=stage)
         # DELETE 取消/删除任务常返回 200/204 且无 body
         if method.upper() == "DELETE" and not (resp.content or b"").strip():
             return {}
@@ -573,16 +640,20 @@ class SeedanceProvider(ABC):
         except Exception as exc:
             if method.upper() == "DELETE":
                 return {}
+            from ....core.channels.failure import FailureKind, classify_http_status
+
+            _, bad_phase = classify_http_status(resp.status_code or 500, stage=stage)
             raise SeedanceProviderError(
                 f"{self.name} 返回非 JSON: {exc}; raw={resp.text[:500]}",
                 code="BAD_RESPONSE",
-                retryable=True,  # 上游偶发脏响应,换通道可解
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=bad_phase,
                 provider=self.name,
                 http_status=resp.status_code,
                 user_message="上游返回格式异常,请稍后重试。",
             ) from exc
 
-    def _build_http_error(self, resp: httpx.Response) -> SeedanceProviderError:
+    def _build_http_error(self, resp: httpx.Response, *, stage: "Stage" = "other") -> SeedanceProviderError:
         # 尝试从响应体抽出干净的供应商 message,透传给调用方。
         try:
             err_body: Any = resp.json()
@@ -595,12 +666,14 @@ class SeedanceProvider(ABC):
                 vendor_msg = err_field.get("message") or err_field.get("code")
             if not vendor_msg:
                 vendor_msg = err_body.get("message") or err_body.get("msg")
+        from ....core.channels.failure import classify_http_status
+
+        kind, phase = classify_http_status(resp.status_code, stage=stage)
         return SeedanceProviderError(
             f"{self.name} API 错误 {resp.status_code}: {err_body}",
             code="HTTP_ERROR",
-            # 按状态码标注可重试:5xx/429/408 是上游侧问题、401/403 换一家(不同 key)
-            # 可能就通;其余 4xx 是参数类错误,换通道也解决不了
-            retryable=http_status_retryable(resp.status_code),
+            kind=kind,
+            phase=phase,
             provider=self.name,
             http_status=resp.status_code,
             user_message=str(vendor_msg) if vendor_msg else "上游服务异常,请稍后重试。",
@@ -631,16 +704,19 @@ class SeedanceProvider(ABC):
         from ....core.telemetry.wire_capture import set_wire_from_http_body
 
         set_wire_from_http_body(masked)
-        resp = await self._request(method, url, headers=headers, json=body)
+        resp = await self._request(method, url, headers=headers, json=body, stage="create")
         task_id = self.parse_create(resp)
         if not task_id:
             # RunningHub 等共享 API 并发满时常 HTTP 200 + code=421 且无 taskId。
-            # 标 transient:run() 层会在原通道退避重试一次;主路径仍靠 RH 共享并发闸排队。
+            # 标 RATE_LIMITED(=旧 transient):run() 层先在原通道退避;主路径仍靠共享并发闸排队。
             queue_full = _is_rh_queue_full_response(resp) if isinstance(resp, dict) else False
+            from ....core.channels.failure import Phase, FailureKind
+
             raise SeedanceProviderError(
                 f"{self.name} 未返回 task id: {resp}",
                 code="TASK_QUEUE_MAXED" if queue_full else "NO_TASK_ID",
-                retryable=True,  # 尚未产生任务,换通道重建无重复计费风险
+                kind=FailureKind.RATE_LIMITED if queue_full else FailureKind.PROVIDER_FAULT,
+                phase=Phase.REJECTED,
                 provider=self.name,
                 http_status=421 if queue_full else None,
                 user_message=("RunningHub 并发已满,请稍后重试。" if queue_full else "上游未返回任务 ID,请稍后重试。"),
@@ -677,25 +753,52 @@ class SeedanceProvider(ABC):
         last_status: Optional[NormalizedStatus] = None
         last_progress: Any = None
         poll_count = 0
+        from ....core.channels.failure import Phase, FailureKind
+        from ....core.channels.polling import PollErrorTolerance
+
+        tolerance = PollErrorTolerance(window_s=self.poll_error_window_s)
         while True:
             poll_count += 1
             try:
                 task = await self.get(task_id)
+            except SeedanceProviderError as poll_err:
+                # 上游已建单:5xx/429/408 在容忍窗内退避续轮询;4xx 立即抛
+                status = poll_err.http_status
+                # 无 http_status 的语义错误(业务拒答/参数类)不可重试的立即抛,
+                # 否则会被当成传输错误白等整个容忍窗
+                if status is None and not poll_err.retryable:
+                    raise
+                delay = tolerance.next_delay(http_status=status)
+                if delay is None:
+                    raise
+                logger.warning(f"[Seedance:{self.name}] 任务 {task_id} 轮询错误(HTTP {status}),{delay:.1f}s 后重试")
+                await asyncio.sleep(delay)
+                continue
             except (httpx.HTTPError, asyncio.TimeoutError, OSError) as poll_exc:
                 # Transport retry (5× / 5s) already happened in RetryingAsyncClient.
                 # Reaching here means five consecutive network failures on this GET.
+                delay = tolerance.next_delay(http_status=None)
+                if delay is not None:
+                    logger.warning(
+                        f"[Seedance:{self.name}] 任务 {task_id} 轮询网络错误"
+                        f"({type(poll_exc).__name__}),{delay:.1f}s 后重试"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 elapsed = loop.time() - start
                 raise SeedanceProviderError(
                     f"{self.name} 轮询失败({type(poll_exc).__name__}: {poll_exc}); "
                     f"上次状态={last_status}, 进度={last_progress}, "
                     f"已等待={elapsed:.1f}s, 轮询次数={poll_count}",
                     code="POLL_NETWORK_ERROR",
+                    kind=FailureKind.PROVIDER_FAULT,
+                    phase=Phase.ACCEPTED,
                     # 任务可能已在上游成功,换通道会整单重跑(重复烧钱)——
                     # 与 RESULT_DOWNLOAD_FAILED 同理,不做通道切换
-                    retryable=False,
                     provider=self.name,
                     user_message="轮询阶段网络异常,请稍后重试。",
                 ) from poll_exc
+            tolerance.reset()
 
             # 状态变更 → 立即打日志,并重置心跳计数
             if task.status != last_status:
@@ -744,7 +847,8 @@ class SeedanceProvider(ABC):
                     raise SeedanceProviderError(
                         vendor_msg,
                         code="TASK_FAILED",
-                        retryable=True,  # 该家跑挂了(容量/内部错误),换一家值得一试
+                        kind=FailureKind.TASK_FAILED,
+                        phase=Phase.ACCEPTED,
                         provider=self.name,
                         user_message=vendor_msg,
                     )
@@ -753,7 +857,8 @@ class SeedanceProvider(ABC):
                     raise SeedanceProviderError(
                         f"任务已过期:{task_id}",
                         code="TASK_EXPIRED",
-                        retryable=True,
+                        kind=FailureKind.TASK_FAILED,
+                        phase=Phase.ACCEPTED,
                         provider=self.name,
                         user_message="生成任务已过期,请重试。",
                     )
@@ -762,8 +867,13 @@ class SeedanceProvider(ABC):
 
             elapsed = loop.time() - start
             if elapsed > max_wait:
-                raise asyncio.TimeoutError(
-                    f"{self.name} 任务等待超时 ({max_wait}s): {task_id} (最后状态={last_status}, 进度={last_progress})"
+                raise SeedanceProviderError(
+                    f"{self.name} 任务等待超时 ({max_wait}s): {task_id} (最后状态={last_status}, 进度={last_progress})",
+                    code="TASK_WAIT_TIMEOUT",
+                    kind=FailureKind.PROVIDER_FAULT,
+                    phase=Phase.ACCEPTED,
+                    provider=self.name,
+                    user_message="生成任务等待超时,请稍后重试。",
                 )
 
             await asyncio.sleep(interval)

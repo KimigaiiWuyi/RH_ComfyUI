@@ -20,6 +20,7 @@ from ...core.types import NodeOutput
 from ...core.pipeline import NodeDef
 from ....core.base.errors import ChannelError, GenerationError
 from ....core.channels.channel import ProviderChannel
+from ....core.channels.failure import Phase, FailureKind
 
 
 class AzureRuntime:
@@ -66,7 +67,13 @@ class AzureImageChannel(ProviderChannel):
         request = kwargs["request"]
         node = kwargs["node"] if "node" in kwargs else None
         if not isinstance(node, NodeDef) or node.mapper_func is None:
-            raise ChannelError("Azure 通道缺少 mapper", retryable=False, channel=self.name)
+            raise ChannelError(
+                "Azure 通道缺少 mapper",
+                kind=FailureKind.INVALID_REQUEST,
+                phase=Phase.BEFORE_SEND,
+                retryable=False,
+                channel=self.name,
+            )
 
         self._runtime.inflight += 1
         try:
@@ -78,7 +85,8 @@ class AzureImageChannel(ProviderChannel):
         except Exception as exc:
             raise ChannelError(
                 f"Azure {self._model_name} 失败: {exc}",
-                retryable=True,
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.AMBIGUOUS,
                 channel=self.name,
                 user_message=f"Azure {self._model_name} 生图失败,请稍后重试。",
             ) from exc
@@ -88,6 +96,8 @@ class AzureImageChannel(ProviderChannel):
         if not isinstance(result, NodeOutput):
             raise ChannelError(
                 f"Azure mapper 返回了非 NodeOutput: {type(result)}",
+                kind=FailureKind.INVALID_REQUEST,
+                phase=Phase.BEFORE_SEND,
                 retryable=False,
                 channel=self.name,
             )

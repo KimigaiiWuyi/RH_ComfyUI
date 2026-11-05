@@ -104,5 +104,6 @@ ruff check RH_ComfyUI          # 风格检查(120 列,按显示宽度计 CJK)
 | 参数改了调用方没变 | 调用方读的是 `input_schema` 序列化,确认改的是 defs 的 PortSpec |
 | 多参考被判成首尾帧 / 须使用 ratio=adaptive | `frame_mode` 没进 `request.params`;validate 误读顶层字段(永远 None)。见 [§6.6](./06-entry-points.md) |
 | 通道频繁切换/全挂 | 熔断日志;`ChannelError.retryable` 是否误标 |
+| strict 下 503 不换源/熔断不计数 | 后端只报事实(HTTP status+stage):建单错误用 `from_http(status, stage="create")`,禁止手写 `retryable=`/`transient=` 猜语义 |
 | import 报 `cannot import name 'dispatcher' from 'dispatch'` | 用 `importlib.import_module`(02 章 2.1 的坑) |
 | 配完 key 不重启直接报 `LocalProtocolError: Illegal header value b'Bearer '` | 老 [§11](./11-credential-hot-reload.md) 现象:单例把空 key 冻在 `__init__`,httpx 拒收 `Bearer `(尾空格)。修法见 §9.4 / §11 |

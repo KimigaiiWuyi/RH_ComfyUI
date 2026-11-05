@@ -31,6 +31,7 @@ from ....core.base.errors import ChannelError
 from ..happyhorse.channel import _evt, _download, _safe_emit, _dry_run_enabled
 from ..happyhorse.provider import HappyHorseProviderError
 from ....core.channels.channel import ProviderChannel
+from ....core.channels.failure import Phase, FailureKind
 
 ConfigResolver = Callable[[], ProviderCredentials]
 DryRunResolver = Callable[[], bool]
@@ -66,6 +67,15 @@ class Wan30Channel(ProviderChannel):
 
     def credentials(self) -> ProviderCredentials:
         return self._resolve_creds()
+
+    def health_group(self) -> str:
+        """同一上游端点的通道共享熔断组(生效 base_url 的 host,热读零网络)。"""
+        from urllib.parse import urlparse
+
+        creds = self._resolve_creds()
+        raw = (creds.base_url or self._provider_cls.DEFAULT_BASE_URL or "").rstrip("/")
+        host = urlparse(raw).hostname if raw else None
+        return host or self.name
 
     def get_provider_for_resume(self) -> Optional[Wan30Provider]:
         return self._get_provider()
@@ -130,6 +140,8 @@ class Wan30Channel(ProviderChannel):
         if disabled is not None:
             raise ChannelError(
                 disabled,
+                kind=FailureKind.CAPABILITY,
+                phase=Phase.BEFORE_SEND,
                 retryable=True,
                 channel=self.name,
                 user_message=disabled,
@@ -139,6 +151,8 @@ class Wan30Channel(ProviderChannel):
         if provider is None or not provider.api_key:
             raise ChannelError(
                 f"供应商 {self.name} 缺少 API Key",
+                kind=FailureKind.AUTH_OR_QUOTA,
+                phase=Phase.BEFORE_SEND,
                 retryable=True,
                 channel=self.name,
                 user_message="该供应商未配置 API Key。",
@@ -168,25 +182,29 @@ class Wan30Channel(ProviderChannel):
             # 不是 Wan30ProviderError;只捕子类会让 401/403 穿出,dispatch 无法切网关。
             raise ChannelError(
                 str(exc),
+                kind=exc.kind,
+                phase=exc.phase,
+                http_status=exc.http_status,
                 retryable=exc.retryable,
-                transient=exc.retryable and exc.http_status in (429, 503),
+                transient=exc.transient,
                 channel=self.name,
                 code=exc.code or "",
                 user_message=exc.user_message,
             ) from exc
         except (httpx.HTTPError, asyncio.TimeoutError, OSError) as exc:
-            raise ChannelError(
-                f"{self.name} 网络错误({type(exc).__name__}: {exc})",
-                retryable=True,
+            raise ChannelError.from_transport(
+                exc,
+                stage="other",
                 channel=self.name,
-                code="PROVIDER_NETWORK_ERROR",
+                message=f"{self.name} 网络错误({type(exc).__name__}: {exc})",
                 user_message="上游服务暂时不可用,请稍后重试。",
             ) from exc
 
         if not final.video_url:
             raise ChannelError(
                 f"{self.name} 任务成功但未返回 video_url: {final.raw}",
-                retryable=True,
+                kind=FailureKind.TASK_FAILED,
+                phase=Phase.ACCEPTED,
                 channel=self.name,
                 user_message="上游未返回视频结果,请稍后重试。",
             )
@@ -198,6 +216,8 @@ class Wan30Channel(ProviderChannel):
         except (httpx.HTTPError, asyncio.TimeoutError, OSError) as exc:
             raise ChannelError(
                 f"{self.name} 下载生成结果失败({type(exc).__name__}: {exc})",
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.ACCEPTED,
                 retryable=False,
                 channel=self.name,
                 code="RESULT_DOWNLOAD_FAILED",

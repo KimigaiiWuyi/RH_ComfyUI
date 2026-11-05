@@ -18,6 +18,7 @@ from ...core.types import NodeOutput
 from ....core.base.errors import ChannelError
 from ...mappers.gemini_image import gemini_flash_image_mapper
 from ....core.channels.channel import ProviderChannel
+from ....core.channels.failure import Phase, FailureKind
 
 # 调用方按 finish_reason= / block_reason= 映射文案，不要改写成笼统「请稍后重试」。
 _IMAGE_STOP_RE = re.compile(r"\b(finish_reason|block_reason)=([A-Z0-9_]+)")
@@ -116,6 +117,8 @@ class GeminiImageChannel(ProviderChannel):
             if disabled is not None:
                 raise ChannelError(
                     disabled,
+                    kind=FailureKind.CAPABILITY,
+                    phase=Phase.BEFORE_SEND,
                     retryable=True,
                     channel=self.name,
                     user_message=disabled,
@@ -125,6 +128,8 @@ class GeminiImageChannel(ProviderChannel):
         if not self._api.is_configured():
             raise ChannelError(
                 "Gemini 生图未配置(AI Studio 需 API Key;Vertex 需 Project ID)",
+                kind=FailureKind.AUTH_OR_QUOTA,
+                phase=Phase.BEFORE_SEND,
                 retryable=True,
                 channel=self.name,
                 user_message="该供应商未配置完整凭证。",
@@ -143,6 +148,8 @@ class GeminiImageChannel(ProviderChannel):
                 policy = kind == "block_reason" or code in _NON_RETRY_CODES
                 raise ChannelError(
                     f"Gemini 生图失败: {exc}",
+                    kind=FailureKind.INVALID_REQUEST if policy else FailureKind.PROVIDER_FAULT,
+                    phase=Phase.REJECTED,
                     retryable=not policy,
                     transient=False,
                     channel=self.name,
@@ -151,8 +158,10 @@ class GeminiImageChannel(ProviderChannel):
                 ) from exc
             raise ChannelError(
                 f"Gemini 生图失败: {exc}",
+                kind=FailureKind.RATE_LIMITED if rate_limited else FailureKind.PROVIDER_FAULT,
+                phase=Phase.REJECTED,
                 retryable=True,
-                transient=rate_limited,
+                transient=rate_limited or None,
                 channel=self.name,
                 code="RATE_LIMITED" if rate_limited else "GEMINI_FAILED",
                 user_message=("Gemini 生图繁忙,正在排队重试…" if rate_limited else "Gemini 生图失败,请稍后重试。"),

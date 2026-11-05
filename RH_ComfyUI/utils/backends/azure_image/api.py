@@ -26,6 +26,7 @@ from ...audit_key import mask_api_key
 from ..http_retry import is_network_error, call_with_network_retry
 from ..gpt_image2.api import GPTImage2API
 from ....core.base.errors import ChannelError
+from ....core.channels.failure import Phase, Stage, FailureKind, classify_http_status
 from ...mappers.gpt_image2_params import DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT
 
 # 日期版 api-version 属于旧 deployments 路径;v1 的 query 是 preview。
@@ -90,7 +91,7 @@ def wire_api_version(raw: str) -> str:
     return value
 
 
-def azure_http_error(status: int, body: str) -> ChannelError:
+def azure_http_error(status: int, body: str, *, stage: "Stage" = "create") -> ChannelError:
     """把错误信封翻成 ChannelError,保留 error.code(例如 DeploymentNotFound)。"""
     code = f"HTTP_{status}"
     message = body.strip()[:300] if body.strip() else f"HTTP {status}"
@@ -110,6 +111,7 @@ def azure_http_error(status: int, body: str) -> ChannelError:
                 message = raw_message
     transient = status in _TRANSIENT_HTTP
     retryable = transient or status in {404, 408, 429, 500, 502, 503, 504}
+    kind, phase = classify_http_status(status, stage=stage)
     user_message = message
     if code == "DeploymentNotFound":
         user_message = (
@@ -118,6 +120,9 @@ def azure_http_error(status: int, body: str) -> ChannelError:
         )
     return ChannelError(
         f"Azure {code}: {message}",
+        kind=kind,
+        phase=phase,
+        http_status=status,
         retryable=retryable,
         transient=transient,
         channel=_CHANNEL,
@@ -187,7 +192,8 @@ class AzureGPTImage2API(GPTImage2API):
                     if not isinstance(resp_data, dict):
                         raise ChannelError(
                             f"Azure 响应不是 JSON 对象: {type(resp_data)}",
-                            retryable=True,
+                            kind=FailureKind.PROVIDER_FAULT,
+                            phase=Phase.AMBIGUOUS,
                             channel=_CHANNEL,
                             user_message="Azure 生图失败,请稍后重试。",
                         )
@@ -204,17 +210,19 @@ class AzureGPTImage2API(GPTImage2API):
         except Exception as exc:
             if is_network_error(exc):
                 logger.warning(f"[AzureImage] 请求失败(网络重试已耗尽): {exc}")
-                raise ChannelError(
-                    f"Azure 网络错误: {exc}",
-                    retryable=True,
+                raise ChannelError.from_transport(
+                    exc,
+                    stage="create",
                     channel=_CHANNEL,
                     code="PROVIDER_NETWORK_ERROR",
+                    message=f"Azure 网络错误: {exc}",
                     user_message="Azure 生图网络异常,请稍后重试。",
                 ) from exc
             logger.warning(f"[AzureImage] 请求失败: {exc}")
             raise ChannelError(
                 f"Azure 请求失败: {exc}",
-                retryable=True,
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.AMBIGUOUS,
                 channel=_CHANNEL,
                 user_message="Azure 生图失败,请稍后重试。",
             ) from exc
@@ -245,7 +253,8 @@ class AzureGPTImage2API(GPTImage2API):
             raise last_error
         raise ChannelError(
             "Azure 请求失败",
-            retryable=True,
+            kind=FailureKind.PROVIDER_FAULT,
+            phase=Phase.AMBIGUOUS,
             channel=_CHANNEL,
             user_message="Azure 生图失败,请稍后重试。",
         )
@@ -266,7 +275,8 @@ class AzureGPTImage2API(GPTImage2API):
         if not deployment:
             raise ChannelError(
                 "Azure 缺少部署名(model)",
-                retryable=False,
+                kind=FailureKind.INVALID_REQUEST,
+                phase=Phase.REJECTED,
                 channel=_CHANNEL,
                 user_message="Azure 生图缺少模型名。",
             )
@@ -335,7 +345,8 @@ class AzureGPTImage2API(GPTImage2API):
         if isinstance(resp, int):
             raise ChannelError(
                 f"Azure {deployment} 生成失败，错误码: {resp}",
-                retryable=True,
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.AMBIGUOUS,
                 channel=_CHANNEL,
                 user_message=f"Azure {deployment} 生图失败,请稍后重试。",
             )
@@ -355,7 +366,8 @@ class AzureGPTImage2API(GPTImage2API):
             if not isinstance(items, list) or not items:
                 raise ChannelError(
                     "Azure 响应没有图片 data",
-                    retryable=True,
+                    kind=FailureKind.PROVIDER_FAULT,
+                    phase=Phase.AMBIGUOUS,
                     channel=_CHANNEL,
                     user_message="Azure 未返回图片,请稍后重试。",
                 )
@@ -363,7 +375,8 @@ class AzureGPTImage2API(GPTImage2API):
             if not isinstance(data_item, dict):
                 raise ChannelError(
                     "Azure 响应 data[0] 不是对象",
-                    retryable=True,
+                    kind=FailureKind.PROVIDER_FAULT,
+                    phase=Phase.AMBIGUOUS,
                     channel=_CHANNEL,
                     user_message="Azure 未返回图片,请稍后重试。",
                 )
@@ -375,7 +388,8 @@ class AzureGPTImage2API(GPTImage2API):
             if not image_content:
                 raise ChannelError(
                     "Azure 响应没有 url / b64_json",
-                    retryable=True,
+                    kind=FailureKind.PROVIDER_FAULT,
+                    phase=Phase.AMBIGUOUS,
                     channel=_CHANNEL,
                     user_message="Azure 未返回图片,请稍后重试。",
                 )
@@ -383,6 +397,8 @@ class AzureGPTImage2API(GPTImage2API):
             if isinstance(parsed, int):
                 raise ChannelError(
                     f"Azure 图片解码失败，错误码: {parsed}",
+                    kind=FailureKind.PROVIDER_FAULT,
+                    phase=Phase.ACCEPTED,
                     retryable=False,
                     channel=_CHANNEL,
                     user_message="Azure 图片已生成但解码失败。",
@@ -395,7 +411,8 @@ class AzureGPTImage2API(GPTImage2API):
             logger.error(f"[AzureImage] 解析 images 响应失败: {exc}")
             raise ChannelError(
                 f"Azure 解析图片响应失败: {exc}",
-                retryable=True,
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.AMBIGUOUS,
                 channel=_CHANNEL,
                 user_message="Azure 生图失败,请稍后重试。",
             ) from exc

@@ -30,6 +30,7 @@ from ...core.request import GenerationRequest
 from ..seedance.provider import NormalizedTask, DryRunInterrupt
 from ....core.base.errors import ChannelError
 from ....core.channels.channel import ProviderChannel
+from ....core.channels.failure import Phase, FailureKind
 
 
 class MiniMaxH3Channel(ProviderChannel):
@@ -96,6 +97,8 @@ class MiniMaxH3Channel(ProviderChannel):
         if disabled is not None:
             raise ChannelError(
                 disabled,
+                kind=FailureKind.CAPABILITY,
+                phase=Phase.BEFORE_SEND,
                 retryable=True,
                 channel=self.name,
                 user_message=disabled,
@@ -105,6 +108,8 @@ class MiniMaxH3Channel(ProviderChannel):
         if not provider.api_key:
             raise ChannelError(
                 "MiniMax H3 缺少 API Key",
+                kind=FailureKind.AUTH_OR_QUOTA,
+                phase=Phase.BEFORE_SEND,
                 retryable=True,
                 channel=self.name,
                 user_message="未配置 MiniMax API Key。",
@@ -125,25 +130,29 @@ class MiniMaxH3Channel(ProviderChannel):
         except MiniMaxH3ProviderError as exc:
             raise ChannelError(
                 str(exc),
+                kind=exc.kind,
+                phase=exc.phase,
+                http_status=exc.http_status,
                 retryable=exc.retryable,
-                transient=bool(exc.retryable and exc.http_status in (429, 503, 529)),
+                transient=exc.transient,
                 channel=self.name,
                 code=exc.code or "",
                 user_message=exc.user_message,
             ) from exc
         except (httpx.HTTPError, asyncio.TimeoutError, OSError) as exc:
-            raise ChannelError(
-                f"MiniMax H3 网络错误({type(exc).__name__}: {exc})",
-                retryable=True,
+            raise ChannelError.from_transport(
+                exc,
+                stage="other",
                 channel=self.name,
-                code="PROVIDER_NETWORK_ERROR",
+                message=f"MiniMax H3 网络错误({type(exc).__name__}: {exc})",
                 user_message="上游服务暂时不可用,请稍后重试。",
             ) from exc
 
         if not final.video_url:
             raise ChannelError(
                 f"MiniMax H3 任务成功但未返回 video url: {final.raw}",
-                retryable=True,
+                kind=FailureKind.TASK_FAILED,
+                phase=Phase.ACCEPTED,
                 channel=self.name,
                 user_message="上游未返回视频结果,请稍后重试。",
             )
@@ -157,6 +166,8 @@ class MiniMaxH3Channel(ProviderChannel):
         except (httpx.HTTPError, asyncio.TimeoutError, OSError) as exc:
             raise ChannelError(
                 f"MiniMax H3 下载生成结果失败({type(exc).__name__}: {exc})",
+                kind=FailureKind.PROVIDER_FAULT,
+                phase=Phase.ACCEPTED,
                 retryable=False,
                 channel=self.name,
                 code="RESULT_DOWNLOAD_FAILED",
