@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any, Optional
 from unittest.mock import AsyncMock
+from collections.abc import Callable, Awaitable
 
 import pytest
 
@@ -1170,12 +1172,43 @@ def test_rh_app_cannot_cancel_only_resume():
 
 def test_mark_last_failed_refunded_accepts_cancelled():
     """cancelled 终态也可 mark refunded(PointsBillingPolicy post_refund)。"""
-    import inspect
+    from sqlmodel import col, select
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
     from RH_ComfyUI.utils.database.models import RHComfyuiTaskRecord
 
-    src = inspect.getsource(RHComfyuiTaskRecord.mark_last_failed_refunded)
-    assert "CANCELLED" in src
+    async def _run() -> None:
+        engine = create_async_engine("sqlite+aiosqlite://", connect_args={"check_same_thread": False})
+        async with engine.begin() as conn:
+            await conn.run_sync(RHComfyuiTaskRecord.metadata.create_all)
+        maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with maker() as session:
+            session.add(
+                RHComfyuiTaskRecord(
+                    user_id="u1",
+                    bot_id="fixture",
+                    task_type="image",
+                    task_name="gpt-image-2.6-flare",
+                    status="cancelled",
+                    refunded=False,
+                )
+            )
+            await session.commit()
+            inner: Callable[..., Awaitable[bool]] = inspect.unwrap(RHComfyuiTaskRecord.mark_last_failed_refunded)
+            ok = await inner(
+                RHComfyuiTaskRecord,
+                session,
+                user_id="u1",
+                bot_id="fixture",
+                task_name="gpt-image-2.6-flare",
+            )
+            assert ok is True
+            stmt = select(RHComfyuiTaskRecord).where(col(RHComfyuiTaskRecord.user_id) == "u1")
+            row = (await session.execute(stmt)).scalar_one()
+            assert row.refunded is True
+        await engine.dispose()
+
+    asyncio.run(_run())
 
 
 def test_mark_host_wallet_refunded_running_to_cancelled():
@@ -1199,8 +1232,8 @@ def test_mark_host_wallet_refunded_running_to_cancelled():
         def add(self, r):
             pass
 
-    # with_session 包装:__wrapped__(cls, session, ...)
-    inner = RHComfyuiTaskRecord.mark_host_wallet_refunded.__wrapped__  # type: ignore[attr-defined]
+    # with_session 包装:unwrap 出原函数手动注入 session
+    inner: Callable[..., Awaitable[bool]] = inspect.unwrap(RHComfyuiTaskRecord.mark_host_wallet_refunded)
     ok = asyncio.run(
         inner(
             RHComfyuiTaskRecord,

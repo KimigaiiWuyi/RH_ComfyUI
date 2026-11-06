@@ -30,6 +30,8 @@ from ...utils.backends.minimax.config import (
 from ...utils.mappers.gpt_image2_params import (
     GPT_IMAGE2_QUALITIES,
     GPT_IMAGE25_QUALITIES,
+    GPT_IMAGE2_OUTPUT_FORMATS,
+    GPT_IMAGE26_OUTPUT_FORMATS,
     gpt_image_family_inputs,
 )
 from ...utils.mappers.banana_pro_billing import estimate_banana_pro_points
@@ -1468,6 +1470,7 @@ def _gpt_image_family_node(
     knowledge_content: str,
     priority: int,
     qualities: tuple[str, ...] = GPT_IMAGE2_QUALITIES,
+    output_formats: tuple[str, ...] = GPT_IMAGE2_OUTPUT_FORMATS,
 ) -> NodeDef:
     """gpt-image 家族 NodeDef:catalog name = 上游 model;端口/mapper 共用。"""
     return NodeDef(
@@ -1482,7 +1485,7 @@ def _gpt_image_family_node(
         requirements=["gpt_image2_apikey"],
         mode="programmatic",
         mapper_func=_gpt_image2_mapper,
-        inputs=gpt_image_family_inputs(qualities=qualities),
+        inputs=gpt_image_family_inputs(qualities=qualities, output_formats=output_formats),
         outputs={
             "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
         },
@@ -1576,6 +1579,66 @@ class GptImage25FlareDef(GptImageFamilyModel):
             ),
             priority=78,
             qualities=GPT_IMAGE25_QUALITIES,
+        )
+
+
+class GptImage26SunburstDef(GptImageFamilyModel):
+    """GPT-Image-2.6 Sunburst — 高精度编辑,支持 output_format=gif 直出。"""
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return _gpt_image_family_node(
+            name="gpt-image-2.6-sunburst",
+            display_name="GPT-Image-2.6 Sunburst",
+            description="高精度编辑，可直接生成 GIF",
+            knowledge_content=(
+                "GPT-Image-2.6 Sunburst(上游 model=gpt-image-2.6-sunburst)。"
+                "\n"
+                "优势:多轮编辑稳定,且是家族中唯一支持 output_format=gif 直出动图的型号。"
+                "\n"
+                "适用:成片级精修、需要直接产出 GIF 动图的编辑/文生图任务。"
+                "\n"
+                "不适用:要快、要量大(改用 gpt-image-2.6-flare);静态图同 2.5 选型即可。"
+                "\n"
+                "计费与 quality 档同 2.5;协议同 gpt-image-2,禁止当通道混用。"
+                "\n"
+            ),
+            priority=79,
+            qualities=GPT_IMAGE25_QUALITIES,
+            output_formats=GPT_IMAGE26_OUTPUT_FORMATS,
+        )
+
+
+class GptImage26FlareDef(GptImageFamilyModel):
+    """GPT-Image-2.6 Flare — 日常高速档,支持 output_format=gif 直出。"""
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return _gpt_image_family_node(
+            name="gpt-image-2.6-flare",
+            display_name="GPT-Image-2.6 Flare",
+            description="日常高质量，可直接生成 GIF",
+            knowledge_content=(
+                "GPT-Image-2.6 Flare(上游 model=gpt-image-2.6-flare)。"
+                "\n"
+                "优势:2.6 系列日常档,延迟低;支持 output_format=gif 直出 GIF 动图。"
+                "\n"
+                "适用:社交图、快速打样、大批量生图,以及需要动图产物的场景。"
+                "\n"
+                "不适用:成片级精细多轮编辑(改用 gpt-image-2.6-sunburst)。"
+                "\n"
+                "计费与 quality 档同 2.5;协议同 gpt-image-2,禁止当通道混用。"
+                "\n"
+            ),
+            priority=80,
+            qualities=GPT_IMAGE25_QUALITIES,
+            output_formats=GPT_IMAGE26_OUTPUT_FORMATS,
         )
 
 
@@ -2200,6 +2263,8 @@ ALL_MODELS = [
     GptImage2Def,
     GptImage25SunburstDef,
     GptImage25FlareDef,
+    GptImage26SunburstDef,
+    GptImage26FlareDef,
     MinimaxImage01Def,
     MossImageDef,
     Qwen2511Def,

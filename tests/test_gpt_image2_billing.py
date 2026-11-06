@@ -2,7 +2,14 @@
 
 import pytest
 
-from RH_ComfyUI.models.image.defs import BananaProDef, GptImage2Def, GptImage25FlareDef, GptImage25SunburstDef
+from RH_ComfyUI.models.image.defs import (
+    BananaProDef,
+    GptImage2Def,
+    GptImage25FlareDef,
+    GptImage26FlareDef,
+    GptImage25SunburstDef,
+    GptImage26SunburstDef,
+)
 from RH_ComfyUI.utils.core.request import TaskType, GenerationRequest
 from RH_ComfyUI.utils.mappers.gpt_image2_billing import (
     IMAGE_MODEL_SPECS,
@@ -103,9 +110,14 @@ def test_quality_ordering():
 
 
 def test_gpt_image25_quality_axis_matches_20_anchors():
-    """2.5 max 输出 token = 2.0 high;2.5 high = 2.0 medium。单价相同。"""
+    """2.5/2.6 max 输出 token = 2.0 high;high = 2.0 medium。单价相同。"""
     w, h = 1024, 1024
-    for model_25 in ("gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
+    for model_25 in (
+        "gpt-image-2.5-flare",
+        "gpt-image-2.5-sunburst",
+        "gpt-image-2.6-flare",
+        "gpt-image-2.6-sunburst",
+    ):
         assert calculate_image_tokens("max", w, h, model_25) == calculate_image_tokens("high", w, h, "gpt-image-2")
         assert calculate_image_tokens("high", w, h, model_25) == calculate_image_tokens("medium", w, h, "gpt-image-2")
         assert calculate_image_tokens("low", w, h, model_25) == calculate_image_tokens("low", w, h, "gpt-image-2")
@@ -122,7 +134,12 @@ def test_gpt_image25_quality_monotonic():
 
 def test_family_specs_share_unit_price_and_pixel_table():
     gpt = IMAGE_MODEL_SPECS["gpt-image-2"]
-    for name in ("gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
+    for name in (
+        "gpt-image-2.5-flare",
+        "gpt-image-2.5-sunburst",
+        "gpt-image-2.6-flare",
+        "gpt-image-2.6-sunburst",
+    ):
         spec = IMAGE_MODEL_SPECS[name]
         assert spec["size_limits"] == gpt["size_limits"]
         assert spec["token_area_offset_pixels"] == gpt["token_area_offset_pixels"]
@@ -211,9 +228,12 @@ def test_gpt_image2_estimate_cost_dynamic():
     assert cost_low < cost_default
 
 
-@pytest.mark.parametrize("cls", [GptImage25SunburstDef, GptImage25FlareDef])
+@pytest.mark.parametrize(
+    "cls",
+    [GptImage25SunburstDef, GptImage25FlareDef, GptImage26SunburstDef, GptImage26FlareDef],
+)
 def test_gpt_image25_equivalent_quality_pairs(cls):
-    """2.5 max=2.0 high;2.5 high=2.0 medium。同 label medium 不再同价。"""
+    """2.5/2.6 max=2.0 high;high=2.0 medium。同 label medium 不再同价。"""
     gpt = GptImage2Def()
     other = cls()
     req_20_high = _make_request(ratio="16:9", quality="high", image_size="2K")

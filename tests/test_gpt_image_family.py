@@ -1,11 +1,12 @@
-"""gpt-image 家族:2.0 / 2.5-sunburst / 2.5-flare 必须是三个独立 catalog 模型。"""
+"""gpt-image 家族:2.0 / 2.5 / 2.6 sunburst / flare 必须是五个独立 catalog 模型。"""
 
 from __future__ import annotations
 
+import io
 import asyncio
 
 import pytest
-from PIL import Image
+from PIL import Image, GifImagePlugin
 
 from RH_ComfyUI.core.base.errors import ValidationError
 from RH_ComfyUI.core.schema.types import NodeOutput
@@ -13,7 +14,9 @@ from RH_ComfyUI.models.image.defs import (
     ALL_MODELS,
     GptImage2Def,
     GptImage25FlareDef,
+    GptImage26FlareDef,
     GptImage25SunburstDef,
+    GptImage26SunburstDef,
 )
 from RH_ComfyUI.core.schema.request import TaskType, GenerationRequest
 from RH_ComfyUI.core.channels.channel import ProviderChannel
@@ -24,16 +27,31 @@ from RH_ComfyUI.utils.mappers.gpt_image2_params import (
     GPT_IMAGE2_QUALITIES,
     GPT_IMAGE25_QUALITIES,
     GPT_IMAGE_FAMILY_NAMES,
+    GPT_IMAGE26_OUTPUT_FORMATS,
     gpt_image_family_inputs,
     resolve_gpt_image_family_model,
 )
 
-_FamilyCls = type[GptImage2Def] | type[GptImage25SunburstDef] | type[GptImage25FlareDef]
-_FAMILY: tuple[_FamilyCls, ...] = (GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef)
+_FamilyCls = (
+    type[GptImage2Def]
+    | type[GptImage25SunburstDef]
+    | type[GptImage25FlareDef]
+    | type[GptImage26SunburstDef]
+    | type[GptImage26FlareDef]
+)
+_FAMILY: tuple[_FamilyCls, ...] = (
+    GptImage2Def,
+    GptImage25SunburstDef,
+    GptImage25FlareDef,
+    GptImage26SunburstDef,
+    GptImage26FlareDef,
+)
 _EXPECTED = (
     ("gpt-image-2", GptImage2Def, 76),
     ("gpt-image-2.5-sunburst", GptImage25SunburstDef, 77),
     ("gpt-image-2.5-flare", GptImage25FlareDef, 78),
+    ("gpt-image-2.6-sunburst", GptImage26SunburstDef, 79),
+    ("gpt-image-2.6-flare", GptImage26FlareDef, 80),
 )
 
 
@@ -53,7 +71,7 @@ def test_family_catalog_identity(name: str, cls: _FamilyCls, priority: int):
 def test_family_names_are_unique_and_in_all_models():
     names = [cls.node_def().name for cls in _FAMILY]
     assert names == list(GPT_IMAGE_FAMILY_NAMES)
-    assert len(set(names)) == 3
+    assert len(set(names)) == 5
     for cls in _FAMILY:
         assert cls in ALL_MODELS
 
@@ -65,11 +83,15 @@ def test_family_share_ports_not_generation_request_fields():
         assert set(node.inputs) == set(ports)
         assert node.inputs["background"].values == ports["background"].values
         assert node.inputs["output_format"].default == "png"
-        assert node.inputs["output_format"].values == ["png", "jpeg"]
         assert "width" not in node.inputs and "height" not in node.inputs
+    assert GptImage2Def.node_def().inputs["output_format"].values == ["png", "jpeg"]
+    for cls in (GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef):
+        assert cls.node_def().inputs["output_format"].values == ["png", "jpeg"]
+    for cls in (GptImage26SunburstDef, GptImage26FlareDef):
+        assert cls.node_def().inputs["output_format"].values == list(GPT_IMAGE26_OUTPUT_FORMATS)
     assert GptImage2Def.node_def().inputs["quality"].values == list(GPT_IMAGE2_QUALITIES)
-    assert GptImage25FlareDef.node_def().inputs["quality"].values == list(GPT_IMAGE25_QUALITIES)
-    assert GptImage25SunburstDef.node_def().inputs["quality"].values == list(GPT_IMAGE25_QUALITIES)
+    for cls in (GptImage25FlareDef, GptImage25SunburstDef, GptImage26SunburstDef, GptImage26FlareDef):
+        assert cls.node_def().inputs["quality"].values == list(GPT_IMAGE25_QUALITIES)
 
 
 def test_gpt_image2_rejects_xhigh_and_max():
@@ -80,10 +102,38 @@ def test_gpt_image2_rejects_xhigh_and_max():
             m.validate(req)
 
 
-@pytest.mark.parametrize("cls", (GptImage25FlareDef, GptImage25SunburstDef))
+@pytest.mark.parametrize(
+    "cls",
+    (GptImage25FlareDef, GptImage25SunburstDef, GptImage26FlareDef, GptImage26SunburstDef),
+)
 @pytest.mark.parametrize("quality", GPT_IMAGE25_QUALITIES)
 def test_gpt_image25_accepts_five_qualities(cls: _FamilyCls, quality: str):
     cls().validate(GenerationRequest(task_type=TaskType.IMAGE, prompt="x", params={"quality": quality}))
+
+
+@pytest.mark.parametrize("cls", (GptImage26SunburstDef, GptImage26FlareDef))
+def test_gpt_image26_accepts_gif_output_format(cls: _FamilyCls):
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="x", params={"output_format": "gif"})
+    cls().validate(req)
+    assert req.params["output_format"] == "gif"
+
+
+@pytest.mark.parametrize("cls", (GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef))
+def test_non_26_models_reject_gif_output_format(cls: _FamilyCls):
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="x", params={"output_format": "gif"})
+    with pytest.raises(ValidationError, match="output_format"):
+        cls().validate(req)
+
+
+@pytest.mark.parametrize("cls", (GptImage26SunburstDef, GptImage26FlareDef))
+def test_gpt_image26_transparent_gif_is_allowed(cls: _FamilyCls):
+    """gif 支持透明,不命中 transparent+jpeg 拦截。"""
+    req = GenerationRequest(
+        task_type=TaskType.IMAGE,
+        prompt="x",
+        params={"background": "transparent", "output_format": "gif"},
+    )
+    cls().validate(req)
 
 
 @pytest.mark.parametrize("cls", _FAMILY)
@@ -218,6 +268,59 @@ def test_mapper_attaches_usage_from_draw_result():
     assert out.raw["usage"]["output_tokens"] == 50
 
 
+def _make_animated_gif(frames: int = 3) -> bytes:
+    imgs = [Image.new("P", (4, 4)) for _ in range(frames)]
+    for i, img in enumerate(imgs):
+        img.putpalette([i * 60, 0, 0] * 256)
+    buf = io.BytesIO()
+    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:], duration=100, loop=0)
+    return buf.getvalue()
+
+
+def test_mapper_passthrough_gif_bytes_not_flattened():
+    """draw_result.data(GIF 字节)必须原样进 NodeOutput,不经 PIL 重编。"""
+    from RH_ComfyUI.utils.backends.gpt_image2.api import GPTImageDrawResult
+
+    gif_bytes = _make_animated_gif()
+
+    class _Api:
+        async def draw_image(self, **kwargs: object) -> GPTImageDrawResult:
+            return GPTImageDrawResult(data=gif_bytes, mime="image/gif", usage={}, raw={})
+
+    req = GenerationRequest(
+        task_type=TaskType.IMAGE,
+        prompt="p",
+        model="gpt-image-2.6-flare",
+        params={"output_format": "gif"},
+    )
+    out = asyncio.run(gpt_image2_mapper(req, _Api()))
+    assert out.mime_type == "image/gif"
+    assert out.data == gif_bytes
+    assert out.outputs["image"] == gif_bytes
+    with Image.open(io.BytesIO(out.data)) as img:
+        assert isinstance(img, GifImagePlugin.GifImageFile)
+        assert img.n_frames == 3
+
+
+def test_encode_image_bytes_preserves_animated_gif():
+    """encode_image_bytes(raw, 'gif') 对已是 GIF 的字节整段透传。"""
+    from RH_ComfyUI.utils.image_process import encode_image_bytes
+
+    gif_bytes = _make_animated_gif()
+    assert encode_image_bytes(gif_bytes, "gif") == gif_bytes
+    png_still = Image.new("RGB", (4, 4), (1, 2, 3))
+    buf = io.BytesIO()
+    png_still.save(buf, format="PNG")
+    converted = encode_image_bytes(buf.getvalue(), "gif")
+    assert converted[:4] == b"GIF8"
+
+
+def test_mime_for_output_format_gif():
+    from RH_ComfyUI.utils.mappers.gpt_image2_params import mime_for_output_format
+
+    assert mime_for_output_format("gif") == "image/gif"
+
+
 def test_mapper_does_not_collapse_25_to_gpt_image_2():
     api = _FakeGptApi()
     req = GenerationRequest(
@@ -249,15 +352,23 @@ def test_channel_bindings_do_not_leak_across_family():
         gpt_names = [b.channel.name for b in GptImage2Def().channel_bindings()]
         sun_names = [b.channel.name for b in GptImage25SunburstDef().channel_bindings()]
         flare_names = [b.channel.name for b in GptImage25FlareDef().channel_bindings()]
+        sun26_names = [b.channel.name for b in GptImage26SunburstDef().channel_bindings()]
+        flare26_names = [b.channel.name for b in GptImage26FlareDef().channel_bindings()]
         assert "azure" in gpt_names
         assert "azure" not in sun_names
         assert "azure" not in flare_names
+        assert "azure" not in sun26_names
+        assert "azure" not in flare26_names
         assert sun_names == ["gpt-image-2"]
         sun_vendor = [b.vendor_model for b in GptImage25SunburstDef().channel_bindings()]
         flare_vendor = [b.vendor_model for b in GptImage25FlareDef().channel_bindings()]
+        sun26_vendor = [b.vendor_model for b in GptImage26SunburstDef().channel_bindings()]
+        flare26_vendor = [b.vendor_model for b in GptImage26FlareDef().channel_bindings()]
         gpt_vendor = [b.vendor_model for b in GptImage2Def().channel_bindings() if b.channel.name == "gpt-image-2"]
         assert sun_vendor == ["gpt-image-2.5-sunburst"]
         assert flare_vendor == ["gpt-image-2.5-flare"]
+        assert sun26_vendor == ["gpt-image-2.6-sunburst"]
+        assert flare26_vendor == ["gpt-image-2.6-flare"]
         assert gpt_vendor == ["gpt-image-2"]
     finally:
         channel_registry.clear()
@@ -289,3 +400,28 @@ def test_gpt_image2_api_forwards_xhigh_and_max():
     asyncio.run(api.draw_image(model="gpt-image-2", prompt="x", quality="ultra"))
     body = captured["json"]
     assert isinstance(body, dict) and "quality" not in body
+
+
+def test_gpt_image2_api_forwards_gif_output_format():
+    """output_format=gif 必须透传到 wire body(2.6 直出动图)。"""
+    from RH_ComfyUI.utils.backends.gpt_image2.api import GPTImage2API
+
+    api = GPTImage2API()
+    captured: dict[str, object] = {}
+
+    async def fake_request(
+        method: str,
+        url: str,
+        headers: object = None,
+        json: object = None,
+        data: object = None,
+    ) -> int:
+        captured["json"] = json
+        return 500
+
+    setattr(api, "_request", fake_request)
+    asyncio.run(api.draw_image(model="gpt-image-2.6-flare", prompt="x", output_format="gif"))
+    body = captured["json"]
+    assert isinstance(body, dict)
+    assert body["model"] == "gpt-image-2.6-flare"
+    assert body["output_format"] == "gif"

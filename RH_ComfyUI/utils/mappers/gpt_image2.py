@@ -14,6 +14,7 @@ from ..core.types import NodeOutput
 from ..core.request import GenerationRequest
 from ..image_process import encode_pil_image
 from .gpt_image2_params import (
+    mime_for_output_format,
     resolve_gpt_image2_background,
     resolve_gpt_image_family_model,
     resolve_gpt_image2_output_format,
@@ -97,9 +98,22 @@ async def gpt_image2_mapper(
     usage: dict[str, object] = {}
     raw: dict[str, object] = {}
     if isinstance(drawn, GPTImageDrawResult):
-        image = drawn.image
         usage = drawn.usage
         raw = drawn.raw
+        if drawn.data:
+            # 原始字节产物(GIF 动图):跳过 PIL 重编,否则只留首帧;空字节视为失败
+            return NodeOutput(
+                status="ok",
+                output_type="image",
+                data=drawn.data,
+                mime_type=drawn.mime or mime_for_output_format(output_format),
+                outputs={"image": drawn.data},
+                usage=dict(usage),
+                raw=dict(raw),
+            )
+        image = drawn.image
+        if image is None:
+            raise RuntimeError(f"{model} 返回了空的图像结果")
     elif isinstance(drawn, Image.Image):
         image = drawn
     else:

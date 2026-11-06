@@ -16,14 +16,20 @@ from gsuid_core.logger import logger
 
 from ..http_retry import is_network_error, call_with_network_retry
 from ....rh_config.comfyui_config import SERVICE_CONFIG
-from ....utils.mappers.gpt_image2_params import DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT
+from ....utils.mappers.gpt_image2_params import DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT, mime_for_output_format
 
 
 @dataclass
 class GPTImageDrawResult:
-    """官方 /v1/images/generations 解析结果(含 usage 供后结算)。"""
+    """官方 /v1/images/generations 解析结果(含 usage 供后结算)。
 
-    image: Image.Image
+    ``data`` 非空时为原始产物字节(GIF 动图等不经 PIL 的路径),
+    mapper 直接透传;否则走 ``image``(PIL)按 output_format 重编。
+    """
+
+    image: Image.Image | None = None
+    data: bytes | None = None
+    mime: str = ""
     usage: dict[str, object] = field(default_factory=dict)
     raw: dict[str, object] = field(default_factory=dict)
 
@@ -161,6 +167,38 @@ class GPTImage2API:
         logger.error("[GPT-Image2] 请求重试耗尽，最终失败")
         return 500
 
+    async def _download_bytes_from_url(self, url: str) -> Union[bytes, int]:
+        """下载原始产物字节(不动 PIL,动图全帧保留)。"""
+        logger.info(f"[GPT-Image2] 下载产物: {url}")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"[GPT-Image2] 下载产物失败,状态码: {resp.status}")
+                        return 500
+                    return await resp.read()
+        except Exception as e:
+            logger.warning(f"[GPT-Image2] 下载产物失败: {e}")
+            return 500
+
+    async def _fetch_content_bytes(self, content: str) -> Union[bytes, int]:
+        """按 url / data URI / 裸 base64 取原始字节。"""
+        content = content.strip()
+        if content.startswith(("http://", "https://")):
+            return await self._download_bytes_from_url(content)
+        if content.startswith("data:"):
+            try:
+                return base64.b64decode(content.partition(",")[2])
+            except Exception:
+                return 500
+        if len(content) > 100:
+            try:
+                return base64.b64decode(content, validate=True)
+            except Exception:
+                return 500
+        logger.warning(f"[GPT-Image2] 无法识别的内容格式: {content[:50]}...")
+        return 500
+
     async def _download_image_from_url(self, url: str) -> Union[Image.Image, int]:
         logger.info(f"[GPT-Image2] 下载图片: {url}")
         try:
@@ -199,9 +237,7 @@ class GPTImage2API:
     async def _parse_image_from_content(self, content: str) -> Union[Image.Image, int]:
         content = content.strip()
 
-        if content.startswith("data:") or (
-            len(content) > 100 and "/" not in content and not content.startswith(("http://", "https://"))
-        ):
+        if content.startswith("data:") or (len(content) > 100 and not content.startswith(("http://", "https://"))):
             return await asyncio.to_thread(self._decode_base64_image, content)
 
         if content.startswith(("http://", "https://")):
@@ -339,19 +375,38 @@ class GPTImage2API:
 
             data_item = resp["data"][0]
             image_content = data_item.get("url") or (
-                f"data:image/png;base64,{data_item['b64_json']}" if "b64_json" in data_item else None
+                f"data:{mime_for_output_format(output_format or DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT)};base64,"
+                f"{data_item['b64_json']}"
+                if "b64_json" in data_item
+                else None
             )
 
             if not image_content:
                 return 500
 
-            image = await self._parse_image_from_content(image_content)
-            if isinstance(image, int):
-                return image
             from ....utils.mappers.gpt_image2_billing import (
                 sanitize_gpt_image_raw,
                 normalize_gpt_image_usage,
             )
+
+            if output_format == "gif":
+                # 动图整段透传:PIL 重编只留首帧,动画丢失
+                raw_bytes = await self._fetch_content_bytes(image_content)
+                if isinstance(raw_bytes, int):
+                    return raw_bytes
+                from ....utils.image_process import encode_image_bytes_async
+
+                data = await encode_image_bytes_async(raw_bytes, "gif")
+                return GPTImageDrawResult(
+                    data=data,
+                    mime="image/gif",
+                    usage=normalize_gpt_image_usage(resp),
+                    raw=sanitize_gpt_image_raw(resp),
+                )
+
+            image = await self._parse_image_from_content(image_content)
+            if isinstance(image, int):
+                return image
 
             return GPTImageDrawResult(
                 image=image,

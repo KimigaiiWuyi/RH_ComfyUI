@@ -50,6 +50,9 @@ IMAGE_MODEL_SPECS: dict[str, dict] = {
     "gpt-image-2": _gpt_image_family_spec(_GPT_IMAGE2_QUALITY_AXIS),
     "gpt-image-2.5-sunburst": _gpt_image_family_spec(_GPT_IMAGE25_QUALITY_AXIS),
     "gpt-image-2.5-flare": _gpt_image_family_spec(_GPT_IMAGE25_QUALITY_AXIS),
+    # 2.6 与 2.5 同价同档;gif 直出不改变 token 公式
+    "gpt-image-2.6-sunburst": _gpt_image_family_spec(_GPT_IMAGE25_QUALITY_AXIS),
+    "gpt-image-2.6-flare": _gpt_image_family_spec(_GPT_IMAGE25_QUALITY_AXIS),
 }
 
 # ── 计费常量 ──

@@ -12,7 +12,9 @@ from RH_ComfyUI.models.image.defs import (
     MossImageDef,
     MinimaxImage01Def,
     GptImage25FlareDef,
+    GptImage26FlareDef,
     GptImage25SunburstDef,
+    GptImage26SunburstDef,
 )
 from RH_ComfyUI.models.video.defs import (
     Wan30Def,
@@ -139,7 +141,15 @@ def test_seedance25_declares_task_mode_and_output_format():
 
 @pytest.mark.parametrize(
     "cls",
-    [BananaProDef, GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef, MinimaxImage01Def],
+    [
+        BananaProDef,
+        GptImage2Def,
+        GptImage25SunburstDef,
+        GptImage25FlareDef,
+        GptImage26SunburstDef,
+        GptImage26FlareDef,
+        MinimaxImage01Def,
+    ],
 )
 def test_ratio_based_image_models_expose_ratio_not_wh(cls):
     # 这些模型的真实请求参数是宽高比(aspect_ratio / aspect_ratio+image_size→size),
@@ -157,7 +167,10 @@ def test_ratio_based_image_models_expose_ratio_not_wh(cls):
     assert ratio.default in ratio.values
 
 
-@pytest.mark.parametrize("cls", [BananaProDef, GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef])
+@pytest.mark.parametrize(
+    "cls",
+    [BananaProDef, GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef, GptImage26SunburstDef, GptImage26FlareDef],
+)
 def test_gpt_image2_family_exposes_all_billing_ratios_including_1_2(cls):
     """计费/像素真源表中的 ratio(含 1:2、2:1)必须完整暴露到 /models schema。"""
     from RH_ComfyUI.utils.mappers.gpt_image2_billing import _RATIO_SIZE_MAP
@@ -180,7 +193,10 @@ def test_pixel_based_models_keep_wh(cls):
     assert "width" in node.inputs and "height" in node.inputs
 
 
-@pytest.mark.parametrize("cls", [GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef])
+@pytest.mark.parametrize(
+    "cls",
+    [GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef, GptImage26SunburstDef, GptImage26FlareDef],
+)
 def test_gpt_image_family_rejects_transparent_jpeg(cls):
     m = cls()
     req = GenerationRequest(
@@ -192,7 +208,10 @@ def test_gpt_image_family_rejects_transparent_jpeg(cls):
         m.validate(req)
 
 
-@pytest.mark.parametrize("cls", [GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef])
+@pytest.mark.parametrize(
+    "cls",
+    [GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef, GptImage26SunburstDef, GptImage26FlareDef],
+)
 def test_gpt_image_family_accepts_transparent_png_and_omitted_defaults(cls):
     m = cls()
     m.validate(
@@ -212,7 +231,10 @@ def test_gpt_image_family_accepts_transparent_png_and_omitted_defaults(cls):
     m.validate(GenerationRequest(task_type=TaskType.IMAGE, prompt="x"))
 
 
-@pytest.mark.parametrize("cls", [GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef])
+@pytest.mark.parametrize(
+    "cls",
+    [GptImage2Def, GptImage25SunburstDef, GptImage25FlareDef, GptImage26SunburstDef, GptImage26FlareDef],
+)
 def test_gpt_image_family_normalize_fills_background_and_output_format(cls):
     m = cls()
     req = m.normalize(GenerationRequest(task_type=TaskType.IMAGE, prompt="x"))

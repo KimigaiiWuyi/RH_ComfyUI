@@ -159,7 +159,9 @@ def test_image_catalog_order_gpt_then_banana_then_seed():
         Banana2LiteDef,
         Seedream5ProDef,
         GptImage25FlareDef,
+        GptImage26FlareDef,
         GptImage25SunburstDef,
+        GptImage26SunburstDef,
     )
 
     class _CatalogModel(Protocol):
@@ -169,7 +171,13 @@ def test_image_catalog_order_gpt_then_banana_then_seed():
     def _priority(cls: type[_CatalogModel]) -> int:
         return cls.node_def().capabilities.priority
 
-    gpt = [_priority(GptImage2Def), _priority(GptImage25SunburstDef), _priority(GptImage25FlareDef)]
+    gpt = [
+        _priority(GptImage2Def),
+        _priority(GptImage25SunburstDef),
+        _priority(GptImage25FlareDef),
+        _priority(GptImage26SunburstDef),
+        _priority(GptImage26FlareDef),
+    ]
     banana = [
         _priority(Banana21Def),
         _priority(Banana2Def),

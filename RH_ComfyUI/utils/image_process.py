@@ -352,14 +352,23 @@ def _is_webp_bytes(data: bytes) -> bool:
     return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
 
 
+_GIF_MAGIC = b"GIF8"  # GIF87a / GIF89a 共用前 4 字节
+
+
+def _is_gif_bytes(data: bytes) -> bool:
+    return data[:4] == _GIF_MAGIC
+
+
 def image_mime_from_bytes(data: bytes) -> str:
-    """按文件头猜 PNG / JPEG / WebP mime;其它回落 image/png。"""
+    """按文件头猜 PNG / JPEG / WebP / GIF mime;其它回落 image/png。"""
     if data.startswith(_PNG_MAGIC):
         return "image/png"
     if data.startswith(_JPEG_MAGIC):
         return "image/jpeg"
     if _is_webp_bytes(data):
         return "image/webp"
+    if _is_gif_bytes(data):
+        return "image/gif"
     return "image/png"
 
 
@@ -1239,13 +1248,13 @@ def _normalize_encode_format(output_format: str) -> str:
     key = output_format.strip().lower()
     if key == "jpg":
         return "jpeg"
-    if key in ("png", "jpeg", "webp"):
+    if key in ("png", "jpeg", "webp", "gif"):
         return key
     return "webp"
 
 
 def _save_pil_as(image: Any, output_format: str) -> bytes:
-    """把已打开的 PIL 图编成 png / jpeg / webp。jpeg 透明通道铺白底。"""
+    """把已打开的 PIL 图编成 png / jpeg / webp / gif。jpeg 透明通道铺白底。"""
     from PIL import Image
 
     fmt = _normalize_encode_format(output_format)
@@ -1263,6 +1272,10 @@ def _save_pil_as(image: Any, output_format: str) -> bytes:
         ready = image.convert("RGBA") if image.mode in ("RGBA", "LA", "P") else image.convert("RGB")
         ready.save(buf, format="WEBP", quality=_WEBP_QUALITY)
         return buf.getvalue()
+    if fmt == "gif":
+        # 单帧兜底;动图走 encode_image_bytes 的 GIF8 透传,不会进这里
+        image.convert("P", palette=Image.Palette.ADAPTIVE).save(buf, format="GIF")
+        return buf.getvalue()
     ready = image.convert("RGBA") if image.mode in ("RGBA", "LA", "P") else image.convert("RGB")
     ready.save(buf, format="PNG")
     return buf.getvalue()
@@ -1272,6 +1285,7 @@ _ENCODE_FORMAT_MIME: dict[str, str] = {
     "png": "image/png",
     "jpeg": "image/jpeg",
     "webp": "image/webp",
+    "gif": "image/gif",
 }
 
 
@@ -1286,7 +1300,7 @@ def encode_pil_image(image: object, output_format: str) -> tuple[bytes, str]:
 
 
 def encode_image_bytes(raw: bytes, output_format: str) -> bytes:
-    """把图片字节转成 png / jpeg / webp。已是目标格式则尽量透传。"""
+    """把图片字节转成 png / jpeg / webp / gif。已是目标格式则尽量透传。"""
     from PIL import Image
 
     fmt = _normalize_encode_format(output_format)
@@ -1300,6 +1314,9 @@ def encode_image_bytes(raw: bytes, output_format: str) -> bytes:
     elif fmt == "jpeg" and raw.startswith(_JPEG_MAGIC):
         return raw
     elif fmt == "webp" and _is_webp_bytes(raw):
+        return raw
+    elif fmt == "gif" and _is_gif_bytes(raw):
+        # 动图必须整段透传:重编只留首帧,动画丢失
         return raw
 
     with Image.open(BytesIO(raw)) as img:

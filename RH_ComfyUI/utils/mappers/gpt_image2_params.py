@@ -3,6 +3,7 @@
 PortSpec 名 = params 键,不升 GenerationRequest 字段(见 skill §6.6)。
 透明背景只能配 png;jpeg 会在 validate 拦截。旧值 webp 回落 png。
 2.5 与 2.0 同协议,仅上游 model id 与 quality 枚举不同(2.5 多 xhigh/max)。
+2.6 与 2.5 同协议同档,另支持 output_format=gif 直出 GIF 动图。
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ if TYPE_CHECKING:
 
 GPT_IMAGE2_BACKGROUNDS: tuple[str, ...] = ("transparent", "opaque", "auto")
 GPT_IMAGE2_OUTPUT_FORMATS: tuple[str, ...] = ("png", "jpeg")
+# 2.6 独占:gif 直出(GPT_IMAGE2_OUTPUT_FORMATS 不含,靠 PortSpec 挡 2.0/2.5)
+GPT_IMAGE26_OUTPUT_FORMATS: tuple[str, ...] = ("png", "jpeg", "gif")
 
 DEFAULT_GPT_IMAGE2_BACKGROUND: str = "auto"
 DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT: str = "png"
@@ -27,12 +30,14 @@ GPT_IMAGE2_BACKGROUND_TITLES: dict[str, str] = {
 GPT_IMAGE2_OUTPUT_FORMAT_TITLES: dict[str, str] = {
     "png": "PNG",
     "jpeg": "JPEG",
+    "gif": "GIF",
 }
 
 _OUTPUT_FORMAT_MIME: dict[str, str] = {
     "png": "image/png",
     "jpeg": "image/jpeg",
     "webp": "image/webp",
+    "gif": "image/gif",
 }
 
 
@@ -57,7 +62,11 @@ def resolve_gpt_image2_background(params: Mapping[str, object] | None) -> str:
 
 
 def resolve_gpt_image2_output_format(params: Mapping[str, object] | None) -> str:
-    """缺省 png;jpg → jpeg;遗留 webp → png。"""
+    """缺省 png;jpg → jpeg;遗留 webp → png。
+
+    gif 原样透传:是否合法由 PortSpec 枚举决定(仅 2.6 收),
+    不支持 gif 的模型在 validate 抛 ValidationError,而非静默落回 png。
+    """
     raw = _param_str(params, "output_format")
     if raw is None:
         return DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT
@@ -66,7 +75,7 @@ def resolve_gpt_image2_output_format(params: Mapping[str, object] | None) -> str
         return "jpeg"
     if key == "webp":
         return DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT
-    if key in GPT_IMAGE2_OUTPUT_FORMATS:
+    if key in GPT_IMAGE2_OUTPUT_FORMATS or key == "gif":
         return key
     return DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT
 
@@ -85,11 +94,13 @@ def gpt_image2_transparent_jpeg(params: Mapping[str, object] | None) -> bool:
     return resolve_gpt_image2_background(params) == "transparent" and resolve_gpt_image2_output_format(params) == "jpeg"
 
 
-# catalog name = 上游 Images API 的 model 字段。2.5 与 2.0 同协议。
+# catalog name = 上游 Images API 的 model 字段。2.5/2.6 与 2.0 同协议。
 GPT_IMAGE_FAMILY_NAMES: tuple[str, ...] = (
     "gpt-image-2",
     "gpt-image-2.5-sunburst",
     "gpt-image-2.5-flare",
+    "gpt-image-2.6-sunburst",
+    "gpt-image-2.6-flare",
 )
 DEFAULT_GPT_IMAGE_FAMILY_MODEL: str = "gpt-image-2"
 
@@ -116,8 +127,9 @@ def resolve_gpt_image_family_model(request: GenerationRequest) -> str:
 def gpt_image_family_inputs(
     *,
     qualities: Sequence[str] = GPT_IMAGE2_QUALITIES,
+    output_formats: Sequence[str] = GPT_IMAGE2_OUTPUT_FORMATS,
 ) -> dict[str, PortSpec]:
-    """家族共用端口;qualities 区分 2.0 三档与 2.5 五档。"""
+    """家族共用端口;qualities 区分 2.0 三档与 2.5/2.6 五档,gif 仅 2.6 收。"""
     from ..core.types import PortSpec, PortType
     from .gpt_image2_billing import ratio_enum_values
 
@@ -162,9 +174,9 @@ def gpt_image_family_inputs(
         "output_format": PortSpec(
             type=PortType.ENUM,
             default=DEFAULT_GPT_IMAGE2_OUTPUT_FORMAT,
-            values=list(GPT_IMAGE2_OUTPUT_FORMATS),
+            values=list(output_formats),
             title="输出格式",
-            description="产物编码:png / jpeg。透明背景不能使用 jpeg",
-            value_titles=dict(GPT_IMAGE2_OUTPUT_FORMAT_TITLES),
+            description="产物编码:png / jpeg;2.6 另收 gif 直出。透明背景不能使用 jpeg",
+            value_titles={k: v for k, v in GPT_IMAGE2_OUTPUT_FORMAT_TITLES.items() if k in output_formats},
         ),
     }

@@ -83,7 +83,7 @@ class Seedream5ProImageModel(ImagePipelineModel):
 
 
 class GptImageFamilyModel(ImagePipelineModel):
-    """gpt-image-2 / 2.5-sunburst / 2.5-flare:同协议;2.5 多 xhigh/max。"""
+    """gpt-image 家族(2.0 / 2.5 / 2.6 sunburst / flare):同协议;2.5+ 多 xhigh/max,2.6 多 gif。"""
 
     def validate(self, request: GenerationRequest) -> None:
         from ...utils.mappers.gpt_image2_params import (
