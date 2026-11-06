@@ -241,6 +241,9 @@ def test_infer_backend_channel_over_node_backend():
     assert _infer_backend(backend="", model="seedance2", channel="gateway_slot1_seedance") == "seedance"
     assert _infer_backend(backend="", model="minimax_h3", channel="") == "minimax-h3"
     assert _infer_backend(backend="", model="minimax_h3", channel="minimax-h3") == "minimax-h3"
+    # omni:vendor_channel 记的是 gemini-ai-studio/vertex,backend 优先才不误判
+    assert _infer_backend(backend="gemini-omni", model="gemini_omni12", channel="gemini") == "gemini-omni"
+    assert _infer_backend(backend="", model="gemini_omni12", channel="gemini-ai-studio") == "gemini-omni"
 
 
 def test_resolve_seedance_channel_hard_fail_on_missing():

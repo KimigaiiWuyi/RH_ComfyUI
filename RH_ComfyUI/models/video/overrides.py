@@ -1251,6 +1251,102 @@ class Wan30VideoModel(VideoPipelineModel):
         return f"{self.display_name} 无可用供应商"
 
 
+class GeminiOmniVideoModel(VideoPipelineModel):
+    """Gemini Omni 视频(Interactions API):文生/图生/首尾帧/多图参考/视频编辑续拍
+
+    background interaction 可 ``interactions.cancel`` 远端取消
+    (supports_remote_cancel=True);任务 id 走 vendor_task_id 支持 resume_poll。
+    原生音频常开(上游无静音开关,generate_audio 端口不暴露)。
+    """
+
+    supports_remote_cancel = True
+
+    def __init__(self, node: NodeDef) -> None:
+        super().__init__(node)
+        self.supported_shapes = {
+            VideoTaskShape.TEXT2VIDEO,
+            VideoTaskShape.IMAGE2VIDEO,
+            VideoTaskShape.FIRST_LAST_FRAME,
+            VideoTaskShape.MULTIMODAL,
+        }
+        self.supports_generate_audio = True
+        # 官方上限:6 图 + 3 视频(11~15s 时仅 1 视频);audio 上游不收
+        self.max_reference_total = 9
+        self.card = ModelCard(
+            description=node.description or "Gemini Omni 1.2 Flash 视频生成/编辑",
+            strengths=["原生音频", "最多 15s", "视频编辑与续拍", "6 图主体一致性参考"],
+            categories=["短视频", "写实", "音画同步"],
+            weaknesses=["4K 为放大档耗时与积分更高"],
+            sample_prompts=["霓虹城市的雨夜航拍,镜头缓慢推进,环境声真实"],
+            languages=["zh", "en"],
+            speed_hint="slow",
+        )
+
+    def validate(self, request: GenerationRequest) -> None:
+        super().validate(request)
+        from ...core.schema.types import ContentItemType
+        from ...utils.mappers.gemini_omni import iter_video_refs, iter_image_bytes
+
+        # 与 mapper 同一去重口径(并集),不是 max(flat,oc):flat+OC 合起来超 6 也拒
+        n_images = len(iter_image_bytes(request))
+        if n_images > 6:
+            raise ValidationError(f"{self.display_name} 最多接受 6 张参考图,当前 {n_images} 张")
+        n_videos = len(iter_video_refs(request))
+        if request.audio_refs or any(
+            it.type == ContentItemType.AUDIO and it.media is not None for it in request.ordered_content
+        ):
+            raise ValidationError(f"{self.display_name} 不接受参考音频")
+        # 原生音频常开,上游无静音开关;显式传 False 是契约误解,直接拒
+        if request.generate_audio is False:
+            raise ValidationError(f"{self.display_name} 输出恒含原生音频,不支持 generate_audio=False")
+        try:
+            raw_dur = request.duration if request.duration is not None else (request.params or {}).get("duration")
+            dur = float(raw_dur) if raw_dur is not None else 10.0
+        except (TypeError, ValueError):
+            dur = 10.0
+        # 官方:11~15s 输出仅收 1 段 ≤3s 参考视频;3~10s 最多 3 段
+        if dur > 10 and n_videos > 1:
+            raise ValidationError(f"{self.display_name} 输出超 10s 时最多 1 段参考视频(≤3s),当前 {n_videos} 段")
+        if n_videos > 3:
+            raise ValidationError(f"{self.display_name} 最多接受 3 段参考视频,当前 {n_videos} 段")
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...utils.backends.gemini_omni.channel import GeminiOmniChannel
+
+        bindings = [
+            ChannelBinding(
+                GeminiOmniChannel(logical_model=self.name),
+                vendor_model=self.node.backend_model,
+            )
+        ]
+        bindings.extend(channel_registry.bindings_for(self.name))
+        return bindings
+
+    async def execute_on_channel(
+        self,
+        request: GenerationRequest,
+        binding: ChannelBinding,
+        *,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> NodeOutput:
+        return await binding.channel.invoke(
+            request=request,
+            node=self.node,
+            on_progress=on_progress,
+            vendor_model=binding.vendor_model,
+        )
+
+    async def unavailable_reason(self) -> str:
+        notes: list[str] = []
+        for binding in self.channel_bindings():
+            if await binding.channel.check_available():
+                continue
+            notes.append(f"{binding.channel.name}: {await binding.channel.unavailable_reason()}")
+        if notes:
+            return f"{self.display_name} 无可用供应商({'; '.join(notes)})"
+        return f"{self.display_name} 无可用供应商:请配置 Gemini 或外部供应商插件"
+
+
 __all__ = [
     "SeedanceVideoModel",
     "Seedance25VideoModel",
@@ -1258,4 +1354,5 @@ __all__ = [
     "HappyHorseVideoModel",
     "MiniMaxH3VideoModel",
     "Wan30VideoModel",
+    "GeminiOmniVideoModel",
 ]

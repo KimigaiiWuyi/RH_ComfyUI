@@ -87,6 +87,8 @@ class GeminiImageAPI:
 
     # 轮询错误容忍窗(秒):已受理任务遇到 5xx/429/传输错先退避续轮,超时再抛
     poll_error_window_s: float = 600.0
+    # active_tasks 登记的通道名;Omni 子类覆写以区分行统计
+    vendor_channel_name: str = "gemini"
 
     @property
     def api_key(self) -> str:
@@ -296,7 +298,7 @@ class GeminiImageAPI:
             await get_active_task_registry().bind_vendor_task(
                 vendor_task_id=interaction_id,
                 cancel_remote=_cancel_remote,
-                channel_name="gemini",
+                channel_name=self.vendor_channel_name,
             )
         except VendorTaskNotDurable:
             raise

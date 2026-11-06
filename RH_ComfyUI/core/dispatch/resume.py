@@ -247,6 +247,11 @@ def _infer_backend(*, backend: str, model: str, channel: str) -> str:
     m = (model or "").strip().lower()
     b = (backend or "").strip().lower()
 
+    # omni 记录的 vendor_channel 是 gemini-ai-studio/vertex;若历史行存的是
+    # "gemini",通道优先会判成 gemini-image(图)——backend 直接优先
+    if b == "gemini-omni":
+        return "gemini-omni"
+
     ch_backend = _channel_implies_backend(ch)
     if ch_backend:
         return ch_backend
@@ -275,6 +280,8 @@ def _infer_backend(*, backend: str, model: str, channel: str) -> str:
             return "seedance"
         # 无 seedance 关键词时:仅当模型 registry 指 comfy 才在下方解析
         pass
+    if "gemini_omni" in m:
+        return "gemini-omni"
     if "gemini" in m or "banana" in m:
         return "gemini-image"
 
@@ -1174,6 +1181,14 @@ async def resume_poll(
                 trace_id=trace_id,
                 record_id=record_id,
             )
+        elif backend == "gemini-omni":
+            result = await _resume_gemini_omni_with_cancel(
+                vendor_task_id=vendor_task_id,
+                model=model,
+                on_progress=on_progress,
+                trace_id=trace_id,
+                record_id=record_id,
+            )
         elif backend == "gateway-image":
             result = await _resume_gateway_image_with_cancel(
                 vendor_task_id=vendor_task_id,
@@ -1504,6 +1519,49 @@ async def _resume_gemini_with_cancel(**kwargs: Any) -> GenerationResult:
             vendor_task_id=vendor_task_id,
             model=model,
             on_progress=kwargs.get("on_progress"),
+        )
+    finally:
+        await reg.unregister(ag)
+
+
+async def _resume_gemini_omni_with_cancel(**kwargs: Any) -> GenerationResult:
+    from .active_tasks import get_active_task_registry
+    from ..telemetry.wire_capture import get_vendor_raw
+    from ...utils.backends.gemini_omni.api import GeminiOmniAPI
+
+    model = kwargs["model"]
+    vendor_task_id = kwargs["vendor_task_id"]
+    api = GeminiOmniAPI()
+    reg = get_active_task_registry()
+    ag = await reg.register(
+        model_name=model,
+        trace_id=kwargs.get("trace_id") or "",
+        record_id=kwargs.get("record_id"),
+    )
+
+    async def _cancel() -> None:
+        await api.cancel_interaction(vendor_task_id)
+
+    await reg.bind_vendor_task(
+        vendor_task_id=vendor_task_id,
+        cancel_remote=_cancel,
+        channel_name="gemini-omni",
+        ag=ag,
+    )
+    try:
+        await _emit(kwargs.get("on_progress"), "resuming", 10, "恢复 Gemini Omni interaction 轮询")
+        data, usage = await api.resume_video(vendor_task_id)
+        if not data:
+            raise ResumeFailedError("Gemini Omni 响应未包含视频")
+        return GenerationResult(
+            kind="video",
+            model=model,
+            backend="gemini-omni",
+            data=data,
+            mime_type="video/mp4",
+            usage=dict(usage or {}, task_id=vendor_task_id),
+            raw=get_vendor_raw() or None,
+            metadata={"task_id": vendor_task_id, "channel": "gemini-omni", "resumed": True},
         )
     finally:
         await reg.unregister(ag)

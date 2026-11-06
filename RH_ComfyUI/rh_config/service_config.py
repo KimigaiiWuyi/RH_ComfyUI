@@ -127,27 +127,29 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "",
     ),
     "divider_gemini_image": GsDivider(
-        "Gemini 生图 / 语音(generate_content,走 google-genai SDK)",
-        "Gemini 生图(banana1 / banana2 / banana2.1 / banana2.lite / banana_pro 的 Gemini 通道)与语音 gemini_tts。"
+        "Gemini 生图 / 视频 / 语音(google-genai SDK)",
+        "Gemini 生图(banana1 / banana2 / banana2.1 / banana2.lite / banana_pro 的 Gemini 通道)、"
+        "视频 gemini_omni12 与语音 gemini_tts。"
         "banana2、banana2.1 与 banana2.lite 是三个模型,价格和参数都不同,须分别勾选。"
-        "gemini_tts 是语音合成,须单独勾选,不走生图通道。"
+        "gemini_omni12 是视频生成/编辑(Interactions API),gemini_tts 是语音合成,均须单独勾选,不走生图通道。"
         "默认 AI Studio(API Key);打开 VertexAI 走组织版。"
         "须打开「启用 Gemini 供应商」,并在模型列表勾选后才走 Gemini 通道。",
-        "Gemini 生图 / 语音服务配置",
+        "Gemini 生图 / 视频 / 语音服务配置",
     ),
     "Gemini_Enable": GsBoolConfig(
         "启用 Gemini 供应商",
-        "是否启用 Gemini 生图通道。关闭后 banana1 / banana2 / banana2.1 / "
-        "banana2.lite / banana_pro / gemini_tts 均不走 Gemini。",
+        "是否启用 Gemini 通道。关闭后 banana1 / banana2 / banana2.1 / "
+        "banana2.lite / banana_pro / gemini_tts / gemini_omni12 均不走 Gemini。",
         True,
     ),
     "Gemini_Enabled_Models": GsListStrConfig(
         "启用的 Gemini 模型",
         "从列表勾选要走 Gemini 通道的内部模型;可自由添加内部模型名。"
         "留空则全部不走 Gemini。共用下方 Gemini 凭证。"
-        "可选:banana1 / banana2 / banana2.1 / banana2.lite / banana_pro / gemini_tts。"
-        "已保存的旧列表不会自动勾上 banana2.1、banana2.lite 或 gemini_tts,需要手动加上。"
+        "可选:banana1 / banana2 / banana2.1 / banana2.lite / banana_pro / gemini_tts / gemini_omni12。"
+        "已保存的旧列表不会自动勾上 banana2.1、banana2.lite、gemini_tts 或 gemini_omni12,需要手动加上。"
         "gemini_tts 是语音合成,须单独勾选,不走生图通道。"
+        "gemini_omni12 是视频生成/编辑(Interactions API),须单独勾选,不走生图通道。"
         "banana2.lite 只生成 1K。"
         "banana_pro 未勾选时仍可通过 OpenAI 兼容供应商池使用。",
         list(_GEMINI_MODEL_NAMES),

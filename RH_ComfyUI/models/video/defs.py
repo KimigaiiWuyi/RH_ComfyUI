@@ -15,6 +15,7 @@ from .overrides import (
     Wan30VideoModel,
     SeedanceVideoModel,
     MiniMaxH3VideoModel,
+    GeminiOmniVideoModel,
     HappyHorseVideoModel,
     Seedance25VideoModel,
 )
@@ -1528,8 +1529,142 @@ class MiniMaxH3Def(MiniMaxH3VideoModel):
         )
 
 
+class GeminiOmni12Def(GeminiOmniVideoModel):
+    """Gemini Omni 1.2 Flash — Interactions API 视频生成/编辑,原生音频"""
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="gemini_omni12",
+            display_name="Gemini Omni 1.2 Flash",
+            task_type=TaskType("video"),
+            backend="gemini-omni",
+            point_cost=50,
+            description="文生/图生/首尾帧/多图参考/视频编辑续拍,原生音频",
+            knowledge_content=(
+                "Gemini Omni 1.2 Flash(gemini-omni-1.2-flash,Interactions API)视频生成与编辑。"
+                "\n"
+                "能力:文生视频;图生视频(1 图);首尾帧(2 图,≤10s);主体一致性多图参考(≤6 图);"
+                "视频编辑与续拍(传入参考视频,输出 3~10s/轮,总长≤30s)。原生音频常开。"
+                "\n"
+                "参考视频:输出 3~10s 最多 3 段;输出 11~15s 仅 1 段且须 ≤3s。不接受参考音频。"
+                "\n"
+                "宽高比 16:9 / 9:16;分辨率 360p / 720p(默认)/ 1080p / 4k(后两档为放大);"
+                "时长 3~15 秒整数,平台默认 5 秒(上游缺省 10 秒)。"
+                "\n"
+                "计费:按输出 token($12/1M,1 秒 720p≈5792 tok≈48.7 积分)+ 输入 token($1.5/1M);"
+                "成功后按上游实际用量结算,多退少补。"
+                "\n"
+                "凭证:与生图共用 Gemini 配置(AI Studio key / Vertex),"
+                "须在「启用的 Gemini 模型」勾选 gemini_omni12。"
+                "\n"
+                "注意:gemini-omni-1.1-flash 已弃用,2026-12-03 起上游自动路由到 1.2。"
+            ),
+            requirements=["gemini_image_apikey"],
+            backend_model="gemini-omni-1.2-flash",
+            backend_models={"gemini-omni": "gemini-omni-1.2-flash"},
+            mode="declarative",
+            inputs={
+                "prompt": PortSpec(type=PortType.TEXT, required=True, title="提示词", description="视频生成/编辑描述"),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=6,
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description="0 张=文生 / 1 张=图生 / 2 张=首尾帧(≤10s)/ 最多 6 张主体参考",
+                ),
+                "video_refs": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=3,
+                    item_type=PortType.VIDEO,
+                    title="参考视频",
+                    description="视频编辑/续拍素材:输出≤10s 最多 3 段;输出 11~15s 仅 1 段且 ≤3s",
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="16:9",
+                    values=["16:9", "9:16"],
+                    title="宽高比",
+                    description="视频宽高比",
+                ),
+                "resolution": PortSpec(
+                    type=PortType.ENUM,
+                    default="720p",
+                    values=["360p", "720p", "1080p", "4k"],
+                    title="分辨率",
+                    description="输出分辨率(1080p/4k 为放大档)",
+                ),
+                "duration": PortSpec(
+                    type=PortType.INTEGER,
+                    default=5,
+                    minimum=3,
+                    maximum=15,
+                    title="时长",
+                    description="视频时长,单位秒",
+                ),
+            },
+            outputs={
+                "video": PortSpec(type=PortType.OUTPUT_VIDEO, description="生成的视频(MP4,含原生音频)"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["video"],
+                mode="async_poll",
+                priority=72,
+            ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """预扣:秒×分辨率输出 token 率 ×$12/M + 输入估算 ×$1.5/M。"""
+        from ...utils.mappers.gemini_omni_billing import estimate_gemini_omni_points
+
+        # 与 mapper 同一优先级:字段优先,params 兜底
+        resolution = str(request.resolution or request.params.get("resolution") or "720p")
+        try:
+            duration = float(request.duration if request.duration is not None else request.params.get("duration") or 10)
+        except (TypeError, ValueError):
+            duration = 10.0
+        from ...utils.mappers.gemini_omni import iter_image_bytes
+
+        n_images = len(iter_image_bytes(request))
+        try:
+            vid_secs = float(request.params.get("input_video_duration") or 0.0)
+        except (TypeError, ValueError):
+            vid_secs = 0.0
+        return estimate_gemini_omni_points(resolution, duration, n_images=n_images, video_refs_duration_s=vid_secs)
+
+    def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
+        """按上游 usage 实扣;无 token 用量时返回 None 维持预扣。"""
+        from ...utils.mappers.gemini_omni_billing import settle_gemini_omni_points
+
+        resolution = str(request.resolution or request.params.get("resolution") or "720p")
+        from ...utils.mappers.gemini_omni import iter_image_bytes
+
+        try:
+            vid_secs = float(request.params.get("input_video_duration") or 0.0)
+        except (TypeError, ValueError):
+            vid_secs = 0.0
+        return settle_gemini_omni_points(
+            usage, resolution, n_images=len(iter_image_bytes(request)), video_refs_duration_s=vid_secs
+        )
+
+    def point_range(self) -> tuple[int, int]:
+        """最小 360p×3s;最大 4k×15s + 6 图 + 输入视频 3s(>10s 输出仅收 ≤3s 参考视频)。"""
+        from ...utils.mappers.gemini_omni_billing import estimate_gemini_omni_points
+
+        return (
+            estimate_gemini_omni_points("360p", 3),
+            estimate_gemini_omni_points("4k", 15, n_images=6, video_refs_duration_s=3.0),
+        )
+
+
 ALL_MODELS = [
     Seedance15ProDef,
+    GeminiOmni12Def,
     Seedance2Def,
     Seedance25Def,
     Seedance2MiniDef,

@@ -41,7 +41,8 @@ def test_gemini_tts_is_a_separate_checkbox():
     assert "banana2.lite" in names
     item = SERVICE_CONFIG_DEFAULT["Gemini_Enabled_Models"]
     assert isinstance(item, GsListStrConfig)
-    assert item.options[-1] == "gemini_tts"
+    assert "gemini_tts" in item.options
+    assert "gemini_omni12" in item.options
     assert item.data == item.options
 
 
