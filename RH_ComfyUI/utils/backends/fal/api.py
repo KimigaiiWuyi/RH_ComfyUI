@@ -6,11 +6,11 @@
 
 from __future__ import annotations
 
-from typing import Mapping, Optional
+from typing import Mapping, Callable, Optional, Awaitable
 
 from . import config
 from .parse import FalPoll, _object_dict, parse_status, video_url_of, request_id_of, raise_if_error
-from .catalog import APP_PREFIX
+from .catalog import app_prefix
 from .payload import FalSubmit
 from ..http_retry import RetryingAsyncClient, download_with_network_retry
 from ....core.base.errors import ChannelError
@@ -39,7 +39,7 @@ class FalAPI(PollingChannelMixin):
     """fal 队列式生成接口。
 
     客户端每次调用新建(配置可能热更新),不缓存实例。
-    FLUX 3 Max 生成极快(官方约 1s/1s),轮询间隔比默认可灵短。
+    FLUX 3 Max / H3 Max 生成都极快(官方约 1s/1s),轮询间隔比默认可灵短。
     """
 
     poll_interval_seconds = 2.0
@@ -56,42 +56,46 @@ class FalAPI(PollingChannelMixin):
             stage="create",
         )
         request_id = request_id_of(created)
-        await self._bind_vendor(request_id)
-        final = await self.poll_until_done(request_id, self.poll_once)
-        return await self._to_output(final, request_id=request_id, model_name=model_name)
+        await self._bind_vendor(request_id, app=submit.app)
+        final = await self.poll_until_done(request_id, self._poll_for(submit.app))
+        return await self._to_output(final, request_id=request_id, model_name=model_name, app=submit.app)
 
     async def resume(self, request_id: str, *, model_name: str) -> NodeOutput:
         """已有 request_id,只做轮询和取结果。"""
-        final = await self.poll_until_done(request_id, self.poll_once)
-        return await self._to_output(final, request_id=request_id, model_name=model_name)
+        app = app_prefix(model_name)
+        final = await self.poll_until_done(request_id, self._poll_for(app))
+        return await self._to_output(final, request_id=request_id, model_name=model_name, app=app)
 
-    async def cancel(self, request_id: str) -> None:
+    async def cancel(self, request_id: str, *, app: str) -> None:
         """PUT 取消(仅排队中的任务有效;已开始跑的返回 400)。"""
         await self._exchange(
             "PUT",
-            f"/{APP_PREFIX}/requests/{request_id}/cancel",
+            f"/{app}/requests/{request_id}/cancel",
             timeout=_CANCEL_TIMEOUT,
             stage="other",
         )
 
-    async def poll_once(self, request_id: str) -> tuple[bool, FalPoll]:
-        payload = await self._exchange(
-            "GET",
-            f"/{APP_PREFIX}/requests/{request_id}/status",
-            timeout=_POLL_TIMEOUT,
-            stage="poll",
-        )
-        view = parse_status(payload)
-        return view.done, view
+    def _poll_for(self, app: str) -> Callable[[str], Awaitable[tuple[bool, FalPoll]]]:
+        async def _poll(request_id: str) -> tuple[bool, FalPoll]:
+            payload = await self._exchange(
+                "GET",
+                f"/{app}/requests/{request_id}/status",
+                timeout=_POLL_TIMEOUT,
+                stage="poll",
+            )
+            view = parse_status(payload)
+            return view.done, view
 
-    async def _bind_vendor(self, request_id: str) -> None:
+        return _poll
+
+    async def _bind_vendor(self, request_id: str, *, app: str) -> None:
         """建单成功后把 request_id + 远端取消挂到活动任务注册表。"""
         from ....core.dispatch.active_tasks import get_active_task_registry
 
         api = self
 
         async def _cancel() -> None:
-            await api.cancel(request_id)
+            await api.cancel(request_id, app=app)
 
         await get_active_task_registry().bind_vendor_cancel(
             vendor_task_id=request_id,
@@ -99,7 +103,7 @@ class FalAPI(PollingChannelMixin):
             channel_name=_CHANNEL,
         )
 
-    async def _to_output(self, final: FalPoll, *, request_id: str, model_name: str) -> NodeOutput:
+    async def _to_output(self, final: FalPoll, *, request_id: str, model_name: str, app: str) -> NodeOutput:
         if final.failed:
             raise ChannelError(
                 f"fal 任务失败:{final.message}",
@@ -110,7 +114,7 @@ class FalAPI(PollingChannelMixin):
             )
         result = await self._exchange(
             "GET",
-            f"/{APP_PREFIX}/requests/{request_id}",
+            f"/{app}/requests/{request_id}",
             timeout=_RESULT_TIMEOUT,
             stage="result",
         )
@@ -124,12 +128,18 @@ class FalAPI(PollingChannelMixin):
                 channel=_CHANNEL,
                 code="EMPTY_RESULT",
             )
+        usage: dict[str, object] = {"request_id": request_id, "provider": _CHANNEL, "model": model_name}
+        # reference_to_video 回包带实际 reference_tokens,供 settle_cost 精确补差
+        if "reference_tokens" in result:
+            tokens = result["reference_tokens"]
+            if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
+                usage["reference_tokens"] = tokens
         return NodeOutput(
             status="ok",
             output_type="video",
             data=data,
             mime_type="video/mp4",
-            usage={"request_id": request_id, "provider": _CHANNEL, "model": model_name},
+            usage=usage,
             raw={"request_id": request_id, "status": final.raw, "result": result},
             metadata={"task_id": request_id},
         )

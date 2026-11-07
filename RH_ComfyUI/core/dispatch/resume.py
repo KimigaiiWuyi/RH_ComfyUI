@@ -8,7 +8,7 @@ RHComfyuiTaskRecord 终态。
   - happyhorse (dashscope 等)
   - minimax-h3 (官方 MiniMax H3 视频)
   - kling (可灵视频/图片 query — **可 resume,但无 remote cancel**)
-  - fal (flux3max 队列轮询 — **可 resume,且支持 PUT 远端取消**)
+  - fal (flux3max / h3max* 队列轮询 — **可 resume,且支持 PUT 远端取消**)
   - rh_app (AI 应用 query — **可 resume,但无 remote cancel**)
   - comfyui (local history / RH 工作流代理 history)
   - gemini-image (background interactions)
@@ -277,7 +277,7 @@ def _infer_backend(*, backend: str, model: str, channel: str) -> str:
         return "minimax-h3"
     if m.startswith("kling-"):
         return "kling"
-    if m == "flux3max":
+    if m == "flux3max" or m.startswith("h3max"):
         return "fal"
     # runninghub 无 model/backend 时 fail-closed 空串,避免误走 comfy/seedance
     if ch == "runninghub":
@@ -332,7 +332,7 @@ def _kind_for_model(model: str, backend: str) -> str:
         return "image"
     if backend == "kling" or m.startswith("kling-"):
         return "video"
-    if backend == "fal" or m == "flux3max":
+    if backend == "fal" or m == "flux3max" or m.startswith("h3max"):
         return "video"
     return "image"
 
@@ -1183,6 +1183,7 @@ async def resume_poll(
             # fal 有官方 PUT 取消,resume 时同样挂上 vendor 任务号
             from .active_tasks import get_active_task_registry
             from ...utils.backends.fal.api import FalAPI
+            from ...utils.backends.fal.catalog import app_prefix
 
             api = FalAPI()
             reg = get_active_task_registry()
@@ -1193,7 +1194,7 @@ async def resume_poll(
             )
 
             async def _cancel_fal() -> None:
-                await api.cancel(vendor_task_id)
+                await api.cancel(vendor_task_id, app=app_prefix(model))
 
             await reg.bind_vendor_task(
                 vendor_task_id=vendor_task_id,

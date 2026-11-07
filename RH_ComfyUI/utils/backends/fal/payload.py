@@ -3,6 +3,9 @@
 task_mode=auto 时按输入推断:0 图→文生,1~2 图→图生(第二张作尾帧),
 ≥3 图或给了 frame_indices→关键帧。关键帧帧号按 24fps 计,
 取值 0~时长×24;缺省时在该区间按张数均分(首帧 0、末帧 时长×24)。
+
+MiniMax H3 Max / Turbo 的参数面不同,组包逻辑在 payload_h3.py;
+``prepare`` 按模型名分流。
 """
 
 from __future__ import annotations
@@ -15,12 +18,14 @@ from .billing import video_usd
 from .catalog import (
     FPS,
     RATIOS,
+    APP_PREFIX,
     TASK_MODES,
     RESOLUTIONS,
     ENDPOINT_IDS,
     MAX_DURATION,
     MIN_DURATION,
     MAX_KEYFRAMES,
+    H3_MODEL_NAMES,
     FAL_VIDEO_MODELS,
     REASONING_LEVELS,
 )
@@ -37,10 +42,13 @@ class FalSubmit:
     """组装好的 fal 建单请求。"""
 
     path: str  # 建单路径(/owner/app/mode)
+    app: str  # 状态/结果/取消共享的 owner/app 前缀
     body: dict[str, JsonValue]
     prompt: str
     usd: Decimal  # 按刊例价算出的美元成本,供积分换算
-    mode: str  # text_to_video / image_to_video / keyframes_to_video
+    mode: str  # text_to_video / image_to_video / keyframes_to_video / reference_to_video
+    # reference 模式按 1024 token/文件估算的量;settle 用上游实报 reference_tokens 替换
+    ref_tokens_est: int = 0
 
 
 def _label(model_name: str) -> str:
@@ -184,6 +192,15 @@ def _mode(request: GenerationRequest, n_images: int, has_indices: bool, *, label
 
 
 def prepare(model_name: str, request: GenerationRequest, *, for_estimate: bool = False) -> FalSubmit:
+    """校验 + 组装 fal 请求体(不打网络),按模型分流到具体实现。"""
+    if model_name in H3_MODEL_NAMES:
+        from .payload_h3 import prepare_h3
+
+        return prepare_h3(model_name, request, for_estimate=for_estimate)
+    return _prepare_flux3max(model_name, request, for_estimate=for_estimate)
+
+
+def _prepare_flux3max(model_name: str, request: GenerationRequest, *, for_estimate: bool = False) -> FalSubmit:
     """校验 + 组装 fal 请求体(不打网络)。
 
     for_estimate=True 时允许空 prompt 等缺省,仅用于积分估算,
@@ -227,6 +244,7 @@ def prepare(model_name: str, request: GenerationRequest, *, for_estimate: bool =
 
     return FalSubmit(
         path=f"/{ENDPOINT_IDS[mode]}",
+        app=APP_PREFIX,
         body=body,
         prompt=prompt,
         usd=video_usd(resolution, duration),

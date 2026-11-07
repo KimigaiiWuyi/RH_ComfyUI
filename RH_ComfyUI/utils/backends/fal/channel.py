@@ -11,7 +11,7 @@ from dataclasses import field, dataclass
 
 from . import config
 from .api import FalAPI
-from .catalog import APP_PREFIX
+from .catalog import app_prefix
 from .payload import prepare
 from ...audit_key import mask_api_key
 from ....core.base.errors import ChannelError, GenerationError
@@ -85,7 +85,9 @@ class FalChannel(ProviderChannel):
 
 def bindings_for(model_name: str) -> list[ChannelBinding]:
     """模型 → fal 直连 + 调用方注入的扩展通道。"""
-    return [ChannelBinding(FalChannel(model_name), vendor_model=APP_PREFIX)] + channel_registry.bindings_for(model_name)
+    return [
+        ChannelBinding(FalChannel(model_name), vendor_model=app_prefix(model_name))
+    ] + channel_registry.bindings_for(model_name)
 
 
 __all__ = ["FalChannel", "FalRuntime", "bindings_for"]

@@ -591,3 +591,420 @@ def test_service_config_keys_present() -> None:
 
     for key in ("FAL_Enable", "FAL_Enabled_Models", "FAL_API_Key", "FAL_Endpoint", "FAL_Max_Concurrency"):
         assert key in SERVICE_CONFIG_DEFAULT, key
+
+
+# ═══════════════════════════════════════════════════════════
+#  MiniMax H3 Max / H3 Max Turbo
+# ═══════════════════════════════════════════════════════════
+
+from RH_ComfyUI.utils.core.types import MediaRef, MediaKind  # noqa: E402
+from RH_ComfyUI.utils.backends.fal.billing import (  # noqa: E402
+    H3_REF_TOKENS_INCLUDED,
+    h3_video_usd,
+    h3_point_bounds,
+    h3_ref_tokens_usd,
+)
+
+
+def _h3v(
+    prompt: str = "一只猫在月球上奔跑",
+    *,
+    images: list[bytes] | None = None,
+    video_refs: list[MediaRef] | None = None,
+    audio_refs: list[MediaRef] | None = None,
+    ordered: list[ContentItem] | None = None,
+    duration: int = 5,
+    resolution: str | None = None,
+    ratio: str | None = None,
+    params: dict[str, object] | None = None,
+) -> GenerationRequest:
+    req = GenerationRequest(
+        task_type=TaskType.VIDEO,
+        prompt=prompt,
+        images=list(images or []),
+        video_refs=list(video_refs or []),
+        audio_refs=list(audio_refs or []),
+        duration=duration,
+        resolution=resolution,
+        ratio=ratio,
+        params=dict(params or {}),
+    )
+    if ordered is not None:
+        req.ordered_content = list(ordered)
+    return req
+
+
+# ── H3 计费 ──
+
+
+def test_h3_video_usd_matches_list_rates() -> None:
+    # 刊例价:h3max 480p/768p/1080p = 0.05/0.08/0.16;turbo 半价
+    assert h3_video_usd("h3max", "text_to_video", "768p", 5) == Decimal("0.40")
+    assert h3_video_usd("h3max", "image_to_video", "1080p", 15) == Decimal("2.40")
+    assert h3_video_usd("h3maxturbo", "text_to_video", "480p", 5) == Decimal("0.125")
+    assert h3_video_usd("h3maxturbo", "text_to_video", "768p", 5) == Decimal("0.20")
+    assert h3_video_usd("h3maxturbo", "image_to_video", "1080p", 10) == Decimal("0.80")
+    # reference 两模型同按 H3 Max 档
+    assert h3_video_usd("h3maxturbo", "reference_to_video", "768p", 5) == Decimal("0.40")
+    assert h3_video_usd("h3max", "reference_to_video", "768p", 5) == Decimal("0.40")
+
+
+def test_h3_ref_tokens_usd_overage() -> None:
+    assert h3_ref_tokens_usd("h3max", H3_REF_TOKENS_INCLUDED) == Decimal("0")
+    assert h3_ref_tokens_usd("h3max", 0) == Decimal("0")
+    # 2048 超量 × $0.02/1K = $0.04096
+    assert h3_ref_tokens_usd("h3max", 6144) == Decimal("0.04096")
+    # turbo 档 $0.016/1K
+    assert h3_ref_tokens_usd("h3maxturbo", 6144) == Decimal("0.032768")
+
+
+def test_h3_point_bounds() -> None:
+    low_t, high_t = h3_point_bounds("h3maxturbo")
+    low_m, high_m = h3_point_bounds("h3max")
+    assert low_t < high_t and low_m < high_m
+    assert low_t < low_m  # turbo 起步价更低
+    assert high_m == 240  # 0.16 × 15s
+
+
+# ── H3 请求体 / 校验 ──
+
+
+def test_h3_t2v_body_fields() -> None:
+    submit = prepare("h3max", _h3v(duration=7, resolution="1080p", ratio="16:9"))
+    assert submit.mode == "text_to_video"
+    assert submit.app == "minimax/h3-max"
+    assert submit.path == "/minimax/h3-max/text-to-video"
+    body = submit.body
+    assert body["resolution"] == "1080P"
+    assert body["duration"] == 7
+    assert body["aspect_ratio"] == "16:9"
+    assert body["prompt_expansion_mode"] == "balanced"
+    assert body["enable_safety_checker"] is True
+    assert "aspect_ratio" not in prepare("h3max", _h3v()).body
+    # turbo 半价
+    assert prepare("h3maxturbo", _h3v(duration=7, resolution="1080p")).usd == Decimal("0.56")
+
+
+def test_h3_float_duration() -> None:
+    import json
+
+    req = _h3v()
+    req.duration = json.loads("7.5")
+    submit = prepare("h3max", req)
+    assert submit.body["duration"] == 7.5
+    assert submit.usd == Decimal("0.60")  # 0.08 × 7.5
+
+    with pytest.raises(ValidationError, match="0.92~15"):
+        prepare("h3max", _h3v(duration=0))
+    with pytest.raises(ValidationError, match="0.92~15"):
+        prepare("h3max", _h3v(duration=16))
+
+
+def test_h3_i2v_first_and_end_frame() -> None:
+    one = prepare("h3max", _h3v(images=[_PNG]))
+    assert one.mode == "image_to_video"
+    assert str(one.body["image_url"]).startswith("data:image/")
+    assert "end_image_url" not in one.body
+    two = prepare("h3maxturbo", _h3v(images=[_PNG, _PNG]))
+    assert "end_image_url" in two.body
+    # last_only:仅尾帧
+    last = prepare("h3max", _h3v(images=[_PNG], params={"frame_mode": "last_only"}))
+    assert "end_image_url" in last.body and "image_url" not in last.body
+
+
+def test_h3_auto_routes_to_reference_with_av_or_many_images() -> None:
+    vid = MediaRef(kind=MediaKind.VIDEO, url="https://example.com/a.mp4")
+    aud = MediaRef(kind=MediaKind.AUDIO, url="https://example.com/a.mp3")
+    assert prepare("h3max", _h3v(video_refs=[vid])).mode == "reference_to_video"
+    assert prepare("h3max", _h3v(audio_refs=[aud])).mode == "reference_to_video"
+    assert prepare("h3max", _h3v(images=[_PNG] * 3)).mode == "reference_to_video"
+    sub = prepare("h3maxturbo", _h3v(images=[_PNG] * 4, video_refs=[vid]))
+    assert sub.mode == "reference_to_video"
+    assert len(sub.body["reference_image_urls"] if isinstance(sub.body["reference_image_urls"], list) else []) == 4
+    assert sub.body["reference_video_urls"] == ["https://example.com/a.mp4"]
+
+
+def test_h3_reference_mode_explicit_lock() -> None:
+    with pytest.raises(ValidationError, match="至少 1 个参考素材"):
+        prepare("h3max", _h3v(params={"task_mode": "reference_to_video"}))
+    with pytest.raises(ValidationError, match="不能带参考素材"):
+        prepare("h3max", _h3v(params={"task_mode": "text_to_video"}, images=[_PNG]))
+    with pytest.raises(ValidationError, match="1~2 张"):
+        prepare("h3max", _h3v(params={"task_mode": "image_to_video"}, images=[_PNG] * 3))
+
+
+def test_h3_reference_caps() -> None:
+    with pytest.raises(ValidationError, match="最多 9 张"):
+        prepare("h3max", _h3v(images=[_PNG] * 10))
+    vids = [MediaRef(kind=MediaKind.VIDEO, url="https://example.com/a.mp4")] * 4
+    with pytest.raises(ValidationError, match="最多 3 段"):
+        prepare("h3max", _h3v(video_refs=vids))
+    auds = [MediaRef(kind=MediaKind.AUDIO, url="https://example.com/a.mp3")] * 4
+    with pytest.raises(ValidationError, match="最多 3 段"):
+        prepare("h3max", _h3v(audio_refs=auds))
+
+
+def test_h3_frame_role_only_on_images() -> None:
+    # flat 路径:视频/音频 ref 带帧位 role 直接报错(帧位只能是图片)
+    vid = MediaRef(kind=MediaKind.VIDEO, url="https://example.com/a.mp4", role="first_frame")
+    with pytest.raises(ValidationError, match="帧位只能是图片"):
+        prepare("h3max", _h3v(images=[_PNG] * 3, video_refs=[vid]))
+    # OC 路径同理
+    ordered = [
+        ContentItem(type=ContentItemType.VIDEO, media=vid),
+        ContentItem(type=ContentItemType.IMAGE, media=MediaRef(kind=MediaKind.IMAGE, data=_PNG)),
+    ]
+    with pytest.raises(ValidationError, match="帧位只能是图片"):
+        prepare("h3max", _h3v(ordered=ordered))
+
+
+def test_h3_frame_modes_in_reference() -> None:
+    sub = prepare("h3max", _h3v(images=[_PNG] * 5, params={"frame_mode": "first_last"}))
+    assert "image_url" in sub.body and "end_image_url" in sub.body
+    refs = sub.body["reference_image_urls"]
+    assert isinstance(refs, list) and len(refs) == 3
+
+    sub = prepare("h3max", _h3v(images=[_PNG] * 3, params={"frame_mode": "first_middle_last"}, duration=6))
+    assert "middle_image_url" in sub.body
+    assert sub.body["middle_frame_time"] == 3.0
+    # 3 张图全部被帧位消耗,不再有参考图列表
+    assert "reference_image_urls" not in sub.body
+
+    with pytest.raises(ValidationError, match="至少 3 张"):
+        prepare(
+            "h3max",
+            _h3v(images=[_PNG] * 2, params={"task_mode": "reference_to_video", "frame_mode": "first_middle_last"}),
+        )
+    with pytest.raises(ValidationError, match="不支持关键帧位"):
+        prepare("h3maxturbo", _h3v(images=[_PNG] * 3, params={"frame_mode": "first_last"}))
+    with pytest.raises(ValidationError, match="不支持关键帧位"):
+        prepare("h3maxturbo", _h3v(images=[_PNG] * 3, params={"frame_mode": "last_only"}))
+
+
+def test_h3_middle_frame_constraints() -> None:
+    base = _h3v(images=[_PNG] * 3, params={"frame_mode": "first_middle_last"}, duration=6)
+    sub = prepare("h3max", base)
+    assert sub.body["middle_frame_time"] == 3.0
+    # 越界时刻
+    bad = _h3v(images=[_PNG] * 3, params={"frame_mode": "first_middle_last", "middle_frame_time": 6}, duration=6)
+    with pytest.raises(ValidationError, match="middle_frame_time"):
+        prepare("h3max", bad)
+    # 1080p 不支持中间帧
+    bad2 = _h3v(images=[_PNG] * 3, resolution="1080p", params={"frame_mode": "first_middle_last"}, duration=6)
+    with pytest.raises(ValidationError, match="1080p"):
+        prepare("h3max", bad2)
+
+
+def test_h3_ordered_content_maps_to_reference_conditions() -> None:
+    ordered = [
+        ContentItem(type=ContentItemType.IMAGE, media=MediaRef(kind=MediaKind.IMAGE, data=_PNG), role="first_frame"),
+        ContentItem(type=ContentItemType.IMAGE, media=MediaRef(kind=MediaKind.IMAGE, url="https://e.com/b.png")),
+        ContentItem(type=ContentItemType.VIDEO, media=MediaRef(kind=MediaKind.VIDEO, url="https://e.com/v.mp4")),
+        ContentItem(type=ContentItemType.IMAGE, media=MediaRef(kind=MediaKind.IMAGE, data=_PNG), role="last_frame"),
+    ]
+    sub = prepare("h3max", _h3v(ordered=ordered))
+    assert sub.mode == "reference_to_video"
+    conds = sub.body["reference_conditions"]
+    assert isinstance(conds, list)
+    assert [c["type"] for c in conds if isinstance(c, dict)] == ["image", "video"]
+    # 帧位拆到独立字段,不进 conditions
+    assert "image_url" in sub.body and "end_image_url" in sub.body
+    assert sub.body["reference_conditions"] == [
+        {"type": "image", "url": "https://e.com/b.png"},
+        {"type": "video", "url": "https://e.com/v.mp4"},
+    ]
+
+
+def test_h3_ordered_text_merges_into_prompt() -> None:
+    ordered = [
+        ContentItem(type=ContentItemType.TEXT, text="一只猫在月球上奔跑"),
+        ContentItem(type=ContentItemType.TEXT, text="电影感"),
+        ContentItem(type=ContentItemType.IMAGE, media=MediaRef(kind=MediaKind.IMAGE, data=_PNG)),
+    ]
+    sub = prepare("h3max", _h3v(ordered=ordered))
+    assert sub.body["prompt"] == "一只猫在月球上奔跑\n电影感"
+
+
+def test_h3_ratio_adaptive_only_in_reference() -> None:
+    with pytest.raises(ValidationError, match="adaptive"):
+        prepare("h3max", _h3v(ratio="adaptive"))
+    ok = prepare("h3max", _h3v(images=[_PNG] * 3, ratio="adaptive"))
+    assert ok.body["aspect_ratio"] == "adaptive"
+
+
+def test_h3_target_audio_constraints() -> None:
+    ok = prepare("h3max", _h3v(params={"target_audio_url": "https://e.com/a.mp3"}))
+    assert ok.body["target_audio_url"] == "https://e.com/a.mp3"
+    # 参考模式与参考音频互斥
+    with pytest.raises(ValidationError, match="不能与参考音频"):
+        prepare(
+            "h3max",
+            _h3v(
+                images=[_PNG] * 3,
+                audio_refs=[MediaRef(kind=MediaKind.AUDIO, url="https://e.com/b.mp3")],
+                params={"target_audio_url": "https://e.com/a.mp3"},
+            ),
+        )
+
+
+def test_h3_generate_audio_false_rejected() -> None:
+    req = _h3v()
+    req.generate_audio = False
+    with pytest.raises(ValidationError, match="恒含原生音频"):
+        prepare("h3max", req)
+    with pytest.raises(ValidationError, match="恒含原生音频"):
+        prepare("h3maxturbo", req)
+
+
+def test_h3_validation_rejects_bad_enums() -> None:
+    with pytest.raises(ValidationError, match="prompt_expansion"):
+        prepare("h3max", _h3v(params={"prompt_expansion": "max"}))
+    with pytest.raises(ValidationError, match="frame_mode"):
+        prepare("h3max", _h3v(params={"frame_mode": "nope"}))
+    with pytest.raises(ValidationError, match="480p/768p/1080p"):
+        prepare("h3max", _h3v(resolution="2k"))
+    with pytest.raises(ValidationError, match="safety_checker"):
+        prepare("h3max", _h3v(params={"safety_checker": "maybe"}))
+    sub = prepare("h3max", _h3v(params={"safety_checker": False}))
+    assert sub.body["enable_safety_checker"] is False
+
+
+# ── H3 计费精确性(estimate / settle)──
+
+
+def test_h3_estimate_and_settle_reference_tokens() -> None:
+    from RH_ComfyUI.models.video.fal import H3MaxVideo, H3MaxTurboVideo
+
+    model = H3MaxVideo()
+    turbo = H3MaxTurboVideo()
+
+    # t2v 基费:h3max 768p×5s = $0.40 → 40 分;turbo 768p×5s = $0.20 → 20 分
+    assert model.estimate_cost(_h3v(resolution="768p")) == 40
+    assert turbo.estimate_cost(_h3v(resolution="768p")) == 20
+
+    # 5 图 + 1 视频参考:估算 6×1024=6144 token,超 2048 → $0.40 + $0.04096 = $0.44096 → 45 分
+    vid = MediaRef(kind=MediaKind.VIDEO, url="https://example.com/a.mp4")
+    req = _h3v(images=[_PNG] * 5, video_refs=[vid])
+    assert model.estimate_cost(req) == 45
+    # turbo 参考模式同基费,但 token 费率 $0.016/1K:$0.40 + $0.032768 = $0.432768 → 44 分
+    assert turbo.estimate_cost(req) == 44
+
+    # settle:上游实报 2048 token(未超 4096)→ 退超额差,回到 $0.40 → 40 分
+    settled = model.settle_cost(req, {"reference_tokens": 2048})
+    assert settled == 40
+    # 实报 8192 → $0.40 + 4096/1000×0.02 = $0.48192 → 49 分
+    settled = model.settle_cost(req, {"reference_tokens": 8192})
+    assert settled == 49
+    # usage 缺 token → 维持估算价
+    settled = model.settle_cost(req, {})
+    assert settled == 45
+
+
+def test_h3_models_registered() -> None:
+    from RH_ComfyUI.models.video.fal import H3MaxVideo, H3MaxTurboVideo
+
+    names = {cls.node_def().name for cls in VIDEO_MODELS}
+    assert "h3max" in names and "h3maxturbo" in names
+
+    for cls, expected_backend_model in ((H3MaxVideo, "minimax/h3-max"), (H3MaxTurboVideo, "minimax/h3-max-turbo")):
+        model = cls()
+        node = model.node
+        assert node.backend == "fal"
+        assert node.backend_model == expected_backend_model
+        assert set(node.inputs["task_mode"].values or []) == {
+            "auto",
+            "text_to_video",
+            "image_to_video",
+            "reference_to_video",
+        }
+        assert set(node.inputs["resolution"].values or []) == {"480p", "768p", "1080p"}
+        bindings = model.channel_bindings()
+        assert bindings and bindings[0].vendor_model == expected_backend_model
+        # 多模态参考须过基类形态闸
+        model.validate(_h3v(video_refs=[MediaRef(kind=MediaKind.VIDEO, url="https://e.com/a.mp4")]))
+
+    # 关键帧位只有 h3max 有;turbo 参考端点无此字段
+    H3MaxVideo().validate(_h3v(images=[_PNG] * 3, params={"frame_mode": "first_last"}))
+    with pytest.raises(ValidationError):
+        H3MaxTurboVideo().validate(_h3v(images=[_PNG] * 3, params={"frame_mode": "first_last"}))
+
+
+def test_h3_turbo_allows_flat_reference_images() -> None:
+    # turbo 参考模式:图都进 reference_image_urls,无关键帧位
+    sub = prepare("h3maxturbo", _h3v(images=[_PNG] * 3))
+    assert sub.mode == "reference_to_video"
+    assert isinstance(sub.body["reference_image_urls"], list)
+    assert len(sub.body["reference_image_urls"]) == 3
+    assert "image_url" not in sub.body
+
+
+def test_h3_run_uses_model_app_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_cfg(monkeypatch)
+    seen: list[str] = []
+
+    class _Client:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        async def __aenter__(self) -> "_Client":
+            return self
+
+        async def __aexit__(self, *_args: object) -> bool:
+            return False
+
+        async def post(self, url: str, headers: dict[str, str] | None = None, json: object = None) -> _Resp:
+            seen.append(url)
+            return _Resp({"request_id": "req-h3"})
+
+        async def get(self, url: str, headers: dict[str, str] | None = None) -> _Resp:
+            seen.append(url)
+            if url.endswith("/status"):
+                return _Resp({"status": "COMPLETED"})
+            return _Resp({"video": {"url": "https://cdn.example/a.mp4"}, "reference_tokens": 5120})
+
+    async def _download(url: str, **kwargs: object) -> bytes:
+        return b"ok"
+
+    monkeypatch.setattr("RH_ComfyUI.utils.backends.fal.api.RetryingAsyncClient", _Client)
+    monkeypatch.setattr("RH_ComfyUI.utils.backends.fal.api.download_with_network_retry", _download)
+    submit = prepare("h3maxturbo", _h3v(images=[_PNG] * 3))
+    output = asyncio.run(FalAPI().run(submit, model_name="h3maxturbo"))
+    assert output.usage["request_id"] == "req-h3"
+    # 上游实报 reference_tokens 进 usage,供 settle_cost 精确补差
+    assert output.usage["reference_tokens"] == 5120
+    assert seen[0] == f"{DEFAULT_QUEUE_ENDPOINT}/minimax/h3-max-turbo/reference-to-video"
+    assert seen[1] == f"{DEFAULT_QUEUE_ENDPOINT}/minimax/h3-max-turbo/requests/req-h3/status"
+    assert seen[2] == f"{DEFAULT_QUEUE_ENDPOINT}/minimax/h3-max-turbo/requests/req-h3"
+
+
+def test_h3_resume_polls_model_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_cfg(monkeypatch)
+    calls: list[str] = []
+
+    class _Client:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        async def __aenter__(self) -> "_Client":
+            return self
+
+        async def __aexit__(self, *_args: object) -> bool:
+            return False
+
+        async def post(self, url: str, **kwargs: object) -> _Resp:
+            raise AssertionError("resume 不得重新建单")
+
+        async def get(self, url: str, headers: dict[str, str] | None = None) -> _Resp:
+            calls.append(url)
+            if url.endswith("/status"):
+                return _Resp({"status": "COMPLETED"})
+            return _Resp({"video": {"url": "https://cdn.example/a.mp4"}})
+
+    async def _download(url: str, **kwargs: object) -> bytes:
+        return b"resumed"
+
+    monkeypatch.setattr("RH_ComfyUI.utils.backends.fal.api.RetryingAsyncClient", _Client)
+    monkeypatch.setattr("RH_ComfyUI.utils.backends.fal.api.download_with_network_retry", _download)
+    output = asyncio.run(FalAPI().resume("req-9", model_name="h3max"))
+    assert output.data == b"resumed"
+    assert calls[0] == f"{DEFAULT_QUEUE_ENDPOINT}/minimax/h3-max/requests/req-9/status"
