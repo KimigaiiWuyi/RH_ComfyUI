@@ -21,6 +21,7 @@ backends/
 │   └── executor.py      # GPTImage2Adapter 执行器
 ├── azure_image/         # Azure Foundry v1 生图通道(非 Adapter,见该目录 README)
 ├── kling/               # 可灵视频与图片通道(非 Adapter,见该目录 README)
+├── fal/                 # fal.ai 队列式通道:FLUX 3 Max 文生/图生/关键帧(非 Adapter,见该目录 README)
 ├── rh_app/              # RunningHub 原生 AI 应用后端
 │   ├── __init__.py
 │   ├── api.py           # RHAppAPI HTTP 客户端

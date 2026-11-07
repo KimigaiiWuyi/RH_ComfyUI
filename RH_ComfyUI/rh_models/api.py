@@ -269,6 +269,9 @@ def _channel_supports_remote_cancel(
     if name in ("minimax-h3",):
         return True
 
+    if name == "fal":
+        return True
+
     # 外部注入的 gateway_slot 异步视频通道
     if name.startswith("gateway_slot") and (
         name.endswith("_seedance")

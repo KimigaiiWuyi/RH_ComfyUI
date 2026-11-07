@@ -22,6 +22,7 @@ from gsuid_core.utils.plugins_config.models import (
 )
 
 from .fish_models import FISH_MODEL_NAMES
+from ..utils.backends.fal.catalog import FAL_MODEL_NAMES, DEFAULT_QUEUE_ENDPOINT
 from ..utils.backends.kling.catalog import (
     DEFAULT_ENDPOINT,
     KLING_MODEL_NAMES,
@@ -470,6 +471,43 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     "Kling_Max_Concurrency": GsStrConfig(
         "最大并发",
         "在途请求达到此数则暂时不可用。视频和图片共用这个上限。",
+        "2",
+    ),
+    "divider_fal": GsDivider(
+        "FAL(FLUX 3 Max 视频)",
+        "fal.ai 队列式视频生成:FLUX 3 Max 的文生 / 首尾帧图生 / 关键帧三个端点"
+        "归在 flux3max 一个模型里,按 task_mode 或输入自动分流。"
+        "计费按生成秒数(720p / 1080p 两档刊例价)。"
+        "须在启用列表勾选后才分发;供应商总开关关闭则全部不可用。"
+        "改完即时生效。",
+        "FAL 视频服务配置",
+    ),
+    "FAL_Enable": GsBoolConfig(
+        "启用 FAL 供应商",
+        "是否启用 fal.ai 通道。禁用后 flux3max 不参与分发;若已挂外部插件通道,模型仍可用。",
+        False,
+    ),
+    "FAL_Enabled_Models": GsListStrConfig(
+        "启用的 FAL 模型",
+        "勾选要走 FAL 通道的模型;可自由添加内部模型名。留空则 FAL 通道全关。可选:flux3max。",
+        list(FAL_MODEL_NAMES),
+        options=list(FAL_MODEL_NAMES),
+    ),
+    "FAL_API_Key": GsStrConfig(
+        "FAL API Key",
+        "fal.ai API Key(FAL_KEY),请求以 Authorization: Key 鉴权。",
+        "",
+        secret=True,
+    ),
+    "FAL_Endpoint": GsStrConfig(
+        "FAL 队列地址",
+        "fal 队列 API 根地址(不含尾斜杠)。",
+        DEFAULT_QUEUE_ENDPOINT,
+        options=[DEFAULT_QUEUE_ENDPOINT],
+    ),
+    "FAL_Max_Concurrency": GsStrConfig(
+        "最大并发",
+        "在途请求达到此数则暂时不可用。",
         "2",
     ),
     "divider_happyhorse": GsDivider(

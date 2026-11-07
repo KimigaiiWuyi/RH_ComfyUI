@@ -8,6 +8,7 @@ RHComfyuiTaskRecord 终态。
   - happyhorse (dashscope 等)
   - minimax-h3 (官方 MiniMax H3 视频)
   - kling (可灵视频/图片 query — **可 resume,但无 remote cancel**)
+  - fal (flux3max 队列轮询 — **可 resume,且支持 PUT 远端取消**)
   - rh_app (AI 应用 query — **可 resume,但无 remote cancel**)
   - comfyui (local history / RH 工作流代理 history)
   - gemini-image (background interactions)
@@ -224,6 +225,8 @@ def _channel_implies_backend(channel: str) -> str:
         return "minimax-h3"
     if ch == "kling":
         return "kling"
+    if ch == "fal":
+        return "fal"
     if ch == "rh_app" or ch.startswith("rh_app"):
         return "rh_app"
     if ch in ("comfyui", "comfyui-local"):
@@ -274,6 +277,8 @@ def _infer_backend(*, backend: str, model: str, channel: str) -> str:
         return "minimax-h3"
     if m.startswith("kling-"):
         return "kling"
+    if m == "flux3max":
+        return "fal"
     # runninghub 无 model/backend 时 fail-closed 空串,避免误走 comfy/seedance
     if ch == "runninghub":
         if "seedance" in m:
@@ -326,6 +331,8 @@ def _kind_for_model(model: str, backend: str) -> str:
     if m.startswith("kling-image"):
         return "image"
     if backend == "kling" or m.startswith("kling-"):
+        return "video"
+    if backend == "fal" or m == "flux3max":
         return "video"
     return "image"
 
@@ -756,6 +763,39 @@ async def _resume_kling(
     )
 
 
+async def _resume_fal(
+    *,
+    vendor_task_id: str,
+    model: str,
+    on_progress: Optional[ProgressCallback],
+) -> GenerationResult:
+    """fal:凭 request_id 继续轮询 + 取结果。不发起第二次创建。"""
+    from ..base.errors import ChannelError
+    from ...utils.backends.fal.api import FalAPI
+
+    await _emit(on_progress, "resuming", 10, "恢复 fal 轮询")
+    try:
+        output = await FalAPI().resume(vendor_task_id, model_name=model)
+    except ChannelError as exc:
+        # 404 = 任务不存在(已过期清理),终态失败;网络错误留给上层记为不确定。
+        if exc.code in {"TASK_FAILED", "EMPTY_RESULT"} or exc.http_status == 404:
+            raise ResumeFailedError(exc.user_message or str(exc), definitive=True) from exc
+        raise
+    meta = dict(output.metadata)
+    meta["channel"] = "fal"
+    meta["resumed"] = True
+    return GenerationResult(
+        kind="video",
+        model=model,
+        backend="fal",
+        data=output.data,
+        mime_type=output.mime_type,
+        usage=dict(output.usage),
+        raw=output.raw,
+        metadata=meta,
+    )
+
+
 async def _resume_rh_app(
     *,
     vendor_task_id: str,
@@ -1135,6 +1175,36 @@ async def resume_poll(
                     vendor_task_id=vendor_task_id,
                     model=model,
                     kind=kind,
+                    on_progress=on_progress,
+                )
+            finally:
+                await reg.unregister(ag)
+        elif backend == "fal":
+            # fal 有官方 PUT 取消,resume 时同样挂上 vendor 任务号
+            from .active_tasks import get_active_task_registry
+            from ...utils.backends.fal.api import FalAPI
+
+            api = FalAPI()
+            reg = get_active_task_registry()
+            ag = await reg.register(
+                model_name=model,
+                trace_id=trace_id,
+                record_id=record_id,
+            )
+
+            async def _cancel_fal() -> None:
+                await api.cancel(vendor_task_id)
+
+            await reg.bind_vendor_task(
+                vendor_task_id=vendor_task_id,
+                channel_name="fal",
+                cancel_remote=_cancel_fal,
+                ag=ag,
+            )
+            try:
+                result = await _resume_fal(
+                    vendor_task_id=vendor_task_id,
+                    model=model,
                     on_progress=on_progress,
                 )
             finally:
