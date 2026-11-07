@@ -147,6 +147,7 @@ def _b64() -> str:
 def test_catalog_matches_console_menus() -> None:
     assert VIDEO_CATALOG == [
         ("kling-4.0", "Kling 4.0 & 4.0 Omni"),
+        ("kling-4.0-flash", "Kling 4.0 Flash"),
         ("kling-3.0-turbo", "Kling 3.0 Turbo"),
         ("kling-3.0", "Kling 3.0 & 3.0 Omni"),
         ("kling-o1", "Kling O1"),
@@ -627,6 +628,85 @@ def test_v40_omni_limits() -> None:
         )
 
 
+def test_v40_flash_routes_and_caps() -> None:
+    text = prepare("kling-4.0-flash", _video(duration=16, ratio="9:16"))
+    assert text.path == "/text-to-video/kling-4.0-flash"
+    assert _settings(text) == {"resolution": "720p", "aspect_ratio": "9:16", "duration": 16}
+    # 16s * 0.6 = 9.6 元 -> 135 分
+    assert cny_to_points(text.yuan) == 135
+    assert "contents" not in text.body
+
+    adaptive = prepare("kling-4.0-flash", _video(ratio="adaptive"))
+    assert adaptive.path == "/omni-video/kling-4.0-flash"
+    assert _settings(adaptive)["audio"] == "native"
+    assert [item["type"] for item in _items(adaptive.body["contents"])] == ["prompt"]
+
+    single = prepare("kling-4.0-flash", _video(images=[_PNG]))
+    assert single.path == "/image-to-video/kling-4.0-flash"
+    assert [item["type"] for item in _items(single.body["contents"])] == ["prompt", "first_frame"]
+    assert "aspect_ratio" not in _settings(single)
+
+    multi = prepare("kling-4.0-flash", _video(images=[_PNG, _PNG]))
+    assert multi.path == "/omni-video/kling-4.0-flash"
+    assert [item["type"] for item in _items(multi.body["contents"])] == ["prompt", "first_frame", "refer_image"]
+
+    with pytest.raises(ValidationError, match="不支持分辨率"):
+        prepare("kling-4.0-flash", _video(resolution="1080p"))
+    with pytest.raises(ValidationError, match="时长不支持 21"):
+        prepare("kling-4.0-flash", _video(duration=21))
+    with pytest.raises(ValidationError, match="时长不支持 2"):
+        prepare("kling-4.0-flash", _video(duration=2))
+    with pytest.raises(ValidationError, match="first/refer"):
+        prepare("kling-4.0-flash", _video(images=[_PNG, _PNG], params={"frame_roles": ["first", "middle"]}))
+    with pytest.raises(ValidationError, match="只能在第 1 位"):
+        prepare("kling-4.0-flash", _video(images=[_PNG, _PNG], params={"frame_roles": ["first", "first"]}))
+    with pytest.raises(ValidationError, match="音色"):
+        prepare("kling-4.0-flash", _video(params={"voice_ids": ["v1"]}))
+    with pytest.raises(ValidationError, match="总时长"):
+        prepare(
+            "kling-4.0-flash",
+            _video(video_refs=[video_ref(url="https://cdn.example/a.mp4")], params={"input_video_duration": 25}),
+        )
+
+
+def test_v40_flash_omni_audio_and_billing() -> None:
+    original = prepare(
+        "kling-4.0-flash",
+        _video(
+            video_refs=[video_ref(url="https://cdn.example/a.mp4")],
+            generate_audio=False,
+            params={"input_video_duration": 8},
+        ),
+    )
+    assert original.path == "/omni-video/kling-4.0-flash"
+    assert _settings(original)["audio"] == "original"
+    assert [item["type"] for item in _items(original.body["contents"])] == ["prompt", "feature_video"]
+    # 输入 8s > 输出 5s:(8+5)*0.4 = 5.2 元 -> 73 分
+    assert cny_to_points(original.yuan) == 73
+
+    native = prepare(
+        "kling-4.0-flash",
+        _video(video_refs=[video_ref(url="https://cdn.example/a.mp4")], params={"input_video_duration": 4}),
+    )
+    assert _settings(native)["audio"] == "native"
+    # 输入 4s < 输出 5s:5*2*0.4 = 4.0 元 -> 56 分
+    assert cny_to_points(native.yuan) == 56
+
+    base = prepare(
+        "kling-4.0-flash",
+        _video(
+            images=[_PNG],
+            video_refs=[video_ref(url="https://cdn.example/a.mp4")],
+            params={"video_role": "base", "frame_roles": ["refer"], "input_video_duration": 8},
+        ),
+    )
+    assert [item["type"] for item in _items(base.body["contents"])] == ["prompt", "refer_image", "base_video"]
+    assert _settings(base)["audio"] == "native"
+
+    with pytest.raises(ValidationError, match="静音档"):
+        prepare("kling-4.0-flash", _video(images=[_PNG, _PNG], generate_audio=False))
+
+
 def test_image_30_picks_generations_or_omni() -> None:
     single = prepare("kling-image-3.0", _image())
     assert single.path == "/v1/images/generations"
@@ -1050,6 +1130,7 @@ def test_invoke_keeps_validation_and_releases_inflight(monkeypatch: pytest.Monke
 def test_models_register_with_menu_names_and_estimates() -> None:
     expected = {
         "kling-4.0": ("Kling 4.0 & 4.0 Omni", 105),
+        "kling-4.0-flash": ("Kling 4.0 Flash", 42),
         "kling-3.0-turbo": ("Kling 3.0 Turbo", 56),
         "kling-3.0": ("Kling 3.0 & 3.0 Omni", 63),
         "kling-o1": ("Kling O1", 42),

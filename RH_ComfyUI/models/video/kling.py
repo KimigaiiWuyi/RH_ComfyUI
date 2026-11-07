@@ -104,7 +104,7 @@ class _KlingVideo(VideoPipelineModel):
                 title="视频角色",
                 description=cls._video_role_help,
             )
-        if cls._name == "kling-4.0":
+        if cls._name in {"kling-4.0", "kling-4.0-flash"}:
             inputs["frame_roles"] = PortSpec(
                 type=PortType.LIST,
                 item_type=PortType.TEXT,
@@ -113,6 +113,8 @@ class _KlingVideo(VideoPipelineModel):
                 description=(
                     "与参考图片一一对应:first/middle/last/refer。"
                     "缺省按位置:首图首帧、末图尾帧、其余中间帧。refer 为纯参考图(走 Omni)。"
+                    if cls._name == "kling-4.0"
+                    else "与参考图片一一对应:first/refer。缺省首图=首帧、其余=参考图(走 Omni)。"
                 ),
             )
         if cls._name == "kling-3.0":
@@ -192,6 +194,30 @@ class Kling40Video(_KlingVideo):
     _priority = 53
 
 
+class Kling40FlashVideo(_KlingVideo):
+    _name = "kling-4.0-flash"
+    _display = "Kling 4.0 Flash"
+    _description = "文生、单首帧或 Omni 参考,3~20 秒,只支持 720p"
+    _knowledge = (
+        "0 张文生;1 张图走图生(仅首帧);多图、参考视频(URL,至多 5 段)或主体走 Omni。"
+        "frame_roles 只支持 first/refer,没有中间帧与尾帧,也不支持音色。"
+        "素材在提示词里用 @image_N/@video_N/@element_N 引用,合计 ≤15。"
+        "Omni 关闭有声且有参考视频时保留原声;其余音画同出,没有静音档。"
+        "有参考视频时按 input_video_duration 计入输入时长计费。"
+    )
+    _resolutions = ["720p"]
+    _duration = (3, 20)
+    _max_images = 10
+    _max_videos = 5
+    _allow_video = True
+    _ratios = _RATIOS_40
+    _point_cost = 42
+    _audio_help = "Flash 始终音画同出;Omni 且有参考视频时关闭表示保留原声。文生/图生此项不改变上游请求。"
+    _images_help = "0~10 张。0 张文生;1 张为首帧;多图或 frame_roles 带 refer 时走 Omni 参考。"
+    _video_role_help = "feature: 特征参考,至多 5 段。base: 待编辑视频,只能 1 段,不能配首帧。"
+    _priority = 52
+
+
 class Kling30TurboVideo(_KlingVideo):
     _name = "kling-3.0-turbo"
     _display = "Kling 3.0 Turbo"
@@ -255,6 +281,7 @@ class Kling25TurboVideo(_KlingVideo):
 
 KLING_VIDEO_MODELS = [
     Kling40Video,
+    Kling40FlashVideo,
     Kling30TurboVideo,
     Kling30Video,
     KlingO1Video,
@@ -268,6 +295,7 @@ __all__ = [
     "Kling26Video",
     "Kling30TurboVideo",
     "Kling30Video",
+    "Kling40FlashVideo",
     "Kling40Video",
     "KlingO1Video",
 ]

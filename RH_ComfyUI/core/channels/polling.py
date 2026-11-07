@@ -47,7 +47,9 @@ class PollErrorTolerance:
         now = self._clock()
         if self._first_at is None:
             self._first_at = now
-        elif now - self._first_at > self._window:
+        elif now - self._first_at >= self._window:
+            # >= :零窗语义是不容忍;粗粒度时钟(如 GetTickCount64 ~15ms)下
+            # 紧循环 delta 恒为 0,> 会让零窗永不耗尽。
             return None
         self._consecutive += 1
         return min(self._base * (2 ** (self._consecutive - 1)), self._max)

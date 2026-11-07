@@ -6,6 +6,7 @@
 视频单价(元/秒):
 - 4.0 无输入视频:720p 1.0 / 1080p 1.5
 - 4.0 有输入视频:720p 0.6 / 1080p 0.9,输入>输出按(输入+输出)秒,否则按输出×2 秒
+- 4.0 Flash 只有 720p:无输入视频 0.6,有输入视频 0.4(口径同上)
 - 3.0 Turbo 只有有声:720p 0.8 / 1080p 1.0
 - 3.0 无参考无声 0.6/0.8/3.0,有声 0.9/1.2/3.0(720/1080/4k)
 - 3.0 Omni 无参考无声 0.6/0.8/3.0,无参考有声 0.8/1.0/3.0
@@ -37,6 +38,8 @@ _SILENT_26 = {"720p": Decimal("0.3"), "1080p": Decimal("0.5")}
 _TURBO = {"720p": Decimal("0.8"), "1080p": Decimal("1.0")}
 _V40_PLAIN = {"720p": Decimal("1.0"), "1080p": Decimal("1.5")}
 _V40_REF = {"720p": Decimal("0.6"), "1080p": Decimal("0.9")}
+_F40_PLAIN = {"720p": Decimal("0.6")}
+_F40_REF = {"720p": Decimal("0.4")}
 
 
 def cny_to_points(yuan: Decimal) -> int:
@@ -73,6 +76,11 @@ def video_yuan(
             return _rate(_V40_PLAIN, resolution) * Decimal(seconds)
         billed = seconds * 2 if input_seconds <= seconds else input_seconds + seconds
         return _rate(_V40_REF, resolution) * Decimal(str(billed))
+    if model == "kling-4.0-flash":
+        if not ref_video:
+            return _rate(_F40_PLAIN, resolution) * Decimal(seconds)
+        billed = seconds * 2 if input_seconds <= seconds else input_seconds + seconds
+        return _rate(_F40_REF, resolution) * Decimal(str(billed))
     if model == "kling-3.0-turbo":
         rate = _rate(_TURBO, resolution)
     elif model == "kling-3.0":
@@ -138,6 +146,16 @@ def video_point_bounds(model: str) -> tuple[int, int]:
             sound="",
             ref_video=True,
             input_seconds=30.0,
+        )
+    elif model == "kling-4.0-flash":
+        low = video_yuan(model, resolution="720p", seconds=3, sound="", ref_video=False)
+        high = video_yuan(
+            model,
+            resolution="720p",
+            seconds=20,
+            sound="",
+            ref_video=True,
+            input_seconds=20.0,
         )
     elif model == "kling-3.0-turbo":
         low = video_yuan(model, resolution="720p", seconds=3, sound="always", ref_video=False)

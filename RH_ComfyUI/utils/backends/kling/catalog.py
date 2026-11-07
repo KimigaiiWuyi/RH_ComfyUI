@@ -8,6 +8,7 @@ from __future__ import annotations
 # (模型 id, 展示名)
 KLING_VIDEO_MODELS: list[tuple[str, str]] = [
     ("kling-4.0", "Kling 4.0 & 4.0 Omni"),
+    ("kling-4.0-flash", "Kling 4.0 Flash"),
     ("kling-3.0-turbo", "Kling 3.0 Turbo"),
     ("kling-3.0", "Kling 3.0 & 3.0 Omni"),
     ("kling-o1", "Kling O1"),

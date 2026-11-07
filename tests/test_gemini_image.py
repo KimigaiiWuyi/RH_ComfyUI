@@ -71,10 +71,12 @@ def test_relay_base_url_passed_to_sdk(monkeypatch):
     client = api._build_client()
     opts = client._api_client._http_options
     assert opts.base_url == "https://relay.invalid/gemini/"
-    assert opts.api_version == "v1beta"  # SDK 仍在其后拼 /v1beta/...,中转端按标准路径转发
 
     plain = _api_with(monkeypatch, {"Gemini_Image_apikey": "AIzaKEY"})
-    assert "generativelanguage" in plain._build_client()._api_client._http_options.base_url
+    plain_opts = plain._build_client()._api_client._http_options
+    # api_version 跟随 SDK 默认(旧版 v1beta,新 SDK 为 v1);中转只换 base_url,版本路径由 SDK 拼。
+    assert opts.api_version == plain_opts.api_version
+    assert "generativelanguage" in plain_opts.base_url
 
 
 def test_relay_base_url_ignored_in_vertex_mode(monkeypatch):
