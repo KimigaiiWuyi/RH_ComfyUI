@@ -142,4 +142,30 @@ def video_url_of(payload: object) -> str:
     )
 
 
-__all__ = ["FalPoll", "parse_status", "raise_if_error", "request_id_of", "video_url_of"]
+def image_of(payload: object) -> tuple[str, str]:
+    """结果响应里的 images[0] → (url, mime);兼容外层 payload 嵌套。"""
+    root = _object_dict(payload)
+    if root is not None and "images" not in root and "payload" in root:
+        nested = _object_dict(root["payload"])
+        if nested is not None:
+            root = nested
+    if root is not None and "images" in root:
+        raw = root["images"]
+        if isinstance(raw, list) and raw:
+            first = _object_dict(raw[0])
+            if first is not None and "url" in first:
+                url = first["url"]
+                if isinstance(url, str) and url.strip():
+                    mime = first["content_type"] if "content_type" in first else "image/png"
+                    return url.strip(), mime if isinstance(mime, str) and mime else "image/png"
+    raise ChannelError(
+        "fal 结果响应缺少 images[0].url",
+        kind=FailureKind.TASK_FAILED,
+        phase=Phase.ACCEPTED,
+        channel=_CHANNEL,
+        code="EMPTY_RESULT",
+        user_message="fal 任务完成但未返回图片,请稍后重试。",
+    )
+
+
+__all__ = ["FalPoll", "image_of", "parse_status", "raise_if_error", "request_id_of", "video_url_of"]

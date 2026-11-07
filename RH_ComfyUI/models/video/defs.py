@@ -27,6 +27,7 @@ from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...utils.mappers.video import wan_videogen_mapper as _wan_videogen_mapper
+from ...core.channels.channel import ChannelBinding
 from ...utils.mappers.extra_billing import estimate_wan22_points
 from ...utils.mappers.wan30_billing import estimate_wan30_points
 from ...utils.backends.seedance.draft import is_draft_flag, draft_task_id_from_request
@@ -396,6 +397,15 @@ class Seedance2Def(SeedanceVideoModel):
                 candidates.append(estimate_seedance2_points(res, dur, input_video_duration=15.0))
         return (min(candidates), max(candidates))
 
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...utils.backends.fal.channel import fal_binding
+
+        bindings = super().channel_bindings()
+        if self.node.provider:
+            return bindings
+        bindings.append(fal_binding("seedance2"))
+        return bindings
+
 
 class Seedance25Def(Seedance25VideoModel):
     """Seedance 2.5 — 火山方舟 doubao-seedance-2-5-260628
@@ -673,6 +683,15 @@ class Seedance25Def(Seedance25VideoModel):
             estimate_seedance25_points("480p", 4, video_refs=None),
             estimate_seedance25_points("1080p", 30, input_video_duration=150.0),
         )
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...utils.backends.fal.channel import fal_binding
+
+        bindings = super().channel_bindings()
+        if self.node.provider:
+            return bindings
+        bindings.append(fal_binding("seedance2.5"))
+        return bindings
 
 
 class Seedance2MiniDef(SeedanceVideoModel):
@@ -1528,6 +1547,15 @@ class MiniMaxH3Def(MiniMaxH3VideoModel):
             estimate_minimax_h3_points("768p", 4),
             estimate_minimax_h3_points("2k", 15, input_video_duration=15.0, num_input_images=9),
         )
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...utils.backends.fal.channel import fal_binding
+
+        bindings = super().channel_bindings()
+        if self.node.provider:
+            return bindings
+        bindings.append(fal_binding("minimax_h3"))
+        return bindings
 
 
 class GeminiOmni12Def(GeminiOmniVideoModel):

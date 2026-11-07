@@ -336,9 +336,13 @@ def test_invoke_keeps_validation_and_releases_inflight(monkeypatch: pytest.Monke
     _patch_cfg(monkeypatch)
     runtime = FalRuntime()
     channel = FalChannel("flux3max", runtime=runtime)
-    with pytest.raises(ValidationError):
+    # invoke 层的组包错误统一翻译成 CAPABILITY(换源),且不占并发
+    with pytest.raises(ChannelError) as exc:
         asyncio.run(channel.invoke(request=_video("")))
     assert runtime.inflight == 0
+    from RH_ComfyUI.core.channels.failure import FailureKind
+
+    assert exc.value.kind == FailureKind.CAPABILITY
 
     async def _boom(*args: object, **kwargs: object) -> NodeOutput:
         raise RuntimeError("boom")
@@ -1008,3 +1012,269 @@ def test_h3_resume_polls_model_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
     output = asyncio.run(FalAPI().resume("req-9", model_name="h3max"))
     assert output.data == b"resumed"
     assert calls[0] == f"{DEFAULT_QUEUE_ENDPOINT}/minimax/h3-max/requests/req-9/status"
+
+
+# ═══════════════════════════════════════════════════════════
+#  共享模型挂 fal 通道:minimax_h3 / seedance2·2.5 / banana / gpt-image-2
+# ═══════════════════════════════════════════════════════════
+
+from RH_ComfyUI.utils.backends.fal.parse import image_of  # noqa: E402
+
+
+def _img(
+    prompt: str = "一只猫坐在窗边",
+    *,
+    images: list[bytes] | None = None,
+    ratio: str | None = None,
+    params: dict[str, object] | None = None,
+) -> GenerationRequest:
+    return GenerationRequest(
+        task_type=TaskType.IMAGE,
+        prompt=prompt,
+        images=list(images or []),
+        ratio=ratio,
+        params=dict(params or {}),
+    )
+
+
+# ── minimax_h3 ──
+
+
+def test_mmh3_t2v_and_resolution_map() -> None:
+    sub = prepare("minimax_h3", _h3v(duration=8, resolution="2k", ratio="21:9"))
+    assert sub.mode == "text_to_video"
+    assert sub.app == "minimax/h3"
+    assert sub.path == "/minimax/h3/text-to-video"
+    assert sub.body["resolution"] == "2K"
+    assert sub.body["duration"] == 8
+    assert sub.body["aspect_ratio"] == "21:9"
+    sub = prepare("minimax_h3", _h3v(resolution="768p"))
+    assert sub.body["resolution"] == "768P"
+
+
+def test_mmh3_i2v_frame_roles() -> None:
+    one = prepare("minimax_h3", _h3v(images=[_PNG]))
+    assert one.mode == "image_to_video"
+    assert "image_url" in one.body and "end_image_url" not in one.body
+    two = prepare("minimax_h3", _h3v(images=[_PNG, _PNG]))
+    assert "end_image_url" in two.body
+    last = prepare("minimax_h3", _h3v(images=[_PNG], params={"frame_mode": "last_frame"}))
+    assert "end_image_url" in last.body and "image_url" not in last.body
+    fl = prepare("minimax_h3", _h3v(images=[_PNG, _PNG], params={"task_mode": "first_last"}))
+    assert "image_url" in fl.body and "end_image_url" in fl.body
+
+
+def test_mmh3_reference_and_caps() -> None:
+    sub = prepare("minimax_h3", _h3v(images=[_PNG] * 3))
+    assert sub.mode == "reference_to_video"
+    assert sub.path == "/minimax/h3/reference-to-video"
+    assert isinstance(sub.body["reference_image_urls"], list)
+    assert len(sub.body["reference_image_urls"]) == 3
+    ref = prepare("minimax_h3", _h3v(images=[_PNG], params={"frame_mode": "reference"}))
+    assert ref.mode == "reference_to_video"
+    with pytest.raises(ValidationError, match="最多 9 张"):
+        prepare("minimax_h3", _h3v(images=[_PNG] * 10))
+    # 参考模式带帧位:fal 无此字段
+    with pytest.raises(ValidationError, match="不支持首/尾帧位"):
+        prepare("minimax_h3", _h3v(images=[_PNG] * 3, params={"frame_mode": "first_last"}))
+
+
+def test_mmh3_rejects_unsupported() -> None:
+    with pytest.raises(ValidationError, match="时长"):
+        prepare("minimax_h3", _h3v(duration=4))
+    with pytest.raises(ValidationError, match="watermark"):
+        prepare("minimax_h3", _h3v(params={"watermark": True}))
+    req = _h3v()
+    req.seed = 7
+    with pytest.raises(ValidationError, match="seed"):
+        prepare("minimax_h3", req)
+    with pytest.raises(ValidationError, match="adaptive"):
+        prepare("minimax_h3", _h3v(ratio="adaptive"))
+
+
+# ── seedance2 / seedance2.5 ──
+
+
+def test_seedance2_t2v_and_i2v() -> None:
+    sub = prepare("seedance2", _h3v(duration=6, ratio="16:9", resolution="1080p"))
+    assert sub.mode == "text_to_video"
+    assert sub.app == "bytedance/seedance-2.0"
+    assert sub.path == "/bytedance/seedance-2.0/text-to-video"
+    assert sub.body["duration"] == "6"  # fal 枚举是字符串
+    assert sub.body["aspect_ratio"] == "16:9"
+    assert sub.body["generate_audio"] is True
+    two = prepare("seedance2", _h3v(images=[_PNG, _PNG], ratio="adaptive"))
+    assert two.mode == "image_to_video"
+    assert two.body["aspect_ratio"] == "auto"
+    assert "image_url" in two.body and "end_image_url" in two.body
+
+
+def test_seedance2_reference_and_rejects() -> None:
+    vid = MediaRef(kind=MediaKind.VIDEO, url="https://e.com/a.mp4")
+    sub = prepare("seedance2", _h3v(video_refs=[vid]))
+    assert sub.mode == "reference_to_video"
+    assert sub.path == "/bytedance/seedance-2.0/reference-to-video"
+    assert sub.body["video_urls"] == ["https://e.com/a.mp4"]
+    with pytest.raises(ValidationError, match="自动"):
+        prepare("seedance2", _h3v(duration=-1))
+    with pytest.raises(ValidationError, match="watermark"):
+        prepare("seedance2", _h3v(params={"watermark": True}))
+    with pytest.raises(ValidationError, match="adaptive"):
+        prepare("seedance2", _h3v(images=[_PNG], ratio="16:9"))
+
+
+def test_seedance25_edit_extend_and_draft() -> None:
+    vid = MediaRef(kind=MediaKind.VIDEO, url="https://e.com/a.mp4")
+    sub = prepare("seedance2.5", _h3v(video_refs=[vid], params={"task_mode": "edit"}))
+    assert sub.mode == "reference_to_video"
+    assert sub.body["task"] == "editing"
+    sub = prepare("seedance2.5", _h3v(video_refs=[vid], params={"omni_reference_task_type": "extend"}))
+    assert sub.body["task"] == "extension"
+    with pytest.raises(ValidationError, match="参考视频"):
+        prepare("seedance2.5", _h3v(params={"task_mode": "edit"}))
+    # duration=-1 → "auto"
+    sub = prepare("seedance2.5", _h3v(duration=-1))
+    assert sub.body["duration"] == "auto"
+    # draft 直通且锁 480p
+    sub = prepare("seedance2.5", _h3v(params={"draft": True}, resolution="1080p"))
+    assert sub.body["draft"] is True
+    assert sub.body["resolution"] == "480p"
+    with pytest.raises(ValidationError, match="draft_task_id"):
+        prepare("seedance2.5", _h3v(params={"draft_task_id": "x"}))
+    with pytest.raises(ValidationError, match="output_format"):
+        prepare("seedance2.5", _h3v(params={"output_format": "mov"}))
+
+
+def test_seedance25_ref_caps() -> None:
+    imgs = [_PNG] * 31
+    with pytest.raises(ValidationError, match="最多 30 张"):
+        prepare("seedance2.5", _h3v(images=imgs))
+    vids = [MediaRef(kind=MediaKind.VIDEO, url="https://e.com/a.mp4")] * 11
+    with pytest.raises(ValidationError, match="最多 10 段"):
+        prepare("seedance2.5", _h3v(video_refs=vids))
+
+
+# ── banana / gpt-image-2 ──
+
+
+def test_banana1_t2i_and_edit() -> None:
+    sub = prepare("banana1", _img(ratio="4:3"))
+    assert sub.mode == "text_to_image"
+    assert sub.output == "image"
+    assert sub.app == "fal-ai/nano-banana"
+    assert sub.path == "/fal-ai/nano-banana"
+    assert sub.body["aspect_ratio"] == "4:3"
+    assert "resolution" not in sub.body  # 一代无尺寸档
+    edit = prepare("banana1", _img(images=[_PNG, _PNG]))
+    assert edit.mode == "edit"
+    assert edit.path == "/fal-ai/nano-banana/edit"
+    assert isinstance(edit.body["image_urls"], list) and len(edit.body["image_urls"]) == 2
+
+
+def test_banana2_resolution_and_ratio_fold() -> None:
+    sub = prepare("banana2", _img(params={"image_size": "512", "ratio": "8:5"}))
+    assert sub.path == "/fal-ai/nano-banana-2"
+    assert sub.body["resolution"] == "0.5K"
+    assert sub.body["aspect_ratio"] == "3:2"  # 产品面 8:5 折成上游白名单 3:2
+    pro = prepare("banana_pro", _img(images=[_PNG], params={"image_size": "4K"}))
+    assert pro.path == "/fal-ai/nano-banana-pro/edit"
+    assert pro.body["resolution"] == "4K"
+    lite = prepare("banana2.lite", _img(params={"image_size": "1K", "thinking_level": "high"}))
+    assert lite.app == "google/nano-banana-2-lite"
+    assert lite.body["thinking_level"] == "high"
+    with pytest.raises(ValidationError, match="image_size"):
+        prepare("banana2.lite", _img(params={"image_size": "4K"}))
+
+
+def test_gpt_image2_size_quality_format() -> None:
+    sub = prepare("gpt-image-2", _img())
+    assert sub.app == "openai/gpt-image-2"
+    assert sub.path == "/openai/gpt-image-2"
+    assert sub.body["image_size"] == {"width": 2048, "height": 2048}  # 默认 2K 方图
+    auto = prepare("gpt-image-2", _img(params={"image_size": "1K"}))
+    assert auto.body["image_size"] == "auto"
+    wide = prepare("gpt-image-2", _img(params={"ratio": "16:9", "image_size": "4K"}))
+    dims = wide.body["image_size"]
+    assert isinstance(dims, dict)
+    w, h = dims["width"], dims["height"]
+    assert isinstance(w, int) and isinstance(h, int)
+    assert w <= 3840 and w % 16 == 0 and h % 16 == 0
+    edit = prepare("gpt-image-2", _img(images=[_PNG]))
+    assert edit.path == "/openai/gpt-image-2/edit"
+    assert isinstance(edit.body["image_urls"], list)
+
+
+def test_gpt_image2_rejects_fal_gaps() -> None:
+    with pytest.raises(ValidationError, match="quality"):
+        prepare("gpt-image-2", _img(params={"quality": "xhigh"}))
+    with pytest.raises(ValidationError, match="output_format"):
+        prepare("gpt-image-2", _img(params={"output_format": "gif"}))
+    with pytest.raises(ValidationError, match="transparent"):
+        prepare("gpt-image-2", _img(params={"background": "transparent", "output_format": "jpeg"}))
+
+
+def test_image_of_parses_result() -> None:
+    url, mime = image_of({"images": [{"url": "https://cdn.example/a.png", "content_type": "image/png"}]})
+    assert url == "https://cdn.example/a.png" and mime == "image/png"
+    with pytest.raises(ChannelError):
+        image_of({"video": {"url": "x"}})
+
+
+def test_fal_image_run_returns_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_cfg(monkeypatch)
+
+    class _Client:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        async def __aenter__(self) -> "_Client":
+            return self
+
+        async def __aexit__(self, *_args: object) -> bool:
+            return False
+
+        async def post(self, url: str, headers: dict[str, str] | None = None, json: object = None) -> _Resp:
+            return _Resp({"request_id": "req-img"})
+
+        async def get(self, url: str, headers: dict[str, str] | None = None) -> _Resp:
+            if url.endswith("/status"):
+                return _Resp({"status": "COMPLETED"})
+            return _Resp({"images": [{"url": "https://cdn.example/a.webp", "content_type": "image/webp"}]})
+
+    async def _download(url: str, **kwargs: object) -> bytes:
+        return b"img"
+
+    monkeypatch.setattr("RH_ComfyUI.utils.backends.fal.api.RetryingAsyncClient", _Client)
+    monkeypatch.setattr("RH_ComfyUI.utils.backends.fal.api.download_with_network_retry", _download)
+    submit = prepare("banana_pro", _img())
+    output = asyncio.run(FalAPI().run(submit, model_name="banana_pro"))
+    assert output.output_type == "image"
+    assert output.mime_type == "image/webp"
+    assert output.data == b"img"
+
+
+def test_channel_maps_prepare_error_to_capability() -> None:
+    # fal 表达不了的参数(watermark)→ CAPABILITY + BEFORE_SEND,换源不记健康
+    ch = FalChannel("minimax_h3")
+    req = _h3v(params={"watermark": True})
+    with pytest.raises(ChannelError) as exc:
+        asyncio.run(ch.invoke(request=req))
+    from RH_ComfyUI.core.channels.failure import Phase, FailureKind
+
+    assert exc.value.kind == FailureKind.CAPABILITY
+    assert exc.value.phase == Phase.BEFORE_SEND
+
+
+def test_shared_model_bindings_include_fal() -> None:
+    from RH_ComfyUI.models.image.defs import Banana1Def, BananaProDef, GptImage2Def
+    from RH_ComfyUI.models.video.defs import MiniMaxH3Def, Seedance2Def, Seedance25Def
+
+    for cls in (MiniMaxH3Def, Seedance2Def, Seedance25Def, Banana1Def, BananaProDef, GptImage2Def):
+        bindings = cls().channel_bindings()
+        fal = [b for b in bindings if isinstance(b.channel, FalChannel)]
+        assert fal, f"{cls.__name__} 缺少 fal 绑定"
+        assert fal[0].vendor_model
+    # 官方通道仍在 fal 之前
+    sd = Seedance2Def().channel_bindings()
+    assert not isinstance(sd[0].channel, FalChannel)
+    assert isinstance(sd[-1].channel, FalChannel)

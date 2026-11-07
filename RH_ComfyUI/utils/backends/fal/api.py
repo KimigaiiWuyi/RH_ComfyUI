@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Mapping, Callable, Optional, Awaitable
 
 from . import config
-from .parse import FalPoll, _object_dict, parse_status, video_url_of, request_id_of, raise_if_error
+from .parse import FalPoll, image_of, _object_dict, parse_status, video_url_of, request_id_of, raise_if_error
 from .catalog import app_prefix
 from .payload import FalSubmit
 from ..http_retry import RetryingAsyncClient, download_with_network_retry
@@ -58,13 +58,16 @@ class FalAPI(PollingChannelMixin):
         request_id = request_id_of(created)
         await self._bind_vendor(request_id, app=submit.app)
         final = await self.poll_until_done(request_id, self._poll_for(submit.app))
-        return await self._to_output(final, request_id=request_id, model_name=model_name, app=submit.app)
+        return await self._to_output(
+            final, request_id=request_id, model_name=model_name, app=submit.app, output=submit.output
+        )
 
     async def resume(self, request_id: str, *, model_name: str) -> NodeOutput:
         """已有 request_id,只做轮询和取结果。"""
         app = app_prefix(model_name)
         final = await self.poll_until_done(request_id, self._poll_for(app))
-        return await self._to_output(final, request_id=request_id, model_name=model_name, app=app)
+        output = "image" if model_name.startswith("banana") or model_name == "gpt-image-2" else "video"
+        return await self._to_output(final, request_id=request_id, model_name=model_name, app=app, output=output)
 
     async def cancel(self, request_id: str, *, app: str) -> None:
         """PUT 取消(仅排队中的任务有效;已开始跑的返回 400)。"""
@@ -103,7 +106,9 @@ class FalAPI(PollingChannelMixin):
             channel_name=_CHANNEL,
         )
 
-    async def _to_output(self, final: FalPoll, *, request_id: str, model_name: str, app: str) -> NodeOutput:
+    async def _to_output(
+        self, final: FalPoll, *, request_id: str, model_name: str, app: str, output: str = "video"
+    ) -> NodeOutput:
         if final.failed:
             raise ChannelError(
                 f"fal 任务失败:{final.message}",
@@ -118,7 +123,10 @@ class FalAPI(PollingChannelMixin):
             timeout=_RESULT_TIMEOUT,
             stage="result",
         )
-        url = video_url_of(result)
+        if output == "image":
+            url, mime = image_of(result)
+        else:
+            url, mime = video_url_of(result), "video/mp4"
         data = await download_with_network_retry(url, label="fal result")
         if not data:
             raise ChannelError(
@@ -134,11 +142,21 @@ class FalAPI(PollingChannelMixin):
             tokens = result["reference_tokens"]
             if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
                 usage["reference_tokens"] = tokens
+        if "duration" in result:
+            dur = result["duration"]
+            if isinstance(dur, (int, float)) and not isinstance(dur, bool):
+                usage["duration"] = dur
+        if "seed" in result:
+            seed = result["seed"]
+            if isinstance(seed, int) and not isinstance(seed, bool):
+                usage["seed"] = seed
+        if "draft_id" in result and isinstance(result["draft_id"], str):
+            usage["draft_id"] = result["draft_id"]
         return NodeOutput(
             status="ok",
-            output_type="video",
+            output_type=output,
             data=data,
-            mime_type="video/mp4",
+            mime_type=mime,
             usage=usage,
             raw={"request_id": request_id, "status": final.raw, "result": result},
             metadata={"task_id": request_id},

@@ -948,13 +948,15 @@ class Banana2Def(ImagePipelineModel):
 
     def channel_bindings(self) -> list[ChannelBinding]:
         from ...core.channels.registry import channel_registry
+        from ...utils.backends.fal.channel import fal_binding
         from ...utils.backends.gemini_image.channel import GeminiImageChannel
 
         bindings = [
             ChannelBinding(
                 GeminiImageChannel(logical_model=self.name),
                 vendor_model=self.node.backend_model,
-            )
+            ),
+            fal_binding(self.name),
         ]
         bindings.extend(channel_registry.bindings_for(self.name))
         return bindings
@@ -1074,13 +1076,15 @@ class Banana21Def(ImagePipelineModel):
 
     def channel_bindings(self) -> list[ChannelBinding]:
         from ...core.channels.registry import channel_registry
+        from ...utils.backends.fal.channel import fal_binding
         from ...utils.backends.gemini_image.channel import GeminiImageChannel
 
         bindings = [
             ChannelBinding(
                 GeminiImageChannel(logical_model=self.name),
                 vendor_model=self.node.backend_model,
-            )
+            ),
+            fal_binding(self.name),
         ]
         bindings.extend(channel_registry.bindings_for(self.name))
         return bindings
@@ -1195,13 +1199,15 @@ class Banana2LiteDef(ImagePipelineModel):
 
     def channel_bindings(self) -> list[ChannelBinding]:
         from ...core.channels.registry import channel_registry
+        from ...utils.backends.fal.channel import fal_binding
         from ...utils.backends.gemini_image.channel import GeminiImageChannel
 
         bindings = [
             ChannelBinding(
                 GeminiImageChannel(logical_model=self.name),
                 vendor_model=self.node.backend_model,
-            )
+            ),
+            fal_binding(self.name),
         ]
         bindings.extend(channel_registry.bindings_for(self.name))
         return bindings
@@ -1298,13 +1304,15 @@ class Banana1Def(ImagePipelineModel):
 
     def channel_bindings(self) -> list[ChannelBinding]:
         from ...core.channels.registry import channel_registry
+        from ...utils.backends.fal.channel import fal_binding
         from ...utils.backends.gemini_image.channel import GeminiImageChannel
 
         bindings = [
             ChannelBinding(
                 GeminiImageChannel(logical_model=self.name),
                 vendor_model=self.node.backend_model,
-            )
+            ),
+            fal_binding(self.name),
         ]
         bindings.extend(channel_registry.bindings_for(self.name))
         return bindings
@@ -1420,8 +1428,9 @@ class BananaProDef(ImagePipelineModel):
         )
 
     def channel_bindings(self) -> list[ChannelBinding]:
-        """Gemini Pro 优先 + 内置 gpt-image-2 适配 + 外部注入通道。"""
+        """Gemini Pro 优先 + 内置 gpt-image-2 适配 + fal + 外部注入通道。"""
         from ...core.channels.registry import channel_registry
+        from ...utils.backends.fal.channel import fal_binding
         from ...utils.backends.gemini_image.channel import GeminiImageChannel
 
         bindings = [
@@ -1430,6 +1439,7 @@ class BananaProDef(ImagePipelineModel):
                 vendor_model=self.GEMINI_VENDOR_MODEL,
             ),
             ChannelBinding(channel=self._channel, vendor_model=self.node.backend_model),
+            fal_binding("banana_pro"),
         ]
         bindings.extend(channel_registry.bindings_for(self.name))
         return bindings
@@ -1522,6 +1532,13 @@ class GptImage2Def(GptImageFamilyModel):
             ),
             priority=76,
         )
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...utils.backends.fal.channel import fal_binding
+
+        bindings = super().channel_bindings()
+        bindings.insert(1, fal_binding("gpt-image-2"))
+        return bindings
 
 
 class GptImage25SunburstDef(GptImageFamilyModel):

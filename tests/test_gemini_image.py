@@ -237,13 +237,13 @@ def test_vertex_toggle_keeps_the_same_model_id(monkeypatch):
 
 
 def test_banana2_served_by_gemini_only():
-    # Nano Banana 2 仍是 Gemini 3.1 Flash,不换成 2.1。
+    # Nano Banana 2 仍是 Gemini 3.1 Flash,不换成 2.1;fal 作为第二供应商兜底。
     channel_registry.clear()
     banana2 = Banana2Def()
     assert banana2.name == "banana2"
     assert banana2.display_name == "Nano Banana 2"
     names = [b.channel.name for b in banana2.channel_bindings()]
-    assert names == ["gemini"]
+    assert names == ["gemini", "fal"]
     assert "gpt-image-2" not in names
     assert banana2.channel_bindings()[0].vendor_model == "gemini-3.1-flash-image"
     assert banana2.node.backend == "gemini-image"
@@ -266,7 +266,7 @@ def test_banana21_served_by_gemini_only():
     assert model.name == "banana2.1"
     assert model.display_name == "Nano Banana 2.1"
     names = [b.channel.name for b in model.channel_bindings()]
-    assert names == ["gemini"]
+    assert names == ["gemini", "fal"]
     assert model.channel_bindings()[0].vendor_model == "gemini-nano-banana-2.1"
     assert model.node.backend == "gemini-image"
     schema = model.input_schema()
@@ -290,7 +290,7 @@ def test_banana2_lite_served_by_gemini_only():
     assert model.name == "banana2.lite"
     assert model.display_name == "Nano Banana 2 Lite"
     names = [b.channel.name for b in model.channel_bindings()]
-    assert names == ["gemini"]
+    assert names == ["gemini", "fal"]
     assert model.channel_bindings()[0].vendor_model == "gemini-3.1-flash-lite-image"
     schema = model.input_schema()
     assert schema["image_size"].values == ["1K"]
@@ -365,7 +365,7 @@ def test_banana1_served_by_gemini_first_gen():
     channel_registry.clear()
     banana1 = Banana1Def()
     names = [b.channel.name for b in banana1.channel_bindings()]
-    assert names == ["gemini"]
+    assert names == ["gemini", "fal"]
     assert banana1.channel_bindings()[0].vendor_model == "gemini-2.5-flash-image"
     assert banana1.execution_mode == "sync"
     schema = banana1.input_schema()

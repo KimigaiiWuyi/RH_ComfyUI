@@ -14,7 +14,7 @@ from .api import FalAPI
 from .catalog import app_prefix
 from .payload import prepare
 from ...audit_key import mask_api_key
-from ....core.base.errors import ChannelError, GenerationError
+from ....core.base.errors import ChannelError, GenerationError, ValidationError
 from ....utils.core.types import NodeOutput
 from ....core.schema.request import GenerationRequest
 from ....core.channels.channel import ChannelBinding, ProviderChannel
@@ -66,7 +66,18 @@ class FalChannel(ProviderChannel):
         return True
 
     async def invoke(self, *, request: GenerationRequest, **_: object) -> NodeOutput:
-        submit = prepare(self._model_name, request)
+        try:
+            submit = prepare(self._model_name, request)
+        except ValidationError as exc:
+            # fal 表达不了的参数/形态:本通道不支持,换下一通道,不计健康
+            raise ChannelError(
+                f"fal 通道不支持:{exc}",
+                kind=FailureKind.CAPABILITY,
+                phase=Phase.BEFORE_SEND,
+                retryable=True,
+                channel=self.name,
+                user_message=str(exc),
+            ) from exc
         self._runtime.inflight += 1
         try:
             return await self._runtime.api.run(submit, model_name=self._model_name)
@@ -90,4 +101,9 @@ def bindings_for(model_name: str) -> list[ChannelBinding]:
     ] + channel_registry.bindings_for(model_name)
 
 
-__all__ = ["FalChannel", "FalRuntime", "bindings_for"]
+def fal_binding(model_name: str) -> ChannelBinding:
+    """给已有定义模型追加 fal 通道的正交绑定(模型×供应商)。"""
+    return ChannelBinding(FalChannel(model_name), vendor_model=app_prefix(model_name))
+
+
+__all__ = ["FalChannel", "FalRuntime", "bindings_for", "fal_binding"]

@@ -45,10 +45,11 @@ class FalSubmit:
     app: str  # 状态/结果/取消共享的 owner/app 前缀
     body: dict[str, JsonValue]
     prompt: str
-    usd: Decimal  # 按刊例价算出的美元成本,供积分换算
-    mode: str  # text_to_video / image_to_video / keyframes_to_video / reference_to_video
+    usd: Decimal  # 按刊例价算出的美元成本,供积分换算;共享模型由模型侧计价,置 0
+    mode: str  # text_to_video / image_to_video / keyframes_to_video / reference_to_video / edit
     # reference 模式按 1024 token/文件估算的量;settle 用上游实报 reference_tokens 替换
     ref_tokens_est: int = 0
+    output: str = "video"  # video / image:结果体取 video.url 还是 images[0].url
 
 
 def _label(model_name: str) -> str:
@@ -197,6 +198,18 @@ def prepare(model_name: str, request: GenerationRequest, *, for_estimate: bool =
         from .payload_h3 import prepare_h3
 
         return prepare_h3(model_name, request, for_estimate=for_estimate)
+    if model_name == "minimax_h3":
+        from .payload_minimax_h3 import prepare_minimax_h3
+
+        return prepare_minimax_h3(model_name, request, for_estimate=for_estimate)
+    if model_name in ("seedance2", "seedance2.5"):
+        from .payload_seedance import prepare_seedance
+
+        return prepare_seedance(model_name, request, for_estimate=for_estimate)
+    if model_name == "gpt-image-2" or model_name.startswith("banana"):
+        from .payload_image import prepare_image
+
+        return prepare_image(model_name, request, for_estimate=for_estimate)
     return _prepare_flux3max(model_name, request, for_estimate=for_estimate)
 
 

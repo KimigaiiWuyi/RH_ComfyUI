@@ -11,7 +11,19 @@ FAL_VIDEO_MODELS: list[tuple[str, str]] = [
     ("h3max", "MiniMax H3 Max"),
     ("h3maxturbo", "MiniMax H3 Max Turbo"),
 ]
-FAL_MODEL_NAMES: list[str] = [name for name, _ in FAL_VIDEO_MODELS]
+# fal 也能承载这些已定义模型(模型×供应商正交;模型类在 channel_bindings 里挂 FalChannel)
+FAL_SHARED_MODELS: list[str] = [
+    "minimax_h3",
+    "seedance2",
+    "seedance2.5",
+    "banana1",
+    "banana2",
+    "banana2.1",
+    "banana2.lite",
+    "banana_pro",
+    "gpt-image-2",
+]
+FAL_MODEL_NAMES: list[str] = [name for name, _ in FAL_VIDEO_MODELS] + FAL_SHARED_MODELS
 
 DEFAULT_QUEUE_ENDPOINT = "https://queue.fal.run"
 
@@ -21,6 +33,15 @@ APP_PREFIXES: dict[str, str] = {
     "flux3max": "blackforestlabs/flux-3-max",
     "h3max": "minimax/h3-max",
     "h3maxturbo": "minimax/h3-max-turbo",
+    "minimax_h3": "minimax/h3",
+    "seedance2": "bytedance/seedance-2.0",
+    "seedance2.5": "bytedance/seedance-2.5",
+    "banana1": "fal-ai/nano-banana",
+    "banana2": "fal-ai/nano-banana-2",
+    "banana2.1": "google/nano-banana-2.1",
+    "banana2.lite": "google/nano-banana-2-lite",
+    "banana_pro": "fal-ai/nano-banana-pro",
+    "gpt-image-2": "openai/gpt-image-2",
 }
 
 
@@ -95,3 +116,82 @@ H3_MAX_REFERENCE_IMAGES = 9
 H3_MAX_REFERENCE_VIDEOS = 3
 H3_MAX_REFERENCE_AUDIOS = 3
 H3_MAX_REFERENCE_FILES = 12
+
+# ── 共享模型(MiniMax H3 官方型 / Seedance / 图像家族)的 fal 端点 ──
+
+# minimax/h3:与普通 H3 Max 同构但无关键帧位;resolution 是 480P/768P/2K/4K
+MMH3_ENDPOINTS: dict[str, str] = {
+    "text_to_video": "minimax/h3/text-to-video",
+    "image_to_video": "minimax/h3/image-to-video",
+    "reference_to_video": "minimax/h3/reference-to-video",
+}
+MMH3_RATIOS = ("21:9", "16:9", "4:3", "1:1", "3:4", "9:16")
+MMH3_EXPANSION_MODES = ("disabled", "fast", "balanced", "quality")
+MMH3_MIN_DURATION = 5  # fal 侧整数秒 5~15(插件模型自身允许 4,4s 走不了 fal)
+MMH3_MAX_DURATION = 15
+MMH3_MAX_REFERENCE_IMAGES = 9
+MMH3_MAX_REFERENCE_VIDEOS = 3
+MMH3_MAX_REFERENCE_AUDIOS = 3
+MMH3_MAX_REFERENCE_FILES = 12
+
+# Seedance 2.0 / 2.5:t2v / i2v / reference 三端点;duration 枚举是字符串 "4".."N" 或 "auto"
+SEEDANCE_FAL_ENDPOINTS: dict[str, dict[str, str]] = {
+    "seedance2": {
+        "text_to_video": "bytedance/seedance-2.0/text-to-video",
+        "image_to_video": "bytedance/seedance-2.0/image-to-video",
+        "reference_to_video": "bytedance/seedance-2.0/reference-to-video",
+    },
+    "seedance2.5": {
+        "text_to_video": "bytedance/seedance-2.5/text-to-video",
+        "image_to_video": "bytedance/seedance-2.5/image-to-video",
+        "reference_to_video": "bytedance/seedance-2.5/reference-to-video",
+    },
+}
+SEEDANCE_FAL_RATIOS = ("auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16")
+SEEDANCE_FAL_RESOLUTIONS: dict[str, tuple[str, ...]] = {
+    "seedance2": ("480p", "720p", "1080p", "4k"),
+    "seedance2.5": ("480p", "720p", "1080p"),
+}
+SEEDANCE_FAL_DURATION: dict[str, tuple[int, int]] = {
+    "seedance2": (4, 15),
+    "seedance2.5": (4, 30),
+}
+SEEDANCE_FAL_REF_CAPS: dict[str, tuple[int, int, int, int]] = {
+    # 模型 → (图, 视频, 音频, 总文件)
+    "seedance2": (9, 3, 3, 12),
+    "seedance2.5": (30, 10, 10, 50),
+}
+# 2.5 的 ref 端点支持 task 任务类型(auto/reference/editing/extension)
+SEEDANCE25_TASK_MODES = ("auto", "reference", "editing", "extension")
+
+# banana / gpt-image:文生 + /edit(传图即编辑);fal 无 web_search 等扩展参数映射
+BANANA_FAL_ENDPOINTS: dict[str, str] = {
+    "banana1": "fal-ai/nano-banana",
+    "banana2": "fal-ai/nano-banana-2",
+    "banana2.1": "google/nano-banana-2.1",
+    "banana2.lite": "google/nano-banana-2-lite",
+    "banana_pro": "fal-ai/nano-banana-pro",
+}
+# fal 收的分辨率档位(插件 image_size → fal resolution)
+BANANA_FAL_RESOLUTIONS: dict[str, dict[str, str] | None] = {
+    "banana1": None,  # 一代无尺寸档
+    "banana2": {"512": "0.5K", "1K": "1K", "2K": "2K", "4K": "4K"},
+    "banana2.1": {"1K": "1K", "2K": "2K", "4K": "4K"},
+    "banana2.lite": {"1K": "1K"},
+    "banana_pro": {"1K": "1K", "2K": "2K", "4K": "4K"},
+}
+BANANA_FAL_THINKING: dict[str, tuple[str, ...] | None] = {
+    "banana1": None,
+    "banana2": ("minimal", "high"),
+    "banana2.1": ("minimal", "medium", "high"),
+    "banana2.lite": ("minimal", "high"),
+    "banana_pro": None,  # Pro 只有 high 一档,不传
+}
+GPT_IMAGE_FAL_ENDPOINT = "openai/gpt-image-2"
+# fal gpt-image-2 显式 {width,height} 约束:16 倍数、最长边 3840、比例 ≤3:1、像素 ∈ [655360, 8294400]
+GPT_IMAGE_FAL_MAX_EDGE = 3840
+GPT_IMAGE_FAL_TIER_PIXELS: dict[str, int] = {
+    "1K": 1024 * 1024,
+    "2K": 2048 * 2048,
+    "4K": 3840 * 2160,
+}

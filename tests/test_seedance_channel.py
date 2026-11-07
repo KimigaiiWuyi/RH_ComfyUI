@@ -89,12 +89,13 @@ def _req() -> GenerationRequest:
 def test_builtin_bindings_ark_and_runninghub():
     channel_registry.clear()
     names = [b.channel.name for b in Seedance2Def().channel_bindings()]
-    assert names == ["ark", "runninghub"]  # 二者都在 backend_models 中挂名
+    assert names == ["ark", "runninghub", "fal"]  # 二者都在 backend_models 中挂名;fal 兜底
 
     # ark 携带 vendor model;runninghub 端点即模型 → vendor_model 为 None
     bindings = {b.channel.name: b for b in Seedance2Def().channel_bindings()}
     assert bindings["ark"].vendor_model == "doubao-seedance-2-0-260128"
     assert bindings["runninghub"].vendor_model is None
+    assert bindings["fal"].vendor_model == "bytedance/seedance-2.0"
 
 
 def test_mini_has_ark_builtin_channel():
@@ -113,7 +114,7 @@ def test_external_channel_injected_and_participates():
     channel_registry.register_binding("seedance2_mini", gw, vendor_model="doubao-seedance-2.0-mini")
 
     names = [b.channel.name for b in Seedance2Def().channel_bindings()]
-    assert names == ["ark", "runninghub", "gateway"]
+    assert names == ["ark", "runninghub", "gateway", "fal"]
 
     mini_names = [b.channel.name for b in Seedance2MiniDef().channel_bindings()]
     assert "gateway" in mini_names
@@ -223,12 +224,12 @@ def test_bridge_model_accepts_external_channel():
     from RH_ComfyUI.models.image.defs import GptImage2Def
 
     model = GptImage2Def()
-    assert [b.channel.name for b in model.channel_bindings()] == ["gpt-image-2"]
+    assert [b.channel.name for b in model.channel_bindings()] == ["gpt-image-2", "fal"]
 
     azure = _make_channel(name="azure")
     channel_registry.register_binding("gpt-image-2", azure, vendor_model="my-deploy")
     names = [b.channel.name for b in model.channel_bindings()]
-    assert names == ["gpt-image-2", "azure"]
+    assert names == ["gpt-image-2", "fal", "azure"]
 
 
 # ── 消费审计:记录供应商 key 前5*****后5 ──

@@ -785,7 +785,7 @@ async def _resume_fal(
     meta["channel"] = "fal"
     meta["resumed"] = True
     return GenerationResult(
-        kind="video",
+        kind="image" if output.output_type == "image" else "video",
         model=model,
         backend="fal",
         data=output.data,
