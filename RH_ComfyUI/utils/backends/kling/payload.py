@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 import base64
 from decimal import Decimal
 from dataclasses import dataclass
@@ -320,6 +321,19 @@ def _legacy_extra(request: GenerationRequest, label: str) -> dict[str, JsonValue
     return extra
 
 
+_MENTION_RE = re.compile(r"\[@参考?(图片|视频)(\d+)\]")
+
+
+def _normalize_media_mentions(text: str) -> str:
+    """[@参考图片N]/[@参考视频N] 引用标记转成上游认的 @image_N/@video_N 字面量。"""
+
+    def _sub(m: re.Match[str]) -> str:
+        kind = "image" if m.group(1) == "图片" else "video"
+        return f"@{kind}_{m.group(2)}"
+
+    return _MENTION_RE.sub(_sub, text)
+
+
 def _prompt_item(text: str) -> dict[str, JsonValue]:
     return {"type": "prompt", "text": text}
 
@@ -365,6 +379,8 @@ def _prepare_video(model: str, request: GenerationRequest, *, for_estimate: bool
         return _video_40(request, prompt, label, flash=True)
     limit = 3072 if model in {"kling-3.0-turbo", "kling-3.0"} else 2500
     prompt = _prompt(request, limit=limit, required=not for_estimate, label=label)
+    if model in {"kling-3.0", "kling-o1"}:
+        prompt = _normalize_media_mentions(prompt)
     if model == "kling-3.0-turbo":
         return _video_turbo(request, prompt, label)
     if model == "kling-3.0":
@@ -425,7 +441,7 @@ def _prompt_40(request: GenerationRequest, *, required: bool, label: str) -> str
     others = len(text) - english
     if english / 26000 + others / 11000 > 1:
         raise ValidationError(f"{label} 提示词超长(英文 ≤26000 字符,非英文 ≤11000 字符)")
-    return text
+    return _normalize_media_mentions(text)
 
 
 _FRAME_ROLE_ALIASES: dict[str, str] = {
@@ -606,6 +622,10 @@ def _video_40_i2v(
     resolution: str,
     duration: int,
 ) -> KlingSubmit:
+    # 官方:首帧/中间帧/尾帧合计 ≤ 时长+1;refer 不占关键帧名额(有 refer 已走 Omni)
+    keyframes = sum(1 for role in roles if role != "refer_image")
+    if keyframes > duration + 1:
+        raise ValidationError(f"{label} 的关键帧最多 时长+1 帧(当前 {keyframes} 帧,{duration} 秒)")
     contents: list[JsonValue] = [_prompt_item(prompt)]
     for index, (blob, kind) in enumerate(zip(blobs, roles), start=1):
         contents.append(_frame_item(kind, blob, index))

@@ -58,7 +58,7 @@ def test_schema_ports_and_limits():
     assert node.inputs["prompt"].required is False
     assert node.inputs["draft"].default is False
 
-    # 官方 camera_fixed 仅 1.x;2.5 暴露会让前端展示「固定镜头」并触发 400
+    # 官方 camera_fixed 仅 1.x;2.5 暴露会让调用方展示「固定镜头」并触发 400
     assert "camera_fixed" not in node.inputs
 
     assert node.inputs["images"].max_items == 30

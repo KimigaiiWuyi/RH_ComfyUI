@@ -64,12 +64,12 @@ class _GatewayTerminalError(Protocol):
 
 
 def _loaded_gateway_error_types() -> list[type[BaseException]]:
-    """网关类只从已加载模块取，避免 RH 单测硬导入 aigc 插件。"""
+    """网关类只从已加载模块取，避免单测硬导入外部插件。"""
     import sys
 
     found: list[type[BaseException]] = []
     for name, module in sys.modules.items():
-        if name != "aigc_system.seedance_gateway.unified" and not name.endswith(".seedance_gateway.unified"):
+        if not name.endswith(".seedance_gateway.unified"):
             continue
         if module is None or "GatewayUnifiedError" not in module.__dict__:
             continue

@@ -1,6 +1,6 @@
 """回归: seedream5_pro 的 estimate_cost 必须按 image_size 区分 1K (30 积分) / 2K (60 积分)。
 
-历史 bug: estimate_cost 从 request.params.get("size_mode") 取参,而前端通用
+历史 bug: estimate_cost 从 request.params.get("size_mode") 取参,而调用方通用
 estimate 接口发的是 image_size,key 不一致导致永远走默认 2K → 60 积分。
 """
 

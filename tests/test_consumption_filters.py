@@ -46,7 +46,7 @@ def test_append_agg_filters_includes_status_and_user():
     conds: list = []
     RHComfyuiTaskRecord._append_agg_filters(
         conds,
-        bot_id="canvas",
+        bot_id="test-bot",
         user_id="42",
         status="ok",
         task_type="image",

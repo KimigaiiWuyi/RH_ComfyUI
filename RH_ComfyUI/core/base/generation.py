@@ -280,7 +280,7 @@ class AIGCGenerationBase(ABC):
     def point_range(self) -> tuple[int, int]:
         """该模型单次请求的积分范围(min, max)。
 
-        供前端在模型选择列表中展示"最低~最高积分"用。
+        供调用方在模型选择列表中展示"最低~最高积分"用。
         默认返回(point_cost, point_cost)(静态计费)。
         动态计费的模型覆盖本方法,返回基于参数范围的估算最小值与最大值。
         返回值必须是纯函数:不做 IO,不抛业务异常。

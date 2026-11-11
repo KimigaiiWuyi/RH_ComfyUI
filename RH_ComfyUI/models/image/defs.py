@@ -1351,7 +1351,7 @@ class BananaProDef(ImagePipelineModel):
 
     ⚠️ 注意:此模型 schema 中**没有** quality 字段。官方计费曲线不区分 quality
     档位 —— 暴露会让用户在切换 quality 时看到积分不变,造成"积分 bug"误判。
-    前端要切 quality 请用 gpt-image-2。
+    调用方要切 quality 请用 gpt-image-2。
     """
 
     # 原生 Gemini 侧的 vendor model id(与 banana2 的 flash 代际区分)
@@ -1415,7 +1415,7 @@ class BananaProDef(ImagePipelineModel):
                     description="输出分辨率档位,与宽高比组合映射为 size 参数",
                 ),
                 # 注:故意不暴露 quality 字段 —— 官方计费曲线不区分 quality 档位,
-                # 暴露会让前端误以为切 quality 会影响积分(实际不影响)。
+                # 暴露会让调用方误以为切 quality 会影响积分(实际不影响)。
             },
             outputs={
                 "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
@@ -1783,7 +1783,7 @@ class MossImageDef(ImagePipelineModel):
                 "\n"
                 f"rh_app:RunningHub AI 应用 {MOSS_IMAGE_APP_ID},节点与工作流一致。"
                 "\n"
-                "优势:提示词直接出图,画布按像素宽高控制,默认 1200×1600。"
+                "优势:提示词直接出图,尺寸按像素宽高控制,默认 1200×1600。"
                 "\n"
                 "适用场景:从零生成图片,不需要参考图。"
                 "\n"

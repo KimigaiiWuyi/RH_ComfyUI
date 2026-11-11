@@ -101,14 +101,18 @@ class _KlingVideo(VideoPipelineModel):
                 type=PortType.ENUM,
                 default="feature",
                 values=["feature", "base"],
+                value_titles={"feature": "特征参考", "base": "待编辑视频"},
                 title="视频角色",
                 description=cls._video_role_help,
             )
         if cls._name in {"kling-4.0", "kling-4.0-flash"}:
+            role_titles = {"first": "首帧", "middle": "中间帧", "last": "尾帧", "refer": "参考图"}
             inputs["frame_roles"] = PortSpec(
                 type=PortType.LIST,
                 item_type=PortType.TEXT,
                 max_items=10,
+                values=(["first", "middle", "last", "refer"] if cls._name == "kling-4.0" else ["first", "refer"]),
+                value_titles=role_titles,
                 title="关键帧角色",
                 description=(
                     "与参考图片一一对应:first/middle/last/refer。"

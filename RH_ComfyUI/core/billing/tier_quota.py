@@ -22,9 +22,6 @@ from dataclasses import dataclass
 
 from ...rh_config.comfyui_config import PLUGIN_CONFIG
 
-# 常用 HTTP/业务入口 bot_id 约定值(任意 bot_id 均可;仅作文档化常量)
-CANVAS_BOT_ID: Final[str] = "canvas"
-
 TIER_KEYS: Final[tuple[str, ...]] = (
     "free",
     "basic",
@@ -199,7 +196,7 @@ def next_5h_refresh_at(timer_started_at_5h: int) -> int:
     """5h 下次补满时刻。
 
     ``timer_started_at_5h == 0`` 表示**尚未开始计时**(满额闲置),返回 0;
-    前端应展示「使用后开始计时」而非倒计时。
+    调用方应展示「使用后开始计时」而非倒计时。
     """
     base = int(timer_started_at_5h or 0)
     if base <= 0:
@@ -245,7 +242,6 @@ def needs_week_refresh(refreshed_at_week: int, now: Optional[int] = None) -> boo
 
 
 __all__ = [
-    "CANVAS_BOT_ID",
     "TIER_KEYS",
     "UNLIMITED_TIER",
     "TierQuotas",

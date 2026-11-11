@@ -122,7 +122,7 @@ def test_minimax_h3_declares_media_ports():
     [Seedance2Def, Seedance2FastDef, Seedance2MiniDef, Seedance25Def],
 )
 def test_seedance2_family_hides_camera_fixed(cls):
-    """官方 2.x 不支持 camera_fixed;catalog 暴露会让前端出现「固定镜头」。"""
+    """官方 2.x 不支持 camera_fixed;catalog 暴露会让调用方出现「固定镜头」。"""
     assert "camera_fixed" not in cls.node_def().inputs
 
 

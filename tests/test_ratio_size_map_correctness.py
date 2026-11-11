@@ -86,7 +86,7 @@ def test_user_case_2_3_2k_vs_4k():
 
 
 def test_all_schema_ratios_have_all_tiers():
-    """每个 ratio 必须有 1K/2K/4K 三个 tier(前端 schema 按 tier 渲染)。"""
+    """每个 ratio 必须有 1K/2K/4K 三个 tier(调用方 schema 按 tier 渲染)。"""
     for ratio, tiers in _RATIO_SIZE_MAP.items():
         assert "1K" in tiers, f"{ratio} 缺 1K 档"
         assert "2K" in tiers, f"{ratio} 缺 2K 档"

@@ -511,6 +511,40 @@ def test_v40_keyframes_and_frame_roles() -> None:
         prepare("kling-4.0", _video(images=[_PNG, _PNG], params={"frame_roles": ["last", "first"]}))
     with pytest.raises(ValidationError, match="frame_roles"):
         prepare("kling-4.0", _video(params={"frame_roles": ["first"]}))
+    # 官方:关键帧合计 ≤ 时长+1。4 帧/3 秒踩线,5 帧/3 秒越界
+    ok = prepare("kling-4.0", _video(images=[_PNG] * 4, duration=3))
+    assert ok.path == "/image-to-video/kling-4.0"
+    with pytest.raises(ValidationError, match="时长\\+1"):
+        prepare("kling-4.0", _video(images=[_PNG] * 5, duration=3))
+
+
+def test_v40_frame_roles_schema_values() -> None:
+    nodes = {cls._name: cls.node_def() for cls in KLING_VIDEO_MODELS}
+    roles = nodes["kling-4.0"].inputs["frame_roles"]
+    assert roles.values == ["first", "middle", "last", "refer"]
+    flash = nodes["kling-4.0-flash"].inputs["frame_roles"]
+    assert flash.values == ["first", "refer"]
+    assert "frame_roles" not in nodes["kling-3.0"].inputs
+
+
+def test_v40_normalizes_media_mentions() -> None:
+    omni = prepare(
+        "kling-4.0",
+        _video(
+            "编辑 @video_1,把人物换成 [@参考图片1] 里的",
+            images=[_PNG],
+            video_refs=[video_ref(url="https://cdn.example/a.mp4")],
+            params={"video_role": "base", "frame_roles": ["refer"], "input_video_duration": 8},
+        ),
+    )
+    contents = _items(omni.body["contents"])
+    assert contents[0]["text"] == "编辑 @video_1,把人物换成 @image_1 里的"
+
+    text = prepare("kling-4.0", _video("参考 [@参考图片2] 和 [@参考视频3] 生成", duration=5))
+    assert text.body["prompt"] == "参考 @image_2 和 @video_3 生成"
+
+    old = prepare("kling-3.0", _video("看看 [@参考视频1]", duration=5))
+    assert old.body["prompt"] == "看看 @video_1"
 
 
 def test_v40_omni_assets_and_billing() -> None:

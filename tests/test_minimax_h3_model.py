@@ -691,8 +691,8 @@ def test_media_ref_cache_key_same_bytes_not_id():
 
 
 def test_media_ref_cache_key_canonicalizes_url_path():
-    a = MediaRef(kind=MediaKind.VIDEO, url="https://host.example/api/canvas-backend/assets/abc/raw?sig=1")
-    b = MediaRef(kind=MediaKind.VIDEO, url="/api/canvas-backend/assets/abc/raw")
+    a = MediaRef(kind=MediaKind.VIDEO, url="https://host.example/api/media/assets/abc/raw?sig=1")
+    b = MediaRef(kind=MediaKind.VIDEO, url="/api/media/assets/abc/raw")
     assert media_ref_cache_key(a) == media_ref_cache_key(b)
 
 

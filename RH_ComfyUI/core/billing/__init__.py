@@ -19,7 +19,6 @@ from .points_api import (
 )
 from .tier_quota import (
     TIER_KEYS,
-    CANVAS_BOT_ID,
     UNLIMITED_TIER,
     TierQuotas,
     get_tier_quotas,
@@ -40,7 +39,6 @@ __all__ = [
     "settle_model_cost",
     "DEFAULT_SEEDANCE_RECONCILE_MODELS",
     "reconcile_seedance_usage_billing",
-    "CANVAS_BOT_ID",
     "TIER_KEYS",
     "UNLIMITED_TIER",
     "TierQuotas",

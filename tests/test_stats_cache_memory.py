@@ -10,11 +10,11 @@ from RH_ComfyUI.utils.database import stats_cache
 
 def test_invalidate_keeps_memory_payload() -> None:
     stats_cache._L1.clear()
-    key = stats_cache.make_cache_key("summary", bot_id="canvas")
+    key = stats_cache.make_cache_key("summary", bot_id="test-bot")
     stats_cache._l1_put(key, {"total": 9, "success": 1}, dirty=False)
 
     async def _go() -> None:
-        await stats_cache.invalidate_stats_cache("canvas")
+        await stats_cache.invalidate_stats_cache("test-bot")
         hit = await stats_cache.cache_get(key)
         assert hit == {"total": 9, "success": 1}
         entry = stats_cache._l1_get(key)
@@ -29,26 +29,26 @@ def test_cache_key_stable_for_sliding_days() -> None:
     """days=N 窗口不把 now() 写进键。"""
     t0 = datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc)
     t1 = t0 + timedelta(seconds=1)
-    a = stats_cache.make_cache_key("summary", bot_id="canvas", start_time=t0, end_time=t1, days=14)
+    a = stats_cache.make_cache_key("summary", bot_id="test-bot", start_time=t0, end_time=t1, days=14)
     b = stats_cache.make_cache_key(
         "summary",
-        bot_id="canvas",
+        bot_id="test-bot",
         start_time=t0 + timedelta(minutes=5),
         end_time=t1 + timedelta(minutes=5),
         days=14,
     )
     assert a == b
-    c = stats_cache.make_cache_key("summary", bot_id="canvas", days=30)
+    c = stats_cache.make_cache_key("summary", bot_id="test-bot", days=30)
     assert c != a
 
 
 def test_cache_key_all_history_ignores_clock() -> None:
-    a = stats_cache.make_cache_key("summary", bot_id="canvas")
-    b = stats_cache.make_cache_key("summary", bot_id="canvas", start_time=None, end_time=None, days=None)
+    a = stats_cache.make_cache_key("summary", bot_id="test-bot")
+    b = stats_cache.make_cache_key("summary", bot_id="test-bot", start_time=None, end_time=None, days=None)
     assert a == b
     custom = stats_cache.make_cache_key(
         "summary",
-        bot_id="canvas",
+        bot_id="test-bot",
         start_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
         end_time=datetime(2026, 2, 1, tzinfo=timezone.utc),
     )
@@ -57,7 +57,7 @@ def test_cache_key_all_history_ignores_clock() -> None:
 
 def test_needs_refresh_coalesces_dirty() -> None:
     stats_cache._L1.clear()
-    key = stats_cache.make_cache_key("summary", bot_id="canvas")
+    key = stats_cache.make_cache_key("summary", bot_id="test-bot")
     stats_cache._l1_put(key, {"total": 1}, dirty=True)
     entry = stats_cache._l1_get(key)
     assert entry is not None

@@ -838,7 +838,7 @@ async def build_record_detail_payload(record_id: int) -> Optional[dict[str, Any]
     """单条消费记录详情(含 raw_response_json 等重字段)。
 
     列表接口刻意不返回 raw_response_json(最大 64KB,随分页批量返回会拖垮
-    响应体积);前端点击行展开时懒加载走这里。记录不存在返回 None。
+    响应体积);调用方点击行展开时懒加载走这里。记录不存在返回 None。
     """
     record = await RHComfyuiTaskRecord.get_by_record_id(record_id)
     if record is None:

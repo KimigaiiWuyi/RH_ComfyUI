@@ -601,7 +601,7 @@ def _to_media_ref(d: dict[str, Any], kind: MediaKind) -> MediaRef:
 def _to_content_item(d: dict[str, Any]) -> ContentItem:
     """dict → ContentItem。
 
-    前端/调用方约定 type 为 image_url|video_url|audio_url|text|draft_task。
+    调用方约定 type 为 image_url|video_url|audio_url|text|draft_task。
     若 type 与真实媒体不符(常见:视频被标成 image_url),以 mime/文件头/扩展名纠正,
     保证下游 Seedance content[] 使用正确的 video_url / audio_url 键。
     """

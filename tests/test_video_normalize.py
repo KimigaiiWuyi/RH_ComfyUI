@@ -96,7 +96,7 @@ def _img_item() -> ContentItem:
 
 
 def test_shape_of_text_only_ordered_content_is_not_multimodal():
-    """纯文本 ordered_content(前端对任意 prompt 都会产出)不应把形态判成 multimodal。
+    """纯文本 ordered_content(调用方对任意 prompt 都会产出)不应把形态判成 multimodal。
 
     回归:kling_v3 这类只支持 T2V/I2V/首尾帧的模型,收到"1 张连线图 + 纯文本
     ordered_content"时,曾被误判为 multimodal 而直接报错;应按真实图片数判为 I2V。

@@ -100,9 +100,9 @@ class IndexTTS2Def(IndexTTS2Model):
         """积分范围:最小(空文本) ~ 最大(5000 字符常见上限)。
 
         历史 bug:max 用 300 字符(900 bytes)算出的积分还是 1,与 min=1 相同,
-        前端用 min<max 判断是否调 estimate API,导致 IndexTTS2 被当成"固定积分"
+        调用方用 min<max 判断是否调 estimate API,导致 IndexTTS2 被当成"固定积分"
         不调 estimate,实际生成长文本时积分远超显示。改成 5000 字符(15000 bytes)
-        算出 8 积分,触发前端动态调用 estimate。
+        算出 8 积分,触发调用方动态调用 estimate。
 
         上限取 5000 而非真实模型上限,是为了 UI 上展示"常见长度的最高积分"
         而非理论上限(避免误导用户以为输入多少字都是 8 积分)。
@@ -281,7 +281,7 @@ class MimoTtsDef(SpeechPipelineModel):
     def point_range(self) -> tuple[int, int]:
         """积分范围:最小(空文本) ~ 最大(5000 字符常见上限)。
 
-        历史 bug:同 IndexTTS2 —— max 用 300 字符算出仍是 1 积分,前端误判为固定积分。
+        历史 bug:同 IndexTTS2 —— max 用 300 字符算出仍是 1 积分,调用方误判为固定积分。
         改为 5000 字符(15000 bytes × 600 积分/M bytes = 9 积分)触发动态 estimate。
         """
         return (

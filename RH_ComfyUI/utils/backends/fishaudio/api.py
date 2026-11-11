@@ -28,7 +28,7 @@ _BASE_URL = "https://api.fish.audio"
 # 快速克隆通常即时可用;偶发未就绪时轮询兜底,超预算仍未就绪则尽力尝试。
 _NOT_READY_STATES = frozenset({"created", "training", "pending", "processing"})
 
-# 统一超时:与 seedance/aigc 通道一致,慢响应不会无限占住并发闸。
+# 统一超时:与 seedance 等上游通道一致,慢响应不会无限占住并发闸。
 _TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 
 
@@ -212,7 +212,7 @@ class FishAudioAPI:
             audio: 音频字节(完整文件,wav/mp3/opus/...;不接受裸 PCM 流)
             language: ISO 639-1 语言码(如 en/zh/ja),空 = 上游自动识别
             ignore_timestamps: True = 不返回 segments(只给 text + duration);
-                默认 False = 返回带 start/end 的分段,方便前端做字幕。
+                默认 False = 返回带 start/end 的分段,方便调用方做字幕。
         """
         if not self.api_key:
             logger.warning("[FishAudio] 未配置 API Key,将无法请求 ASR")

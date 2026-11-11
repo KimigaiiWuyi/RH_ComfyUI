@@ -92,7 +92,7 @@ _RATIO_SIZE_MAP: dict[str, dict[str, str]] = {
     "1:2": {"1K": "576x1152", "2K": "1280x2560", "4K": "1920x3840"},
 }
 
-# 前端 /models schema 展示顺序(auto 置顶;表中新增 ratio 未列入时会追加到末尾)
+# 调用方 /models schema 展示顺序(auto 置顶;表中新增 ratio 未列入时会追加到末尾)
 _RATIO_ENUM_ORDER: tuple[str, ...] = (
     "auto",
     "1:1",
@@ -229,7 +229,7 @@ def estimate_gpt_image2_points(
 
 
 _TOKEN_BLOB_KEYS: tuple[str, ...] = ("input_tokens", "output_tokens", "total_tokens")
-# result: AI 基座 task/info 把上游 JSON 放在 data.result
+# result: 上游网关 task/info 把上游 JSON 放在 data.result
 _USAGE_NEST_KEYS: tuple[str, ...] = (
     "rawUsage",
     "raw_usage",

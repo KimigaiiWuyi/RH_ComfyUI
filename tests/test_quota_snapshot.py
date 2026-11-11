@@ -16,7 +16,7 @@ def _row(
 ) -> RHBind:
     return RHBind(
         user_id="1",
-        bot_id="canvas",
+        bot_id="test-bot",
         group_id=None,
         point=min(h5, day, week),
         point_5h=h5,

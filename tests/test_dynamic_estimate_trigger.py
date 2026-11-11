@@ -44,7 +44,7 @@ def test_all_speech_models_have_dynamic_point_range():
             continue
         assert rmin < rmax, (
             f"{m.name} 的 point_range=({rmin}, {rmax}) min==max,"
-            f"前端会判定为固定积分不调 estimate,实际动态计费预览会失真"
+            f"调用方会判定为固定积分不调 estimate,实际动态计费预览会失真"
         )
 
 
@@ -54,7 +54,7 @@ def test_all_asr_models_have_dynamic_point_range():
     assert asr_models, "应至少有一个 ASR 模型"
     for m in asr_models:
         rmin, rmax = m.point_range()
-        assert rmin < rmax, f"{m.name} 的 point_range=({rmin}, {rmax}) min==max,前端不会调 estimate"
+        assert rmin < rmax, f"{m.name} 的 point_range=({rmin}, {rmax}) min==max,调用方不会调 estimate"
 
 
 def test_index_tts25_shares_index_tts2_point_range():
@@ -73,7 +73,7 @@ def test_index_tts2_max_uses_realistic_text_length():
 
     锁死当前实现:5000 字符 × 3 bytes/字 = 15000 bytes × 500 积分/M bytes
     = 7.5 → 向上取整 8 积分。如果有人改回 300 字符,这个测试会失败,提醒
-    "min==max → 前端不调 estimate"的回归。
+    "min==max → 调用方不调 estimate"的回归。
     """
     from RH_ComfyUI.core.routing.registry import model_registry
 
@@ -83,7 +83,7 @@ def test_index_tts2_max_uses_realistic_text_length():
     assert rmin < rmax, f"IndexTTS2 应触发 estimate,实际 point_range=({rmin},{rmax})"
     assert rmin == 1, "min 应为空文本最小值"
     assert rmax >= 5, (
-        f"IndexTTS2 max={rmax} 太小,可能 max 文本长度不够。前端 min==max 时不调 estimate,长文本用户看到积分不变。"
+        f"IndexTTS2 max={rmax} 太小,可能 max 文本长度不够。调用方 min==max 时不调 estimate,长文本用户看到积分不变。"
     )
 
 

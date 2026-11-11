@@ -2,7 +2,7 @@
 
 历史 bug: 后端创建 GenerationRequest 时没传 images 字段,estimate_cost 读
 len(request.images) 永远 0,导致 seedream5_pro / banana_pro 这类按图计费
-的模型在前端预览时永远按 0 张图算,实际生成时才暴露差异。
+的模型在调用方预览时永远按 0 张图算,实际生成时才暴露差异。
 """
 
 from __future__ import annotations

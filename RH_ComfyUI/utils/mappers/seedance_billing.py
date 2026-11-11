@@ -233,7 +233,7 @@ def resolve_input_video_duration(
     """解析「输入视频总时长」(秒),供 token 公式使用。
 
     优先级:
-    1. 显式 ``input_video_duration``(estimate API / request.params,前端可传总秒数)
+    1. 显式 ``input_video_duration``(estimate API / request.params,调用方可传总秒数)
     2. 累加 ``video_refs`` 每段可解析时长
     3. 有参考视频但全无时长: ``默认 5s × 段数``
     4. 无参考视频: ``0``

@@ -452,7 +452,7 @@ def test_seedance25_estimate_cost_dynamic():
 
 
 def test_seedance25_point_range_dynamic():
-    """Seedance 2.5 point_range 必须 min < max(触发前端 estimate)"""
+    """Seedance 2.5 point_range 必须 min < max(触发调用方 estimate)"""
     m = Seedance25Def()
     lo, hi = m.point_range()
     assert lo < hi

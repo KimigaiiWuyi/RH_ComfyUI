@@ -1,10 +1,10 @@
 """回归: banana_pro schema 不应暴露 quality 字段。
 
-历史 bug: banana_pro 的 input_schema 声明了 quality 枚举,前端按 schema 渲染了
+历史 bug: banana_pro 的 input_schema 声明了 quality 枚举,调用方按 schema 渲染了
 quality 控件。但 banana_pro 官方计费曲线不区分 quality 档位(只按 image_size 分档),
 estimate_cost 不读 quality —— 用户切换 quality 时积分不变,造成"积分 bug"误判。
 
-修复:从 BananaProDef.node_def() 移除 quality 字段。前端不再渲染,契约清晰。
+修复:从 BananaProDef.node_def() 移除 quality 字段。调用方不再渲染,契约清晰。
 """
 
 from __future__ import annotations
