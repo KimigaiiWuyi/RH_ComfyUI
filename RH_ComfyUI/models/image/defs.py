@@ -12,7 +12,7 @@ import asyncio
 from .qwen import QWEN_IMAGE_MODELS
 from .kling import KLING_IMAGE_MODELS
 from ..bridge import AdapterChannel, ImagePipelineModel
-from .overrides import GptImageFamilyModel, Seedream5ProImageModel
+from .overrides import GptImageFamilyModel, MiniMaxH3ImageModel, Seedream5ProImageModel
 from ...core.base.errors import ValidationError
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...core.schema.types import NodeOutput, ProgressCallback
@@ -2265,6 +2265,145 @@ class Seedream5ProDef(Seedream5ProImageModel):
         )
 
 
+class MiniMaxH3ImageDef(MiniMaxH3ImageModel):
+    """MiniMax H3-Image — 文生图 + 图片编辑(≤16 图),官方 MiniMax / fal 双通道正交"""
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    async def check_available(self) -> bool:
+        for binding in self.channel_bindings():
+            if await binding.channel.check_available():
+                return True
+        return False
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="minimax_h3_image",
+            display_name="MiniMax H3-Image",
+            task_type=TaskType("image"),
+            backend="minimax-h3-image",
+            point_cost=17,
+            description="文生图与多图编辑，最高4K/20MP",
+            knowledge_content=(
+                "MiniMax H3-Image 是 MiniMax 新一代图像生成模型(官方 Model ID: MiniMax-H3-Image,"
+                "高速变体 MiniMax-H3-Image-Highspeed)。"
+                "\n"
+                "模式:0 张参考图=文生图;1~16 张参考图=图片编辑(多图合成/局部修改/换主体)。"
+                "\n"
+                "尺寸:image_size 档位 1K/2K/4K × ratio 宽高比(auto 或 1:3~3:1 任意比例);"
+                "也可直接给 size 像素串(如 2048x2048),面积 655360~20,000,000 像素。"
+                "\n"
+                "供应商(模型×供应商正交,任一可用即可用):"
+                "\n"
+                "  - 官方 MiniMax:复用 MiniMax_apikey,须在「启用的 MiniMax 模型」勾选 minimax_h3_image;"
+                "支持 auto 宽高比、aigc 水印、highspeed 变体、output_compression。"
+                "\n"
+                "  - fal:复用 FAL_API_Key;编辑图 ≤16 张;文生图不支持 auto 宽高比,"
+                "不支持 aigc 水印与 highspeed(会自动换官方通道)。"
+                "\n"
+                "提示词:中英文均可,最长 32000 字符;编辑模式可用「图片1」「图片2」引用素材,"
+                "编辑时提示词增强恒开(prompt_enhanced 只能为真)。"
+                "\n"
+                "计费按 token:文本输入 15 元/M、图片输入 10~20 元/M、图片输出 25~50 元/M"
+                "(standard/highspeed);估算按输出档位折算。"
+                "\n"
+                "输出 1 张图,支持 png/jpeg/webp;官方接口同步返回,fal 走队列轮询。"
+                "\n"
+            ),
+            requirements=["minimax_apikey", "FAL_API_Key"],
+            backend_model="MiniMax-H3-Image",
+            mode="declarative",
+            inputs={
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=True,
+                    title="提示词",
+                    description="生成或编辑描述(必填,最长 32000 字符);编辑模式可用「图片1」「图片2」引用参考图",
+                ),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=16,
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description="图片输入(最多 16 张):0 张=文生图,1~16 张=图片编辑",
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    title="宽高比",
+                    description="输出宽高比:auto(官方可自动)或具体比例,范围 1:3~3:1;fal 文生图不支持 auto",
+                ),
+                "image_size": PortSpec(
+                    type=PortType.ENUM,
+                    default="2K",
+                    values=["1K", "2K", "4K"],
+                    title="分辨率",
+                    description="输出分辨率档位,与宽高比组合决定尺寸;size 像素串优先于此",
+                ),
+                "size": PortSpec(
+                    type=PortType.TEXT,
+                    default="",
+                    title="像素尺寸",
+                    description="显式 '宽x高'(如 2048x2048),面积 655360~20,000,000、宽高比 1:3~3:1;留空按档位",
+                ),
+                "model_variant": PortSpec(
+                    type=PortType.ENUM,
+                    default="standard",
+                    values=["standard", "highspeed"],
+                    title="模型变体",
+                    description="standard=MiniMax-H3-Image;highspeed=高速版(仅官方通道)",
+                ),
+                "prompt_enhanced": PortSpec(
+                    type=PortType.BOOLEAN,
+                    default=True,
+                    title="提示词增强",
+                    description="文生图可关(disable_prompt_enhanced);编辑模式恒开,不能为否",
+                ),
+                "output_format": PortSpec(
+                    type=PortType.ENUM,
+                    default="jpeg",
+                    values=["jpeg", "png", "webp"],
+                    title="输出格式",
+                    description="输出图片格式(官方另接受 jpg)",
+                ),
+                "output_compression": PortSpec(
+                    type=PortType.INTEGER,
+                    minimum=0,
+                    maximum=100,
+                    title="压缩质量",
+                    description="JPEG/WebP 压缩质量 0~100(仅官方通道;留空上游默认)",
+                ),
+                "watermark": PortSpec(
+                    type=PortType.BOOLEAN,
+                    default=False,
+                    title="AIGC 水印",
+                    description="是否添加 AIGC 标识水印(仅官方通道)",
+                ),
+            },
+            outputs={
+                "image": PortSpec(type=PortType.OUTPUT_IMAGE, description="生成的图片"),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="sync",
+                priority=73,
+            ),
+        )
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...utils.backends.fal.channel import fal_binding
+
+        bindings = super().channel_bindings()
+        if self.node.provider:
+            return bindings
+        bindings.append(fal_binding("minimax_h3_image"))
+        return bindings
+
+
 ALL_MODELS = [
     AnimaDef,
     Banana1Def,
@@ -2283,6 +2422,7 @@ ALL_MODELS = [
     GptImage26SunburstDef,
     GptImage26FlareDef,
     MinimaxImage01Def,
+    MiniMaxH3ImageDef,
     MossImageDef,
     Qwen2511Def,
     Qwen2512Def,

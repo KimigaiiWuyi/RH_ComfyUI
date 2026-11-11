@@ -14,6 +14,7 @@ FAL_VIDEO_MODELS: list[tuple[str, str]] = [
 # fal 也能承载这些已定义模型(模型×供应商正交;模型类在 channel_bindings 里挂 FalChannel)
 FAL_SHARED_MODELS: list[str] = [
     "minimax_h3",
+    "minimax_h3_image",
     "seedance2",
     "seedance2.5",
     "banana1",
@@ -34,6 +35,7 @@ APP_PREFIXES: dict[str, str] = {
     "h3max": "minimax/h3-max",
     "h3maxturbo": "minimax/h3-max-turbo",
     "minimax_h3": "minimax/h3",
+    "minimax_h3_image": "minimax/h3-image",
     "seedance2": "bytedance/seedance-2.0",
     "seedance2.5": "bytedance/seedance-2.5",
     "banana1": "fal-ai/nano-banana",
@@ -195,3 +197,18 @@ GPT_IMAGE_FAL_TIER_PIXELS: dict[str, int] = {
     "2K": 2048 * 2048,
     "4K": 3840 * 2160,
 }
+
+# minimax/h3-image:文生 text-to-image + 编辑 edit(传图即走 edit)
+MMH3_IMAGE_ENDPOINTS: dict[str, str] = {
+    "text_to_image": "minimax/h3-image/text-to-image",
+    "edit": "minimax/h3-image/edit",
+}
+# fal 显式 {width,height} 约束:面积 655360~20,000,000、宽高比 1:3~3:1、单边 ≤7745
+MMH3_IMAGE_MAX_EDGE = 7745
+MMH3_IMAGE_MAX_IMAGES = 16
+MMH3_IMAGE_TIER_PIXELS: dict[str, int] = {
+    "1K": 1024 * 1024,
+    "2K": 2048 * 2048,
+    "4K": 4096 * 4096,
+}
+MMH3_IMAGE_FORMATS = ("png", "jpeg", "jpg", "webp")

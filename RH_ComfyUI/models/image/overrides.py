@@ -12,11 +12,17 @@
 from __future__ import annotations
 
 from typing import Optional
+from collections.abc import Mapping
 
 from ..bridge import ImagePipelineModel
 from ...core.base.errors import ValidationError
+from ...core.schema.card import ModelCard
+from ...core.schema.types import MediaKind
 from ...core.schema.request import GenerationRequest
 from ...utils.core.pipeline import NodeDef
+from ...core.channels.family import lock_bindings_to_provider_family
+from ...core.channels.channel import ChannelBinding
+from ...core.channels.registry import channel_registry
 
 
 class Seedream5ProImageModel(ImagePipelineModel):
@@ -145,4 +151,164 @@ class GptImageFamilyModel(ImagePipelineModel):
         )
 
 
-__all__ = ["Seedream5ProImageModel", "GptImageFamilyModel"]
+class MiniMaxH3ImageModel(ImagePipelineModel):
+    """MiniMax H3-Image:官方 / fal 双通道,文生图 + 图片编辑(≤16 参考图)。
+
+    模型与供应商正交:channel_bindings 挂官方 minimax-h3-image 通道 +
+    fal 通道 + 外部插件注入;跨字段约束(编辑模式恒增强、n=1)在本类收口。
+    """
+
+    MAX_IMAGES = 16
+    MAX_PROMPT_CHARS = 32000
+    VENDOR_MODEL = "MiniMax-H3-Image"
+    VENDOR_MODEL_HIGHSPEED = "MiniMax-H3-Image-Highspeed"
+
+    def __init__(self, node: NodeDef) -> None:
+        super().__init__(node)
+        self.card = ModelCard(
+            description=node.description or "MiniMax H3-Image 文生图与多图编辑,最高 4K/20MP",
+            strengths=[
+                "文生图与 1~16 图编辑同节点",
+                "1K/2K/4K 档位或显式像素尺寸",
+                "宽高比 auto 或 1:3~3:1 任意比例",
+                "官方 MiniMax 与 fal 双通道正交",
+            ],
+            categories=["写实", "商品图", "海报", "多图合成", "局部编辑"],
+            weaknesses=[
+                "编辑模式提示词恒被增强,不能关",
+                "fal 通道文生图不支持 auto 宽高比 / 水印 / highspeed",
+            ],
+            sample_prompts=[
+                "一杯拿铁放在原木桌上,俯拍,暖光",
+                "把图片1里的猫换成图片2里的狗,其余保持不变",
+            ],
+            languages=["zh", "en"],
+            speed_hint="normal",
+        )
+
+    def validate(self, request: GenerationRequest) -> None:
+        super().validate(request)
+        prompt = (request.prompt or "").strip()
+        if not prompt:
+            raise ValidationError(f"{self.display_name} 必须填写提示词")
+        if len(prompt) > self.MAX_PROMPT_CHARS:
+            raise ValidationError(f"{self.display_name} 提示词最长 {self.MAX_PROMPT_CHARS} 字符,当前 {len(prompt)}")
+        if request.video_refs or request.audio_refs:
+            raise ValidationError(f"{self.display_name} 是生图模型,不接受音视频参考素材")
+        n_img = len(request.images)
+        if request.ordered_content:
+            n_oc = 0
+            for item in request.ordered_content:
+                if item.media is None:
+                    continue
+                if item.media.kind != MediaKind.IMAGE:
+                    raise ValidationError(f"{self.display_name} 只接受图片素材,实际收到 {item.media.kind.value}")
+                n_oc += 1
+            n_img = max(n_img, n_oc)
+        if n_img > self.MAX_IMAGES:
+            raise ValidationError(f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,当前 {n_img} 张")
+        # 编辑模式两家上游都恒开提示词增强,关掉会静默失效 → 请求级拒绝
+        if n_img and _is_false_param(request, "prompt_enhanced"):
+            raise ValidationError(f"{self.display_name} 的图片编辑模式始终开启提示词增强,prompt_enhanced 不能为否")
+        if "n" in request.params:
+            n_raw: object = request.params["n"]
+            if n_raw is not None:
+                try:
+                    n_val = int(str(n_raw))
+                except (TypeError, ValueError):
+                    raise ValidationError(f"{self.display_name} 的 n 必须是整数,实际收到 {n_raw!r}") from None
+                if n_val != 1:
+                    raise ValidationError(f"{self.display_name} 单次返回 1 张图,不支持 n={n_val}")
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...utils.backends.minimax.h3_image_channel import builtin_minimax_h3_image_channels
+
+        node = self.node
+        builtins = builtin_minimax_h3_image_channels()
+        external = channel_registry.bindings_for(node.name)
+        if node.provider:
+            return lock_bindings_to_provider_family(
+                node.provider,
+                builtins,
+                external,
+                builtin_vendor_model=self.VENDOR_MODEL,
+            )
+        bindings: list[ChannelBinding] = [
+            ChannelBinding(ch, vendor_model=self.VENDOR_MODEL) for ch in builtins.values()
+        ]
+        bindings.extend(external)
+        return bindings
+
+    async def unavailable_reason(self) -> str:
+        for binding in self.channel_bindings():
+            if await binding.channel.check_available():
+                continue
+            return await binding.channel.unavailable_reason()
+        return f"{self.display_name} 无可用供应商"
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """token 计费曲线:文本 4000 + 输入图 3000/张 + 输出按档位/像素折算。"""
+        from ...utils.mappers.minimax_h3_image_billing import estimate_minimax_h3_image_points
+
+        params = request.params
+        image_size = params["image_size"] if "image_size" in params else None
+        variant = params["model_variant"] if "model_variant" in params else "standard"
+        width, height = _explicit_size_params(params)
+        n_img = len(request.images)
+        if request.ordered_content:
+            n_oc = sum(
+                1 for item in request.ordered_content if item.media is not None and item.media.kind == MediaKind.IMAGE
+            )
+            n_img = max(n_img, n_oc)
+        return estimate_minimax_h3_image_points(image_size, n_img, variant=variant, width=width, height=height)
+
+    def settle_cost(self, request: GenerationRequest, usage: dict) -> Optional[int]:
+        """上游 usage 实报 token 实扣;解析不出则维持预扣。"""
+        from ...utils.mappers.minimax_h3_image_billing import settle_minimax_h3_image_points
+
+        del request
+        return settle_minimax_h3_image_points(usage)
+
+    def point_range(self) -> tuple[int, int]:
+        """最小 1K 文生(标准);最大 4K + 16 参考图(highspeed)。"""
+        from ...utils.mappers.minimax_h3_image_billing import estimate_minimax_h3_image_points
+
+        return (
+            estimate_minimax_h3_image_points("1K", 0, variant="standard"),
+            estimate_minimax_h3_image_points("4K", self.MAX_IMAGES, variant="highspeed"),
+        )
+
+
+def _is_false_param(request: GenerationRequest, key: str) -> bool:
+    if key not in request.params or request.params[key] is None:
+        return False
+    raw: object = request.params[key]
+    if isinstance(raw, bool):
+        return not raw
+    if isinstance(raw, str):
+        return raw.strip().lower() in ("false", "0", "no", "off")
+    return False
+
+
+def _explicit_size_params(params: Mapping[str, object]) -> tuple[Optional[int], Optional[int]]:
+    size_raw: object = params["size"] if "size" in params else None
+    if isinstance(size_raw, str) and "x" in size_raw.lower():
+        parts = size_raw.lower().split("x")
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            return int(parts[0]), int(parts[1])
+    w = _opt_int(params["width"] if "width" in params else None)
+    h = _opt_int(params["height"] if "height" in params else None)
+    return w, h
+
+
+def _opt_int(raw: object) -> Optional[int]:
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.strip().isdigit():
+        return int(raw.strip())
+    return None
+
+
+__all__ = ["Seedream5ProImageModel", "GptImageFamilyModel", "MiniMaxH3ImageModel"]

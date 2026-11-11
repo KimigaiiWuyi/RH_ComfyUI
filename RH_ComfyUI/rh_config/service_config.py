@@ -66,7 +66,7 @@ _RH_APP_NAMES = [
     "moss-image",
 ]
 _GEMINI_MODEL_NAMES = list(GEMINI_MODEL_OPTIONS)
-_MINIMAX_MODEL_NAMES = ["minimax_t2a_speech", "minimax_image01", "minimax_h3"]
+_MINIMAX_MODEL_NAMES = ["minimax_t2a_speech", "minimax_image01", "minimax_h3", "minimax_h3_image"]
 _MIMO_MODEL_NAMES = ["mimo_tts"]
 _SEEDANCE_ARK_MODEL_NAMES = [
     "seedance15_pro",

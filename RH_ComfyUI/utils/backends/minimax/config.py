@@ -13,11 +13,13 @@ from typing import Any
 MINIMAX_MODEL_SPEECH = "minimax_t2a_speech"
 MINIMAX_MODEL_IMAGE = "minimax_image01"
 MINIMAX_MODEL_H3 = "minimax_h3"
+MINIMAX_MODEL_H3_IMAGE = "minimax_h3_image"
 
 MINIMAX_MODEL_OPTIONS: tuple[str, ...] = (
     MINIMAX_MODEL_SPEECH,
     MINIMAX_MODEL_IMAGE,
     MINIMAX_MODEL_H3,
+    MINIMAX_MODEL_H3_IMAGE,
 )
 
 
@@ -84,6 +86,7 @@ __all__ = [
     "MINIMAX_MODEL_SPEECH",
     "MINIMAX_MODEL_IMAGE",
     "MINIMAX_MODEL_H3",
+    "MINIMAX_MODEL_H3_IMAGE",
     "MINIMAX_MODEL_OPTIONS",
     "minimax_api_key",
     "minimax_enabled_models",

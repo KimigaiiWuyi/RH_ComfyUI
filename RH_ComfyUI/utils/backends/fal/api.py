@@ -66,7 +66,9 @@ class FalAPI(PollingChannelMixin):
         """已有 request_id,只做轮询和取结果。"""
         app = app_prefix(model_name)
         final = await self.poll_until_done(request_id, self._poll_for(app))
-        output = "image" if model_name.startswith("banana") or model_name == "gpt-image-2" else "video"
+        output = (
+            "image" if model_name.startswith("banana") or model_name in ("gpt-image-2", "minimax_h3_image") else "video"
+        )
         return await self._to_output(final, request_id=request_id, model_name=model_name, app=app, output=output)
 
     async def cancel(self, request_id: str, *, app: str) -> None:
@@ -137,6 +139,10 @@ class FalAPI(PollingChannelMixin):
                 code="EMPTY_RESULT",
             )
         usage: dict[str, object] = {"request_id": request_id, "provider": _CHANNEL, "model": model_name}
+        # 图片模型回包带 token 级 usage(H3-Image 等),供 settle_cost 精确对齐
+        raw_usage = result["usage"] if "usage" in result else None
+        if isinstance(raw_usage, dict):
+            usage["vendor_usage"] = raw_usage
         # reference_to_video 回包带实际 reference_tokens,供 settle_cost 精确补差
         if "reference_tokens" in result:
             tokens = result["reference_tokens"]
