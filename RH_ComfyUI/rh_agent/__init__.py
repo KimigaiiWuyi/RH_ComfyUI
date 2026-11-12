@@ -135,8 +135,7 @@ def register_rh_aigc_agent() -> None:
         AgentNode(
             node_id="rh_aigc_agent",
             display_name="AIGC 创作代理",
-            prompt=RH_AIGC_AGENT_PROMPT,
-            prompt_builder=build_rh_aigc_agent_prompt,
+            prompt=build_rh_aigc_agent_prompt(),
             when_to_use="需要进行 AI 绘图、图片编辑、视频生成、音乐创作、语音合成等 AIGC 创作任务",
             match_keywords=[
                 "绘图",
@@ -187,6 +186,7 @@ def register_rh_aigc_agent() -> None:
                 "copy_file",
             ],
             source="plugin",
+            plugin="RH_ComfyUI",
         )
     )
 

@@ -74,6 +74,12 @@ async def init_pipeline_system() -> None:
 
     register_pipeline_knowledge()
 
+    # 4. 刷新 AIGC 创作代理节点（装配最新就绪的模型列表与调用指引）
+    from .rh_agent import register_rh_aigc_agent
+
+    register_rh_aigc_agent()
+    register_resync_hook("rh_aigc_agent", register_rh_aigc_agent)
+
     from gsuid_core.logger import logger
 
     from .utils.database.models import RHComfyuiTaskRecord
