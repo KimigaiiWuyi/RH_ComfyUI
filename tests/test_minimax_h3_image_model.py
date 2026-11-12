@@ -395,3 +395,51 @@ def test_fal_dims_tiers_within_bounds():
             assert w % 16 == 0 and h % 16 == 0
             assert 1 / 3 <= w / h <= 3
             assert w <= 7745 and h <= 7745
+
+
+def test_fal_t2i_default_ratio_adaptive_square():
+    # 当调用方未传 ratio 时，fal 文生图自动自适应兜底为 1:1 方图，不抛出异常
+    sub = prepare("minimax_h3_image", _t2i())
+    dims = sub.body["image_size"]
+    assert isinstance(dims, dict)
+    assert dims["width"] == dims["height"]
+
+
+def test_extract_aspect_ratio_and_size():
+    from RH_ComfyUI.utils.core.parser import extract_aspect_ratio_and_size
+
+    # 1. 自然语言中带有 16:9 与横版描述
+    p1 = "日系动漫赛璐珞质感的黄昏海边小镇风景，横版构图，16:9 宽幅，画质清晰。"
+    cleaned1, r1, s1 = extract_aspect_ratio_and_size(p1)
+    assert r1 == "16:9"
+
+    # 2. 显式命令行 --ar 16:9 提取并剥离
+    p2 = "--ar 16:9 一只可爱的小猫咪在玩耍"
+    cleaned2, r2, s2 = extract_aspect_ratio_and_size(p2)
+    assert r2 == "16:9"
+    assert "--ar" not in cleaned2
+    assert "一只可爱的小猫咪在玩耍" in cleaned2
+
+    # 3. 自然语言语义词：立绘 -> 9:16
+    p3 = "少女全身立绘，二次元风格"
+    cleaned3, r3, s3 = extract_aspect_ratio_and_size(p3)
+    assert r3 == "9:16"
+
+    # 4. 自然语言语义词：头像 -> 1:1
+    p4 = "可爱小狗头像"
+    cleaned4, r4, s4 = extract_aspect_ratio_and_size(p4)
+    assert r4 == "1:1"
+
+    # 5. 显式尺寸 --size 1920x1080 提取并剥离，推导比例为 16:9
+    p5 = "--size 1920x1080 浩瀚星空"
+    cleaned5, r5, s5 = extract_aspect_ratio_and_size(p5)
+    assert s5 == (1920, 1080)
+    assert r5 == "16:9"
+    assert "--size" not in cleaned5
+
+    # 6. 无任何画幅要求时返回 None
+    p6 = "纯粹的一句话描述"
+    cleaned6, r6, s6 = extract_aspect_ratio_and_size(p6)
+    assert r6 is None
+    assert s6 is None
+    assert cleaned6 == p6

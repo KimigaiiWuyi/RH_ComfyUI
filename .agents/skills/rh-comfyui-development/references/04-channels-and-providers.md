@@ -35,8 +35,10 @@ class MyGatewayChannel(ProviderChannel):
             ...  # 调 utils/backends 里的客户端(POST 建单)
         except httpx.HTTPStatusError as e:
             raise ChannelError.from_http(
-                e.response.status_code, stage="create",
-                channel=self.name, message=f"上游拒绝: {e}",
+                e.response.status_code,
+                stage="create",
+                channel=self.name,
+                message=f"上游拒绝: {e}",
             )
         except httpx.TransportError as e:
             raise ChannelError.from_transport(e, stage="create", channel=self.name)

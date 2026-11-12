@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from gsuid_core.sv import SV
 from gsuid_core.bot import Bot
@@ -14,7 +14,11 @@ from gsuid_core.ai_core.trigger_bridge import ai_return
 
 from ..core.base.errors import GenerationError
 from ..utils.core.types import audio_ref
-from ..utils.core.parser import parse_mood_from_prompt, parse_model_from_prompt
+from ..utils.core.parser import (
+    parse_mood_from_prompt,
+    parse_model_from_prompt,
+    extract_aspect_ratio_and_size,
+)
 from ..utils.core.request import TaskType, GenerationResult, GenerationRequest
 from ..core.billing.policy import BillingContext
 from ..core.base.generation import AIGCGenerationBase
@@ -124,6 +128,9 @@ async def _current_point(ev: Event) -> int:
     当用户想要创建图片、画图、生成插画、设计图等时调用。
     不提供图片即文生图;提供图片则按图片编辑处理(已不再有独立的潜空间图生图)。
     可通过模型名指定使用哪个模型，不指定则自动选择(系统按输入与可用性自动路由)。
+    所有模型适配与构图尺寸均由底层自动承接：你只需在文字描述中自然表达画幅与构图
+    （如“16:9 宽幅”、“横版”、“9:16 竖版”、“1:1 方图”或“--ar 16:9”），底层会自动识别并注入到
+    模型对应的尺寸参数中；若未指定画幅，底层会自适应使用最合适的默认画幅（默认 1:1），绝不报错。
 
     Args:
         text: 生成描述 + 可选模型名。
@@ -131,12 +138,13 @@ async def _current_point(ev: Event) -> int:
               格式2（指定模型）: "qwen 一只可爱的猫咪"
               格式3（指定 Anima 二次元模型，必须使用小写模型名前缀）: "anima 蕾米莉亚的图"
               格式4（指定 MiniMax 模型）: "image01 一只可爱的猫咪"
-              格式5（指定 MiniMax H3-Image 模型，支持别名 h3image / h3）: "h3image 一只可爱的猫咪"
+              格式5（指定 MiniMax H3-Image 模型，支持别名 h3image / h3）: "h3image 一只可爱的猫咪，16:9 横版宽幅"
               常用模型名: qwen, banana, banana_pro, anima, image01（即 minimax_image01）,
               minimax_h3_image（常用简称 h3image / h3-image）, gpt, moss-image
               moss-image 只做文生图,不要附参考图。它有 comfyui 与 rh_app 两个供应商,命令不区分通道。
               当用户明确要求 Anima / anima 模型，或需求是二次元、动漫角色、插画、萌系头像时，text 必须以 "anima " 开头。
               当用户明确要求 image01 / minimax 模型时，text 必须以 "image01 " 开头。
+              当用户明确要求 h3image / h3 模型时，text 必须以 "h3image " 开头。
         image_id: 可选，参考图片的资源ID（img_xxxxxxxx），有则按编辑处理。
     """,
 )
@@ -149,11 +157,24 @@ async def generate_image(bot: Bot, ev: Event) -> None:
 
     # 统一为 IMAGE 模态:具体走文生图还是编辑,由路由按"有没有图片"决定
     model_name, actual_prompt = parse_model_from_prompt(prompt, TaskType.IMAGE)
+    actual_prompt, extracted_ratio, extracted_size = extract_aspect_ratio_and_size(actual_prompt)
+
+    params: dict[str, Any] = {}
+    if extracted_ratio:
+        params["ratio"] = extracted_ratio
+    if extracted_size:
+        params["size"] = f"{extracted_size[0]}x{extracted_size[1]}"
+        params["width"] = extracted_size[0]
+        params["height"] = extracted_size[1]
 
     request = GenerationRequest(
         task_type=TaskType.IMAGE,
         prompt=actual_prompt,
         model=model_name,
+        ratio=extracted_ratio,
+        width=extracted_size[0] if extracted_size else 720,
+        height=extracted_size[1] if extracted_size else 1280,
+        params=params,
     )
 
     # 附加图片(有图则路由到编辑类节点)
@@ -205,16 +226,29 @@ async def edit_image(bot: Bot, ev: Event) -> None:
         return
 
     model_name, actual_prompt = parse_model_from_prompt(prompt, TaskType.IMAGE)
+    actual_prompt, extracted_ratio, extracted_size = extract_aspect_ratio_and_size(actual_prompt)
 
     from gsuid_core.utils.resource_manager import RM
 
     images = [await RM.get(img_id) for img_id in image_id_list]
+
+    params: dict[str, Any] = {}
+    if extracted_ratio:
+        params["ratio"] = extracted_ratio
+    if extracted_size:
+        params["size"] = f"{extracted_size[0]}x{extracted_size[1]}"
+        params["width"] = extracted_size[0]
+        params["height"] = extracted_size[1]
 
     request = GenerationRequest(
         task_type=TaskType.IMAGE,
         prompt=actual_prompt,
         model=model_name,
         images=images,
+        ratio=extracted_ratio,
+        width=extracted_size[0] if extracted_size else 720,
+        height=extracted_size[1] if extracted_size else 1280,
+        params=params,
     )
 
     result = await _do_generate(request, ev, bot)
@@ -263,6 +297,7 @@ async def generate_video(bot: Bot, ev: Event) -> None:
         return
 
     model_name, actual_prompt = parse_model_from_prompt(prompt, TaskType.VIDEO)
+    actual_prompt, extracted_ratio, extracted_size = extract_aspect_ratio_and_size(actual_prompt)
     from ..utils.backends.seedance.draft import split_seedance25_round
 
     round_name, round_body = split_seedance25_round(model_name, actual_prompt)
@@ -289,10 +324,22 @@ async def generate_video(bot: Bot, ev: Event) -> None:
         await bot.send(MessageSegment.video(result.data))
         return
 
+    params: dict[str, Any] = {}
+    if extracted_ratio:
+        params["ratio"] = extracted_ratio
+    if extracted_size:
+        params["size"] = f"{extracted_size[0]}x{extracted_size[1]}"
+        params["width"] = extracted_size[0]
+        params["height"] = extracted_size[1]
+
     request = GenerationRequest(
         task_type=TaskType.VIDEO,
         prompt=round_body,
         model=model_name,
+        ratio=extracted_ratio,
+        width=extracted_size[0] if extracted_size else 720,
+        height=extracted_size[1] if extracted_size else 1280,
+        params=params,
     )
     if round_name == "draft":
         request.resolution = "480p"

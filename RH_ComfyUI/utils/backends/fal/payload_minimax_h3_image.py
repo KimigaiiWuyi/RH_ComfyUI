@@ -67,11 +67,13 @@ def _check_bounds(w: int, h: int) -> None:
         raise ValidationError(f"{_LABEL} 的 size 宽高比须为 1:3~3:1,当前 {w}x{h}")
 
 
-def _ratio(request: GenerationRequest) -> str:
+def _ratio(request: GenerationRequest, *, is_edit: bool = False) -> str:
     raw = _text_param(request, "ratio", label=_LABEL).lower()
     if not raw and isinstance(request.ratio, str):
         raw = request.ratio.strip().lower()
-    if not raw or raw == "auto":
+    if not raw:
+        return "auto" if is_edit else "1:1"
+    if raw == "auto":
         return "auto"
     if ":" not in raw:
         raise ValidationError(f"{_LABEL} 的宽高比非法:{raw!r};须为 'auto' 或 '宽:高'")
@@ -162,7 +164,7 @@ def prepare_minimax_h3_image(model_name: str, request: GenerationRequest, *, for
         _check_bounds(*size)
         body["image_size"] = {"width": size[0], "height": size[1]}
     else:
-        ratio = _ratio(request)
+        ratio = _ratio(request, is_edit=is_edit)
         if ratio == "auto":
             if is_edit:
                 body["image_size"] = "auto"
