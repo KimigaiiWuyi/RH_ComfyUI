@@ -148,11 +148,22 @@ class ChannelError(GenerationError):
 
 
 class AllChannelsFailedError(GenerationError):
-    def __init__(self, message: str, *, cause: Optional[Exception] = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        cause: Optional[Exception] = None,
+        skipped_notes: Optional[list[str]] = None,
+    ) -> None:
         # 保留最后一个通道的干净用户文案(如供应商 failReason),
-        # 否则调用方只会看到 "所有通道均失败" 这类无信息量的兜底文案。
+        # 并附带跳过通道的诊断信息,避免丢失关键凭证缺失提示。
         cause_user_message = getattr(cause, "user_message", None) if cause is not None else None
-        super().__init__(message, user_message=cause_user_message)
+        if cause_user_message:
+            suffix = f" (备用通道未尝试: {', '.join(skipped_notes)})" if skipped_notes else ""
+            final_user_msg = f"{cause_user_message}{suffix}"
+        else:
+            final_user_msg = message
+        super().__init__(message, user_message=final_user_msg)
         self.cause = cause
 
 

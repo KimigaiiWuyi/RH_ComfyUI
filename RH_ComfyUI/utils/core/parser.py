@@ -47,7 +47,7 @@ def parse_model_from_prompt(
 
     解析规则：
     1. 提取第一个词，检查是否匹配已知 Pipeline 名
-    2. 精确匹配 > 前缀匹配 > 包含匹配
+    2. 精确匹配 > 前缀匹配 > 包含匹配 > 归一化匹配
     3. 不匹配则整个文本作为 prompt
 
     Args:

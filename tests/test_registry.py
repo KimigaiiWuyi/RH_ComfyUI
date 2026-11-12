@@ -87,3 +87,29 @@ def test_partial_name_is_case_insensitive_and_prefers_exact():
     assert match_partial_name(names, "IndexTTS2.5", lambda n: n) == "IndexTTS2.5"
     assert match_partial_name(names, "indextts2", lambda n: n) == "IndexTTS2"
     assert match_partial_name(names, "indextts", lambda n: n) == "IndexTTS2"
+
+
+def test_partial_name_normalized_separators():
+    """归一化档:h3image / h3-image / banana21 等无分隔符别名也命中。"""
+    from RH_ComfyUI.core.routing.registry import match_partial_name
+
+    names = ["minimax_h3_image", "moss-image", "banana2.1"]
+    assert match_partial_name(names, "h3image", lambda n: n) == "minimax_h3_image"
+    assert match_partial_name(names, "h3-image", lambda n: n) == "minimax_h3_image"
+    assert match_partial_name(names, "mossimage", lambda n: n) == "moss-image"
+    assert match_partial_name(names, "banana21", lambda n: n) == "banana2.1"
+    assert match_partial_name(names, "nonexistent", lambda n: n) is None
+
+
+def test_route_resolves_normalized_model_token():
+    """parser 剥离的别名 token(如 h3image)在 route 侧也能解析回模型。"""
+    import asyncio
+
+    from RH_ComfyUI.core.routing.router import route
+
+    reg = ModelRegistry()
+    target = FakeModel("minimax_h3_image")
+    reg.register(target)
+    reg.register(FakeModel("banana2"))
+    req = GenerationRequest(task_type=TaskType.IMAGE, model="h3image", prompt="x")
+    assert asyncio.run(route(req, reg)) is target

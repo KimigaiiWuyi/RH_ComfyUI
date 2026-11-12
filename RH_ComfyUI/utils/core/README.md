@@ -104,7 +104,7 @@ class PipelineDef:
 | `register(pipeline)` | 注册一个 Pipeline |
 | `get(name)` | 按名称精确查找 |
 | `get_by_task(task_type)` | 按任务类型查找所有 Pipeline |
-| `find_by_partial_name(partial, task_type)` | 模糊匹配（精确 > 前缀 > 包含） |
+| `find_by_partial_name(partial, task_type)` | 模糊匹配（精确 > 前缀 > 包含 > 归一化） |
 | `all_pipelines()` | 返回所有已注册 Pipeline |
 
 YAML 加载支持两种映射模式：

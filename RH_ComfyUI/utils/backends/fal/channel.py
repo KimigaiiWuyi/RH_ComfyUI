@@ -89,6 +89,7 @@ class FalChannel(ProviderChannel):
                 kind=FailureKind.PROVIDER_FAULT,
                 phase=Phase.AMBIGUOUS,
                 channel=self.name,
+                user_message=f"fal 执行失败: {str(exc)[:120]}",
             ) from exc
         finally:
             self._runtime.inflight -= 1

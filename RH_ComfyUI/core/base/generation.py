@@ -597,6 +597,7 @@ class AIGCGenerationBase(ABC):
         raise AllChannelsFailedError(
             f"{self.display_name} 所有通道均失败{skipped}",
             cause=last_error,
+            skipped_notes=skipped_notes,
         )
 
     async def _emit_transient_progress(

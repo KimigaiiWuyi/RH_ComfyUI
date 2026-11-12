@@ -148,7 +148,7 @@ class PipelineRegistry:
         return self._all_nodes()
 
     def find_by_partial_name(self, partial: str, task_type: TaskType) -> Optional[NodeDef]:
-        """精确 → 前缀 → 包含 三级模糊匹配(与 ModelRegistry 共用同一实现)"""
+        """精确 → 前缀 → 包含 → 归一化 多级模糊匹配(与 ModelRegistry 共用同一实现)"""
         from ...core.routing.registry import match_partial_name
 
         return match_partial_name(self.get_by_task(task_type), partial, lambda n: n.name)

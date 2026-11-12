@@ -26,10 +26,16 @@ T = TypeVar("T", bound=AIGCGenerationBase)
 _N = TypeVar("_N")
 
 
+def clean_key(s: str) -> str:
+    """归一化比较键:忽略大小写与 -/_/./空格 分隔符(h3image ≡ h3-image ≡ h3_image)。"""
+    return s.lower().replace("-", "").replace("_", "").replace(" ", "").replace(".", "")
+
+
 def match_partial_name(candidates: Sequence[_N], partial: str, name_of: Callable[[_N], str]) -> Optional[_N]:
-    """精确 → 前缀 → 包含 三级模糊匹配(ModelRegistry / PipelineRegistry 共用)
+    """精确 → 前缀 → 包含 → 归一化(去分隔符) 多级模糊匹配(ModelRegistry / PipelineRegistry 共用)
 
     比较一律忽略大小写:命令入口会把首词 lower(),模型名如 IndexTTS2.5 才能命中。
+    归一化比较允许输入 h3image 或 h3-image 匹配到 minimax_h3_image。
     """
     key = (partial or "").lower()
     if not key:
@@ -43,6 +49,17 @@ def match_partial_name(candidates: Sequence[_N], partial: str, name_of: Callable
     for c in candidates:
         if key in name_of(c).lower():
             return c
+    clean_k = clean_key(key)
+    if clean_k:
+        for c in candidates:
+            if clean_k == clean_key(name_of(c)):
+                return c
+        for c in candidates:
+            if clean_key(name_of(c)).startswith(clean_k):
+                return c
+        for c in candidates:
+            if clean_k in clean_key(name_of(c)):
+                return c
     return None
 
 
@@ -88,7 +105,7 @@ class ModelRegistry:
         return list(self._models.values())
 
     def find_by_partial_name(self, partial: str, modality: TaskType) -> Optional[AIGCGenerationBase]:
-        """精确 → 前缀 → 包含 三级模糊匹配"""
+        """精确 → 前缀 → 包含 → 归一化 多级模糊匹配"""
         return match_partial_name(self.by_modality(modality), partial, lambda m: m.name)
 
 
@@ -132,4 +149,5 @@ __all__ = [
     "register_model",
     "load_entry_point_models",
     "match_partial_name",
+    "clean_key",
 ]

@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from gsuid_core.logger import logger
 
-from .registry import ModelRegistry, model_registry
+from .registry import ModelRegistry, clean_key, model_registry, match_partial_name
 from ..base.errors import ModelUnavailableError
 from ..schema.request import GenerationRequest
 from ..base.generation import AIGCGenerationBase
@@ -39,7 +39,9 @@ async def route(
     from ...utils.backends.http_retry import is_strict_create_once
 
     if request.model and is_strict_create_once():
-        model = registry.get(request.model)
+        model = registry.get(request.model) or match_partial_name(
+            registry.by_modality(request.task_type), request.model, lambda m: m.name
+        )
         if model is None or model.modality != request.task_type or not model.supports(request):
             raise ModelUnavailableError(f"指定模型 {request.model} 不支持当前请求，未切换模型")
         if not await model.check_available():
@@ -55,9 +57,13 @@ async def route(
                 return model
             logger.warning(f"[Router] 用户指定模型 {model.name} 不可用,回退自动选择")
         else:
-            partial = request.model.lower()
+            # parser 按 match_partial_name 归一化档剥离模型 token(h3image/h3-image),
+            # 这里必须用同一归一化键包含比较,否则别名 token 被剥离后静默落到自动选模
+            clean = clean_key(request.model)
             matches = [
-                m for m in registry.by_modality(request.task_type) if partial in m.name.lower() and m.supports(request)
+                m
+                for m in registry.by_modality(request.task_type)
+                if m.supports(request) and clean and clean in clean_key(m.name)
             ]
             matches.sort(key=lambda m: m.priority, reverse=True)
             for m in matches:

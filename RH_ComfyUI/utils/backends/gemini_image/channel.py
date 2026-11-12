@@ -156,6 +156,16 @@ class GeminiImageChannel(ProviderChannel):
                     code=code,
                     user_message=f"Gemini {kind}={code}",
                 ) from exc
+            err_msg = str(exc)
+            if "Server disconnected" in err_msg or "ServerDisconnected" in type(exc).__name__:
+                detail = "网络连接断开 (Server disconnected)"
+            elif "Timeout" in type(exc).__name__ or "timed out" in err_msg.lower():
+                detail = "网络请求超时"
+            elif err_msg:
+                detail = err_msg[:120]
+            else:
+                detail = type(exc).__name__
+
             raise ChannelError(
                 f"Gemini 生图失败: {exc}",
                 kind=FailureKind.RATE_LIMITED if rate_limited else FailureKind.PROVIDER_FAULT,
@@ -164,7 +174,7 @@ class GeminiImageChannel(ProviderChannel):
                 transient=rate_limited or None,
                 channel=self.name,
                 code="RATE_LIMITED" if rate_limited else "GEMINI_FAILED",
-                user_message=("Gemini 生图繁忙,正在排队重试…" if rate_limited else "Gemini 生图失败,请稍后重试。"),
+                user_message=("Gemini 生图繁忙,正在排队重试…" if rate_limited else f"Gemini 生图失败: {detail}"),
             ) from exc
 
         # 消费统计维度:区分 VertexAI / AI Studio

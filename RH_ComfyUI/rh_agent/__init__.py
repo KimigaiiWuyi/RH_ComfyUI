@@ -50,13 +50,15 @@ RH_AIGC_AGENT_PROMPT = """你是一个专业的「AIGC 创作代理」。你没�
    - 任务上下文标注了【委派人人格】且需要该角色本人的音色/形象时（如用她的
      声音配音、画她本人），先用 get_self_persona_info 取资源再调用生成工具。
 5. 调用工具：选择正确的工具并传入参数。
-6. 交付结果：工具会自动发送生成结果给用户，你只需在交付摘要中说明完成情况。
+6. 交付结果：在交付结论中保留工具返回的资源 ID（如 img_xxxxxxxx /
+   aud_xxxxxxxx），说明完成情况与配文即可，上游编排会自动统一发送。
 
 【prompt 优化建议】
 - 如果用户的描述过于简短（如"画个猫"），应主动补充细节使其更具体。
 - 二次元/动漫风格需求，在生图时 text 前加 "anima " 前缀指定 Anima 模型。
 - 当用户明确要求使用某个模型时，必须在 text 前加对应的模型名前缀
-  （如 "image01"、"qwen"、"anima"、"banana"、"moss-image"）。
+  （请查阅下方【当前系统已注册的可用模型与调用前缀】列表，系统支持忽略大小写与 -_/. 分隔符，
+  例如 "h3image" 会自动匹配 "minimax_h3_image"）。
 - moss-image 只做文生图,不要附参考图。comfyui 与 rh_app 是它的两个供应商,
   命令里只写 "moss-image ",不要再写别的模型名。
 - 如果用户未指定模型，工具会自动选择最合适的模型，无需额外指定。
@@ -70,6 +72,56 @@ RH_AIGC_AGENT_PROMPT = """你是一个专业的「AIGC 创作代理」。你没�
 """
 
 
+def get_dynamic_models_summary() -> str:
+    """动态获取当前系统已注册并可用的模型列表与调用指令前缀。"""
+    from ..models import discover_builtin_models
+    from ..utils.core.request import TaskType
+    from ..utils.core.pipeline import pipeline_registry
+    from ..core.routing.registry import model_registry
+
+    if not model_registry.all_models():
+        discover_builtin_models()
+
+    lines: list[str] = ["【当前系统已注册的可用模型与调用前缀】"]
+    lines.append(
+        "当用户指定使用某个模型时，在对应工具的 text 开头写入该模型名称或常用别名（系统支持忽略大小写与 -_/. 分隔符）："
+    )
+
+    task_groups = [
+        ("图片生成 / 编辑 (generate_image / edit_image)", TaskType.IMAGE),
+        ("视频生成 (generate_video)", TaskType.VIDEO),
+        ("音乐生成 (generate_music)", TaskType.MUSIC),
+        ("语音合成 (generate_speech)", TaskType.SPEECH),
+    ]
+
+    listed = 0
+    for group_title, tt in task_groups:
+        nodes = pipeline_registry.get_by_task(tt)
+        if not nodes:
+            continue
+        lines.append(f"\n- {group_title}:")
+        for node in nodes:
+            listed += 1
+            desc = node.description or node.display_name
+            alias_hint = ""
+            if "h3_image" in node.name:
+                alias_hint = " (别名: h3image, h3-image, h3)"
+            elif "banana" in node.name:
+                alias_hint = " (别名: banana)"
+            elif "image01" in node.name:
+                alias_hint = " (别名: image01)"
+            lines.append(f"  * {node.name}{alias_hint}: {desc}")
+
+    return "\n".join(lines) if listed else ""
+
+
+def build_rh_aigc_agent_prompt() -> str:
+    summary = get_dynamic_models_summary()
+    if summary:
+        return f"{RH_AIGC_AGENT_PROMPT}\n\n{summary}"
+    return RH_AIGC_AGENT_PROMPT
+
+
 def register_rh_aigc_agent() -> None:
     """注册 RH_ComfyUI AIGC 创作能力代理（AgentNode 统一注册表）。"""
     register_agent_node(
@@ -77,6 +129,7 @@ def register_rh_aigc_agent() -> None:
             node_id="rh_aigc_agent",
             display_name="AIGC 创作代理",
             prompt=RH_AIGC_AGENT_PROMPT,
+            prompt_builder=build_rh_aigc_agent_prompt,
             when_to_use="需要进行 AI 绘图、图片编辑、视频生成、音乐创作、语音合成等 AIGC 创作任务",
             match_keywords=[
                 "绘图",
