@@ -97,18 +97,19 @@ async def _do_generate(
         )
         return result
     except GenerationError as e:
-        ai_return(f"错误：{e.user_message}")
         await bot.send(f"❌ {e.user_message}")
         return None
     except Exception as e:
         logger.exception(f"[RHComfyUI] 生成失败: {e}")
         refund_msg = f"已退回{selected['cost']}积分。" if selected["display_name"] else ""
-        ai_return(
-            f"错误：生成失败 - {str(e)}。{refund_msg}"
-            "不要在同一轮对话中盲目切换到未确认可用的云端 TTS 后端重试；"
-            "如果错误码是 MiniMax 2038，表示账号未开通 voice_clone 权限，代码无法绕过。"
-        )
-        await bot.send(f"❌ 生成失败: {e}" + (f"\n↩️ {refund_msg}" if refund_msg else ""))
+        if is_ai:
+            ai_return(
+                f"错误：生成失败 - {str(e)}。{refund_msg}"
+                "不要在同一轮对话中盲目切换到未确认可用的云端 TTS 后端重试；"
+                "如果错误码是 MiniMax 2038，表示账号未开通 voice_clone 权限，代码无法绕过。"
+            )
+        else:
+            await bot.send(f"❌ 生成失败: {e}" + (f"\n↩️ {refund_msg}" if refund_msg else ""))
         return None
 
 
@@ -151,7 +152,6 @@ async def _current_point(ev: Event) -> int:
 async def generate_image(bot: Bot, ev: Event) -> None:
     prompt = ev.text.strip()
     if not prompt:
-        ai_return("错误：未提供生成描述")
         await bot.send("请在命令后输入描述，例如：\n生图 一只可爱的猫咪\n生图 qwen 一只可爱的猫咪")
         return
 
@@ -214,14 +214,12 @@ async def generate_image(bot: Bot, ev: Event) -> None:
 async def edit_image(bot: Bot, ev: Event) -> None:
     prompt = ev.text.strip()
     if not prompt:
-        ai_return("错误：未提供编辑指令")
         await bot.send("请在命令后输入编辑指令，例如：改图 把背景换成海边")
         return
 
     # 兼容 AI 通过 image_id 参数传入资源 ID 的情况
     image_id_list = ev.image_id_list or ([ev.image_id] if ev.image_id else [])
     if not image_id_list:
-        ai_return("错误：编辑图片必须附带图片")
         await bot.send("编辑图片需要附带至少一张图片！")
         return
 
@@ -292,7 +290,6 @@ async def edit_image(bot: Bot, ev: Event) -> None:
 async def generate_video(bot: Bot, ev: Event) -> None:
     prompt = ev.text.strip()
     if not prompt:
-        ai_return("错误：未提供视频描述")
         await bot.send("请在命令后输入视频描述")
         return
 
@@ -302,13 +299,11 @@ async def generate_video(bot: Bot, ev: Event) -> None:
 
     round_name, round_body = split_seedance25_round(model_name, actual_prompt)
     if round_name == "draft" and not round_body.strip():
-        ai_return("错误：样片仍需要视频描述")
         await bot.send("请在样片后写上视频描述，例如：生视频 seedance2.5 draft 女孩抱着狐狸")
         return
     if round_name == "final":
         if ev.image_id or ev.image_id_list or ev.audio_id or ev.audio_id_list:
-            ai_return("错误：成片不能再传参考图片或音频，上游会复用样片素材")
-            await bot.send("出成片时不要再附带图片或音频。")
+            await bot.send("出成片时不要再附带图片或音频，上游会复用样片素材。")
             return
         request = GenerationRequest(
             task_type=TaskType.VIDEO,
@@ -406,7 +401,6 @@ async def generate_video(bot: Bot, ev: Event) -> None:
 async def generate_music(bot: Bot, ev: Event) -> None:
     prompt = ev.text.strip()
     if not prompt:
-        ai_return("错误：未提供音乐描述")
         await bot.send("请在命令后输入音乐描述")
         return
 
@@ -484,7 +478,6 @@ async def generate_music(bot: Bot, ev: Event) -> None:
 async def generate_speech(bot: Bot, ev: Event) -> None:
     prompt = ev.text.strip()
     if not prompt:
-        ai_return("错误：未提供要转换的文字")
         await bot.send("请在命令后输入要转换的文字")
         return
 
