@@ -279,6 +279,228 @@ class MiniMaxH3ImageModel(ImagePipelineModel):
         )
 
 
+class Seedream55ImageModel(ImagePipelineModel):
+    """Seedream 5.5:图层拆分 / 原生 RGBA 的跨字段约束 + 动态计费
+
+    PortSpec 表达不了的组合规则(参 ARK Seedream 5.5 文档):
+    - 图片生成:prompt 必填;size 为 1K/1.5K/2K 档位或 'WxH'(像素积
+      [921600, 4624220]、宽高比 [1/16, 16]);transparent 背景必须配 png。
+    - 图层拆分(layer_decomposition):恰好 1 张输入图;prompt 可空;
+      size 仅档位或 auto;不支持 background。
+    - 通用:safety_identifier ≤64 字符;仅 standard 提示词优化;
+      不支持 sequential_image_generation / stream / tools。
+    - 计费:输入图 5 积分/张(首张起计),输出按像素 13/23 积分/张。
+    """
+
+    # 像素积 / 宽高比上下界('WxH' 显式模式;同 Seedream 5.0 Pro 口径)
+    MIN_PIXELS = 921600
+    MAX_PIXELS = 4624220
+    MIN_ASPECT_RATIO = 1 / 16
+    MAX_ASPECT_RATIO = 16
+
+    MAX_IMAGES = 10  # 多参考上限(与端口 max_items 一致,ordered_content 兜底)
+    LAYER_MIN_IMAGES = 2
+    LAYER_MAX_IMAGES = 100  # layer_decomposition_options.max_images 官方上限
+    SAFETY_ID_MAX_LEN = 64
+    TIERS = ("1K", "1.5K", "2K")
+    BACKGROUNDS = ("auto", "transparent", "opaque")
+    # 5.5 官方不支持的字段(仅 Lite 组图 / 流式 / 联网工具)
+    FORBIDDEN_PARAMS = ("sequential_image_generation", "sequential_image_generation_options", "tools", "stream")
+
+    def __init__(self, node: NodeDef) -> None:
+        super().__init__(node)
+        self.card = ModelCard(
+            description=node.description or "Seedream 5.5 火山方舟图片生成/编辑(图层拆分 / 原生 RGBA)",
+            strengths=[
+                "文生图与 ≤10 张参考图编辑同节点",
+                "1K/1.5K/2K 档位或显式像素尺寸",
+                "原生 RGBA 透明图(background=transparent)",
+                "图层拆分:1 底图 + ≤99 图层,可选富文本 OCR",
+            ],
+            categories=["写实", "商品图", "海报", "设计素材", "图层拆分"],
+            weaknesses=[
+                "不支持连续组图(sequential_image_generation)",
+                "transparent 背景不能配 jpeg 输出",
+            ],
+            sample_prompts=[
+                "一张电商主图,纯白背景,产品居中",
+                "把这张海报拆成可编辑图层",
+            ],
+            languages=["zh", "en"],
+            speed_hint="normal",
+        )
+
+    def validate(self, request: GenerationRequest) -> None:
+        super().validate(request)
+        params = request.params
+        layer_mode = _is_true_param(request, "layer_decomposition")
+
+        for key in self.FORBIDDEN_PARAMS:
+            if key in params and params[key] is not None:
+                raise ValidationError(f"{self.display_name} 不支持参数 {key}(连续组图仅 Seedream 5.0 Lite 支持)")
+
+        opt = params["optimize_mode"] if "optimize_mode" in params else None
+        if opt is not None and opt != "standard":
+            raise ValidationError(f"{self.display_name} 仅支持 standard 提示词优化,实际收到 {opt!r}")
+
+        sid = params["safety_identifier"] if "safety_identifier" in params else None
+        if sid is not None and (not isinstance(sid, str) or len(sid) > self.SAFETY_ID_MAX_LEN):
+            raise ValidationError(
+                f"{self.display_name} 的 safety_identifier 须为 ≤{self.SAFETY_ID_MAX_LEN} 字符的字符串"
+            )
+
+        layer_max_raw = params["layer_max_images"] if "layer_max_images" in params else None
+        layer_max = _opt_int(layer_max_raw)
+        if layer_max_raw is not None and layer_max is None:
+            raise ValidationError(f"{self.display_name} 的 layer_max_images 须为整数,实际收到 {layer_max_raw!r}")
+        if layer_max is not None and not (self.LAYER_MIN_IMAGES <= layer_max <= self.LAYER_MAX_IMAGES):
+            raise ValidationError(
+                f"{self.display_name} 的 layer_max_images 须在 "
+                f"[{self.LAYER_MIN_IMAGES}, {self.LAYER_MAX_IMAGES}] 内,实际 {layer_max}"
+            )
+
+        n_img = _image_count(request)
+        if n_img > self.MAX_IMAGES:
+            raise ValidationError(f"{self.display_name} 最多 {self.MAX_IMAGES} 张参考图,当前 {n_img} 张")
+
+        explicit_w, explicit_h = _explicit_size_params(params)
+        size_raw = params["size"] if "size" in params else None
+        size_tier: Optional[str] = None
+        if isinstance(size_raw, str) and size_raw.strip():
+            s = size_raw.strip()
+            if s.upper() in self.TIERS:
+                size_tier = s.upper()
+            elif s.lower() == "auto":
+                size_tier = "auto"
+            elif explicit_w is None:
+                raise ValidationError(
+                    f"{self.display_name} 的 size 仅接受 1K/1.5K/2K/auto 档位或 '宽x高' 像素,实际 {size_raw!r}"
+                )
+        elif size_raw is not None and not isinstance(size_raw, str):
+            raise ValidationError(f"{self.display_name} 的 size 须为字符串,实际收到 {size_raw!r}")
+
+        tier_raw = (
+            params["image_size"] if "image_size" in params else (params["size_mode"] if "size_mode" in params else None)
+        )
+        tier = str(tier_raw).strip().upper() if tier_raw is not None else "2K"
+        eff_tier = size_tier or tier
+
+        bg_raw = params["background"] if "background" in params else None
+        background = bg_raw.strip().lower() if isinstance(bg_raw, str) else ""
+
+        if layer_mode:
+            if n_img != 1:
+                raise ValidationError(f"{self.display_name} 图层拆分只接受恰好 1 张输入图,当前 {n_img} 张")
+            if explicit_w is not None or explicit_h is not None:
+                raise ValidationError(f"{self.display_name} 图层拆分的 size 仅支持 1K/1.5K/2K/auto 档位,不支持显式像素")
+            if eff_tier != "auto" and eff_tier not in self.TIERS:
+                raise ValidationError(f"{self.display_name} 图层拆分的 image_size 仅支持 1K/1.5K/2K/auto")
+            if background and background != "auto":
+                raise ValidationError(f"{self.display_name} 图层拆分不支持 background 参数")
+        else:
+            if not (request.prompt or "").strip():
+                raise ValidationError(f"{self.display_name} 必须填写提示词")
+            if size_tier == "auto" or (explicit_w is None and eff_tier == "auto"):
+                raise ValidationError(f"{self.display_name} 图片生成不支持 size/image_size=auto(仅图层拆分可用)")
+            if explicit_w is None and eff_tier not in self.TIERS:
+                raise ValidationError(f"{self.display_name} 的 image_size 仅支持 1K/1.5K/2K,实际 {tier_raw!r}")
+            if explicit_w is not None and explicit_h is not None:
+                self._check_pixel_bounds(explicit_w, explicit_h)
+            if background and background not in self.BACKGROUNDS:
+                raise ValidationError(
+                    f"{self.display_name} 的 background 仅接受 auto/transparent/opaque,实际 {bg_raw!r}"
+                )
+            output_format_raw = params["output_format"] if "output_format" in params else None
+            output_format = output_format_raw.strip().lower() if isinstance(output_format_raw, str) else "png"
+            if background == "transparent" and output_format == "jpeg":
+                raise ValidationError(f"{self.display_name}:transparent 背景不能使用 jpeg,请改用 png")
+
+    def _check_pixel_bounds(self, width: int, height: int) -> None:
+        pixels = width * height
+        if pixels < self.MIN_PIXELS or pixels > self.MAX_PIXELS:
+            raise ValidationError(
+                f"{self.display_name} 显式尺寸总像素须在 [{self.MIN_PIXELS}, {self.MAX_PIXELS}] "
+                f"(≈1280×720 ~ 2048×2048×1.1025),当前 {width}×{height}={pixels}"
+            )
+        ratio = width / height
+        if ratio < self.MIN_ASPECT_RATIO or ratio > self.MAX_ASPECT_RATIO:
+            raise ValidationError(
+                f"{self.display_name} 宽高比需在 [{self.MIN_ASPECT_RATIO:.4f}, {self.MAX_ASPECT_RATIO}] 内,"
+                f"当前 {width}/{height}={ratio:.4f}"
+            )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """输入图 5 积分/张 + 输出按档位/像素 13/23 积分/张;拆分按 max_images 预扣。"""
+        from ...utils.mappers.seedream55_billing import (
+            DEFAULT_MAX_IMAGES,
+            estimate_seedream55_points,
+        )
+
+        params = request.params
+        layer_max = _opt_int(params["layer_max_images"] if "layer_max_images" in params else None)
+        return estimate_seedream55_points(
+            _image_count(request),
+            self._resolve_size_hint(params),
+            layer_decomposition=_is_true_param(request, "layer_decomposition"),
+            layer_max_images=layer_max or DEFAULT_MAX_IMAGES,
+        )
+
+    def settle_cost(self, request: GenerationRequest, usage: dict) -> Optional[int]:
+        """上游实扣:data[] 逐张按实际像素分档 + usage.input_images。"""
+        from ...utils.mappers.seedream55_billing import settle_seedream55_points
+
+        del request
+        return settle_seedream55_points(usage)
+
+    def point_range(self) -> tuple[int, int]:
+        """最小 1K 文生(13);最大 auto 图层拆分 1 输入 + 100 输出(2305)。"""
+        from ...utils.mappers.seedream55_billing import estimate_seedream55_points
+
+        return (
+            estimate_seedream55_points(0, "1K"),
+            estimate_seedream55_points(1, "auto", layer_decomposition=True, layer_max_images=self.LAYER_MAX_IMAGES),
+        )
+
+    @staticmethod
+    def _resolve_size_hint(params: Mapping[str, object]) -> object:
+        """估算计费用的 size 形态:显式 WxH > size 原文 > image_size > size_mode。"""
+        w, h = _explicit_size_params(params)
+        if w is not None and h is not None:
+            return f"{w}x{h}"
+        size_raw = params["size"] if "size" in params else None
+        if isinstance(size_raw, str) and size_raw.strip():
+            return size_raw.strip()
+        if "image_size" in params:
+            return params["image_size"]
+        if "size_mode" in params:
+            return params["size_mode"]
+        return None
+
+
+def _image_count(request: GenerationRequest) -> int:
+    """输入图张数:扁平 images 与 ordered_content 取大值。"""
+    n_img = len(request.images)
+    if request.ordered_content:
+        n_oc = sum(
+            1 for item in request.ordered_content if item.media is not None and item.media.kind == MediaKind.IMAGE
+        )
+        n_img = max(n_img, n_oc)
+    return n_img
+
+
+def _is_true_param(request: GenerationRequest, key: str) -> bool:
+    if key not in request.params or request.params[key] is None:
+        return False
+    raw: object = request.params[key]
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.strip().lower() in ("true", "1", "yes", "on")
+    if isinstance(raw, int):
+        return raw != 0
+    return False
+
+
 def _is_false_param(request: GenerationRequest, key: str) -> bool:
     if key not in request.params or request.params[key] is None:
         return False
@@ -311,4 +533,4 @@ def _opt_int(raw: object) -> Optional[int]:
     return None
 
 
-__all__ = ["Seedream5ProImageModel", "GptImageFamilyModel", "MiniMaxH3ImageModel"]
+__all__ = ["Seedream5ProImageModel", "Seedream55ImageModel", "GptImageFamilyModel", "MiniMaxH3ImageModel"]

@@ -47,8 +47,8 @@ from RH_ComfyUI.utils.mappers.nanobanana2_lite_billing import (
 
 
 def test_nb2_points_per_million_tokens_constant():
-    """60 美元 / 1M tokens,1 美元 = 100 积分 → 6_000 积分 / 1M tokens"""
-    assert NB2_POINTS_PER_MILLION_TOKENS == 6_000
+    """60 美元 / 1M tokens,1 美元 ≈ ¥7 = 700 积分 → 42_000 积分 / 1M tokens"""
+    assert NB2_POINTS_PER_MILLION_TOKENS == 42_000
 
 
 @pytest.mark.parametrize(
@@ -68,10 +68,10 @@ def test_nb2_output_tokens_by_size(image_size, expected_tokens):
 @pytest.mark.parametrize(
     "image_size,expected_points",
     [
-        ("512", 5),  # 747 * 6000 / 1M = 4.482 → ceil = 5
-        ("1K", 7),  # 1120 * 6000 / 1M = 6.72 → ceil = 7
-        ("2K", 11),  # 1680 * 6000 / 1M = 10.08 → ceil = 11
-        ("4K", 16),  # 2520 * 6000 / 1M = 15.12 → ceil = 16
+        ("512", 32),  # 747 * 42000 / 1M = 31.374 → ceil = 32
+        ("1K", 48),  # 1120 * 42000 / 1M = 47.04 → ceil = 48
+        ("2K", 71),  # 1680 * 42000 / 1M = 70.56 → ceil = 71
+        ("4K", 106),  # 2520 * 42000 / 1M = 105.84 → ceil = 106
     ],
 )
 def test_nb2_calculate_output_points(image_size, expected_points):
@@ -87,7 +87,7 @@ def test_nb2_default_size():
 def test_nb2_invalid_size_fallback():
     """非法档位 → 回落到 2K 档;512 仍是合法档,不能当成非法"""
     assert nb2_calculate_output_points("8K") == nb2_calculate_output_points("2K")
-    assert nb2_calculate_output_points("512") == 5
+    assert nb2_calculate_output_points("512") == 32
 
 
 def test_nb2_size_ordering():
@@ -155,8 +155,8 @@ def test_banana2_estimate_cost_never_below_minimum():
 
 
 def test_nb21_points_per_million_tokens_constant():
-    """30 美元 / 1M tokens,1 美元 = 100 积分 → 3_000 积分 / 1M tokens"""
-    assert NB21_POINTS_PER_MILLION_TOKENS == 3_000
+    """30 美元 / 1M tokens,1 美元 ≈ ¥7 = 700 积分 → 21_000 积分 / 1M tokens"""
+    assert NB21_POINTS_PER_MILLION_TOKENS == 21_000
     assert NB21_POINTS_PER_MILLION_TOKENS != NB2_POINTS_PER_MILLION_TOKENS
 
 
@@ -177,9 +177,9 @@ def test_nb21_output_tokens_by_size(image_size, expected_tokens):
 @pytest.mark.parametrize(
     "image_size,expected_points",
     [
-        ("1K", 4),  # 1120 * 3000 / 1M = 3.36 → ceil = 4
-        ("2K", 6),  # 1680 * 3000 / 1M = 5.04 → ceil = 6
-        ("4K", 12),  # 3780 * 3000 / 1M = 11.34 → ceil = 12
+        ("1K", 24),  # 1120 * 21000 / 1M = 23.52 → ceil = 24
+        ("2K", 36),  # 1680 * 21000 / 1M = 35.28 → ceil = 36
+        ("4K", 80),  # 3780 * 21000 / 1M = 79.38 → ceil = 80
     ],
 )
 def test_nb21_calculate_output_points(image_size, expected_points):
@@ -188,9 +188,9 @@ def test_nb21_calculate_output_points(image_size, expected_points):
 
 def test_nb21_default_and_unknown_size():
     """缺失、512、非法档都回落到官方默认 1K"""
-    assert nb21_calculate_output_points(None) == 4
-    assert nb21_calculate_output_points("512") == 4
-    assert nb21_calculate_output_points("8K") == 4
+    assert nb21_calculate_output_points(None) == 24
+    assert nb21_calculate_output_points("512") == 24
+    assert nb21_calculate_output_points("8K") == 24
 
 
 def test_banana21_estimate_cost_ignores_thinking():
@@ -198,7 +198,7 @@ def test_banana21_estimate_cost_ignores_thinking():
     assert m.estimate_cost(_make_request()) == estimate_nanobanana21_points("1K")
     high = _make_request(image_size="2K", thinking_level="high")
     low = _make_request(image_size="2K", thinking_level="minimal")
-    assert m.estimate_cost(high) == m.estimate_cost(low) == 6
+    assert m.estimate_cost(high) == m.estimate_cost(low) == 36
 
 
 # 厂商回包:输入 2456(文本 216 + 图 2240),出图 1120,候选里另有文本 658,思考 954。
@@ -218,17 +218,17 @@ _VENDOR_USAGE = {
 
 
 def test_banana21_settle_uses_vendor_token_split():
-    """2.1:输入 $1.50、出图 $30、文本与思考 $7.50,加权后向上取整为 5。"""
-    assert settle_nanobanana21_points(_VENDOR_USAGE) == 5
-    assert Banana21Def().settle_cost(_make_request(), _VENDOR_USAGE) == 5
+    """2.1:输入 $1.50、出图 $30、文本与思考 $7.50,加权后向上取整为 35。"""
+    assert settle_nanobanana21_points(_VENDOR_USAGE) == 35
+    assert Banana21Def().settle_cost(_make_request(), _VENDOR_USAGE) == 35
     wrapped = {"raw_task": _VENDOR_USAGE}
-    assert settle_nanobanana21_points(wrapped) == 5
+    assert settle_nanobanana21_points(wrapped) == 35
 
 
 def test_banana2_settle_uses_its_own_rates():
-    """3.1 Flash:输入 $0.50、出图 $60、文本与思考 $3,同一份用量是 8 积分。"""
-    assert settle_nanobanana2_points(_VENDOR_USAGE) == 8
-    assert Banana2Def().settle_cost(_make_request(), _VENDOR_USAGE) == 8
+    """3.1 Flash:输入 $0.50、出图 $60、文本与思考 $3,同一份用量是 52 积分。"""
+    assert settle_nanobanana2_points(_VENDOR_USAGE) == 52
+    assert Banana2Def().settle_cost(_make_request(), _VENDOR_USAGE) == 52
 
 
 def test_banana_settle_keeps_prepaid_without_usage():
@@ -238,9 +238,9 @@ def test_banana_settle_keeps_prepaid_without_usage():
 
 
 def test_banana21_settle_treats_missing_details_as_image_output():
-    """没有候选明细时,候选 token 全部按图片输出。1120 × $30/1M → 4 积分。"""
+    """没有候选明细时,候选 token 全部按图片输出。1120 × $30/1M → 24 积分。"""
     usage = {"usage_metadata": {"candidates_token_count": 1120, "total_token_count": 1120}}
-    assert settle_nanobanana21_points(usage) == 4
+    assert settle_nanobanana21_points(usage) == 24
 
 
 # 聚合网关任务回包:输入 1684 全是文本,输出 1120 无明细(按图片)。
@@ -266,15 +266,15 @@ _GATEWAY_TASK = {
 
 
 def test_gateway_raw_usage_settles_without_gemini_metadata():
-    """网关 rawUsage 没有 usage_metadata 也入账。2.1 为 4,同一份用量 banana2 为 7。"""
-    assert settle_nanobanana21_points(_GATEWAY_TASK) == 4
-    assert settle_nanobanana2_points(_GATEWAY_TASK) == 7
-    assert Banana21Def().settle_cost(_make_request(), {"raw_task": _GATEWAY_TASK}) == 4
-    assert Banana2Def().settle_cost(_make_request(), {"raw_task": _GATEWAY_TASK}) == 7
+    """网关 rawUsage 没有 usage_metadata 也入账。2.1 为 26,同一份用量 banana2 为 48。"""
+    assert settle_nanobanana21_points(_GATEWAY_TASK) == 26
+    assert settle_nanobanana2_points(_GATEWAY_TASK) == 48
+    assert Banana21Def().settle_cost(_make_request(), {"raw_task": _GATEWAY_TASK}) == 26
+    assert Banana2Def().settle_cost(_make_request(), {"raw_task": _GATEWAY_TASK}) == 48
     normalized = usage_from_gemini_raw(_GATEWAY_TASK)
     assert normalized["input_tokens"] == 1684
     assert normalized["output_tokens"] == 1120
-    assert settle_nanobanana21_points(normalized) == 4
+    assert settle_nanobanana21_points(normalized) == 26
 
 
 def test_gateway_output_details_bill_text_separately():
@@ -289,8 +289,8 @@ def test_gateway_output_details_bill_text_separately():
             }
         }
     }
-    assert settle_nanobanana21_points(task) == 5
-    assert settle_nanobanana2_points(task) == 8
+    assert settle_nanobanana21_points(task) == 31
+    assert settle_nanobanana2_points(task) == 50
 
 
 def test_gateway_total_tokens_alone_keeps_prepaid():
@@ -304,46 +304,46 @@ def test_gemini_usage_dict_roundtrips_into_settle():
     assert usage["output_tokens"] == 1778
     assert usage["thoughts_token_count"] == 954
     assert usage["total_tokens"] == 5188
-    assert settle_nanobanana21_points(usage) == 5
-    assert settle_nanobanana2_points(usage) == 8
+    assert settle_nanobanana21_points(usage) == 35
+    assert settle_nanobanana2_points(usage) == 52
 
 
 def test_banana2_and_21_prices_differ_at_same_size():
     """同一档位两条曲线必须不同,不能共用一张价表"""
     old = Banana2Def()
     new = Banana21Def()
-    assert old.estimate_cost(_make_request(image_size="1K")) == 7
-    assert new.estimate_cost(_make_request(image_size="1K")) == 4
-    assert old.estimate_cost(_make_request(image_size="2K")) == 11
-    assert new.estimate_cost(_make_request(image_size="2K")) == 6
-    assert old.estimate_cost(_make_request(image_size="4K")) == 16
-    assert new.estimate_cost(_make_request(image_size="4K")) == 12
-    assert old.point_range() == (5, 16)
-    assert new.point_range() == (4, 12)
-    assert old.point_cost == 2
-    assert new.point_cost == 4
+    assert old.estimate_cost(_make_request(image_size="1K")) == 48
+    assert new.estimate_cost(_make_request(image_size="1K")) == 24
+    assert old.estimate_cost(_make_request(image_size="2K")) == 71
+    assert new.estimate_cost(_make_request(image_size="2K")) == 36
+    assert old.estimate_cost(_make_request(image_size="4K")) == 106
+    assert new.estimate_cost(_make_request(image_size="4K")) == 80
+    assert old.point_range() == (32, 106)
+    assert new.point_range() == (24, 80)
+    assert old.point_cost == 71
+    assert new.point_cost == 24
 
 
 def test_banana2_lite_only_bills_1k():
     """Lite 图片输出与 2.1 的 1K 同价,但没有 2K/4K,输入和思考更便宜。"""
-    assert LITE_POINTS_PER_MILLION_TOKENS == 3_000
-    assert LITE_INPUT_POINTS_PER_MILLION == 25
-    assert LITE_TEXT_POINTS_PER_MILLION == 150
-    assert lite_calculate_output_points("1K") == 4
-    assert lite_calculate_output_points(None) == 4
-    assert lite_calculate_output_points("2K") == 4
-    assert lite_calculate_output_points("4K") == 4
+    assert LITE_POINTS_PER_MILLION_TOKENS == 21_000
+    assert LITE_INPUT_POINTS_PER_MILLION == 175
+    assert LITE_TEXT_POINTS_PER_MILLION == 1_050
+    assert lite_calculate_output_points("1K") == 24
+    assert lite_calculate_output_points(None) == 24
+    assert lite_calculate_output_points("2K") == 24
+    assert lite_calculate_output_points("4K") == 24
     lite = Banana2LiteDef()
     assert lite.estimate_cost(_make_request()) == estimate_nanobanana2_lite_points("1K")
-    assert lite.estimate_cost(_make_request(image_size="4K")) == 4
-    assert lite.point_range() == (4, 4)
-    assert lite.point_cost == 4
-    # 1120 出图 + 5000 思考:5000*150 + 1120*3000 = 4_110_000 → 5
+    assert lite.estimate_cost(_make_request(image_size="4K")) == 24
+    assert lite.point_range() == (24, 24)
+    assert lite.point_cost == 24
+    # 1120 出图 + 5000 思考:5000*1050 + 1120*21000 = 28_770_000 → 29
     usage = {
         "usage_metadata": {"candidates_token_count": 1120, "thoughts_token_count": 5000, "total_token_count": 6120}
     }
-    assert settle_nanobanana2_lite_points(usage) == 5
-    assert lite.settle_cost(_make_request(), usage) == 5
+    assert settle_nanobanana2_lite_points(usage) == 29
+    assert lite.settle_cost(_make_request(), usage) == 29
     assert settle_nanobanana2_lite_points({}) is None
 
 
@@ -353,8 +353,8 @@ def test_banana2_lite_only_bills_1k():
 
 
 def test_nb1_points_per_million_tokens_constant():
-    """30 美元 / 1M tokens,1 美元 = 100 积分 → 3_000 积分 / 1M tokens"""
-    assert NB1_POINTS_PER_MILLION_TOKENS == 3_000
+    """30 美元 / 1M tokens,1 美元 ≈ ¥7 = 700 积分 → 21_000 积分 / 1M tokens"""
+    assert NB1_POINTS_PER_MILLION_TOKENS == 21_000
 
 
 def test_nb1_output_tokens():
@@ -363,13 +363,13 @@ def test_nb1_output_tokens():
 
 
 def test_nb1_calculate_output_points():
-    """1290 * 3000 / 1M = 3.87 → ceil = 4"""
-    assert nb1_calculate_output_points() == 4
+    """1290 * 21000 / 1M = 27.09 → ceil = 28"""
+    assert nb1_calculate_output_points() == 28
 
 
 def test_nb1_estimate_points():
     """estimate_nanobanana1_points 返回固定值"""
-    assert estimate_nanobanana1_points() == 4
+    assert estimate_nanobanana1_points() == 28
 
 
 # ── Banana1Def.estimate_cost 钩子 ──
@@ -379,7 +379,7 @@ def test_banana1_estimate_cost_fixed():
     """Banana1Def.estimate_cost 返回固定值(一代无尺寸档位)"""
     m = Banana1Def()
     req = _make_request()
-    assert m.estimate_cost(req) == 4
+    assert m.estimate_cost(req) == 28
 
 
 def test_banana1_estimate_cost_same_regardless_of_params():
@@ -387,7 +387,7 @@ def test_banana1_estimate_cost_same_regardless_of_params():
     m = Banana1Def()
     req1 = _make_request(ratio="1:1")
     req2 = _make_request(ratio="16:9")
-    assert m.estimate_cost(req1) == m.estimate_cost(req2) == 4
+    assert m.estimate_cost(req1) == m.estimate_cost(req2) == 28
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -396,13 +396,13 @@ def test_banana1_estimate_cost_same_regardless_of_params():
 
 
 def test_bpro_output_points_per_million_tokens_constant():
-    """120 美元 / 1M tokens,1 美元 = 100 积分 → 12_000 积分 / 1M tokens"""
-    assert BPRO_OUTPUT_POINTS_PER_MILLION_TOKENS == 12_000
+    """120 美元 / 1M tokens,1 美元 ≈ ¥7 = 700 积分 → 84_000 积分 / 1M tokens"""
+    assert BPRO_OUTPUT_POINTS_PER_MILLION_TOKENS == 84_000
 
 
 def test_bpro_input_cost_per_image():
-    """每张输入图片 0.0011 美元 = 0.11 积分"""
-    assert BPRO_INPUT_COST_PER_IMAGE_POINTS == pytest.approx(0.11)
+    """每张输入图片 0.0011 美元 ≈ 0.77 积分"""
+    assert BPRO_INPUT_COST_PER_IMAGE_POINTS == pytest.approx(0.77)
 
 
 @pytest.mark.parametrize(
@@ -421,13 +421,13 @@ def test_bpro_output_tokens_by_size(image_size, expected_tokens):
 @pytest.mark.parametrize(
     "num_input,image_size,expected",
     [
-        (0, "1K", 14),  # 输入 0 + 输出 1K(1120*12000/1M=13.44 → ceil=14) = 14
-        (0, "2K", 14),  # 同上
-        (0, "4K", 24),  # 输入 0 + 输出 4K(2000*12000/1M=24.0 → ceil=24) = 24
-        (1, "1K", 15),  # 输入 1(ceil(0.11)=1) + 输出 14 = 15
-        (1, "4K", 25),  # 输入 1 + 输出 24 = 25
-        (3, "2K", 15),  # 输入 3(ceil(0.33)=1) + 输出 14 = 15
-        (3, "4K", 25),  # 输入 3 + 输出 24 = 25
+        (0, "1K", 95),  # 输入 0 + 输出 1K(1120*84000/1M=94.08 → ceil=95) = 95
+        (0, "2K", 95),  # 同上
+        (0, "4K", 168),  # 输入 0 + 输出 4K(2000*84000/1M=168.0 → ceil=168) = 168
+        (1, "1K", 96),  # 输入 1(ceil(0.77)=1) + 输出 95 = 96
+        (1, "4K", 169),  # 输入 1 + 输出 168 = 169
+        (3, "2K", 98),  # 输入 3(ceil(2.31)=3) + 输出 95 = 98
+        (3, "4K", 171),  # 输入 3 + 输出 168 = 171
     ],
 )
 def test_bpro_calculate_points(num_input, image_size, expected):

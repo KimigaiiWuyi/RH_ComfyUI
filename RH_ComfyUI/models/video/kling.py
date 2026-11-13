@@ -31,7 +31,7 @@ class _KlingVideo(VideoPipelineModel):
     _allow_video: ClassVar[bool] = False
     _max_videos: ClassVar[int] = 1
     _ratios: ClassVar[list[str]] = _RATIOS
-    _point_cost: ClassVar[int] = 56
+    _point_cost: ClassVar[int] = 400
     _priority: ClassVar[int] = 48
     _audio_help: ClassVar[str] = "是否生成有声视频"
     _images_help: ClassVar[str] = "0 张为文生。1 张为首帧。支持尾帧的模型可以再给 1 张。"
@@ -188,7 +188,7 @@ class Kling40Video(_KlingVideo):
     _max_videos = 5
     _allow_video = True
     _ratios = _RATIOS_40
-    _point_cost = 105
+    _point_cost = 750
     _audio_help = "4.0 的声音写在提示词(对白/环境声/配乐),没有独立开关;此项不改变上游请求与积分。"
     _images_help = (
         "0~10 张。0 张文生;默认首图=首帧、末图=尾帧、其余=中间帧;"
@@ -215,7 +215,7 @@ class Kling40FlashVideo(_KlingVideo):
     _max_videos = 5
     _allow_video = True
     _ratios = _RATIOS_40
-    _point_cost = 42
+    _point_cost = 300
     _audio_help = "Flash 始终音画同出;Omni 且有参考视频时关闭表示保留原声。文生/图生此项不改变上游请求。"
     _images_help = "0~10 张。0 张文生;1 张为首帧;多图或 frame_roles 带 refer 时走 Omni 参考。"
     _video_role_help = "feature: 特征参考,至多 5 段。base: 待编辑视频,只能 1 段,不能配首帧。"
@@ -228,7 +228,7 @@ class Kling30TurboVideo(_KlingVideo):
     _description = "文生或单张首帧,3~15 秒,720p/1080p,按有声计价"
     _knowledge = "只支持文生和一张首帧。没有尾帧、参考视频和 4k。多镜头写在提示词里。"
     _max_images = 1
-    _point_cost = 56
+    _point_cost = 400
     _audio_help = "该模型没有静音档,开关不改变请求,仍按有声计价。"
     _priority = 52
 
@@ -241,20 +241,21 @@ class Kling30Video(_KlingVideo):
     _resolutions = ["720p", "1080p", "4k"]
     _max_images = 7
     _allow_video = True
-    _point_cost = 63
+    _point_cost = 450
     _audio_help = "打开为 native。特征参考视频会固定关闭声音。"
     _priority = 51
 
 
 class KlingO1Video(_KlingVideo):
     _name = "kling-o1"
+
     _display = "Kling O1"
     _description = "Omni 视频,3~10 秒,720p/1080p。纯文生和单首帧只支持 5 或 10 秒"
     _knowledge = "始终走 Omni。不能生成新音轨;有参考视频且打开有声时保留原声。"
     _duration = (3, 10)
     _max_images = 7
     _allow_video = True
-    _point_cost = 42
+    _point_cost = 300
     _audio_help = "没有 native。有参考视频时打开表示保留原声,否则关闭。"
     _priority = 50
 
@@ -266,7 +267,7 @@ class Kling26Video(_KlingVideo):
     _knowledge = "有声只支持 1080p。首尾帧只支持 1080p 且必须无声。音色通过 voice_id 传入,最多 2 个。"
     _duration = (5, 10)
     _max_images = 2
-    _point_cost = 70
+    _point_cost = 500
     _audio_help = "打开后分辨率必须是 1080p。首尾帧请关闭。"
     _priority = 49
 
@@ -278,7 +279,7 @@ class Kling25TurboVideo(_KlingVideo):
     _knowledge = "没有声音字段。首尾帧只支持 1080p。"
     _duration = (5, 10)
     _max_images = 2
-    _point_cost = 21
+    _point_cost = 150
     _audio_help = "该模型只出无声视频,开关不生效。"
     _priority = 48
 

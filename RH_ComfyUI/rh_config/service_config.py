@@ -47,6 +47,7 @@ _IMAGE_MODEL_REAL_NAMES = [
     "qwen_2512",
     "seedream5",
     "seedream5_pro",
+    "seedream5_5",
 ]
 _COMFYUI_WORKFLOW_NAMES = [
     "qwen_2511",
@@ -76,6 +77,7 @@ _SEEDANCE_ARK_MODEL_NAMES = [
     "seedance2_fast",
     "seedream5",
     "seedream5_pro",
+    "seedream5_5",
 ]
 _SEEDANCE_RH_MODEL_NAMES = [
     "seedance15_pro",
@@ -272,7 +274,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     ),
     "Seedance_Enable_ark": GsBoolConfig(
         "启用 ARK 供应商",
-        "是否启用火山方舟官方供应商。禁用后,Seedance 视频与 Seedream 5.0 图片均不会通过该供应商分发(同源开关)。",
+        "是否启用火山方舟官方供应商。禁用后,Seedance 视频与 Seedream 5.0/5.5 图片均不会通过该供应商分发(同源开关)。",
         True,
     ),
     "Seedance_Enabled_Models": GsListStrConfig(
@@ -280,7 +282,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "从列表勾选要走火山方舟 ARK 的内部模型;可自由添加内部模型名。"
         "留空则全部不走 ARK。须同时打开上方「启用 ARK 供应商」。"
         "可选:seedance15_pro / seedance2 / seedance2.5 / seedance2_mini / "
-        "seedance2_fast / seedream5 / seedream5_pro。",
+        "seedance2_fast / seedream5 / seedream5_pro / seedream5_5。",
         list(_SEEDANCE_ARK_MODEL_NAMES),
         options=list(_SEEDANCE_ARK_MODEL_NAMES),
     ),
@@ -288,7 +290,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "ARK API Key",
         "火山方舟 ARK API Key。"
         "用于 Seedance 2.0 / 2.0 Fast / 1.5 Pro / 1.0 Pro 视频系列,"
-        "同时用于 Seedream 5.0 Lite / Pro 图片系列(同源 Key)。",
+        "同时用于 Seedream 5.0 Lite / Pro 与 Seedream 5.5 图片系列(同源 Key)。",
         "",
     ),
     "Seedance_BaseURL_ark": GsStrConfig(

@@ -1,7 +1,7 @@
 """可灵积分。
 
 官方价是资源包「单位」,视频约 ¥1/单位,图片不是。
-插件积分按 $1 = 100,这里取 $1 ≈ ¥7.2,即 1 元 = 14 积分,向上取整,最少 1。
+平台口径 1 积分 = 1 分钱:1 元 = 100 积分,向上取整,最少 1。
 
 视频单价(元/秒):
 - 4.0 无输入视频:720p 1.0 / 1080p 1.5
@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from decimal import ROUND_CEILING, Decimal
 
-POINTS_PER_CNY = Decimal("14")
+POINTS_PER_CNY = Decimal("100")
 
 _SILENT_30 = {"720p": Decimal("0.6"), "1080p": Decimal("0.8"), "4k": Decimal("3.0")}
 _AUDIO_30 = {"720p": Decimal("0.9"), "1080p": Decimal("1.2"), "4k": Decimal("3.0")}

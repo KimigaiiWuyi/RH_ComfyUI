@@ -7,7 +7,7 @@ MiniMax H3 Max / Turbo 同为「生成秒数 × 分辨率档」,时长浮点秒 
   H3 Max Turbo 480p $0.025/s,768p $0.04/s,1080p $0.08/s(文生/图生半价)
   reference-to-video 两模型同价(按 H3 Max 档),另含 4096 个免费
   reference token,超出部分 H3 Max $0.02/1K、Turbo $0.016/1K。
-积分换算沿用平台口径 $1 = 100 积分,向上取整、下限 1 分。
+积分按平台口径换算:1 积分 = 1 分钱,$1 ≈ ¥7 → 700 积分,向上取整、下限 1 分。
 
 官网有限时阶梯折扣。折扣是限时的,这里始终按刊例价计——上游打折时
 平台少付,刊例价计价对用户仍是正确的上限,不会欠收。
@@ -19,8 +19,8 @@ from decimal import ROUND_UP, Decimal
 
 from .catalog import MAX_DURATION, MIN_DURATION, H3_MAX_DURATION, H3_MIN_DURATION
 
-# 积分 ↔ 美元:沿用平台 $1 = 100 积分口径
-POINTS_PER_USD = Decimal("100")
+# 积分 ↔ 美元:$1 ≈ ¥7 → 700 积分(1 积分 = 1 分钱)
+POINTS_PER_USD = Decimal("700")
 
 # 官方刊例价(美元 / 秒),两档分辨率
 RATE_PER_SECOND: dict[str, Decimal] = {

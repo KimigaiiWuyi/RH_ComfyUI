@@ -1,12 +1,12 @@
 """Nano Banana 2.1 动态积分计价
 
 官方(gemini-nano-banana-2.1,Standard)图片输出 30 美元/1M tokens。
-1 美元 = 100 积分 → 30 * 100 = 3_000 积分 / 1M tokens。
+1 美元 ≈ ¥7 = 700 积分 → 30 * 700 = 21_000 积分 / 1M tokens。
 token 与单价取自 Gemini API 价格页(2026-10):
 
-  - 1K (1024px) : 1120 tokens → $0.0336 →  4 积分
-  - 2K (2048px) : 1680 tokens → $0.0504 →  6 积分
-  - 4K (4096px) : 3780 tokens → $0.113  → 12 积分
+  - 1K (1024px) : 1120 tokens → $0.0336 → 24 积分
+  - 2K (2048px) : 1680 tokens → $0.0504 → 36 积分
+  - 4K (4096px) : 3780 tokens → $0.113  → 80 积分
 
 与 Nano Banana 2(60 美元/1M,含 512 档)不是同一条曲线。
 2.1 没有 512 档。预扣只按输出图片。成功后按 usage_metadata 补入输入、文本和思考 token。
@@ -17,11 +17,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-# 30 美元 / 1M tokens,1 美元 = 100 积分 → 30 * 100 = 3_000 积分 / 1M tokens
-POINTS_PER_MILLION_TOKENS: int = 3_000
-# 标准档:输入(文本/图片)$1.50/1M;文本与思考输出 $7.50/1M。图片输出沿用上面的 3_000。
-INPUT_POINTS_PER_MILLION: int = 150
-TEXT_POINTS_PER_MILLION: int = 750
+# 30 美元 / 1M tokens,1 美元 ≈ ¥7 = 700 积分 → 30 * 700 = 21_000 积分 / 1M tokens
+POINTS_PER_MILLION_TOKENS: int = 21_000
+# 标准档:输入(文本/图片)$1.50/1M;文本与思考输出 $7.50/1M。图片输出沿用上面的 21_000。
+INPUT_POINTS_PER_MILLION: int = 1_050
+TEXT_POINTS_PER_MILLION: int = 5_250
 
 # 价格页:4K 为 3780 tokens,不是 2 代那张表的 2520。
 OUTPUT_TOKENS_BY_SIZE: dict[str, int] = {
@@ -41,7 +41,7 @@ def calculate_output_points(image_size: Optional[str]) -> int:
     """
     size = image_size if image_size in OUTPUT_TOKENS_BY_SIZE else _DEFAULT_SIZE
     tokens = OUTPUT_TOKENS_BY_SIZE[size]
-    # 向上取整到积分:tokens * 3000 / 1_000_000
+    # 向上取整到积分:tokens * 21000 / 1_000_000
     points = (tokens * POINTS_PER_MILLION_TOKENS + 999_999) // 1_000_000
     return max(points, 1)
 

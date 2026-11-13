@@ -1,8 +1,8 @@
 """Gemini 3.8 Flash-Lite TTS 积分。
 
-只计 Standard。1 美元 = 100 积分,向上取整,最少 1。
-2026-12-31 及以前:输入文本 50 积分/百万 token,音频 600。
-2027-01-01 起:输入 100,音频 1200。
+只计 Standard。1 美元 ≈ ¥7 = 700 积分,向上取整,最少 1。
+2026-12-31 及以前:输入文本 350 积分/百万 token,音频 4200。
+2027-01-01 起:输入 700,音频 8400。
 预扣不知道时长,按 4 字/秒估算,音频 token 封顶 16384。
 """
 
@@ -13,10 +13,10 @@ from datetime import date
 from .gemini_image_usage import find_usage_metadata
 
 _PRICE_STEP = date(2027, 1, 1)
-_INPUT_BEFORE = 50
-_AUDIO_BEFORE = 600
-_INPUT_AFTER = 100
-_AUDIO_AFTER = 1200
+_INPUT_BEFORE = 350
+_AUDIO_BEFORE = 4_200
+_INPUT_AFTER = 700
+_AUDIO_AFTER = 8_400
 _AUDIO_TOKENS_PER_SECOND = 25
 _MAX_AUDIO_TOKENS = 16384
 _MILLION = 1_000_000

@@ -8,7 +8,7 @@ from .video import (
     interpolate_prompt_refs,
 )
 from .speech import index_tts2_mapper
-from .seedream import seedream_mapper
+from .seedream import seedream_mapper, seedream55_mapper
 from .gpt_image2 import gpt_image2_mapper
 from .image_edit import qwen_edit_mapper
 from .image2image import qwen_img2img_mapper
@@ -26,8 +26,9 @@ __all__ = [
     "qwen_img2img_mapper",
     # ── 图片(MiniMax 图生图) ──
     "minimax_image01_img2img_mapper",
-    # ── 图片(火山方舟 Seedream 5.0 Lite / Pro) ──
+    # ── 图片(火山方舟 Seedream 5.0 Lite / Pro / 5.5) ──
     "seedream_mapper",
+    "seedream55_mapper",
     # ── 视频(ComfyUI Wan 统一 videogen mapper) ──
     "wan_videogen_mapper",
     "wan_text2video_mapper",

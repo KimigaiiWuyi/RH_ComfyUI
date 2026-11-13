@@ -341,8 +341,8 @@ def test_models_catalog_lists_banana2_lite():
     assert found is not None
     assert found["display_name"] == "Nano Banana 2 Lite"
     assert found["backend_model"] == "gemini-3.1-flash-lite-image"
-    assert found["point_cost"] == 4
-    assert found["point_range"] == {"min": 4, "max": 4}
+    assert found["point_cost"] == 24
+    assert found["point_range"] == {"min": 24, "max": 24}
     schema = found["input_schema"]
     assert isinstance(schema, dict)
     size = schema["image_size"]

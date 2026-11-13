@@ -33,6 +33,7 @@ from .RH_ComfyUI.api import (  # noqa: F401
     list_quota_statuses,
     resolve_channel_pin,
     get_model_input_schema,
+    reconcile_kling_billing,
     reconcile_seedance_usage_billing,
 )
 from .RH_ComfyUI.utils.backends import (  # noqa: F401
@@ -101,6 +102,7 @@ __all__ = [
     "cancel_generation",
     "resume_poll",
     "settle_model_cost",
+    "reconcile_kling_billing",
     "reconcile_seedance_usage_billing",
     "get_point_cost",
     "resolve_channel_pin",

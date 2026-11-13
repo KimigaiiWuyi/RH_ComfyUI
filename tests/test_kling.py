@@ -252,14 +252,14 @@ def test_turbo_text_and_first_frame_ignore_audio_flag() -> None:
     assert silent.poll_token == "v"
     assert "audio" not in _settings(silent)
     assert _settings(silent)["aspect_ratio"] == "16:9"
-    assert cny_to_points(silent.yuan) == 56
+    assert cny_to_points(silent.yuan) == 400
     framed = prepare("kling-3.0-turbo", _video(images=[_PNG], resolution="1080p", duration=15))
     assert framed.path == "/image-to-video/kling-3.0-turbo"
     assert "aspect_ratio" not in _settings(framed)
     kinds = [item["type"] for item in _items(framed.body["contents"])]
     assert kinds == ["prompt", "first_frame"]
     assert _items(framed.body["contents"])[1]["url"] == _b64()
-    assert cny_to_points(framed.yuan) == 210
+    assert cny_to_points(framed.yuan) == 1500
 
 
 def test_turbo_rejects_tail_video_and_elements() -> None:
@@ -276,11 +276,11 @@ def test_standard_30_routes_text_frames_and_omni() -> None:
     assert text.path == "/text-to-video/kling-3.0"
     assert _settings(text)["audio"] == "native"
     assert _settings(text)["multi_shot"] is True
-    assert cny_to_points(text.yuan) == 63
+    assert cny_to_points(text.yuan) == 450
 
     quiet = prepare("kling-3.0", _video(generate_audio=False))
     assert _settings(quiet)["audio"] == "off"
-    assert cny_to_points(quiet.yuan) == 42
+    assert cny_to_points(quiet.yuan) == 300
 
     frames = prepare("kling-3.0", _video(images=[_PNG, _PNG], generate_audio=False))
     assert frames.path == "/image-to-video/kling-3.0"
@@ -289,7 +289,7 @@ def test_standard_30_routes_text_frames_and_omni() -> None:
 
     forced = prepare("kling-3.0", _video(params={"omni": True}))
     assert forced.path == "/omni-video/kling-3.0-omni"
-    assert cny_to_points(forced.yuan) == 56
+    assert cny_to_points(forced.yuan) == 400
 
     many = prepare("kling-3.0", _video(images=[_PNG, _PNG, _PNG]))
     assert many.path == "/omni-video/kling-3.0-omni"
@@ -299,7 +299,7 @@ def test_standard_30_routes_text_frames_and_omni() -> None:
         "refer_image",
         "refer_image",
     ]
-    assert cny_to_points(many.yuan) == 56
+    assert cny_to_points(many.yuan) == 400
 
     referred = prepare(
         "kling-3.0",
@@ -323,7 +323,7 @@ def test_standard_30_routes_text_frames_and_omni() -> None:
     assert contents[4]["element_id"] == "hero"
     assert _settings(referred)["audio"] == "off"
     assert _settings(referred)["multi_shot"] is True
-    assert cny_to_points(referred.yuan) == 63
+    assert cny_to_points(referred.yuan) == 450
 
 
 def test_omni_feature_and_base_constraints() -> None:
@@ -359,7 +359,7 @@ def test_o1_audio_duration_and_resolution() -> None:
     assert text.path == "/omni-video/kling-o1"
     assert _settings(text)["audio"] == "off"
     assert "multi_shot" not in _settings(text)
-    assert cny_to_points(text.yuan) == 84
+    assert cny_to_points(text.yuan) == 600
     with pytest.raises(ValidationError, match="时长"):
         prepare("kling-o1", _video(duration=7))
     with pytest.raises(ValidationError, match="4k"):
@@ -370,7 +370,7 @@ def test_o1_audio_duration_and_resolution() -> None:
     )
     assert _settings(kept)["audio"] == "original"
     assert "multi_shot" not in _settings(kept)
-    assert cny_to_points(kept.yuan) == 89
+    assert cny_to_points(kept.yuan) == 630
 
 
 def test_v26_audio_resolution_and_voice() -> None:
@@ -378,7 +378,7 @@ def test_v26_audio_resolution_and_voice() -> None:
     assert spoken.path == "/text-to-video/kling-2.6"
     assert _settings(spoken)["resolution"] == "1080p"
     assert _settings(spoken)["audio"] == "native"
-    assert cny_to_points(spoken.yuan) == 70
+    assert cny_to_points(spoken.yuan) == 500
     with pytest.raises(ValidationError, match="1080p"):
         prepare("kling-2.6", _video(resolution="720p"))
     with pytest.raises(ValidationError, match="音色"):
@@ -387,7 +387,7 @@ def test_v26_audio_resolution_and_voice() -> None:
     assert voiced.path == "/image-to-video/kling-2.6"
     voices = [item for item in _items(voiced.body["contents"]) if item["type"] == "voice"]
     assert [item["voice_id"] for item in voices] == ["v1", "v2"]
-    assert cny_to_points(voiced.yuan) == 84
+    assert cny_to_points(voiced.yuan) == 600
     frames = prepare("kling-2.6", _video(images=[_PNG, _PNG], generate_audio=False))
     assert _settings(frames)["resolution"] == "1080p"
     assert _settings(frames)["audio"] == "off"
@@ -399,12 +399,12 @@ def test_v25_is_silent_and_tail_frame_needs_1080p() -> None:
     text = prepare("kling-2.5-turbo", _video(generate_audio=True, resolution="720p"))
     assert text.path == "/text-to-video/kling-2.5-turbo"
     assert "audio" not in _settings(text)
-    assert cny_to_points(text.yuan) == 21
+    assert cny_to_points(text.yuan) == 150
     frames = prepare("kling-2.5-turbo", _video(images=[_PNG, _PNG], generate_audio=True))
     assert frames.path == "/image-to-video/kling-2.5-turbo"
     assert _settings(frames)["resolution"] == "1080p"
     assert "audio" not in _settings(frames)
-    assert cny_to_points(frames.yuan) == 35
+    assert cny_to_points(frames.yuan) == 250
     with pytest.raises(ValidationError, match="1080p"):
         prepare("kling-2.5-turbo", _video(images=[_PNG, _PNG], resolution="720p"))
 
@@ -435,13 +435,13 @@ def test_v40_text_to_video_paths_and_limits() -> None:
     assert text.poll_token == "v"
     assert text.body["prompt"] == "一只猫"
     assert _settings(text) == {"resolution": "720p", "aspect_ratio": "21:9", "duration": 8}
-    assert cny_to_points(text.yuan) == 112
+    assert cny_to_points(text.yuan) == 800
     assert "contents" not in text.body
 
     defaults = prepare("kling-4.0", _video(duration=5))
     assert defaults.path == "/text-to-video/kling-4.0"
     assert _settings(defaults) == {"resolution": "1080p", "aspect_ratio": "16:9", "duration": 5}
-    assert cny_to_points(defaults.yuan) == 105
+    assert cny_to_points(defaults.yuan) == 750
 
     adaptive = prepare("kling-4.0", _video(ratio="adaptive"))
     assert adaptive.path == "/omni-video/kling-4.0"
@@ -482,7 +482,7 @@ def test_v40_keyframes_and_frame_roles() -> None:
     assert contents[1]["url"] == _b64()
     assert "aspect_ratio" not in _settings(frames)
     assert _settings(frames)["duration"] == 12
-    assert cny_to_points(frames.yuan) == 252
+    assert cny_to_points(frames.yuan) == 1800
 
     single = prepare("kling-4.0", _video(images=[_PNG]))
     assert [item["type"] for item in _items(single.body["contents"])] == ["prompt", "first_frame"]
@@ -556,7 +556,7 @@ def test_v40_omni_assets_and_billing() -> None:
     contents = _items(refer.body["contents"])
     assert [item["type"] for item in contents] == ["prompt", "first_frame", "last_frame", "refer_image"]
     assert _settings(refer)["aspect_ratio"] == "adaptive"
-    assert cny_to_points(refer.yuan) == 105
+    assert cny_to_points(refer.yuan) == 750
 
     featured = prepare(
         "kling-4.0",
@@ -584,7 +584,7 @@ def test_v40_omni_assets_and_billing() -> None:
     assert contents[6]["voice_id"] == "v1"
     assert contents[7]["voice_id"] == "v2"
     # 1080p,输入 12s > 输出 5s:计费 (12+5)*0.9 = 15.3 元 -> 215 分
-    assert cny_to_points(featured.yuan) == 215
+    assert cny_to_points(featured.yuan) == 1530
 
     base = prepare(
         "kling-4.0",
@@ -600,7 +600,7 @@ def test_v40_omni_assets_and_billing() -> None:
         "base_video",
     ]
     # 输入 8s > 输出 5s:(8+5)*0.9 = 11.7 元 -> 164 分
-    assert cny_to_points(base.yuan) == 164
+    assert cny_to_points(base.yuan) == 1170
 
     short_input = prepare(
         "kling-4.0",
@@ -610,7 +610,7 @@ def test_v40_omni_assets_and_billing() -> None:
         ),
     )
     # 输入 4s < 输出 5s:5*2*0.9 = 9.0 元 -> 126 分
-    assert cny_to_points(short_input.yuan) == 126
+    assert cny_to_points(short_input.yuan) == 900
 
 
 def test_v40_omni_limits() -> None:
@@ -667,7 +667,7 @@ def test_v40_flash_routes_and_caps() -> None:
     assert text.path == "/text-to-video/kling-4.0-flash"
     assert _settings(text) == {"resolution": "720p", "aspect_ratio": "9:16", "duration": 16}
     # 16s * 0.6 = 9.6 元 -> 135 分
-    assert cny_to_points(text.yuan) == 135
+    assert cny_to_points(text.yuan) == 960
     assert "contents" not in text.body
 
     adaptive = prepare("kling-4.0-flash", _video(ratio="adaptive"))
@@ -716,7 +716,7 @@ def test_v40_flash_omni_audio_and_billing() -> None:
     assert _settings(original)["audio"] == "original"
     assert [item["type"] for item in _items(original.body["contents"])] == ["prompt", "feature_video"]
     # 输入 8s > 输出 5s:(8+5)*0.4 = 5.2 元 -> 73 分
-    assert cny_to_points(original.yuan) == 73
+    assert cny_to_points(original.yuan) == 520
 
     native = prepare(
         "kling-4.0-flash",
@@ -724,7 +724,7 @@ def test_v40_flash_omni_audio_and_billing() -> None:
     )
     assert _settings(native)["audio"] == "native"
     # 输入 4s < 输出 5s:5*2*0.4 = 4.0 元 -> 56 分
-    assert cny_to_points(native.yuan) == 56
+    assert cny_to_points(native.yuan) == 400
 
     base = prepare(
         "kling-4.0-flash",
@@ -747,17 +747,17 @@ def test_image_30_picks_generations_or_omni() -> None:
     assert single.poll_token == "ig"
     assert single.body["model_name"] == "kling-v3"
     assert single.body["resolution"] == "1k"
-    assert cny_to_points(single.yuan) == 3
+    assert cny_to_points(single.yuan) == 20
     kept = prepare("kling-image-3.0", _image("看 <<<image_1>>>", images=[_PNG], params={"image_size": "4K"}))
     assert kept.path == "/v1/images/omni-image"
     assert kept.body["model_name"] == "kling-v3-omni"
     assert kept.body["prompt"] == "看 <<<image_1>>>"
-    assert cny_to_points(kept.yuan) == 6
+    assert cny_to_points(kept.yuan) == 40
     series = prepare("kling-image-3.0", _image(params={"result_type": "series", "series_amount": "auto"}))
     assert series.body["result_type"] == "series"
     assert series.body["series_amount"] == "auto"
     assert "n" not in series.body
-    assert cny_to_points(series.yuan) == 12
+    assert cny_to_points(series.yuan) == 80
     with pytest.raises(ValidationError, match="auto"):
         prepare("kling-image-3.0", _image(ratio="auto"))
     followed = prepare("kling-image-3.0", _image(images=[_PNG], ratio="auto"))
@@ -770,7 +770,7 @@ def test_image_o1_rejects_series_and_4k() -> None:
     assert submit.body["model_name"] == "kling-image-o1"
     assert submit.body["result_type"] == "single"
     assert submit.poll_token == "io"
-    assert cny_to_points(submit.yuan) == 6
+    assert cny_to_points(submit.yuan) == 40
     with pytest.raises(ValidationError, match="组图"):
         prepare("kling-image-o1", _image(params={"result_type": "series"}))
     with pytest.raises(ValidationError, match="4k"):
@@ -782,12 +782,12 @@ def test_image_21_routes_text_subject_and_multi() -> None:
     assert text.path == "/v1/images/generations"
     assert text.body["model_name"] == "kling-v2-1"
     assert text.body["negative_prompt"] == "模糊"
-    assert cny_to_points(text.yuan) == 2
+    assert cny_to_points(text.yuan) == 10
     subject = prepare("kling-image-2.1", _image(images=[_PNG], params={"image_reference": "subject"}))
     assert subject.body["image_reference"] == "subject"
     assert subject.body["image_fidelity"] == 0.5
     assert subject.body["human_fidelity"] == 0.45
-    assert cny_to_points(subject.yuan) == 3
+    assert cny_to_points(subject.yuan) == 20
     face = prepare("kling-image-2.1", _image(images=[_PNG], params={"image_reference": "face"}))
     assert "human_fidelity" not in face.body
     multi = prepare("kling-image-2.1", _image("", images=[_PNG, _PNG, _PNG, _PNG]))
@@ -795,7 +795,7 @@ def test_image_21_routes_text_subject_and_multi() -> None:
     assert multi.poll_token == "im"
     assert len(_items(multi.body["subject_image_list"])) == 4
     assert "resolution" not in multi.body
-    assert cny_to_points(multi.yuan) == 6
+    assert cny_to_points(multi.yuan) == 40
     with pytest.raises(ValidationError, match="负向"):
         prepare("kling-image-2.1", _image(images=[_PNG], negative_prompt="模糊"))
     with pytest.raises(ValidationError, match="多图参考"):
@@ -812,7 +812,7 @@ def test_common_expand_and_subject() -> None:
     assert expand.poll_token == "ex"
     assert expand.body["up_expansion_ratio"] == 0.1
     assert _obj(expand.body["watermark_info"])["enabled"] is True
-    assert cny_to_points(expand.yuan) == 3
+    assert cny_to_points(expand.yuan) == 20
     edge = prepare(
         "kling-image-common",
         _image(
@@ -845,7 +845,7 @@ def test_common_expand_and_subject() -> None:
     assert subject.body["element_frontal_image"] == _b64()
     assert "prompt" not in subject.body
     assert "watermark_info" not in subject.body
-    assert cny_to_points(subject.yuan) == 7
+    assert cny_to_points(subject.yuan) == 50
     with pytest.raises(ValidationError, match="1 张"):
         prepare("kling-image-common", _image())
 
@@ -1163,13 +1163,13 @@ def test_invoke_keeps_validation_and_releases_inflight(monkeypatch: pytest.Monke
 
 def test_models_register_with_menu_names_and_estimates() -> None:
     expected = {
-        "kling-4.0": ("Kling 4.0 & 4.0 Omni", 105),
-        "kling-4.0-flash": ("Kling 4.0 Flash", 42),
-        "kling-3.0-turbo": ("Kling 3.0 Turbo", 56),
-        "kling-3.0": ("Kling 3.0 & 3.0 Omni", 63),
-        "kling-o1": ("Kling O1", 42),
-        "kling-2.6": ("Kling 2.6", 70),
-        "kling-2.5-turbo": ("Kling 2.5 Turbo", 21),
+        "kling-4.0": ("Kling 4.0 & 4.0 Omni", 750),
+        "kling-4.0-flash": ("Kling 4.0 Flash", 300),
+        "kling-3.0-turbo": ("Kling 3.0 Turbo", 400),
+        "kling-3.0": ("Kling 3.0 & 3.0 Omni", 450),
+        "kling-o1": ("Kling O1", 300),
+        "kling-2.6": ("Kling 2.6", 500),
+        "kling-2.5-turbo": ("Kling 2.5 Turbo", 150),
     }
     for cls in KLING_VIDEO_MODELS:
         model = cls()
@@ -1199,15 +1199,15 @@ def test_models_register_with_menu_names_and_estimates() -> None:
         low, high = model.point_range()
         assert low < high
     image30 = KLING_IMAGE_MODELS[0]()
-    assert image30.estimate_cost(_image()) == 3
-    assert image30.estimate_cost(_image(params={"image_size": "4K"})) == 6
+    assert image30.estimate_cost(_image()) == 20
+    assert image30.estimate_cost(_image(params={"image_size": "4K"})) == 40
     image21 = KLING_IMAGE_MODELS[3]()
-    assert image21.estimate_cost(_image()) == 2
-    assert image21.estimate_cost(_image(images=[_PNG])) == 3
-    assert image21.estimate_cost(_image(images=[_PNG, _PNG])) == 6
+    assert image21.estimate_cost(_image()) == 10
+    assert image21.estimate_cost(_image(images=[_PNG])) == 20
+    assert image21.estimate_cost(_image(images=[_PNG, _PNG])) == 40
     common = KLING_IMAGE_MODELS[2]()
     common.validate(_image("", images=[_PNG]))
-    assert common.estimate_cost(_image("", images=[_PNG], params={"task_mode": "subject"})) == 7
+    assert common.estimate_cost(_image("", images=[_PNG], params={"task_mode": "subject"})) == 50
     turbo = next(cls() for cls in KLING_VIDEO_MODELS if cls._name == "kling-3.0-turbo")
     turbo.validate(_video("猫"))
     with pytest.raises(ValidationError):

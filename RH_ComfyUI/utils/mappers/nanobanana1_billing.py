@@ -1,9 +1,9 @@
 """Nano Banana 1 动态积分计价
 
-计价规则:30 美元/1M tokens,1 美元 = 100 积分 → 30 * 100 = 3_000 积分 / 1M tokens。
+计价规则:30 美元/1M tokens,1 美元 ≈ ¥7 = 700 积分 → 30 * 700 = 21_000 积分 / 1M tokens。
 一代模型无尺寸档位,输出分辨率最高 1024x1024px,固定消耗 1290 tokens:
 
-  - 1K (1024x1024px) : 1290 tokens → $0.039 → 4 积分
+  - 1K (1024x1024px) : 1290 tokens → $0.039 → 28 积分
 
 point_cost 仅作兜底,实际计费以本模块为准。
 """
@@ -12,8 +12,8 @@ from __future__ import annotations
 
 # ── 计费常量 ──
 
-# 30 美元 / 1M tokens,1 美元 = 100 积分 → 30 * 100 = 3_000 积分 / 1M tokens
-POINTS_PER_MILLION_TOKENS: int = 3_000
+# 30 美元 / 1M tokens,1 美元 ≈ ¥7 = 700 积分 → 30 * 700 = 21_000 积分 / 1M tokens
+POINTS_PER_MILLION_TOKENS: int = 21_000
 
 # 一代模型固定 token 消耗(最高 1024x1024px)
 OUTPUT_TOKENS: int = 1290

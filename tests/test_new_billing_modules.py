@@ -45,13 +45,13 @@ from RH_ComfyUI.utils.mappers.seedream5_pro_billing import (
 
 
 def test_asr_points_per_audio_hour_constant():
-    """0.36 美元 / 音频小时 → 36 积分 / 音频小时"""
-    assert POINTS_PER_AUDIO_HOUR == 36
+    """0.36 美元 / 音频小时 → 252 积分 / 音频小时"""
+    assert POINTS_PER_AUDIO_HOUR == 252
 
 
 def test_asr_points_per_audio_second():
-    """36 / 3600 = 0.01 积分/秒"""
-    assert POINTS_PER_AUDIO_SECOND == pytest.approx(0.01)
+    """252 / 3600 = 0.07 积分/秒"""
+    assert POINTS_PER_AUDIO_SECOND == pytest.approx(0.07)
 
 
 def test_asr_estimate_duration_from_size():
@@ -64,12 +64,12 @@ def test_asr_estimate_duration_from_size():
 
 
 def test_asr_calculate_points_one_hour():
-    """1 小时音频 = 36 积分"""
+    """1 小时音频 = 252 积分"""
     # 模拟 1 小时音频:128 kbps * 3600 s = 57_600_000 bits = 7_200_000 bytes
     one_hour_bytes = int(128_000 / 8 * 3600)
     points = calculate_asr_points(b"\x00" * one_hour_bytes)
-    # 36 积分(允许 ±1 误差,因估算有偏差)
-    assert 30 <= points <= 40
+    # 252 积分(允许 ±1 误差,因估算有偏差)
+    assert 240 <= points <= 260
 
 
 def test_asr_minimum_one():
@@ -86,11 +86,11 @@ def test_asr_text_returns_minimum():
 
 def test_asr_proportional():
     """音频越长积分越多"""
-    # 128 kbps: 10_000 bytes ≈ 0.625s → 0.00625 积分 → 1
-    # 1_000_000 bytes ≈ 62.5s → 0.625 积分 → 1
+    # 128 kbps: 10_000 bytes ≈ 0.625s → 0.04375 积分 → 1
+    # 1_000_000 bytes ≈ 62.5s → 4.375 积分 → 5
     # 需要用更长的音频才能体现差异
     short = calculate_asr_points(b"\x00" * 10_000)  # ≈ 0.625s → 1 积分
-    long = calculate_asr_points(b"\x00" * 10_000_000)  # ≈ 625s → 6.25 → 7 积分
+    long = calculate_asr_points(b"\x00" * 10_000_000)  # ≈ 625s → 43.75 → 44 积分
     assert short < long
 
 
@@ -140,40 +140,40 @@ def test_fish_asr_estimate_cost_no_audio():
 
 
 def test_fish_tts_points_per_million_bytes_constant():
-    """Fish Audio S2:15 美元 / M bytes → 1500 积分 / M bytes"""
-    assert FISHAUDIO_POINTS_PER_MILLION_BYTES == 1500
+    """Fish Audio S2:15 美元 / M bytes → 10500 积分 / M bytes"""
+    assert FISHAUDIO_POINTS_PER_MILLION_BYTES == 10_500
 
 
 def test_index_tts2_points_per_million_bytes_constant():
-    """IndexTTS2:5 美元 / M bytes → 500 积分 / M bytes"""
-    assert INDEX_TTS2_POINTS_PER_MILLION_BYTES == 500
+    """IndexTTS2:5 美元 / M bytes → 3500 积分 / M bytes"""
+    assert INDEX_TTS2_POINTS_PER_MILLION_BYTES == 3_500
 
 
 def test_fish_tts_one_thousand_chars_chinese():
-    """1000 中文字符 = 3000 UTF-8 字节 → 3000 * 1500 / 1M = 4.5 → ceil = 5"""
+    """1000 中文字符 = 3000 UTF-8 字节 → 3000 * 10500 / 1M = 31.5 → ceil = 32"""
     text = "你好" * 500  # 1000 个中文字符
     points = calculate_fish_tts_points(text)
     byte_len = len(text.encode("utf-8"))
     assert byte_len == 3000
-    # 3000 * 1500 / 1_000_000 = 4.5 → ceil = 5
-    assert points == 5
+    # 3000 * 10500 / 1_000_000 = 31.5 → ceil = 32
+    assert points == 32
 
 
 def test_index_tts2_one_thousand_chars_chinese():
-    """1000 中文字符 = 3000 UTF-8 字节 → 3000 * 500 / 1M = 1.5 → ceil = 2"""
+    """1000 中文字符 = 3000 UTF-8 字节 → 3000 * 3500 / 1M = 10.5 → ceil = 11"""
     text = "你好" * 500
     points = calculate_index_tts2_points(text)
-    # 3000 * 500 / 1_000_000 = 1.5 → ceil = 2
-    assert points == 2
+    # 3000 * 3500 / 1_000_000 = 10.5 → ceil = 11
+    assert points == 11
 
 
 def test_fish_tts_english_text():
-    """英文文本:1000 字符 = 1000 字节 → 1000 * 1500 / 1M = 1.5 → ceil = 2"""
+    """英文文本:1000 字符 = 1000 字节 → 1000 * 10500 / 1M = 10.5 → ceil = 11"""
     text = "hello " * 166 + "h"  # ~1000 字符
     byte_len = len(text.encode("utf-8"))
     assert byte_len == 997 or byte_len == 998 or byte_len == 999 or byte_len == 1000
     points = calculate_fish_tts_points(text)
-    assert points == 2
+    assert points == 11
 
 
 def test_tts_empty_text():

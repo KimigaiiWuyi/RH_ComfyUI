@@ -63,7 +63,7 @@ def _build_fish_asr(spec: FishModelSpec) -> _FishAsrCtor:
                 task_type=TaskType("asr"),
                 backend="fishaudio",
                 backend_model=engine,
-                point_cost=2,
+                point_cost=14,
                 description=spec.description,
                 knowledge_content=_fish_asr_knowledge(spec),
                 requirements=["fishaudio_apikey"],

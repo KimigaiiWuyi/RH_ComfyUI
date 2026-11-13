@@ -12,14 +12,14 @@ import asyncio
 from .qwen import QWEN_IMAGE_MODELS
 from .kling import KLING_IMAGE_MODELS
 from ..bridge import AdapterChannel, ImagePipelineModel
-from .overrides import GptImageFamilyModel, MiniMaxH3ImageModel, Seedream5ProImageModel
+from .overrides import GptImageFamilyModel, MiniMaxH3ImageModel, Seedream55ImageModel, Seedream5ProImageModel
 from ...core.base.errors import ValidationError
 from ...utils.core.types import PortSpec, PortType, CapabilityManifest
 from ...core.schema.types import NodeOutput, ProgressCallback
 from ...utils.core.request import TaskType, GenerationRequest
 from ...utils.core.pipeline import NodeDef
 from ...core.channels.channel import ChannelBinding
-from ...utils.mappers.seedream import seedream_mapper as _seedream_mapper
+from ...utils.mappers.seedream import seedream_mapper as _seedream_mapper, seedream55_mapper as _seedream55_mapper
 from ...utils.mappers.gpt_image2 import gpt_image2_mapper as _gpt_image2_mapper
 from ...utils.mappers.image_edit import qwen_edit_mapper as _qwen_edit_mapper
 from ...utils.mappers.gemini_image import GEMINI_ASPECT_RATIOS
@@ -888,7 +888,7 @@ class Banana2Def(ImagePipelineModel):
             display_name="Nano Banana 2",
             task_type=TaskType("image"),
             backend="gemini-image",
-            point_cost=2,
+            point_cost=71,
             description="速度快，支持多图参考",
             knowledge_content=(
                 "Nano Banana 2 图像生成/编辑模型(Gemini 3.1 Flash,原生 generate_content)。"
@@ -1008,7 +1008,7 @@ class Banana21Def(ImagePipelineModel):
             display_name="Nano Banana 2.1",
             task_type=TaskType("image"),
             backend="gemini-image",
-            point_cost=4,
+            point_cost=24,
             description="2.1 高速，支持多图参考",
             knowledge_content=(
                 "Nano Banana 2.1 图像生成/编辑模型(gemini-nano-banana-2.1,原生 generate_content)。"
@@ -1136,7 +1136,7 @@ class Banana2LiteDef(ImagePipelineModel):
             display_name="Nano Banana 2 Lite",
             task_type=TaskType("image"),
             backend="gemini-image",
-            point_cost=4,
+            point_cost=24,
             description="最快最省,只出 1K",
             knowledge_content=(
                 "Nano Banana 2 Lite 图像生成/编辑模型"
@@ -1256,7 +1256,7 @@ class Banana1Def(ImagePipelineModel):
             display_name="Nano Banana 1",
             task_type=TaskType("image"),
             backend="gemini-image",
-            point_cost=1,
+            point_cost=28,
             description="轻量快速，适合预览",
             knowledge_content=(
                 "Nano Banana 1 图像生成/编辑模型(Gemini 2.5 Flash,一代)。"
@@ -1367,7 +1367,7 @@ class BananaProDef(ImagePipelineModel):
             display_name="Nano Banana Pro",
             task_type=TaskType("image"),
             backend="gpt-image-2",
-            point_cost=3,
+            point_cost=95,
             description="高质量精修，适合成片",
             knowledge_content=(
                 "Nano Banana Pro 高质量图像生成/编辑模型。"
@@ -1454,7 +1454,7 @@ class BananaProDef(ImagePipelineModel):
         """动态计费:独立于 gpt-image-2,按输入图片数 + 输出分辨率分档计费。
 
         输入:每张 0.0011 美元;输出:120 美元/1M tokens,按 image_size 分档
-        (1K~2K 同价 14 积分,4K 24 积分,按官方文档 token 数表)。
+        (1K~2K 同价 95 积分,4K 168 积分,按官方文档 token 数表)。
         image_size 缺失 → 按 2K 档(默认值)估算。
 
         ⚠️ 故意不读 quality:banana_pro 计费曲线无 quality 维度,读它会导致
@@ -2265,6 +2265,191 @@ class Seedream5ProDef(Seedream5ProImageModel):
         )
 
 
+class Seedream55Def(Seedream55ImageModel):
+    """Seedream 5.5 — 火山方舟 Doubao Seedream 5.5 图片生成/编辑模型
+
+    相对 5.0 的新能力(全部官方功能):
+    - 多轮编辑一致性:把上一轮输出 URL 作为 image 回喂,保持角色/场景一致;
+    - 原生 RGBA:background=transparent 生成带透明通道的 PNG;
+    - 图层拆分(layer_decomposition):1 底图 + ≤99 透明图层,
+      layer_decomposition_options.max_images 2~100(默认 30,含底图),
+      text_recognition 逐文字层返回 OCR 文本/位置/样式;
+    - size 档位 1K/1.5K/2K(拆分场景额外支持 auto),或显式 'WxH' 像素
+      (像素积 [921600, 4624220]、宽高比 [1/16,16],validate 收口);
+    - 参考图 0~10 张(多图参考);多轮对话编辑用上一轮图作为输入。
+
+    不支持:sequential_image_generation 连续组图 / stream / tools 联网,
+    图层拆分不支持显式像素 size 与 background(validate 拦截)。
+
+    计费:输入图 5 积分/张(首张起计),输出图按像素 13/23 积分/张,
+    拆分按 max_images 预扣、按 data[] 实际张数结算。
+
+    凭证:复用 Seedance 面板的火山方舟 API Key(同源 ARK 平台)。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        return NodeDef(
+            name="seedream5_5",
+            display_name="Seedream 5.5",
+            task_type=TaskType("image"),
+            backend="seedream",
+            point_cost=23,
+            description="图层拆分+原生RGBA，多轮编辑一致",
+            knowledge_content=(
+                "Seedream 5.5 是字节跳动火山方舟的图片生成/编辑模型"
+                "(doubao-seedream-5-5-261028)。"
+                "\n"
+                "优势:多轮编辑一致性、原生 RGBA 透明图(background=transparent)、"
+                "\n"
+                "图层拆分(1 底图 + ≤99 透明图层 + 可选富文本 OCR)、"
+                "\n"
+                "多图参考(0~10 张)、1K/1.5K/2K 档位或显式像素尺寸。"
+                "\n"
+                "图层拆分:开 layer_decomposition 后恰需 1 张输入图;"
+                "layer_max_images 控制最大输出图片数(2~100,默认 30,含底图);"
+                "text_recognition 为真时逐文字层返回 OCR 文本与样式;"
+                "拆分场景 prompt 可留空(模型自动识别全部主要元素),"
+                "size 仅档位或 auto,不支持显式像素与 background。"
+                "\n"
+                "不适用场景:连续组图/绘本(仅 Seedream 5.0 Lite 支持)。"
+                "\n"
+                "约束:显式像素总像素需在 [921600, 4624220],宽高比 [1/16, 16];"
+                "transparent 背景必须配 png 输出。"
+                "\n"
+                "计费:输入图 5 积分/张;输出图 ≤2.61M 像素 13 积分、"
+                "2.61M~4.63M 像素 23 积分;图层拆分按实际张数与像素结算。"
+                "\n"
+                "凭证:复用 Seedance 面板的火山方舟 API Key,与 Seedance 视频共用。"
+                "\n"
+            ),
+            requirements=["seedance_apikey"],
+            backend_model="doubao-seedream-5-5-261028",
+            mode="programmatic",
+            mapper_func=_seedream55_mapper,
+            inputs={
+                "prompt": PortSpec(
+                    type=PortType.TEXT,
+                    required=False,  # 图层拆分可留空;生成场景由 validate 判必填
+                    title="提示词",
+                    description=(
+                        "生成/编辑描述,支持中英文。图层拆分场景可留空,由模型自动识别全部主要元素;图片生成场景必填。"
+                    ),
+                ),
+                "images": PortSpec(
+                    type=PortType.LIST,
+                    min_items=0,
+                    max_items=10,  # 官方上限(多图参考 2~10 张)
+                    item_type=PortType.IMAGE,
+                    title="参考图片",
+                    description=(
+                        "参考图片:0 张=文生图;1 张=图生图/编辑/多轮一致性回喂;"
+                        "2~10 张=多图参考;图层拆分恰需 1 张。"
+                        "格式 jpeg/png/webp/bmp/tiff/gif/heic/heif,单张 ≤30MB。"
+                    ),
+                ),
+                "ratio": PortSpec(
+                    type=PortType.ENUM,
+                    default="9:16",
+                    values=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+                    title="宽高比",
+                    description=("输出宽高比,按官方推荐以自然语言拼进 prompt;显式 size 像素或图层拆分时忽略。"),
+                ),
+                "image_size": PortSpec(
+                    type=PortType.ENUM,
+                    default="2K",
+                    values=["1K", "1.5K", "2K", "auto"],
+                    title="分辨率档位",
+                    description=("1K/1.5K/2K 档位;auto 仅图层拆分可用(由模型按内容自选)。显式 size 像素优先于本档位。"),
+                ),
+                "size": PortSpec(
+                    type=PortType.TEXT,
+                    default="",
+                    title="像素尺寸",
+                    description=(
+                        "显式 '宽x高'(如 2048x2048),仅图片生成场景;"
+                        "总像素 [921600, 4624220]、宽高比 [1/16, 16];"
+                        "留空按 image_size 档位;图层拆分不支持。"
+                    ),
+                ),
+                "background": PortSpec(
+                    type=PortType.ENUM,
+                    default="auto",
+                    values=["auto", "transparent", "opaque"],
+                    title="背景",
+                    description=(
+                        "auto=不透明;transparent=原生 RGBA 透明(须配 png);"
+                        "opaque=强制不透明(多轮编辑建议保持一致)。图层拆分不支持。"
+                    ),
+                    value_titles={"auto": "自动", "transparent": "透明", "opaque": "不透明"},
+                ),
+                "layer_decomposition": PortSpec(
+                    type=PortType.BOOLEAN,
+                    default=False,
+                    title="图层拆分",
+                    description=(
+                        "开启后把输入图拆成 1 底图 + 最多 99 张透明图层;"
+                        "恰需 1 张输入图,prompt 可留空;不支持显式像素与 background。"
+                    ),
+                ),
+                "layer_max_images": PortSpec(
+                    type=PortType.INTEGER,
+                    default=30,
+                    minimum=2,
+                    maximum=100,
+                    title="最大输出图片数",
+                    description="图层拆分最大输出图片数(含底图),2~100,默认 30;越大越贵",
+                ),
+                "text_recognition": PortSpec(
+                    type=PortType.BOOLEAN,
+                    default=False,
+                    title="富文本 OCR",
+                    description="图层拆分时逐文字图层返回 OCR 文本、位置与样式信息",
+                ),
+                "output_format": PortSpec(
+                    type=PortType.ENUM,
+                    default="png",
+                    values=["png", "jpeg"],
+                    title="输出格式",
+                    description=("生成图片的文件格式;transparent 背景必须用 png。图层拆分只控制底图,图层一律 png。"),
+                ),
+                "response_format": PortSpec(
+                    type=PortType.ENUM,
+                    default="url",
+                    values=["url", "b64_json"],
+                    title="返回格式",
+                    description=("url=返回 24h 有效下载链接(本节点会立即下载转 bytes);b64_json=直接返回 Base64。"),
+                ),
+                "watermark": PortSpec(
+                    type=PortType.BOOLEAN,
+                    default=False,
+                    title="添加水印",
+                    description="是否在生成图右下角添加「AI 生成」水印。",
+                ),
+                "safety_identifier": PortSpec(
+                    type=PortType.STRING,
+                    default="",
+                    title="用户标识",
+                    description="可选,终端用户唯一标识(≤64 字符),用于安全审计",
+                ),
+            },
+            outputs={
+                "image": PortSpec(
+                    type=PortType.OUTPUT_IMAGE,
+                    description="生成的图片;图层拆分时为底图,其余图层见附属输出 layer_01~",
+                ),
+            },
+            capabilities=CapabilityManifest(
+                supported_tasks=["image"],
+                mode="sync",
+                priority=70,
+            ),
+        )
+
+
 class MiniMaxH3ImageDef(MiniMaxH3ImageModel):
     """MiniMax H3-Image — 文生图 + 图片编辑(≤16 图),官方 MiniMax / fal 双通道正交"""
 
@@ -2428,6 +2613,7 @@ ALL_MODELS = [
     Qwen2512Def,
     Seedream5Def,
     Seedream5ProDef,
+    Seedream55Def,
     *KLING_IMAGE_MODELS,
     *QWEN_IMAGE_MODELS,
 ]

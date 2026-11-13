@@ -299,6 +299,28 @@ async def reconcile_seedance_usage_billing(
     )
 
 
+async def reconcile_kling_billing(
+    *,
+    model_names: Optional[list[str] | tuple[str, ...]] = None,
+    apply: bool = False,
+    adjust_wallet: bool = True,
+    limit: Optional[int] = None,
+) -> dict[str, Any]:
+    """按落库 wire 载荷回算可灵历史积分(只做差额)。
+
+    仅处理统计表成功且未退款、request_body 能解析出计费参数的行。
+    ``apply=False`` 预览;``adjust_wallet`` 控制是否改 RHBind。
+    """
+    from .core.billing.reconcile import reconcile_kling_billing as _rec
+
+    return await _rec(
+        model_names=model_names,
+        apply=apply,
+        adjust_wallet=adjust_wallet,
+        limit=limit,
+    )
+
+
 def get_point_cost(model: str) -> Optional[int]:
     """查询模型的积分消耗(不执行生成)。
 
@@ -845,6 +867,7 @@ __all__ = [
     "cancel_generation",
     "resume_poll",
     "settle_model_cost",
+    "reconcile_kling_billing",
     "reconcile_seedance_usage_billing",
     "get_point_cost",
     "resolve_channel_pin",

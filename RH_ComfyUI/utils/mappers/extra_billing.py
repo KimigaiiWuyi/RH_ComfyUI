@@ -2,7 +2,7 @@
 
 计价规则:
   - wan2.2_videogen:0.6 元/秒 = 60 积分/秒(按输出视频时长计费)
-  - mimo_tts (MiMo-V2-TTS):6 美元 / M UTF-8 bytes → 600 积分/M bytes
+  - mimo_tts (MiMo-V2-TTS):6 美元 / M UTF-8 bytes → 4200 积分/M bytes(1 美元 ≈ ¥7)
   - minimax_t2a_speech (speech-2.8-hd):3.5 元/万字符 = 350 积分/万字符
 
 point_cost 仅作兜底。
@@ -17,8 +17,8 @@ from typing import Optional
 # Wan2.2:0.6 元/秒 = 60 积分/秒
 WAN22_POINTS_PER_SECOND: int = 60
 
-# MiMo TTS:6 美元 / M UTF-8 bytes → 600 积分/M bytes
-MIMO_POINTS_PER_MILLION_BYTES: int = 600
+# MiMo TTS:6 美元 / M UTF-8 bytes,1 美元 ≈ ¥7 → 4200 积分/M bytes
+MIMO_POINTS_PER_MILLION_BYTES: int = 4_200
 
 # MiniMax T2A Speech:3.5 元/万字符 = 350 积分/万字符
 MINIMAX_T2A_POINTS_PER_10K_CHARS: int = 350
@@ -44,7 +44,7 @@ def estimate_wan22_points(duration: float) -> int:
 
 
 def calculate_mimo_tts_points(text: Optional[str]) -> int:
-    """MiMo TTS:按输入文本 UTF-8 字节长度计费,6 美元/M bytes → 600 积分/M bytes。"""
+    """MiMo TTS:按输入文本 UTF-8 字节长度计费,6 美元/M bytes → 4200 积分/M bytes。"""
     if not text:
         return 1
     byte_length = len(text.encode("utf-8"))

@@ -145,6 +145,7 @@ uv run basedpyright
 10. 供应商可用性是 **(模型, 通道)** 粒度,不是供应商粒度:同一家(如 ComfyUI)的启用闸按模型名逐个判。看板上的「供应商可用 N/共 M」是聚合口径,别当成全局开关。
 11. 看板「供应商顺序」= `channel_bindings()` 的声明顺序(负载均衡的输入顺序),不是负载均衡后的实际投递顺序。
 12. 后端只报事实(HTTP status + stage / transport exc):`from_http` / `from_transport` / `classify_*` 统一分类,**禁止手写 `retryable=` / `transient=`**;`strict_create_once` 语义是「不重复建单」而非「不换源」(REJECTED/BEFORE_SEND 仍换源);已受理任务(有 vendor_task_id)绝不换源。
+13. **积分口径恒定 `1 积分 = 1 分钱`**(Core 根 `AGENTS.md` §1.14)。外部价必须换算:CNY `×100`,USD `×7×100`;供应商私有单位先折成元/美元。曾按「`$1=100 积分`」在 kling / fal / nanobanana / fish TTS 少收约 7 倍——写新计费文件时先看本行,别再抄错口径。
 
 ## Security notes
 

@@ -23,7 +23,7 @@ class _KlingImage(ImagePipelineModel):
     _ratios: ClassVar[list[str]] = list(IMAGE_RATIOS)
     _sizes: ClassVar[list[str]] = ["1K", "2K"]
     _max_images: ClassVar[int] = 1
-    _point_cost: ClassVar[int] = 3
+    _point_cost: ClassVar[int] = 20
     _priority: ClassVar[int] = 46
     _prompt_required: ClassVar[bool] = True
 
@@ -126,7 +126,7 @@ class KlingImage30(_KlingImage):
     _ratios = list(IMAGE_RATIOS_WITH_AUTO)
     _sizes = ["1K", "2K", "4K"]
     _max_images = 10
-    _point_cost = 3
+    _point_cost = 20
     _priority = 49
 
     @classmethod
@@ -156,7 +156,7 @@ class KlingImageO1(_KlingImage):
     _ratios = list(IMAGE_RATIOS_WITH_AUTO)
     _sizes = ["1K", "2K"]
     _max_images = 10
-    _point_cost = 3
+    _point_cost = 20
     _priority = 48
 
 
@@ -167,7 +167,7 @@ class KlingImageCommon(_KlingImage):
     _knowledge = "task_mode=expand 为扩图,subject 为主体补全。扩图新增面积不能超过原图 3 倍。"
     _sizes = ["1K"]
     _max_images = 1
-    _point_cost = 3
+    _point_cost = 20
     _prompt_required = False
     _priority = 47
 
@@ -204,7 +204,7 @@ class KlingImage21(_KlingImage):
     _knowledge = "一张图可选用 subject/face 参考。两张及以上走多图参考,最多 4 张。"
     _sizes = ["1K", "2K"]
     _max_images = 4
-    _point_cost = 2
+    _point_cost = 10
     _priority = 46
 
     @classmethod

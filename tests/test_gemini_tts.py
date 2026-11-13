@@ -140,8 +140,8 @@ def test_executor_keeps_usage_metadata():
 
 
 def test_rates_step_on_2027():
-    assert gemini_tts_rates(date(2026, 12, 31)) == (50, 600)
-    assert gemini_tts_rates(date(2027, 1, 1)) == (100, 1200)
+    assert gemini_tts_rates(date(2026, 12, 31)) == (350, 4200)
+    assert gemini_tts_rates(date(2027, 1, 1)) == (700, 8400)
 
 
 def test_short_text_is_one_point():
@@ -153,8 +153,8 @@ def test_short_text_is_one_point():
 
 def test_four_thousand_chars_follow_the_dated_cap():
     text = "你" * 4000
-    assert estimate_gemini_tts_points(text, today=date(2026, 12, 31)) == 11
-    assert estimate_gemini_tts_points(text, today=date(2027, 1, 1)) == 21
+    assert estimate_gemini_tts_points(text, today=date(2026, 12, 31)) == 71
+    assert estimate_gemini_tts_points(text, today=date(2027, 1, 1)) == 141
 
 
 def test_settle_uses_audio_detail_then_candidate_count():
@@ -169,13 +169,13 @@ def test_settle_uses_audio_detail_then_candidate_count():
         },
         today=when,
     )
-    # 10*50 + 25*600 = 15500 → 1
+    # 10*350 + 25*4200 = 108500 → 1
     assert detailed == 1
     plain = settle_gemini_tts_points(
         {"usage_metadata": {"prompt_token_count": 4000, "candidates_token_count": 16384}},
         today=when,
     )
-    assert plain == 11
+    assert plain == 71
     assert (
         settle_gemini_tts_points(
             {"usage_metadata": {"prompt_token_count": 0, "candidates_token_count": 0}},

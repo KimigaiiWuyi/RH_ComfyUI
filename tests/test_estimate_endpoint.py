@@ -24,10 +24,10 @@ def test_estimate_banana2_lite_flat_1k():
     """/models 估算:Lite 只有 1K,传 4K 也不加价。"""
     listed = asyncio.run(estimate_model_points("banana2.lite"))
     assert listed["model"] == "banana2.lite"
-    assert listed["point_cost"] == 4
-    assert listed["point_range"] == {"min": 4, "max": 4}
+    assert listed["point_cost"] == 24
+    assert listed["point_range"] == {"min": 24, "max": 24}
     bigger = asyncio.run(estimate_model_points("banana2.lite", image_size="4K"))
-    assert bigger["point_cost"] == 4
+    assert bigger["point_cost"] == 24
 
 
 def test_estimate_gpt_image2_dynamic():
@@ -83,12 +83,12 @@ def test_estimate_gpt_image2_auto_ratio_uses_default_square():
 
 def test_estimate_banana_pro_dynamic():
     """banana_pro 走动态计费(与 gpt-image-2 公式独立,只断言自身动态)"""
-    r_bp = asyncio.run(estimate_model_points("banana_pro", ratio="16:9", image_size="2K", quality="medium"))
+    r_bp = asyncio.run(estimate_model_points("banana_pro", ratio="16:9", image_size="4K", quality="medium"))
     assert r_bp["model"] == "banana_pro"
     assert r_bp["point_cost"] > 0
     assert r_bp["is_dynamic"] is True
-    r_4k = asyncio.run(estimate_model_points("banana_pro", ratio="16:9", image_size="4K", quality="medium"))
-    assert r_4k["point_cost"] >= r_bp["point_cost"]
+    r_1k = asyncio.run(estimate_model_points("banana_pro", ratio="16:9", image_size="1K", quality="medium"))
+    assert r_bp["point_cost"] > r_1k["point_cost"]
 
 
 def test_estimate_static_model_fallback():

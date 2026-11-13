@@ -1,10 +1,10 @@
 """Nano Banana Pro 动态积分计价(独立于 GPT-Image-2)
 
 计价规则(取自官方文档):
-  - 图片输入:每张图片 0.0011 美元(≈ 0.11 积分)
-  - 图片输出:120 美元/1M tokens,1 美元 = 100 积分 → 120 * 100 = 12_000 积分 / 1M tokens
-    - 1K ~ 2K (1048x1048 ~ 2048x2048px): 1120 tokens → $0.134 → 14 积分
-    - 4K (4096x4096px)                  : 2000 tokens → $0.24  → 24 积分
+  - 图片输入:每张图片 0.0011 美元(≈ 0.77 积分)
+  - 图片输出:120 美元/1M tokens,1 美元 ≈ ¥7 = 700 积分 → 120 * 700 = 84_000 积分 / 1M tokens
+    - 1K ~ 2K (1048x1048 ~ 2048x2048px): 1120 tokens → $0.134 → 95 积分
+    - 4K (4096x4096px)                  : 2000 tokens → $0.24  → 168 积分
 
 注:输入 token 单价远低于输出,故输入按固定 USD 价折算;输出按分辨率分档。
 point_cost 仅作 image_size 参数缺失时的兜底(按 1K-2K 档估算)。
@@ -17,11 +17,11 @@ from typing import Optional
 
 # ── 计费常量 ──
 
-# 输出:120 美元 / 1M tokens,1 美元 = 100 积分 → 120 * 100 = 12_000 积分 / 1M tokens
-OUTPUT_POINTS_PER_MILLION_TOKENS: int = 12_000
+# 输出:120 美元 / 1M tokens,1 美元 ≈ ¥7 = 700 积分 → 120 * 700 = 84_000 积分 / 1M tokens
+OUTPUT_POINTS_PER_MILLION_TOKENS: int = 84_000
 
-# 输入:每张图片 0.0011 美元 = 0.11 积分(输入/输出单价不同,不共用同一个汇率)
-INPUT_COST_PER_IMAGE_POINTS: float = 0.0011 * 100  # 0.11 积分/张
+# 输入:每张图片 0.0011 美元 ≈ 0.77 积分(输入/输出单价不同,不共用同一个汇率)
+INPUT_COST_PER_IMAGE_POINTS: float = 0.0011 * 700  # 0.77 积分/张
 
 # ── 分辨率分档 → 消耗 tokens(取自官方文档) ──
 

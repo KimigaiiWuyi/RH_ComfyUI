@@ -60,7 +60,7 @@ class IndexTTS2Def(IndexTTS2Model):
             display_name="IndexTTS2",
             task_type=TaskType("speech"),
             backend="comfyui",
-            point_cost=2,
+            point_cost=11,
             description="中文发音自然",
             knowledge_content=(
                 "语音合成模型。"
@@ -102,10 +102,10 @@ class IndexTTS2Def(IndexTTS2Model):
         历史 bug:max 用 300 字符(900 bytes)算出的积分还是 1,与 min=1 相同,
         调用方用 min<max 判断是否调 estimate API,导致 IndexTTS2 被当成"固定积分"
         不调 estimate,实际生成长文本时积分远超显示。改成 5000 字符(15000 bytes)
-        算出 8 积分,触发调用方动态调用 estimate。
+        算出约 53 积分,触发调用方动态调用 estimate。
 
         上限取 5000 而非真实模型上限,是为了 UI 上展示"常见长度的最高积分"
-        而非理论上限(避免误导用户以为输入多少字都是 8 积分)。
+        而非理论上限(避免误导用户以为输入多少字都是几十积分)。
         """
         return (
             estimate_index_tts2_points(""),
@@ -131,7 +131,7 @@ class IndexTTS25Def(IndexTTS25Model):
             display_name="IndexTTS2.5",
             task_type=TaskType("speech"),
             backend="rh_app",
-            point_cost=2,
+            point_cost=11,
             description="克隆音色，带情绪",
             knowledge_content=(
                 "IndexTTS2.5 是 RunningHub 上的 IndexTTS 2.5 语音合成应用。"
@@ -216,7 +216,7 @@ class MimoTtsDef(SpeechPipelineModel):
             display_name="MiMoTTS 语音合成",
             task_type=TaskType("speech"),
             backend="mimo",
-            point_cost=3,
+            point_cost=13,
             description="预置音色与复刻",
             knowledge_content=(
                 "XiaoMi MiMo-V2.5-TTS 是小米推出的高质量语音合成系列模型。"
@@ -275,14 +275,14 @@ class MimoTtsDef(SpeechPipelineModel):
         )
 
     def estimate_cost(self, request: GenerationRequest) -> int:
-        """动态计费:按输入文本 UTF-8 字节长度计费(6 美元/M bytes → 600 积分/M bytes)。"""
+        """动态计费:按输入文本 UTF-8 字节长度计费(6 美元/M bytes → 4200 积分/M bytes)。"""
         return estimate_mimo_tts_points(request.prompt)
 
     def point_range(self) -> tuple[int, int]:
         """积分范围:最小(空文本) ~ 最大(5000 字符常见上限)。
 
         历史 bug:同 IndexTTS2 —— max 用 300 字符算出仍是 1 积分,调用方误判为固定积分。
-        改为 5000 字符(15000 bytes × 600 积分/M bytes = 9 积分)触发动态 estimate。
+        改为 5000 字符(15000 bytes × 4200 积分/M bytes = 63 积分)触发动态 estimate。
         """
         return (
             estimate_mimo_tts_points(""),
@@ -426,7 +426,7 @@ def _build_fish_tts(spec: FishModelSpec) -> _FishTtsCtor:
                 task_type=TaskType("speech"),
                 backend="fishaudio",
                 backend_model=engine,
-                point_cost=0 if is_free else 2,
+                point_cost=0 if is_free else 32,
                 description=spec.description,
                 knowledge_content=_fish_tts_knowledge(spec),
                 requirements=["fishaudio_apikey"],
@@ -531,7 +531,7 @@ class GeminiTtsDef(GeminiTtsModel):
             task_type=TaskType("speech"),
             backend="gemini_speech",
             backend_model=GEMINI_TTS_UPSTREAM_MODEL,
-            point_cost=1,
+            point_cost=7,
             description="单说话人预置音色,输出 WAV",
             knowledge_content=(
                 "Gemini 3.8 Flash-Lite TTS(gemini_tts) —— 单说话人朗读。"
@@ -539,8 +539,8 @@ class GeminiTtsDef(GeminiTtsModel):
                 "30 个预置音色,默认 Kore。风格写在 mood,不会被读出来。"
                 "正文里的尖括号事件保留。不支持语速、参考音频、多说话人。"
                 "\n"
-                "输出 WAV。2026-12-31 及以前按 Standard:输入文本 50 积分/百万 token,音频 600。"
-                "2027-01-01 起输入 100、音频 1200。1 美元 = 100 积分,向上取整,最少 1。"
+                "输出 WAV。2026-12-31 及以前按 Standard:输入文本 350 积分/百万 token,音频 4200。"
+                "2027-01-01 起输入 700、音频 8400。1 美元 ≈ ¥7 = 700 积分,向上取整,最少 1。"
                 "预扣按字数估算时长;成功后按 usage 实扣。"
                 "\n"
                 "适用场景:配音、口播、有声内容。"

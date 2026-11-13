@@ -3,7 +3,9 @@
 from .policy import BillingPolicy, BillingContext, BillingReservation
 from .settle import settle_model_cost, invoke_settle_cost
 from .reconcile import (
+    DEFAULT_KLING_RECONCILE_MODELS,
     DEFAULT_SEEDANCE_RECONCILE_MODELS,
+    reconcile_kling_billing,
     reconcile_seedance_usage_billing,
 )
 from .points_api import (
@@ -38,6 +40,8 @@ __all__ = [
     "invoke_settle_cost",
     "settle_model_cost",
     "DEFAULT_SEEDANCE_RECONCILE_MODELS",
+    "DEFAULT_KLING_RECONCILE_MODELS",
+    "reconcile_kling_billing",
     "reconcile_seedance_usage_billing",
     "TIER_KEYS",
     "UNLIMITED_TIER",

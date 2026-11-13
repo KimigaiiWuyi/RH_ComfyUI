@@ -39,6 +39,7 @@ from .billing import (
     PointsBillingPolicy,
     ExternalPrepaidPolicy,
     settle_model_cost,
+    reconcile_kling_billing,
     reconcile_seedance_usage_billing,
 )
 from .routing import (
@@ -132,6 +133,7 @@ __all__ = [
     "PointsBillingPolicy",
     "ExternalPrepaidPolicy",
     "settle_model_cost",
+    "reconcile_kling_billing",
     "reconcile_seedance_usage_billing",
     "DispatchContext",
     "dispatch",

@@ -1,6 +1,6 @@
 """Fish Audio ASR 动态积分计价
 
-计价规则:0.36 美元 / 音频小时,1 美元 = 100 积分 → 0.36 * 100 = 36 积分 / 音频小时。
+计价规则:0.36 美元 / 音频小时,1 美元 ≈ ¥7 = 700 积分 → 0.36 * 700 = 252 积分 / 音频小时。
 根据输入音频时长计费,时长优先从音频文件元数据(mutagen)读取,失败时按文件大小估算。
 
 point_cost 仅作兜底。
@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 # ── 计费常量 ──
 
-# 0.36 美元 / 音频小时,1 美元 = 100 积分 → 36 积分 / 音频小时
-POINTS_PER_AUDIO_HOUR: int = 36
+# 0.36 美元 / 音频小时,1 美元 ≈ ¥7 = 700 积分 → 252 积分 / 音频小时
+POINTS_PER_AUDIO_HOUR: int = 252
 
 # 每秒积分 = 36 / 3600 = 0.01 积分/秒
 POINTS_PER_AUDIO_SECOND: float = POINTS_PER_AUDIO_HOUR / 3600.0

@@ -75,15 +75,15 @@ def test_wan22_estimate_cost_proportional():
 
 
 def test_mimo_points_per_million_bytes():
-    """MiMo TTS: 6 美元/M bytes → 600 积分/M bytes"""
-    assert MIMO_POINTS_PER_MILLION_BYTES == 600
+    """MiMo TTS: 6 美元/M bytes → 4200 积分/M bytes"""
+    assert MIMO_POINTS_PER_MILLION_BYTES == 4_200
 
 
 def test_mimo_1000_chinese_chars():
-    """1000 中文字符 = 3000 UTF-8 字节 → 3000 × 600 / 1M = 1.8 → ceil = 2"""
+    """1000 中文字符 = 3000 UTF-8 字节 → 3000 × 4200 / 1M = 12.6 → ceil = 13"""
     text = "你好" * 500
     points = calculate_mimo_tts_points(text)
-    assert points == 2
+    assert points == 13
 
 
 def test_mimo_empty_text():

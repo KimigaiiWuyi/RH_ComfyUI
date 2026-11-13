@@ -1,8 +1,8 @@
 """语音合成动态积分计价(UTF-8 字节计费)
 
-计价规则(取自官方文档):
-  - Fish Audio S2 (s2.1-pro):15 美元 / M UTF-8 bytes → 1500 积分 / M bytes
-  - IndexTTS2 / IndexTTS2.5: 5 美元 / M UTF-8 bytes →  500 积分 / M bytes
+计价规则(取自官方文档,1 美元 ≈ ¥7 = 700 积分):
+  - Fish Audio S2 (s2.1-pro):15 美元 / M UTF-8 bytes → 10500 积分 / M bytes
+  - IndexTTS2 / IndexTTS2.5: 5 美元 / M UTF-8 bytes →  3500 积分 / M bytes
 
 根据输入文本的 UTF-8 字节长度计费。中文在 UTF-8 下通常 3 字节/字。
 point_cost 仅作兜底。
@@ -14,11 +14,11 @@ from typing import Optional
 
 # ── 计费常量 ──
 
-# Fish Audio S2:15 美元 / M UTF-8 bytes,1 美元 = 100 积分 → 1500 积分 / M bytes
-FISHAUDIO_POINTS_PER_MILLION_BYTES: int = 1500
+# Fish Audio S2:15 美元 / M UTF-8 bytes,1 美元 ≈ ¥7 = 700 积分 → 10500 积分 / M bytes
+FISHAUDIO_POINTS_PER_MILLION_BYTES: int = 10_500
 
-# IndexTTS2 / IndexTTS2.5:5 美元 / M UTF-8 bytes,1 美元 = 100 积分 → 500 积分 / M bytes
-INDEX_TTS2_POINTS_PER_MILLION_BYTES: int = 500
+# IndexTTS2 / IndexTTS2.5:5 美元 / M UTF-8 bytes,1 美元 ≈ ¥7 = 700 积分 → 3500 积分 / M bytes
+INDEX_TTS2_POINTS_PER_MILLION_BYTES: int = 3_500
 
 
 def _points_by_bytes(byte_length: int, points_per_million_bytes: int) -> int:

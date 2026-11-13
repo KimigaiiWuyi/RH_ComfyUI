@@ -68,8 +68,8 @@ def _video(
 
 
 def test_usd_to_points_rounds_up_and_keeps_at_least_one() -> None:
-    assert usd_to_points(Decimal("0.85")) == 85
-    assert usd_to_points(Decimal("5.80")) == 580
+    assert usd_to_points(Decimal("0.85")) == 595
+    assert usd_to_points(Decimal("5.80")) == 4060
     assert usd_to_points(Decimal("0.001")) == 1
     assert usd_to_points(Decimal("0")) == 1
 
@@ -84,7 +84,7 @@ def test_video_usd_matches_published_list_rates() -> None:
 
 def test_video_point_bounds_cover_full_range() -> None:
     low, high = video_point_bounds()
-    assert (low, high) == (85, 580)
+    assert (low, high) == (595, 4060)
     assert low < high
 
 
@@ -546,10 +546,10 @@ def test_model_registered_and_schema() -> None:
     assert set(task_mode.values or []) == {"auto", "text_to_video", "image_to_video", "keyframes_to_video"}
     res = node.inputs["resolution"]
     assert set(res.values or []) == {"720p", "1080p"}
-    assert model.point_cost == 85
+    assert model.point_cost == 595
 
     low, high = model.point_range()
-    assert (low, high) == (85, 580)
+    assert (low, high) == (595, 4060)
     assert low < high
 
 
@@ -557,15 +557,15 @@ def test_model_estimate_cost_follows_params() -> None:
     from RH_ComfyUI.models.video.fal import Flux3MaxVideo
 
     model = Flux3MaxVideo()
-    assert model.estimate_cost(_video()) == 85
-    assert model.estimate_cost(_video(resolution="1080p")) == 145
-    assert model.estimate_cost(_video(resolution="1080p", duration=20)) == 580
+    assert model.estimate_cost(_video()) == 595
+    assert model.estimate_cost(_video(resolution="1080p")) == 1015
+    assert model.estimate_cost(_video(resolution="1080p", duration=20)) == 4060
     # 双轨:params['resolution'] 在顶层为空时生效;顶层 duration 缺省 5 秒
     req = _video(params={"resolution": "1080p"})
     req.resolution = None
-    assert model.estimate_cost(req) == 145
+    assert model.estimate_cost(req) == 1015
     req2 = _video(params={"resolution": "1080p", "duration": 10}, duration=10)
-    assert model.estimate_cost(req2) == 290
+    assert model.estimate_cost(req2) == 2030
 
 
 def test_model_validate_runs_prepare() -> None:
@@ -667,7 +667,7 @@ def test_h3_point_bounds() -> None:
     low_m, high_m = h3_point_bounds("h3max")
     assert low_t < high_t and low_m < high_m
     assert low_t < low_m  # turbo 起步价更低
-    assert high_m == 240  # 0.16 × 15s
+    assert high_m == 1680  # 0.16 × 15s × 700
 
 
 # ── H3 请求体 / 校验 ──
@@ -882,26 +882,26 @@ def test_h3_estimate_and_settle_reference_tokens() -> None:
     model = H3MaxVideo()
     turbo = H3MaxTurboVideo()
 
-    # t2v 基费:h3max 768p×5s = $0.40 → 40 分;turbo 768p×5s = $0.20 → 20 分
-    assert model.estimate_cost(_h3v(resolution="768p")) == 40
-    assert turbo.estimate_cost(_h3v(resolution="768p")) == 20
+    # t2v 基费:h3max 768p×5s = $0.40 → 280 分;turbo 768p×5s = $0.20 → 140 分
+    assert model.estimate_cost(_h3v(resolution="768p")) == 280
+    assert turbo.estimate_cost(_h3v(resolution="768p")) == 140
 
-    # 5 图 + 1 视频参考:估算 6×1024=6144 token,超 2048 → $0.40 + $0.04096 = $0.44096 → 45 分
+    # 5 图 + 1 视频参考:估算 6×1024=6144 token,超 2048 → $0.40 + $0.04096 = $0.44096 → 309 分
     vid = MediaRef(kind=MediaKind.VIDEO, url="https://example.com/a.mp4")
     req = _h3v(images=[_PNG] * 5, video_refs=[vid])
-    assert model.estimate_cost(req) == 45
-    # turbo 参考模式同基费,但 token 费率 $0.016/1K:$0.40 + $0.032768 = $0.432768 → 44 分
-    assert turbo.estimate_cost(req) == 44
+    assert model.estimate_cost(req) == 309
+    # turbo 参考模式同基费,但 token 费率 $0.016/1K:$0.40 + $0.032768 = $0.432768 → 303 分
+    assert turbo.estimate_cost(req) == 303
 
-    # settle:上游实报 2048 token(未超 4096)→ 退超额差,回到 $0.40 → 40 分
+    # settle:上游实报 2048 token(未超 4096)→ 退超额差,回到 $0.40 → 280 分
     settled = model.settle_cost(req, {"reference_tokens": 2048})
-    assert settled == 40
-    # 实报 8192 → $0.40 + 4096/1000×0.02 = $0.48192 → 49 分
+    assert settled == 280
+    # 实报 8192 → $0.40 + 4096/1000×0.02 = $0.48192 → 338 分
     settled = model.settle_cost(req, {"reference_tokens": 8192})
-    assert settled == 49
+    assert settled == 338
     # usage 缺 token → 维持估算价
     settled = model.settle_cost(req, {})
-    assert settled == 45
+    assert settled == 309
 
 
 def test_h3_models_registered() -> None:

@@ -13,10 +13,11 @@ from __future__ import annotations
 import re
 import json
 import asyncio
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from gsuid_core.logger import logger
 
+from ...utils.backends.kling.billing import image_yuan, video_yuan, cny_to_points
 from ...utils.mappers.seedance_billing import (
     extract_usage_tokens,
     settle_seedance2_points,
@@ -25,6 +26,23 @@ from ...utils.mappers.seedance_billing import (
 )
 
 DEFAULT_SEEDANCE_RECONCILE_MODELS: tuple[str, ...] = ("seedance2", "seedance2.5")
+
+DEFAULT_KLING_RECONCILE_MODELS: tuple[str, ...] = (
+    "kling-4.0",
+    "kling-4.0-flash",
+    "kling-3.0-turbo",
+    "kling-3.0",
+    "kling-o1",
+    "kling-2.6",
+    "kling-2.5-turbo",
+    "kling-image-3.0",
+    "kling-image-o1",
+    "kling-image-common",
+    "kling-image-2.1",
+)
+
+_KLING_VIDEO_MODELS = frozenset(DEFAULT_KLING_RECONCILE_MODELS[:7])
+_KLING_IMAGE_MODELS = frozenset(DEFAULT_KLING_RECONCILE_MODELS[7:])
 
 _TOKEN_KEY_RE = re.compile(
     r'"(?:completion_tokens|total_tokens|totalTokens|completionTokens)"\s*:\s*(\d+)',
@@ -235,6 +253,134 @@ def actual_points_for_seedance_record(
     )
 
 
+def _kling_num(raw: Any, default: float = 0.0) -> float:
+    if raw is None or raw == "" or isinstance(raw, bool):
+        return default
+    if isinstance(raw, (int, float, str)):
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
+def _kling_video_points(model: str, body: dict[str, Any], extra: dict[str, Any]) -> Optional[int]:
+    """从落库 wire body 还原可灵视频计费参数。无法解析返回 None。"""
+    raw_settings = body.get("settings")
+    settings: dict[str, Any] = raw_settings if isinstance(raw_settings, dict) else {}
+    resolution = str(settings.get("resolution") or "720p").strip().lower()
+    seconds_f = _kling_num(settings.get("duration"))
+    seconds = int(seconds_f)
+    if seconds < 1:
+        return None
+    raw_contents = body.get("contents")
+    contents = [it for it in raw_contents if isinstance(it, dict)] if isinstance(raw_contents, list) else []
+    kinds = {str(it.get("type") or "") for it in contents}
+    has_video = bool(kinds & {"base_video", "feature_video"})
+    has_voice = "voice" in kinds
+    audio = str(settings.get("audio") or "")
+    # 非 Omni 图生只有 first/last 两帧;element / refer_image / 参考视频只能由 Omni 路径产生
+    omni = bool(extra.get("omni")) or bool(kinds - {"prompt", "first_frame", "last_frame"})
+    ivd = _kling_num(extra.get("input_video_duration"))
+    if ivd <= 0:
+        ivd = float(seconds)
+    if model == "kling-3.0-turbo":
+        sound = "always"
+    elif model == "kling-2.6":
+        sound = "voice" if has_voice else ("native" if audio == "native" else "silent")
+    else:
+        sound = "native" if audio == "native" else "silent"
+    try:
+        yuan = video_yuan(
+            model,
+            resolution=resolution,
+            seconds=seconds,
+            sound=sound,
+            ref_video=has_video,
+            omni=omni,
+            input_seconds=ivd,
+        )
+    except (ValueError, KeyError):
+        return None
+    return cny_to_points(yuan)
+
+
+def _kling_image_points(body: dict[str, Any]) -> Optional[int]:
+    """图片按 wire body 形状分路径:subject / 扩图 / 多图 / omni / generations。"""
+    if "element_frontal_image" in body:
+        return cny_to_points(image_yuan("kling-image-common", tier="subject", resolution="1k", count=1))
+    outpaint_keys = ("up_expansion_ratio", "down_expansion_ratio", "left_expansion_ratio", "right_expansion_ratio")
+    if any(k in body for k in outpaint_keys):
+        count = int(_kling_num(body.get("n"), 1))
+        return cny_to_points(image_yuan("kling-image-common", tier="outpaint", resolution="1k", count=max(count, 1)))
+    count = int(_kling_num(body.get("n"), 1))
+    if "subject_image_list" in body:
+        return cny_to_points(image_yuan("kling-image-2.1", tier="multi", resolution="1k", count=max(count, 1)))
+    model_name = str(body.get("model_name") or "")
+    if not model_name:
+        return None
+    size = str(body.get("resolution") or "1k").strip().lower()
+    if model_name in {"kling-v3-omni", "kling-image-o1"}:
+        if body.get("result_type") == "series":
+            amount = body.get("series_amount")
+            count = amount if isinstance(amount, int) and not isinstance(amount, bool) else 4
+        key = "kling-image-o1" if model_name == "kling-image-o1" else "kling-image-3.0"
+        try:
+            yuan = image_yuan(key, tier="omni", resolution=size, count=max(count, 1))
+        except (ValueError, KeyError):
+            return None
+        return cny_to_points(yuan)
+    tier = "i2i" if "image" in body else "t2i"
+    key = "kling-image-2.1" if model_name == "kling-v2-1" else "kling-image-3.0"
+    try:
+        yuan = image_yuan(key, tier=tier, resolution=size, count=max(count, 1))
+    except (ValueError, KeyError):
+        return None
+    return cny_to_points(yuan)
+
+
+def actual_points_for_kling_record(
+    *,
+    task_name: str,
+    request_body: Any,
+    extra_params: Any,
+) -> Optional[int]:
+    """单条统计行 → 按落库 wire 载荷重算的正确积分;无法换算返回 None。"""
+    name = (task_name or "").strip()
+    body = _parse_json_object(request_body)
+    if body is None:
+        return None
+    extra = _parse_json_object(extra_params) or {}
+    if name in _KLING_VIDEO_MODELS:
+        return _kling_video_points(name, body, extra)
+    if name in _KLING_IMAGE_MODELS:
+        return _kling_image_points(body)
+    return None
+
+
+def _row_plan_kling(row: Any) -> Optional[dict[str, Any]]:
+    prepaid = int(getattr(row, "point_cost", 0) or 0)
+    actual = actual_points_for_kling_record(
+        task_name=str(getattr(row, "task_name", "") or ""),
+        request_body=getattr(row, "request_body_json", "") or "",
+        extra_params=getattr(row, "extra_params_json", "") or "",
+    )
+    if actual is None:
+        return None
+    extra_obj = _parse_json_object(getattr(row, "extra_params_json", "") or "") or {}
+    return {
+        "record_id": int(getattr(row, "id", 0) or 0),
+        "trace_id": str(getattr(row, "trace_id", "") or ""),
+        "user_id": str(getattr(row, "user_id", "") or ""),
+        "bot_id": str(getattr(row, "bot_id", "") or ""),
+        "task_name": str(getattr(row, "task_name", "") or ""),
+        "prepaid": prepaid,
+        "actual": int(actual),
+        "delta": int(actual) - prepaid,
+        "wallet_marked": extra_obj.get("usage_settled_points") is not None,
+    }
+
+
 def _row_plan(row: Any) -> Optional[dict[str, Any]]:
     prepaid = int(getattr(row, "point_cost", 0) or 0)
     actual = actual_points_for_seedance_record(
@@ -328,6 +474,46 @@ async def reconcile_seedance_usage_billing(
             apply=bool(apply),
             adjust_wallet=bool(adjust_wallet),
             limit=limit,
+            row_plan=_row_plan,
+            require_raw_usage=True,
+        )
+
+
+async def reconcile_kling_billing(
+    *,
+    model_names: Optional[list[str] | tuple[str, ...]] = None,
+    apply: bool = False,
+    adjust_wallet: bool = True,
+    limit: Optional[int] = None,
+) -> dict[str, Any]:
+    """扫描可灵成功单,按落库 wire 载荷重算 point_cost(修 1元=14积分 的历史错账)。
+
+    Args:
+        model_names: 默认全部可灵视频/图片模型
+        apply: False=只预览,True=写库(+可选钱包)
+        adjust_wallet: 按差额改 RHBind(历史错账首次回算应传 True)
+        limit: 最多处理多少条差额(不含 unchanged)
+    """
+    if _lock.locked():
+        return {
+            "ok": False,
+            "error": "already_running",
+            "message": "已有回算任务在执行,请稍后再试",
+        }
+
+    names = tuple(model_names) if model_names else DEFAULT_KLING_RECONCILE_MODELS
+    names = tuple(n.strip() for n in names if str(n).strip())
+    if not names:
+        names = DEFAULT_KLING_RECONCILE_MODELS
+
+    async with _lock:
+        return await _reconcile_locked(
+            names=names,
+            apply=bool(apply),
+            adjust_wallet=bool(adjust_wallet),
+            limit=limit,
+            row_plan=_row_plan_kling,
+            require_raw_usage=False,
         )
 
 
@@ -337,6 +523,8 @@ async def _reconcile_locked(
     apply: bool,
     adjust_wallet: bool,
     limit: Optional[int],
+    row_plan: Callable[[Any], Optional[dict[str, Any]]] = _row_plan,
+    require_raw_usage: bool = True,
 ) -> dict[str, Any]:
     from sqlmodel import col, select
 
@@ -360,6 +548,11 @@ async def _reconcile_locked(
 
     while True:
         async with async_maker() as session:
+            payload_col = (
+                col(RHComfyuiTaskRecord.raw_response_json)
+                if require_raw_usage
+                else col(RHComfyuiTaskRecord.request_body_json)
+            )
             stmt = (
                 select(RHComfyuiTaskRecord)
                 .where(
@@ -367,7 +560,7 @@ async def _reconcile_locked(
                     col(RHComfyuiTaskRecord.status) == "ok",
                     col(RHComfyuiTaskRecord.refunded) == False,  # noqa: E712
                     col(RHComfyuiTaskRecord.id) > last_id,
-                    col(RHComfyuiTaskRecord.raw_response_json) != "",
+                    payload_col != "",
                 )
                 .order_by(col(RHComfyuiTaskRecord.id))
                 .limit(_BATCH)
@@ -380,7 +573,7 @@ async def _reconcile_locked(
             last_id = int(row.id or 0)
             scanned += 1
             try:
-                plan = _row_plan(row)
+                plan = row_plan(row)
             except Exception as exc:  # noqa: BLE001
                 errors += 1
                 logger.warning(f"[Billing.reconcile] 解析失败 id={row.id}: {exc}")
@@ -495,9 +688,12 @@ async def _reconcile_locked(
 
 
 __all__ = [
+    "DEFAULT_KLING_RECONCILE_MODELS",
     "DEFAULT_SEEDANCE_RECONCILE_MODELS",
     "usage_from_vendor_raw",
     "request_bits_from_record",
+    "actual_points_for_kling_record",
     "actual_points_for_seedance_record",
+    "reconcile_kling_billing",
     "reconcile_seedance_usage_billing",
 ]

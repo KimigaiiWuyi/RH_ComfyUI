@@ -15,7 +15,8 @@ from __future__ import annotations
 import io
 import re
 import base64
-from typing import Any, Dict, Union, Optional
+import asyncio
+from typing import Any, Dict, List, Union, Optional
 
 import aiohttp
 from PIL import Image
@@ -163,16 +164,23 @@ class SeedreamAPI:
 
     # ── 公开入口 ─────────────────────────────────────────────
 
-    async def generate(self, body: Dict[str, Any]) -> Dict[str, Any]:
-        """发请求并把 data[0].url / b64_json 解码为 PIL.Image,整 dict 返回给 mapper
+    async def generate(self, body: Dict[str, Any], *, decode_all: bool = False) -> Dict[str, Any]:
+        """发请求并把 data[] 的 url / b64_json 解码为 PIL.Image
+
+        ``decode_all=False``(默认):只校验并解码 data[0]——单图及 5.0 连续组图
+        沿用首图语义,其余条目不进 ``images`` 也不下载,后续条目失败不影响首图。
+        ``decode_all=True``(5.5 图层拆分):全部条目并发解码,任一失败整体报错。
 
         返回结构:
           {
-              "image": PIL.Image,
+              "image": PIL.Image,            # 第一张(单图 / 图层底图 z_index=0)
+              "images": [PIL.Image, ...],    # 已解码条目,与 items 前缀同序
+              "items": [dict, ...],          # 原始 data 条目(z_index/bounding_box/OCR 等)
               "model": str,                  # 实际响应的 model 字段
-              "size": str,                   # 实际响应的 size 字段(若有)
+              "size": str,                   # 首条 size(若有)
+              "output_format": str,          # 首条 output_format(若有)
               "generated_images": int,       # usage.generated_images(若有)
-              "output_format": str,          # data[0].output_format(若有)
+              "input_images": int,           # usage.input_images(若有,5.5)
               "raw": dict,                   # 厂商原始响应,落统计/审计
           }
 
@@ -193,28 +201,57 @@ class SeedreamAPI:
         if not isinstance(data_list, list) or not data_list:
             raise RuntimeError(f"[Seedream] 响应缺少 data: {resp}")
 
-        first = data_list[0]
-        if isinstance(first, dict) and first.get("error"):
-            err = first["error"]
-            raise RuntimeError(f"[Seedream] 单图错误 {err.get('code', '')}: {err.get('message', '生成失败')}")
+        if decode_all:
+            # 图层拆分任一图层失败整体报错;组图失败项也带 error
+            for item in data_list:
+                if isinstance(item, dict) and isinstance(item.get("error"), dict):
+                    err = item["error"]
+                    raise RuntimeError(f"[Seedream] 单图错误 {err.get('code', '')}: {err.get('message', '生成失败')}")
+            images = await self._decode_all(data_list)
+        else:
+            first_raw = data_list[0]
+            if isinstance(first_raw, dict) and isinstance(first_raw.get("error"), dict):
+                err = first_raw["error"]
+                raise RuntimeError(f"[Seedream] 单图错误 {err.get('code', '')}: {err.get('message', '生成失败')}")
+            images = [await self._decode_one(first_raw, 0)]
 
-        url_or_b64 = first.get("url") or (f"data:image/png;base64,{first['b64_json']}" if "b64_json" in first else None)
-        if not url_or_b64:
-            raise RuntimeError(f"[Seedream] 响应缺少 url/b64_json: {first}")
-
-        image = await self._parse_image_from_content(url_or_b64)
-        if isinstance(image, int):
-            raise RuntimeError(f"[Seedream] 图片解码失败,错误码: {image}")
-
+        first = data_list[0] if isinstance(data_list[0], dict) else {}
         usage = resp.get("usage") or {}
         return {
-            "image": image,
+            "image": images[0],
+            "images": images,
+            "items": data_list,
             "model": resp.get("model") or body.get("model", ""),
             "size": first.get("size") or "",
             "output_format": first.get("output_format") or body.get("output_format", ""),
-            "generated_images": int(usage.get("generated_images") or 1),
+            "generated_images": int(usage.get("generated_images") or len(images)),
+            "input_images": int(usage.get("input_images") or 0),
             "raw": resp,
         }
+
+    async def _decode_one(self, item: Any, index: int) -> Image.Image:
+        if not isinstance(item, dict):
+            raise RuntimeError(f"[Seedream] 第 {index} 条响应不是对象: {item!r}")
+        url_or_b64 = item.get("url") or (f"data:image/png;base64,{item['b64_json']}" if "b64_json" in item else None)
+        if not url_or_b64:
+            raise RuntimeError(f"[Seedream] 第 {index} 条响应缺少 url/b64_json: {item}")
+        img = await self._parse_image_from_content(url_or_b64)
+        if isinstance(img, int):
+            raise RuntimeError(f"[Seedream] 第 {index} 条图片解码失败,错误码: {img}")
+        return img
+
+    async def _decode_all(self, data_list: List[Any]) -> List[Image.Image]:
+        """并发解码全部 data 条目(图层拆分最多 ~100 张);任一失败整体报错。"""
+        semaphore = asyncio.Semaphore(8)
+
+        async def _one(item: Any, index: int) -> Image.Image:
+            async with semaphore:
+                return await self._decode_one(item, index)
+
+        results = await asyncio.gather(*(_one(item, i) for i, item in enumerate(data_list)))
+        if not results:
+            raise RuntimeError("[Seedream] 未解码出任何图片")
+        return list(results)
 
 
 # 全局单例
