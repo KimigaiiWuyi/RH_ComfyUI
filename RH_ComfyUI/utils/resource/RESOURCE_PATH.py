@@ -78,3 +78,54 @@ def init_dir() -> None:
 
 
 init_dir()
+
+
+def _register_backup_hints() -> None:
+    # 宿主 Core 无该模块（旧版本）时跳过，不报错
+    try:
+        from gsuid_core.utils.backup.hints import register_backup_path
+    except ImportError:
+        return
+    register_backup_path(
+        "RH_ComfyUI",
+        SERVICE_CONFIG_PATH,
+        "config",
+        "服务配置：端点、API Key 与供应商渠道",
+        default_selected=True,
+    )
+    register_backup_path(
+        "RH_ComfyUI",
+        PLUGIN_CONFIG_PATH,
+        "config",
+        "插件运行与模型开关配置",
+        default_selected=True,
+    )
+    register_backup_path(
+        "RH_ComfyUI",
+        MAIN_PATH / "gemini",
+        "config",
+        "VertexAI 服务账号凭据目录",
+        default_selected=True,
+    )
+    register_backup_path(
+        "RH_ComfyUI",
+        WORKFLOW_PATH,
+        "config",
+        "ComfyUI 工作流 JSON（含自定义工作流）",
+    )
+    register_backup_path(
+        "RH_ComfyUI",
+        PIPELINES_PATH,
+        "config",
+        "自定义 Pipeline 扩展目录",
+    )
+    register_backup_path(
+        "RH_ComfyUI",
+        OUTPUT_PATH,
+        "user_data",
+        "生成产物存档（图片/视频/音频，体积较大按需勾选）",
+        default_selected=False,
+    )
+
+
+_register_backup_hints()
