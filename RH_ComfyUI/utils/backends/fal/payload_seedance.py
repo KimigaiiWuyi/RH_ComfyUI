@@ -32,6 +32,8 @@ _FRAME_MODES = ("auto", "first_last", "reference")
 _FRAME_ROLES = {"first_frame", "last_frame"}
 # 插件 edit/extend → fal task 名
 _FAL_TASK = {"edit": "editing", "extend": "extension", "reference": "reference", "auto": "auto"}
+# fal 上按 2.5 形态处理的模型(2.5 与 2.5 Flash);样片只属于 seedance2.5
+_SEEDANCE25_FAL_MODELS = frozenset({"seedance2.5", "seedance2.5_flash"})
 
 
 def _text_choice(request: GenerationRequest, key: str, allowed: tuple[str, ...], default: str, *, label: str) -> str:
@@ -60,7 +62,7 @@ def _duration_str(request: GenerationRequest, model_name: str, *, label: str) ->
     if isinstance(raw, bool) or not isinstance(raw, int):
         raise ValidationError(f"{label} 的时长必须是整数秒或 auto,实际收到 {raw!r}")
     if raw == -1:
-        if model_name != "seedance2.5":
+        if model_name not in _SEEDANCE25_FAL_MODELS:
             raise ValidationError(f"{label} 的时长 -1(自动)在 fal 通道的 2.0 不支持")
         return "auto"
     if raw < lo or raw > hi:
@@ -180,8 +182,8 @@ def prepare_seedance(model_name: str, request: GenerationRequest, *, for_estimat
     ratio = _ratio(request, label=label)
     frame_mode = _text_choice(request, "frame_mode", _FRAME_MODES, "auto", label=label)
     task_mode = _text_param(request, "task_mode", label)
-    is_25 = model_name == "seedance2.5"
-    draft = is_25 and _bool_param(request, "draft", False, label=label)
+    is_25 = model_name in _SEEDANCE25_FAL_MODELS
+    draft = model_name == "seedance2.5" and _bool_param(request, "draft", False, label=label)
 
     frames = _frame_roles(inputs, frame_mode, label=label)
     n_images = sum(1 for m in inputs.media if m.kind == MediaKind.IMAGE)

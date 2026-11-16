@@ -36,6 +36,11 @@
     例:720p 16:9 5s 输出 + 2~4s 输入 → 8.16 元 = 816 积分
     duration=-1(自动)时:输出时长优先取输入视频总时长,否则 15s。
 
+  doubao-seedance-2.5-flash (仅 480p/720p,时长 4~30s 或 -1):
+    480p/720p: 无输入 46 元/M,有输入 28 元/M
+    例:720p 16:9 5s 无输入 → 108000 tokens × 46 元/M = 4.97 元 = 497 积分
+    与 2.5 同一 token 公式,费率更低;不支持 1080p 与样片/成片。
+
 point_cost 仅作兜底。
 """
 
@@ -92,6 +97,13 @@ _SEEDANCE25_RATES = {
     "480p": (70.00, 42.00),
     "720p": (70.00, 42.00),
     "1080p": (77.00, 46.00),
+}
+
+# ── Seedance 2.5 Flash 费率(元/M tokens,仅 480p/720p) ──
+
+_SEEDANCE25_FLASH_RATES = {
+    "480p": (46.00, 28.00),
+    "720p": (46.00, 28.00),
 }
 
 # duration=-1 且无法解析输入时长时的代理输出秒数
@@ -355,6 +367,32 @@ def estimate_seedance25_points(
     return _tokens_to_points(tokens, rate_yuan)
 
 
+def estimate_seedance25_flash_points(
+    resolution: str,
+    output_duration: float,
+    video_refs: Optional[list] = None,
+    *,
+    input_video_duration: Optional[float] = None,
+) -> int:
+    """Seedance 2.5 Flash 估算积分(仅 480p/720p;时长 4~30 或 -1)。
+
+    duration=-1(自动)时:输出时长 = 输入视频总时长(若 >0),否则 15s。
+    """
+    in_dur = resolve_input_video_duration(video_refs, input_video_duration=input_video_duration)
+    has_input = in_dur > 0 or _has_input_video(video_refs)
+
+    dur = float(output_duration)
+    if dur < 0:
+        dur = in_dur if in_dur > 0 else _SEEDANCE25_AUTO_DURATION
+
+    width, height, fps = _get_resolution_spec(resolution)
+    tokens = _calculate_tokens(_token_input_duration(in_dur, has_input), dur, width, height, fps)
+    rate = _SEEDANCE25_FLASH_RATES.get(resolution, _SEEDANCE25_FLASH_RATES["720p"])
+    rate_yuan = rate[1] if has_input else rate[0]
+
+    return _tokens_to_points(tokens, rate_yuan)
+
+
 def estimate_seedance15_pro_points(
     resolution: str,
     output_duration: float,
@@ -607,6 +645,25 @@ def settle_seedance25_points(
     )
 
 
+def settle_seedance25_flash_points(
+    usage: Optional[dict[str, Any]],
+    resolution: str,
+    video_refs: Optional[list] = None,
+    *,
+    input_video_duration: Optional[float] = None,
+    output_duration: Optional[float] = None,
+) -> Optional[int]:
+    """Seedance 2.5 Flash 后结算:供应商 token × 480p/720p 档费率。"""
+    return _settle_family_points(
+        usage,
+        resolution,
+        _SEEDANCE25_FLASH_RATES,
+        video_refs,
+        input_video_duration,
+        output_duration,
+    )
+
+
 def settle_seedance15_pro_points(
     usage: Optional[dict[str, Any]],
     resolution: str,
@@ -636,6 +693,7 @@ __all__ = [
     "estimate_seedance2_fast_points",
     "estimate_seedance2_mini_points",
     "estimate_seedance25_points",
+    "estimate_seedance25_flash_points",
     "estimate_seedance15_pro_points",
     "estimate_seedance10_pro_points",
     "extract_usage_tokens",
@@ -646,6 +704,7 @@ __all__ = [
     "settle_seedance2_fast_points",
     "settle_seedance2_mini_points",
     "settle_seedance25_points",
+    "settle_seedance25_flash_points",
     "settle_seedance15_pro_points",
     "settle_seedance10_pro_points",
     "resolve_input_video_duration",
@@ -660,6 +719,7 @@ __all__ = [
     "_SEEDANCE2_FAST_RATES",
     "_SEEDANCE2_MINI_RATES",
     "_SEEDANCE25_RATES",
+    "_SEEDANCE25_FLASH_RATES",
     "_SEEDANCE25_AUTO_DURATION",
     "_SEEDANCE15_PRO_WITH_AUDIO",
     "_SEEDANCE15_PRO_WITHOUT_AUDIO",

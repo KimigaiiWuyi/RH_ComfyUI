@@ -19,6 +19,7 @@ from .overrides import (
     GeminiOmniVideoModel,
     HappyHorseVideoModel,
     Seedance25VideoModel,
+    Seedance25FlashVideoModel,
 )
 from ...core.base.video import VideoTaskShape
 from ...core.base.errors import ValidationError
@@ -44,6 +45,8 @@ from ...utils.mappers.seedance_billing import (
     estimate_seedance2_fast_points,
     estimate_seedance2_mini_points,
     estimate_seedance15_pro_points,
+    settle_seedance25_flash_points,
+    estimate_seedance25_flash_points,
     input_video_duration_from_params,
 )
 from ...utils.backends.seedance.classify import resolve_request_frame_mode
@@ -691,6 +694,168 @@ class Seedance25Def(Seedance25VideoModel):
         if self.node.provider:
             return bindings
         bindings.append(fal_binding("seedance2.5"))
+        return bindings
+
+
+class Seedance25FlashDef(Seedance25FlashVideoModel):
+    """Seedance 2.5 Flash — 火山方舟 doubao-seedance-2-5-flash-261115
+
+    与 seedance2.5 类型分开的更快更便宜档位;复用 Seedance_apikey_ark。
+    能力差异(相对 2.5):
+      - 分辨率只有 480p / 720p(无 1080p)
+      - 多模态参考上限 20(图 10 + 视频 5 + 音频 5)
+      - 不支持样片 / 成片(draft 仅 Seedance 2.5)
+    """
+
+    def __init__(self) -> None:
+        super().__init__(self.node_def())
+
+    @staticmethod
+    def node_def() -> NodeDef:
+        base = Seedance25Def.node_def()
+        inputs = dict(base.inputs)
+        # Flash 无样片/成片(draft 仅 Seedance 2.5),参考上限按官方 10/5/5
+        inputs.pop("draft", None)
+        inputs.pop("draft_task_id", None)
+        inputs["images"] = PortSpec(
+            type=PortType.LIST,
+            min_items=0,
+            max_items=10,
+            item_type=PortType.IMAGE,
+            title="参考图片",
+            description=("参考图片(最多 10 张):0 张=文生 / 1 张=首帧 / 2 张=首尾帧 / 更多=参考"),
+        )
+        inputs["video_refs"] = PortSpec(
+            type=PortType.LIST,
+            max_items=5,
+            item_type=PortType.VIDEO,
+            title="参考视频",
+            description='参考视频(最多 5 段),prompt 中用 "视频1/视频2/..." 引用;编辑/延长必需',
+        )
+        inputs["audio_refs"] = PortSpec(
+            type=PortType.LIST,
+            max_items=5,
+            item_type=PortType.AUDIO,
+            title="参考音频",
+            description='参考音频(最多 5 段),prompt 中用 "音频1/音频2/..." 引用',
+        )
+        inputs["resolution"] = PortSpec(
+            type=PortType.ENUM,
+            default="720p",
+            values=["480p", "720p"],
+            title="分辨率",
+            description="视频分辨率(Flash 仅 480p / 720p,无 1080p)",
+        )
+        inputs["prompt"] = PortSpec(
+            type=PortType.TEXT,
+            required=False,
+            title="提示词",
+            description=(
+                '视频生成提示词。多模态可用 "图片1"/"视频1"/"音频1" 代号引用素材;'
+                "编辑/延长任务避免误用对方关键词以免触发错误任务类型。"
+            ),
+        )
+        return NodeDef(
+            name="seedance2.5_flash",
+            display_name="Seedance 2.5 Flash",
+            task_type=TaskType("video"),
+            backend="seedance",
+            # 静态兜底 ≈ 720p 5s 无输入视频(46 元/M → 4.97 元 = 497 积分)
+            point_cost=497,
+            description="更快更便宜的 2.5 档位,最长 30 秒",
+            knowledge_content=(
+                "字节跳动 Seedance 2.5 Flash(Model ID: doubao-seedance-2-5-flash-261115)。"
+                "\n"
+                "Seedance 2.5 的更快更便宜档位,生成速度约为 2.5 的两倍;凭证复用火山方舟 Ark Key。"
+                "\n"
+                "任务形态(task_mode)与 Seedance 2.5 相同:"
+                "\n"
+                "  - auto(默认): 按输入自动 文生/图生/首尾帧/多模态"
+                "\n"
+                "  - edit: 视频编辑(需参考视频;建议 ratio=adaptive, duration=-1)"
+                "\n"
+                "  - extend: 视频延长(需参考视频;建议 ratio=adaptive)"
+                "\n"
+                "多图角色(frame_mode):auto / first_last / reference。"
+                "\n"
+                "优势:最长 30 秒连贯直出、20 个多模态参考(图 10 + 视频 5 + 音频 5)、mov/mp4 输出。"
+                "\n"
+                "限制:分辨率只有 480p / 720p(无 1080p);不支持样片与成片(draft 仅 Seedance 2.5);"
+                "\n"
+                "不支持 camera_fixed(官方仅 1.x);编辑/延长/首尾帧必须 ratio=adaptive。"
+                "\n"
+                "支持时长:4~30 秒,或 -1 自动(所有 task_mode / frame_mode 均可)。"
+                "\n"
+                "\n"
+            ),
+            requirements=["seedance_apikey"],
+            backend_model="doubao-seedance-2-5-flash-261115",
+            backend_models={"ark": "doubao-seedance-2-5-flash-261115"},
+            mode="declarative",
+            inputs=inputs,
+            outputs=dict(base.outputs),
+            capabilities=CapabilityManifest(
+                supported_tasks=["video"],
+                mode="async_poll",
+                priority=91,
+            ),
+        )
+
+    def estimate_cost(self, request: GenerationRequest) -> int:
+        """动态计费:Flash 费率(无输入 46 元/M,有输入 28 元/M),token 公式同 2.5。"""
+        params = request.params if isinstance(request.params, dict) else {}
+        if "resolution" in params and isinstance(params["resolution"], str) and params["resolution"].strip():
+            resolution = params["resolution"]
+        elif isinstance(request.resolution, str) and request.resolution.strip():
+            resolution = request.resolution
+        else:
+            resolution = "720p"
+        duration = request.duration
+        if duration is None:
+            raw_duration = params["duration"] if "duration" in params else 5
+            duration = raw_duration
+        try:
+            duration_f = float(duration)
+        except (TypeError, ValueError):
+            duration_f = 5.0
+        return estimate_seedance25_flash_points(
+            str(resolution),
+            duration_f,
+            video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
+        )
+
+    def settle_cost(self, request: GenerationRequest, usage: dict[str, Any]) -> Optional[int]:
+        params = request.params if isinstance(request.params, dict) else {}
+        if "resolution" in params and isinstance(params["resolution"], str) and params["resolution"].strip():
+            fallback = params["resolution"]
+        elif isinstance(request.resolution, str) and request.resolution.strip():
+            fallback = request.resolution
+        else:
+            fallback = "720p"
+        resolution = resolution_from_usage(usage) or fallback
+        return settle_seedance25_flash_points(
+            usage,
+            str(resolution),
+            video_refs=request.video_refs,
+            input_video_duration=input_video_duration_from_params(request.params),
+            output_duration=_settle_output_duration(request, usage),
+        )
+
+    def point_range(self) -> tuple[int, int]:
+        """积分范围:最小(480p + 4s + 无输入) ~ 最大(720p + 30s + 输入 75s=5×15)。"""
+        return (
+            estimate_seedance25_flash_points("480p", 4, video_refs=None),
+            estimate_seedance25_flash_points("720p", 30, input_video_duration=75.0),
+        )
+
+    def channel_bindings(self) -> list[ChannelBinding]:
+        from ...utils.backends.fal.channel import fal_binding
+
+        bindings = super().channel_bindings()
+        if self.node.provider:
+            return bindings
+        bindings.append(fal_binding("seedance2.5_flash"))
         return bindings
 
 
@@ -1696,6 +1861,7 @@ ALL_MODELS = [
     GeminiOmni12Def,
     Seedance2Def,
     Seedance25Def,
+    Seedance25FlashDef,
     Seedance2MiniDef,
     Seedance2FastDef,
     HappyHorse11Def,

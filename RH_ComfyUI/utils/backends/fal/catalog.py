@@ -17,6 +17,7 @@ FAL_SHARED_MODELS: list[str] = [
     "minimax_h3_image",
     "seedance2",
     "seedance2.5",
+    "seedance2.5_flash",
     "banana1",
     "banana2",
     "banana2.1",
@@ -38,6 +39,7 @@ APP_PREFIXES: dict[str, str] = {
     "minimax_h3_image": "minimax/h3-image",
     "seedance2": "bytedance/seedance-2.0",
     "seedance2.5": "bytedance/seedance-2.5",
+    "seedance2.5_flash": "bytedance/seedance-2.5/flash",
     "banana1": "fal-ai/nano-banana",
     "banana2": "fal-ai/nano-banana-2",
     "banana2.1": "google/nano-banana-2.1",
@@ -148,20 +150,28 @@ SEEDANCE_FAL_ENDPOINTS: dict[str, dict[str, str]] = {
         "image_to_video": "bytedance/seedance-2.5/image-to-video",
         "reference_to_video": "bytedance/seedance-2.5/reference-to-video",
     },
+    "seedance2.5_flash": {
+        "text_to_video": "bytedance/seedance-2.5/flash/text-to-video",
+        "image_to_video": "bytedance/seedance-2.5/flash/image-to-video",
+        "reference_to_video": "bytedance/seedance-2.5/flash/reference-to-video",
+    },
 }
 SEEDANCE_FAL_RATIOS = ("auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16")
 SEEDANCE_FAL_RESOLUTIONS: dict[str, tuple[str, ...]] = {
     "seedance2": ("480p", "720p", "1080p", "4k"),
     "seedance2.5": ("480p", "720p", "1080p"),
+    "seedance2.5_flash": ("480p", "720p"),
 }
 SEEDANCE_FAL_DURATION: dict[str, tuple[int, int]] = {
     "seedance2": (4, 15),
     "seedance2.5": (4, 30),
+    "seedance2.5_flash": (4, 30),
 }
 SEEDANCE_FAL_REF_CAPS: dict[str, tuple[int, int, int, int]] = {
     # 模型 → (图, 视频, 音频, 总文件)
     "seedance2": (9, 3, 3, 12),
     "seedance2.5": (30, 10, 10, 50),
+    "seedance2.5_flash": (10, 5, 5, 20),
 }
 # 2.5 的 ref 端点支持 task 任务类型(auto/reference/editing/extension)
 SEEDANCE25_TASK_MODES = ("auto", "reference", "editing", "extension")

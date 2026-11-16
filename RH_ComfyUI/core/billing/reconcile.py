@@ -23,9 +23,10 @@ from ...utils.mappers.seedance_billing import (
     settle_seedance2_points,
     settle_seedance25_points,
     has_input_from_vendor_tokens,
+    settle_seedance25_flash_points,
 )
 
-DEFAULT_SEEDANCE_RECONCILE_MODELS: tuple[str, ...] = ("seedance2", "seedance2.5")
+DEFAULT_SEEDANCE_RECONCILE_MODELS: tuple[str, ...] = ("seedance2", "seedance2.5", "seedance2.5_flash")
 
 DEFAULT_KLING_RECONCILE_MODELS: tuple[str, ...] = (
     "kling-4.0",
@@ -52,6 +53,7 @@ _TOKEN_KEY_RE = re.compile(
 _SETTLE_FNS = {
     "seedance2": settle_seedance2_points,
     "seedance2.5": settle_seedance25_points,
+    "seedance2.5_flash": settle_seedance25_flash_points,
 }
 
 _BATCH = 80
@@ -451,7 +453,7 @@ async def reconcile_seedance_usage_billing(
     """扫描 Seedance 2.x 成功单,按原始 usage 回算 point_cost。
 
     Args:
-        model_names: 默认 seedance2 / seedance2.5
+        model_names: 默认 seedance2 / seedance2.5 / seedance2.5_flash
         apply: False=只预览,True=写库(+可选钱包)
         adjust_wallet: 按差额改 RHBind;调用方若用独立账本应传 False,自行消化 changes
         limit: 最多处理多少条有用量的差额(不含 unchanged)

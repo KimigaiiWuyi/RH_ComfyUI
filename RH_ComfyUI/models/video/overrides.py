@@ -734,6 +734,55 @@ class Seedance25VideoModel(SeedanceVideoModel):
         )
 
 
+class Seedance25FlashVideoModel(Seedance25VideoModel):
+    """Seedance 2.5 Flash:更快更便宜的 2.5 档位(官方 doubao-seedance-2-5-flash-261115)
+
+    与 seedance2.5 的差异:
+      - 分辨率只有 480p / 720p(无 1080p)
+      - 多模态参考上限 20(图 10 + 视频 5 + 音频 5)
+      - 不支持样片 / 成片(draft / draft_task_id 直接拒绝)
+    """
+
+    MAX_IMAGES = 10
+    MAX_VIDEOS = 5
+    MAX_AUDIOS = 5
+    MAX_REFERENCE_TOTAL = 20
+
+    def __init__(self, node: NodeDef) -> None:
+        super().__init__(node)
+        self.supported_resolutions = ["480p", "720p"]
+        self.card = ModelCard(
+            description=node.description or "字节跳动 Seedance 2.5 Flash:更快更便宜的 2.5 档位",
+            strengths=[
+                "生成速度约为 Seedance 2.5 的两倍,价格更低",
+                "最长 30 秒连贯直出",
+                "最多 20 个多模态参考(图 10 + 视频 5 + 音频 5)",
+                "视频编辑 / 视频延长",
+                "输出 mp4 或 mov",
+            ],
+            categories=["短视频", "长镜头", "多素材合成", "视频编辑", "视频延长"],
+            weaknesses=[
+                "分辨率只有 480p / 720p",
+                "不支持样片 / 成片(draft)",
+                "不支持 camera_fixed(固定镜头;官方仅 Seedance 1.x)",
+                "编辑/延长/首尾帧须 ratio=adaptive,自定义比例会异步报错",
+            ],
+            sample_prompts=[
+                "图片1为主角,在草原上奔跑 15 秒镜头",
+                "编辑视频1:把背景换成海边日落",
+            ],
+            languages=["zh", "en"],
+            speed_hint="fast",
+        )
+
+    def validate(self, request: GenerationRequest) -> None:
+        # Flash 无样片/成片;先拦下,再走 2.5 通用校验
+        params = request.params if isinstance(request.params, dict) else {}
+        if is_draft_flag(params) or draft_task_id_from_request(request):
+            raise ValidationError(f"{self.display_name} 不支持样片或成片,请改用 Seedance 2.5")
+        super().validate(request)
+
+
 class Wan22VideoModel(VideoPipelineModel):
     """Wan 2.2:仅支持 首帧 + 尾帧 两类图,无音视频参考,无有声,≤720p(像素积)
 

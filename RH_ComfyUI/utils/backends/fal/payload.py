@@ -206,7 +206,7 @@ def prepare(model_name: str, request: GenerationRequest, *, for_estimate: bool =
         from .payload_minimax_h3_image import prepare_minimax_h3_image
 
         return prepare_minimax_h3_image(model_name, request, for_estimate=for_estimate)
-    if model_name in ("seedance2", "seedance2.5"):
+    if model_name in ("seedance2", "seedance2.5", "seedance2.5_flash"):
         from .payload_seedance import prepare_seedance
 
         return prepare_seedance(model_name, request, for_estimate=for_estimate)

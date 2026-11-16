@@ -73,6 +73,7 @@ _SEEDANCE_ARK_MODEL_NAMES = [
     "seedance15_pro",
     "seedance2",
     "seedance2.5",
+    "seedance2.5_flash",
     "seedance2_mini",
     "seedance2_fast",
     "seedream5",
@@ -281,7 +282,7 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "启用的 ARK 模型",
         "从列表勾选要走火山方舟 ARK 的内部模型;可自由添加内部模型名。"
         "留空则全部不走 ARK。须同时打开上方「启用 ARK 供应商」。"
-        "可选:seedance15_pro / seedance2 / seedance2.5 / seedance2_mini / "
+        "可选:seedance15_pro / seedance2 / seedance2.5 / seedance2.5_flash / seedance2_mini / "
         "seedance2_fast / seedream5 / seedream5_pro / seedream5_5。",
         list(_SEEDANCE_ARK_MODEL_NAMES),
         options=list(_SEEDANCE_ARK_MODEL_NAMES),
