@@ -155,12 +155,10 @@ class AllChannelsFailedError(GenerationError):
         cause: Optional[Exception] = None,
         skipped_notes: Optional[list[str]] = None,
     ) -> None:
-        # 保留最后一个通道的干净用户文案(如供应商 failReason),
-        # 并附带跳过通道的诊断信息,避免丢失关键凭证缺失提示。
+        # 保留最后一个通道的干净用户文案(如供应商 failReason),不泄露未试通道名。
         cause_user_message = getattr(cause, "user_message", None) if cause is not None else None
         if cause_user_message:
-            suffix = f" (备用通道未尝试: {', '.join(skipped_notes)})" if skipped_notes else ""
-            final_user_msg = f"{cause_user_message}{suffix}"
+            final_user_msg = str(cause_user_message)
         else:
             final_user_msg = message
         super().__init__(message, user_message=final_user_msg)

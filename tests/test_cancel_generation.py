@@ -1316,3 +1316,88 @@ def test_seedance_bind_reraises_vendor_task_not_durable(monkeypatch):
     monkeypatch.setattr(active_tasks, "get_active_task_registry", lambda: _Reg())
     with pytest.raises(VendorTaskNotDurable):
         asyncio.run(_Provider()._bind_active_cancel("cgt-1"))
+
+
+def test_all_channels_failed_user_message_omits_unattempted_suffix():
+    from RH_ComfyUI.core.base.errors import AllChannelsFailedError
+
+    err = AllChannelsFailedError(
+        "内容未通过安全审核",
+        skipped_notes=["gw: 通道限流"],
+    )
+    assert err.user_message == "内容未通过安全审核"
+    assert "备用通道未尝试" not in err.user_message
+
+
+def test_provider_terminal_error_recognizes_definitive_failures():
+    from RH_ComfyUI.core import ChannelError
+    from RH_ComfyUI.core.base.errors import AllChannelsFailedError
+    from RH_ComfyUI.core.dispatch.resume import ResumeFailedError, provider_terminal_error
+    from RH_ComfyUI.core.channels.failure import Phase, FailureKind
+    from RH_ComfyUI.utils.backends.seedance.provider import SeedanceProviderError
+
+    # Gemini PROHIBITED_CONTENT inside AllChannelsFailedError -> definitive
+    gemini_err = ChannelError(
+        "blocked",
+        channel="gemini",
+        code="PROHIBITED_CONTENT",
+        user_message="Gemini finish_reason=PROHIBITED_CONTENT",
+        kind=FailureKind.INVALID_REQUEST,
+        phase=Phase.ACCEPTED,
+    )
+    wrapped = AllChannelsFailedError("Gemini finish_reason=PROHIBITED_CONTENT", cause=gemini_err)
+    term = provider_terminal_error(wrapped)
+    assert isinstance(term, ResumeFailedError)
+
+    # Seedance 400 REJECTED -> definitive; ACCEPTED poll 404 -> transient (None)
+    from RH_ComfyUI.core.channels.failure import Phase, FailureKind
+
+    sd_400 = SeedanceProviderError(
+        "bad arg",
+        code="HTTP_ERROR",
+        http_status=400,
+        phase=Phase.REJECTED,
+        user_message="请求参数无效",
+    )
+    assert isinstance(provider_terminal_error(sd_400), ResumeFailedError)
+
+    sd_poll_404 = SeedanceProviderError(
+        "not found on poll",
+        code="HTTP_ERROR",
+        http_status=404,
+        phase=Phase.ACCEPTED,
+        kind=FailureKind.PROVIDER_FAULT,
+        user_message="404",
+    )
+    assert provider_terminal_error(sd_poll_404) is None
+
+    # External structured error (no plugin coupling) with INVALID_REQUEST or REJECTED 4xx -> definitive
+    class _ExternalErr(RuntimeError):
+        def __init__(
+            self,
+            *,
+            code: str,
+            user_message: str,
+            kind: FailureKind | None,
+            phase: Phase | None,
+            http_status: int | None,
+        ) -> None:
+            super().__init__(user_message)
+            self.code = code
+            self.user_message = user_message
+            self.kind = kind
+            self.phase = phase
+            self.http_status = http_status
+
+    ext_400 = _ExternalErr(
+        code="BAD_REQ",
+        user_message="参数不符合要求",
+        kind=FailureKind.INVALID_REQUEST,
+        phase=Phase.REJECTED,
+        http_status=400,
+    )
+    assert isinstance(provider_terminal_error(ext_400), ResumeFailedError)
+
+    # Seedance 503 HTTP_ERROR -> transient (None)
+    sd_503 = SeedanceProviderError("busy", code="HTTP_ERROR", http_status=503, user_message="busy")
+    assert provider_terminal_error(sd_503) is None

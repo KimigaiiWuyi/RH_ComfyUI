@@ -657,7 +657,7 @@ class MiniMaxH3Provider:
                         phase=Phase.ACCEPTED,
                         retryable=False,
                         provider=self.name,
-                        user_message=f"任务已{task.status.value}",
+                        user_message="生成任务已过期，请重试。",
                     )
                 logger.info(f"[MiniMaxH3] 任务 {task_id} 终态 {task.status.value}\n  result:\n{raw_dump}")
                 return task

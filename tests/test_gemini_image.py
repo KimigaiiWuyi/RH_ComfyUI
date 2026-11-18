@@ -760,3 +760,28 @@ def test_invoke_exposes_finish_reason_to_user_message(monkeypatch):
         assert exc.user_message == "Gemini finish_reason=NO_IMAGE"
     else:
         raise AssertionError("NO_IMAGE must stay retryable and keep the reason")
+
+
+def test_gemini_channel_sanitizes_html_and_transfer_and_400_errors(monkeypatch) -> None:
+    import RH_ComfyUI.utils.backends.gemini_image.channel as gchan
+    from RH_ComfyUI.core import ChannelError
+    from RH_ComfyUI.core.schema import TaskType, GenerationRequest
+    from RH_ComfyUI.utils.backends.gemini_image.channel import GeminiImageChannel
+
+    ch = GeminiImageChannel()
+    req = GenerationRequest(task_type=TaskType.IMAGE, prompt="cat")
+    for raw_err, expected in [
+        ("<html>504 Gateway Time-out</html>", "上游响应超时，请稍后重试"),
+        ("TransferEncodingError: Response payload is not completed", "网络传输中断，请稍后重试"),
+        ("400 INVALID_ARGUMENT: request rejected", "请求参数或参考图有误"),
+    ]:
+
+        async def _boom(request, api, _m=raw_err):
+            _ = (request, api)
+            raise RuntimeError(_m)
+
+        monkeypatch.setattr(gchan, "gemini_flash_image_mapper", _boom)
+        with pytest.raises(ChannelError) as exc_info:
+            asyncio.run(ch.invoke(request=req, vendor_model="gemini-nano-banana-2.1"))
+        assert expected in str(exc_info.value.user_message)
+        assert "<html>" not in str(exc_info.value.user_message)

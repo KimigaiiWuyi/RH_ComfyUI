@@ -281,3 +281,9 @@ def test_register_azure_image_binds_family_hosts() -> None:
 
 def test_package_init_does_not_import_client() -> None:
     assert not hasattr(azure_image, "AzureGPTImage2API")
+
+
+def test_azure_http_error_sanitizes_moderation_blocked() -> None:
+    msg = "Your request was rejected as a result of our safety system. safety_violations=[sexual]"
+    err = azure_http_error(400, f'{{"error": {{"code": "moderation_blocked", "message": "{msg}"}}}}')
+    assert err.user_message == "内容未通过安全审核，请调整提示词或参考图后重试。"

@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 import base64
 import asyncio
 from typing import TYPE_CHECKING, Any, Callable, Optional
@@ -63,11 +64,13 @@ def _pick_vendor_message(
     data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
     raw_err = resp_json["error"] if "error" in resp_json else None
     err: dict[str, Any] = raw_err if isinstance(raw_err, dict) else {}
+    raw_out = resp_json["output"] if "output" in resp_json else None
+    out: dict[str, Any] = raw_out if isinstance(raw_out, dict) else {}
 
     def _from(blob: dict[str, Any], key: str) -> object:
         return blob[key] if key in blob else None
 
-    for value in (_from(resp_json, "message"), _from(data, "message"), _from(err, "message")):
+    for value in (_from(resp_json, "message"), _from(data, "message"), _from(err, "message"), _from(out, "message")):
         text = _field_text(value)
         if text is not None:
             return text
@@ -82,6 +85,35 @@ def _pick_vendor_message(
     if http_status is not None:
         return str(http_status)
     return "上游错误"
+
+
+_DURATION_EXCEEDS_RE = re.compile(r"exceeds\s+max\s+(\d+(?:\.\d+)?)\s*s?", re.I)
+
+
+def _friendly_task_error(vendor_msg: str) -> str:
+    """将 HappyHorse/万相 3.0 已知英文失败文案转为简洁中文，未命中保留原文。"""
+    low = vendor_msg.lower()
+    if "real human faces" in low:
+        if "output content" in low:
+            return "生成内容疑似包含真人面部，请调整提示词或参考素材后重试。"
+        return "参考素材疑似包含真人面部，请更换后重试。"
+    if "job stalled more than allowable limit" in low:
+        return "任务生成超时卡顿，请稍后重试。"
+    if "reference_audio" in low and ("duration" in low or "exceeds" in low):
+        m = _DURATION_EXCEEDS_RE.search(vendor_msg)
+        if m is not None:
+            return f"参考音频总时长超出当前模型允许范围（最长 {m.group(1)} 秒）。"
+        return "参考音频总时长超出当前模型允许范围，请缩短后重试。"
+    if "reference_video" in low and ("duration" in low or "exceeds" in low):
+        m = _DURATION_EXCEEDS_RE.search(vendor_msg)
+        if m is not None:
+            return f"参考视频总时长超出当前模型允许范围（最长 {m.group(1)} 秒）。"
+        return "参考视频总时长超出当前模型允许范围，请缩短后重试。"
+    if "failed to download" in low and "http" in low:
+        return "参考素材下载失败，请检查或更换素材后重试。"
+    if "task not found" in low:
+        return "上游任务已失效，请重新提交生成。"
+    return vendor_msg
 
 
 class HappyHorseProviderError(SeedanceProviderError):
@@ -786,9 +818,12 @@ class HappyHorseProvider:
                         kind=FailureKind.TASK_FAILED,
                         phase=Phase.ACCEPTED,
                         provider=self.name,
-                        user_message=vendor_msg,
+                        user_message=_friendly_task_error(vendor_msg),
                     )
                 if task.status in (NormalizedStatus.EXPIRED, NormalizedStatus.CANCELLED):
+                    status_msg = (
+                        "生成任务已过期，请重试。" if task.status == NormalizedStatus.EXPIRED else "生成任务已取消。"
+                    )
                     raise HappyHorseProviderError(
                         f"任务 {task.status.value}: {task_id}",
                         code=task.status.value.upper(),
@@ -796,7 +831,7 @@ class HappyHorseProvider:
                         phase=Phase.ACCEPTED,
                         retryable=False,
                         provider=self.name,
-                        user_message=f"任务已{task.status.value}",
+                        user_message=status_msg,
                     )
                 logger.info(f"[HappyHorse:{self.name}] 任务 {task_id} 成功\n  result:\n{raw_dump}")
                 return task

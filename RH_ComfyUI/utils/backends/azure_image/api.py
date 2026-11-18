@@ -113,11 +113,14 @@ def azure_http_error(status: int, body: str, *, stage: "Stage" = "create") -> Ch
     retryable = transient or status in {404, 408, 429, 500, 502, 503, 504}
     kind, phase = classify_http_status(status, stage=stage)
     user_message = message
+    low_msg = message.lower()
     if code == "DeploymentNotFound":
         user_message = (
             "Azure 找不到该部署。Foundry 里的部署名必须与模型 id 完全一致"
             "(例如 gpt-image-2.5-flare / gpt-image-2.5-sunburst)。"
         )
+    elif code == "moderation_blocked" or "rejected by the safety system" in low_msg or "safety_violations" in low_msg:
+        user_message = "内容未通过安全审核，请调整提示词或参考图后重试。"
     return ChannelError(
         f"Azure {code}: {message}",
         kind=kind,

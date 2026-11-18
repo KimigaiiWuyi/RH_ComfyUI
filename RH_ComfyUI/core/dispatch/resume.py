@@ -63,6 +63,20 @@ class _GatewayTerminalError(Protocol):
     user_message: str
 
 
+@runtime_checkable
+class _GatewayWithStatus(Protocol):
+    http_status: int | None
+
+
+@runtime_checkable
+class _ProviderTerminalLike(Protocol):
+    code: str
+    user_message: str
+    kind: object
+    phase: object
+    http_status: int | None
+
+
 def _loaded_gateway_error_types() -> list[type[BaseException]]:
     """网关类只从已加载模块取，避免单测硬导入外部插件。"""
     import sys
@@ -79,7 +93,26 @@ def _loaded_gateway_error_types() -> list[type[BaseException]]:
     return found
 
 
+_DEFINITIVE_GEMINI_CODES: frozenset[str] = frozenset(
+    {
+        "PROHIBITED_CONTENT",
+        "IMAGE_PROHIBITED_CONTENT",
+        "BLOCKLIST",
+        "SAFETY",
+        "IMAGE_SAFETY",
+        "RECITATION",
+        "IMAGE_RECITATION",
+        "NO_IMAGE",
+        "IMAGE_OTHER",
+        "MAX_TOKENS",
+        "SPII",
+    }
+)
+
+
 def _gateway_terminal(error: BaseException) -> ResumeFailedError | None:
+    from ..channels.failure import Phase, FailureKind
+
     for gateway_type in _loaded_gateway_error_types():
         gateway = error if isinstance(error, gateway_type) else error.__cause__
         if not isinstance(gateway, gateway_type) or not isinstance(gateway, _GatewayTerminalError):
@@ -87,26 +120,104 @@ def _gateway_terminal(error: BaseException) -> ResumeFailedError | None:
         # retryable 只表示首次提交可换通道。这条任务号已失败，再查结果相同。
         if gateway.code == "TASK_FAILED":
             return ResumeFailedError(gateway.user_message, definitive=True)
-        if gateway.code == "TASK_CANCELLED":
+        if gateway.code in ("CANCELLED", "TASK_CANCELLED"):
             return ResumeCancelledError(gateway.user_message)
+        if isinstance(gateway, _ProviderTerminalLike):
+            if gateway.kind is FailureKind.INVALID_REQUEST:
+                return ResumeFailedError(gateway.user_message or str(gateway), definitive=True)
+            status = gateway.http_status
+            if (
+                gateway.phase is Phase.REJECTED
+                and isinstance(status, int)
+                and 400 <= status < 500
+                and status not in (408, 429)
+            ):
+                return ResumeFailedError(gateway.user_message or str(gateway), definitive=True)
+        elif isinstance(gateway, _GatewayWithStatus):
+            status = gateway.http_status
+            if isinstance(status, int) and 400 <= status < 500 and status not in (408, 429):
+                return ResumeFailedError(gateway.user_message, definitive=True)
         return None
     return None
 
 
-def provider_terminal_error(error: BaseException) -> ResumeFailedError | None:
-    """只认已有 provider 类型的明确终态码；过期/unknown/网络不可猜失败。"""
-    gateway = _gateway_terminal(error)
-    if gateway is not None:
-        return gateway
+def _external_structured_terminal(error: BaseException) -> ResumeFailedError | None:
+    from ..base.errors import ChannelError
+    from ..channels.failure import Phase, FailureKind
     from ...utils.backends.seedance.provider import SeedanceProviderError
 
-    cause = error if isinstance(error, SeedanceProviderError) else error.__cause__
+    for candidate in (error, error.__cause__):
+        if candidate is None or isinstance(candidate, (ChannelError, SeedanceProviderError)):
+            continue
+        if not isinstance(candidate, _ProviderTerminalLike):
+            continue
+        msg = candidate.user_message or str(candidate)
+        if candidate.code == "TASK_FAILED":
+            return ResumeFailedError(msg, definitive=True)
+        if candidate.code in ("CANCELLED", "TASK_CANCELLED"):
+            return ResumeCancelledError(msg)
+        if candidate.kind is FailureKind.INVALID_REQUEST:
+            return ResumeFailedError(msg, definitive=True)
+        status = candidate.http_status
+        if (
+            candidate.phase is Phase.REJECTED
+            and isinstance(status, int)
+            and 400 <= status < 500
+            and status not in (408, 429)
+        ):
+            return ResumeFailedError(msg, definitive=True)
+    return None
+
+
+def provider_terminal_error(error: BaseException) -> ResumeFailedError | None:
+    """只认已有 provider 类型的明确终态码或确定性 4xx 拒答；网络/过期不可猜失败。"""
+    from ..base.errors import ChannelError, AllChannelsFailedError
+    from ..channels.failure import Phase, FailureKind
+
+    cur_err: BaseException = error
+    if isinstance(cur_err, AllChannelsFailedError) and cur_err.cause is not None:
+        cur_err = cur_err.cause
+
+    gateway = _gateway_terminal(cur_err)
+    if gateway is not None:
+        return gateway
+
+    if isinstance(cur_err, ChannelError):
+        if cur_err.code in ("CANCELLED", "TASK_CANCELLED"):
+            return ResumeCancelledError(cur_err.user_message)
+        if cur_err.code in _DEFINITIVE_GEMINI_CODES or cur_err.code == "TASK_FAILED":
+            return ResumeFailedError(cur_err.user_message, definitive=True)
+        if cur_err.kind is FailureKind.INVALID_REQUEST:
+            return ResumeFailedError(cur_err.user_message, definitive=True)
+        status = cur_err.http_status
+        if (
+            cur_err.phase is Phase.REJECTED
+            and isinstance(status, int)
+            and 400 <= status < 500
+            and status not in (408, 429)
+        ):
+            return ResumeFailedError(cur_err.user_message, definitive=True)
+
+    external = _external_structured_terminal(cur_err)
+    if external is not None:
+        return external
+
+    from ...utils.backends.seedance.provider import SeedanceProviderError
+
+    cause = cur_err if isinstance(cur_err, SeedanceProviderError) else cur_err.__cause__
     if not isinstance(cause, SeedanceProviderError):
         return None
     if cause.code == "TASK_FAILED":
-        return ResumeFailedError(str(cause), definitive=True)
+        return ResumeFailedError(cause.user_message or str(cause), definitive=True)
     if cause.code in ("CANCELLED", "TASK_CANCELLED"):
-        return ResumeCancelledError(str(cause))
+        return ResumeCancelledError(cause.user_message or str(cause))
+    if cause.kind is FailureKind.INVALID_REQUEST or (
+        cause.phase is Phase.REJECTED
+        and isinstance(cause.http_status, int)
+        and 400 <= cause.http_status < 500
+        and cause.http_status not in (408, 429)
+    ):
+        return ResumeFailedError(cause.user_message or str(cause), definitive=True)
     return None
 
 

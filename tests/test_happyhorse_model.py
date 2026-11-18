@@ -244,3 +244,51 @@ def test_render_create_r2v_never_emits_video_type():
         assert types == ["reference_image"]
 
     asyncio.run(_run())
+
+
+def test_happyhorse_pick_vendor_message_reads_output_message():
+    from RH_ComfyUI.utils.backends.happyhorse.provider import _pick_vendor_message
+
+    assert _pick_vendor_message({"output": {"message": "Task not found"}}, http_status=404) == "Task not found"
+    assert _pick_vendor_message({}, http_status=404) == "404"
+
+
+def test_happyhorse_friendly_task_error_mappings():
+    from RH_ComfyUI.utils.backends.happyhorse.provider import _friendly_task_error
+
+    assert _friendly_task_error(
+        "upstream_invalid_request: The output content is suspected to include real human faces."
+    ) == ("生成内容疑似包含真人面部，请调整提示词或参考素材后重试。")
+    assert "真人" in _friendly_task_error(
+        "FaceDetectionSuspect: The input content is suspected to include real human faces."
+    )
+    assert _friendly_task_error("job stalled more than allowable limit") == "任务生成超时卡顿，请稍后重试。"
+    assert "参考视频" in _friendly_task_error("reference_video duration exceeds 10s limit")
+    assert "参考音频" in _friendly_task_error("reference_audio duration exceeds 15s limit")
+    assert _friendly_task_error("Failed to download https://r2.example.com/a.png?X-Amz-Signature=abc") == (
+        "参考素材下载失败，请检查或更换素材后重试。"
+    )
+    assert _friendly_task_error("Task not found") == "上游任务已失效，请重新提交生成。"
+
+
+def test_happyhorse_expired_user_message_is_friendly_chinese():
+    import pytest
+
+    from RH_ComfyUI.utils.backends.happyhorse.provider import (
+        NormalizedTask,
+        NormalizedStatus,
+        HappyHorseProvider,
+        HappyHorseProviderError,
+    )
+
+    class _ExpiredProvider(HappyHorseProvider):
+        async def get(self, task_id: str) -> NormalizedTask:
+            return NormalizedTask(id=task_id, status=NormalizedStatus.EXPIRED, raw={})
+
+    async def _run() -> None:
+        p = _ExpiredProvider(api_key="test")
+        with pytest.raises(HappyHorseProviderError) as ei:
+            await p.poll_until_done("t-1", interval=0.01, max_wait=1.0)
+        assert ei.value.user_message == "生成任务已过期，请重试。"
+
+    asyncio.run(_run())

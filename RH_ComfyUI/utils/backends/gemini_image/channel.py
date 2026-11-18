@@ -157,10 +157,24 @@ class GeminiImageChannel(ProviderChannel):
                     user_message=f"Gemini {kind}={code}",
                 ) from exc
             err_msg = str(exc)
+            low_err = err_msg.lower()
             if "Server disconnected" in err_msg or "ServerDisconnected" in type(exc).__name__:
-                detail = "网络连接断开 (Server disconnected)"
-            elif "Timeout" in type(exc).__name__ or "timed out" in err_msg.lower():
-                detail = "网络请求超时"
+                detail = "网络连接断开，请稍后重试"
+            elif (
+                "Timeout" in type(exc).__name__
+                or "timed out" in low_err
+                or "504 gateway time-out" in low_err
+                or "<html" in low_err
+            ):
+                detail = "上游响应超时，请稍后重试"
+            elif (
+                "transferencodingerror" in low_err
+                or "clientpayloaderror" in low_err
+                or "response payload is not completed" in low_err
+            ):
+                detail = "网络传输中断，请稍后重试"
+            elif "invalid_argument" in low_err or "invalid argument" in low_err:
+                detail = "请求参数或参考图有误，请检查后重试"
             elif err_msg:
                 detail = err_msg[:120]
             else:
