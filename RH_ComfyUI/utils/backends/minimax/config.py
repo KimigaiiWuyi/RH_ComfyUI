@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+MINIMAX_DEFAULT_BASE_URL = "https://api.minimaxi.com"
+
 MINIMAX_MODEL_SPEECH = "minimax_t2a_speech"
 MINIMAX_MODEL_IMAGE = "minimax_image01"
 MINIMAX_MODEL_H3 = "minimax_h3"
@@ -33,6 +35,17 @@ def _cfg(key: str) -> Any:
 def minimax_api_key() -> str:
     """动态读取 API Key,禁止缓存在实例属性上。"""
     return str(_cfg("MiniMax_apikey") or "")
+
+
+def minimax_base_url() -> str:
+    """动态读取 Base URL,空串回退官方默认地址,缺少协议头时自动补 https://。"""
+    raw = _cfg("MiniMax_BaseURL")
+    text = raw.strip() if isinstance(raw, str) else ""
+    if not text:
+        return MINIMAX_DEFAULT_BASE_URL
+    if not text.startswith(("http://", "https://")):
+        text = f"https://{text}"
+    return text.rstrip("/")
 
 
 def minimax_enabled_models() -> list[str]:
@@ -83,12 +96,14 @@ def minimax_dry_run() -> bool:
 
 
 __all__ = [
+    "MINIMAX_DEFAULT_BASE_URL",
     "MINIMAX_MODEL_SPEECH",
     "MINIMAX_MODEL_IMAGE",
     "MINIMAX_MODEL_H3",
     "MINIMAX_MODEL_H3_IMAGE",
     "MINIMAX_MODEL_OPTIONS",
     "minimax_api_key",
+    "minimax_base_url",
     "minimax_enabled_models",
     "is_minimax_vendor_enabled",
     "is_minimax_model_enabled",

@@ -62,10 +62,18 @@ class RHAppAPI:
     - 查询任务状态与结果
     """
 
-    def __init__(self) -> None:
-        # 不在 __init__ 中缓存 api_key，否则用户在 Web 控制台配置后
-        # 不重启进程也能立刻生效 —— 见下面 @property 的实现。
-        self.base_url = "https://www.runninghub.cn"
+    DEFAULT_BASE_URL = "https://www.runninghub.cn"
+
+    @property
+    def base_url(self) -> str:
+        """动态读取 RunningHub Base URL,不在实例化时冻结,空串回退官方默认地址。"""
+        raw = SERVICE_CONFIG.get_config("RH_BaseURL").data
+        text = raw.strip() if isinstance(raw, str) else ""
+        if not text:
+            return self.DEFAULT_BASE_URL
+        if not text.startswith(("http://", "https://")):
+            text = f"https://{text}"
+        return text.rstrip("/")
 
     @property
     def api_key(self) -> str:
@@ -113,10 +121,19 @@ class RHAppAPI:
         self,
         file_data: bytes,
         filename: str = "input.png",
+        *,
+        base_url: Optional[str] = None,
     ) -> str:
         """上传文件到 RunningHub，返回 fileName（用于 nodeInfoList.fieldValue）"""
         api_key = self._require_api_key()
-        url = f"{self.base_url}/openapi/v2/media/upload/binary"
+        override = base_url.strip() if isinstance(base_url, str) else ""
+        if override:
+            if not override.startswith(("http://", "https://")):
+                override = f"https://{override}"
+            root = override.rstrip("/")
+        else:
+            root = self.base_url
+        url = f"{root}/openapi/v2/media/upload/binary"
         headers = {"Authorization": f"Bearer {api_key}"}
 
         files = {"file": (filename, file_data)}

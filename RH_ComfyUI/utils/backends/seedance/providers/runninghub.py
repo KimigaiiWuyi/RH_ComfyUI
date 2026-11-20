@@ -59,9 +59,10 @@ def _guess_extension(ref: MediaRef, kind: MediaKind) -> str:
     return ".bin"
 
 
-def _view_url(file_name: str) -> str:
+def _view_url(file_name: str, base_url: str = "https://www.runninghub.cn") -> str:
     """构造 RunningHub /view?filename=... 直链。"""
-    return f"https://www.runninghub.cn/view?filename={file_name}"
+    root = (base_url or "https://www.runninghub.cn").rstrip("/")
+    return f"{root}/view?filename={file_name}"
 
 
 # 结构化 [@参考图片N] / [参考图片N] 优先;再匹配裸 图片N / image N
@@ -145,8 +146,8 @@ class RunningHubSeedanceProvider(SeedanceProvider):
         if ref.data is None:
             return ref.url
         ext = _guess_extension(ref, ref.kind)
-        file_name = await rh_app_api.upload_file(ref.data, f"input{ext}")
-        return _view_url(file_name)
+        file_name = await rh_app_api.upload_file(ref.data, f"input{ext}", base_url=self.base_url)
+        return _view_url(file_name, self.base_url)
 
     async def render_create(
         self,

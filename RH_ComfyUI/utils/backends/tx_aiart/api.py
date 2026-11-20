@@ -14,6 +14,7 @@ import hashlib
 from io import BytesIO
 from typing import Any
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 import aiohttp
 from PIL import Image
@@ -25,6 +26,7 @@ from ....rh_config.comfyui_config import SERVICE_CONFIG
 
 SERVICE = "aiart"
 DEFAULT_HOST = "aiart.tencentcloudapi.com"
+DEFAULT_BASE_URL = f"https://{DEFAULT_HOST}"
 DEFAULT_REGION = "ap-guangzhou"
 ACTION = "ImageOutpainting"
 VERSION = "2022-12-29"
@@ -149,8 +151,19 @@ def decode_result_image(raw: str) -> bytes:
         return binary
 
 
+def _request_headers(url: str, signed_headers: dict[str, str], signed_host: str) -> dict[str, str]:
+    """发往自定义反代时移除强行覆写的 Host 头,避免反代路由失败。"""
+    headers = dict(signed_headers)
+    hostname = (urlsplit(url).hostname or "").lower()
+    if hostname and hostname != signed_host.lower():
+        headers.pop("Host", None)
+    return headers
+
+
 class TxAiartAPI:
     """混元 AI 艺术客户端。凭证用 @property 每次读配置。"""
+
+    DEFAULT_BASE_URL: str = DEFAULT_BASE_URL
 
     @property
     def secret_id(self) -> str:
@@ -167,6 +180,17 @@ class TxAiartAPI:
     @property
     def host(self) -> str:
         return DEFAULT_HOST
+
+    @property
+    def base_url(self) -> str:
+        """动态读取 Base URL,空串回退官方默认地址。"""
+        raw = SERVICE_CONFIG.get_config("TX_AIArt_BaseURL").data
+        text = raw.strip() if isinstance(raw, str) else ""
+        if not text:
+            return self.DEFAULT_BASE_URL
+        if not text.startswith(("http://", "https://")):
+            text = f"https://{text}"
+        return text.rstrip("/")
 
     def configured(self) -> bool:
         return bool(self.secret_id and self.secret_key)
@@ -196,12 +220,12 @@ class TxAiartAPI:
         from ....core.telemetry.wire_capture import set_wire_from_http_body
 
         set_wire_from_http_body(body_obj)
-        url = f"https://{self.host}"
+        url = self.base_url
         last_error = "未知错误"
 
         for attempt in range(1, max_retries + 1):
             ts = int(time.time())
-            headers = sign_tc3(
+            signed = sign_tc3(
                 secret_id=sid,
                 secret_key=skey,
                 service=SERVICE,
@@ -212,6 +236,7 @@ class TxAiartAPI:
                 region=self.region,
                 version=VERSION,
             )
+            headers = _request_headers(url, signed, self.host)
             logger.info(f"[tx_aiart] ImageOutpainting ratio={ratio} attempt={attempt}/{max_retries}")
             try:
                 timeout = aiohttp.ClientTimeout(total=120)

@@ -20,9 +20,10 @@ banana2 / banana2.1 / banana2.lite / banana_pro 共用的供应商通道,走官�
 
 维护须知:
 - **通道内一切凭证守卫用 `is_configured()`,不要按 `api_key` 判**(Vertex 无 key);
-- 服务器直连不到 Google 时填 `Gemini_Image_BaseURL`(中转地址),SDK 经
-  `http_options.base_url` 改道,并在其后拼 `/v1beta/...`(`api_version` 不变);
-  **仅 AI Studio 模式生效**(Vertex 有自己的端点体系,套上去会打歪)。留空直连官方;
+- `Gemini_Image_BaseURL` 位于启用开关之后(第 2 项),默认官方地址 `https://generativelanguage.googleapis.com`
+  (默认值与留空均直连官方);改为自定义反代/中转地址时,SDK 经 `http_options.base_url`
+  改道并在其后拼 `/v1beta/...`(`api_version` 不变),**仅 AI Studio 模式生效**
+  (Vertex 有自己的端点体系,套上去会打歪);
 - 新请求从 `generate_content` 的 `candidates[0].content.parts[].inline_data` 取图;
   旧 interaction 续跑仍走 `_find_image`(outputs / steps);
 - 详细文档见 `.agents/skills/rh-comfyui-development/references/12-provider-channels-and-gemini.md`;

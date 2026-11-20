@@ -59,7 +59,18 @@ class MIMOAPI:
         "hoarse": "沙哑",
     }
 
-    base_url: str = "https://api.xiaomimimo.com/v1"
+    DEFAULT_BASE_URL: str = "https://api.xiaomimimo.com/v1"
+
+    @property
+    def base_url(self) -> str:
+        """动态读取 Base URL,空串回退官方默认地址,缺少协议头时自动补 https://。"""
+        raw = SERVICE_CONFIG.get_config("MIMO_BaseURL").data
+        text = raw.strip() if isinstance(raw, str) else ""
+        if not text:
+            return self.DEFAULT_BASE_URL
+        if not text.startswith(("http://", "https://")):
+            text = f"https://{text}"
+        return text.rstrip("/")
 
     @property
     def chat_url(self) -> str:

@@ -345,3 +345,71 @@ def test_set_vendor_raw_keeps_urls_and_drops_base64() -> None:
     assert merged["image_url"] == "https://cdn.example/a.png"
     assert attach_file_url({}, "https://cdn.example/out.png") == {"file_url": "https://cdn.example/out.png"}
     clear_wire_audit()
+
+
+def test_upgrade_task_record_spend_index_only_drops_legacy_definition() -> None:
+    from sqlalchemy import text
+    from sqlalchemy.pool import StaticPool
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from RH_ComfyUI.utils.database.models import upgrade_task_record_spend_index
+    from gsuid_core.utils.database.startup import exec_list
+
+    assert not any(
+        "DROP INDEX" in stmt.upper() and "ix_rhcomfyuitaskrecord_bot_created_user_spend" in stmt for stmt in exec_list
+    )
+
+    async def _run() -> None:
+        engine = create_async_engine(
+            "sqlite+aiosqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        "CREATE TABLE rhcomfyuitaskrecord ("
+                        "id INTEGER PRIMARY KEY, bot_id TEXT, created_at INTEGER, "
+                        "user_id TEXT, status TEXT, point_cost INTEGER, "
+                        "elapsed_ms INTEGER, task_type TEXT)"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "CREATE INDEX ix_rhcomfyuitaskrecord_bot_created_user_spend "
+                        "ON rhcomfyuitaskrecord (bot_id, created_at, user_id, status, point_cost)"
+                    )
+                )
+                assert await upgrade_task_record_spend_index(conn) is True
+                remaining = (
+                    await conn.execute(
+                        text(
+                            "SELECT name FROM sqlite_master "
+                            "WHERE type = 'index' AND name = 'ix_rhcomfyuitaskrecord_bot_created_user_spend'"
+                        )
+                    )
+                ).all()
+                assert remaining == []
+
+                await conn.execute(
+                    text(
+                        "CREATE INDEX ix_rhcomfyuitaskrecord_bot_created_user_spend "
+                        "ON rhcomfyuitaskrecord "
+                        "(bot_id, created_at, user_id, status, point_cost, elapsed_ms, task_type)"
+                    )
+                )
+                assert await upgrade_task_record_spend_index(conn) is False
+                kept = (
+                    await conn.execute(
+                        text(
+                            "SELECT name FROM sqlite_master "
+                            "WHERE type = 'index' AND name = 'ix_rhcomfyuitaskrecord_bot_created_user_spend'"
+                        )
+                    )
+                ).all()
+                assert len(kept) == 1
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())

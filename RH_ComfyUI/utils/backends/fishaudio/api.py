@@ -1,7 +1,7 @@
 """Fish Audio 官方 API 客户端 — TTS / 音色克隆 / 语音识别
 
-只对接官方公开端点(api.fish.audio)。API Key 从配置动态读取,
-中途改配置即时生效(不缓存到实例,见 @property)。
+默认对接官方公开端点(api.fish.audio),可通过 ``FishAudio_BaseURL`` 改为自定义反代。
+API Key 与 Base URL 均从配置动态读取,中途改配置即时生效(不缓存到实例,见 @property)。
 合成/识别的 model 由调用方按已启用档位传入,不再读全局单选档位。
 
 网络层用 httpx(与 seedance/aigc 等通道统一风格),统一 120s 总超时 +
@@ -21,8 +21,7 @@ from ..http_retry import RetryingAsyncClient
 from ....rh_config.fish_models import ASR_MODEL_NAMES, TTS_MODEL_NAMES
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
-# 仅对接官方公开端点(不额外暴露地址配置)。
-_BASE_URL = "https://api.fish.audio"
+DEFAULT_BASE_URL = "https://api.fish.audio"
 
 # 音色训练中的状态:处于这些状态需等待就绪后才能用于合成。
 # 快速克隆通常即时可用;偶发未就绪时轮询兜底,超预算仍未就绪则尽力尝试。
@@ -42,7 +41,18 @@ def _audio_content_type(audio: bytes) -> tuple[str, str]:
 class FishAudioAPI:
     """Fish Audio TTS + 音色克隆 + ASR 客户端"""
 
-    base_url: str = _BASE_URL
+    DEFAULT_BASE_URL: str = DEFAULT_BASE_URL
+
+    @property
+    def base_url(self) -> str:
+        """动态读取 Base URL,空串回退官方默认地址,缺少协议头时自动补 https://。"""
+        raw = SERVICE_CONFIG.get_config("FishAudio_BaseURL").data
+        text = raw.strip() if isinstance(raw, str) else ""
+        if not text:
+            return self.DEFAULT_BASE_URL
+        if not text.startswith(("http://", "https://")):
+            text = f"https://{text}"
+        return text.rstrip("/")
 
     @property
     def api_key(self) -> str:

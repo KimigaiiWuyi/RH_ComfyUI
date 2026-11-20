@@ -13,6 +13,7 @@ from PIL import Image
 
 from gsuid_core.logger import logger
 
+from .config import minimax_base_url
 from ..http_retry import is_network_error, call_with_network_retry
 from ....rh_config.comfyui_config import SERVICE_CONFIG
 
@@ -39,14 +40,34 @@ class MiniMaxAPI:
         "whisper",
     ]
 
-    def __init__(self) -> None:
-        self.base_url: str = "https://api.minimaxi.com"
-        self.generation_url = f"{self.base_url}/v1/image_generation"
-        self.t2a_async_url = f"{self.base_url}/v1/t2a_async_v2"
-        self.t2a_query_url = f"{self.base_url}/v1/query/t2a_async_query_v2"
-        self.file_retrieve_url = f"{self.base_url}/v1/files/retrieve"
-        self.file_upload_url = f"{self.base_url}/v1/files/upload"
-        self.voice_clone_url = f"{self.base_url}/v1/voice_clone"
+    @property
+    def base_url(self) -> str:
+        """动态读取 Base URL,不在实例化时冻结,改完即时生效。"""
+        return minimax_base_url()
+
+    @property
+    def generation_url(self) -> str:
+        return f"{self.base_url}/v1/image_generation"
+
+    @property
+    def t2a_async_url(self) -> str:
+        return f"{self.base_url}/v1/t2a_async_v2"
+
+    @property
+    def t2a_query_url(self) -> str:
+        return f"{self.base_url}/v1/query/t2a_async_query_v2"
+
+    @property
+    def file_retrieve_url(self) -> str:
+        return f"{self.base_url}/v1/files/retrieve"
+
+    @property
+    def file_upload_url(self) -> str:
+        return f"{self.base_url}/v1/files/upload"
+
+    @property
+    def voice_clone_url(self) -> str:
+        return f"{self.base_url}/v1/voice_clone"
 
     @property
     def api_key(self) -> str:

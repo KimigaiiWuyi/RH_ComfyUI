@@ -9,6 +9,7 @@ import asyncio
 from typing import Any, Dict, List, Union, Optional
 from pathlib import Path
 from collections import defaultdict
+from urllib.parse import urlsplit
 
 import httpx
 import websockets
@@ -324,6 +325,27 @@ class ComfyUIAPI:
         """
         return self._raw_api_key
 
+    DEFAULT_RH_BASE_URL = "https://www.runninghub.cn"
+
+    @property
+    def _rh_base_url(self) -> str:
+        raw = SERVICE_CONFIG.get_config("RH_BaseURL").data
+        text = raw.strip() if isinstance(raw, str) else ""
+        if not text:
+            return self.DEFAULT_RH_BASE_URL
+        if not text.startswith(("http://", "https://")):
+            text = f"https://{text}"
+        return text.rstrip("/")
+
+    def _rh_headers(self, api_key: str) -> Dict[str, str]:
+        headers: Dict[str, str] = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        if (urlsplit(self._rh_base_url).hostname or "").lower() == "www.runninghub.cn":
+            headers["Host"] = "www.runninghub.cn"
+        return headers
+
     @property
     def is_runninghub(self) -> bool:
         return "runninghub" in self._raw_base_url.lower()
@@ -331,13 +353,14 @@ class ComfyUIAPI:
     @property
     def server_address(self) -> str:
         if self.is_runninghub:
-            return f"www.runninghub.cn/proxy/{self._raw_api_key}"
+            host_path = self._rh_base_url.removeprefix("http://").removeprefix("https://")
+            return f"{host_path}/proxy/{self._raw_api_key}"
         return self._raw_base_url.removeprefix("http://").removeprefix("https://")
 
     @property
     def url(self) -> str:
         if self.is_runninghub:
-            return f"https://www.runninghub.cn/proxy/{self._raw_api_key}"
+            return f"{self._rh_base_url}/proxy/{self._raw_api_key}"
         base_url = self._raw_base_url
         return base_url if base_url.startswith(("http://", "https://")) else f"http://{base_url}"
 
@@ -369,7 +392,7 @@ class ComfyUIAPI:
             return
 
         try:
-            ws_protocol = "wss://" if "runninghub" in self.server_address.lower() else "ws://"
+            ws_protocol = "wss://" if self.url.startswith("https://") else "ws://"
             ws_url = f"{ws_protocol}{self.server_address}/ws?clientId={self.client_id}"
             logger.info(ws_url)
             self.ws = await websockets.connect(ws_url, max_size=None)
@@ -467,12 +490,8 @@ class ComfyUIAPI:
         api_key = self.api_key
         if not api_key:
             raise RuntimeError("[ComfyUI] 取消失败:未配置 RH_apikey")
-        url = "https://www.runninghub.cn/task/openapi/cancel"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Host": "www.runninghub.cn",
-        }
+        url = f"{self._rh_base_url}/task/openapi/cancel"
+        headers = self._rh_headers(api_key)
         payload = {"apiKey": api_key, "taskId": str(task_id)}
         logger.info(f"[ComfyUI] 上游 cancel POST {url} taskId={task_id}")
         async with RetryingAsyncClient(timeout=30.0, follow_redirects=True) as client:
@@ -799,12 +818,8 @@ class ComfyUIAPI:
         api_key = self.api_key
         if not api_key:
             return None
-        url = "https://www.runninghub.cn/task/openapi/outputs"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Host": "www.runninghub.cn",
-        }
+        url = f"{self._rh_base_url}/task/openapi/outputs"
+        headers = self._rh_headers(api_key)
         payload = {"apiKey": api_key, "taskId": task_id}
         chosen: str | None = None
         for attempt in range(3):
@@ -981,7 +996,7 @@ class ComfyUIAPI:
         if not key:
             raise RuntimeError("[ComfyUI] 未配置 RunningHub API Key(RH_apikey),无法上传图片")
 
-        url = "https://www.runninghub.cn/openapi/v2/media/upload/binary"
+        url = f"{self._rh_base_url}/openapi/v2/media/upload/binary"
         headers = {"Authorization": f"Bearer {key}"}
         files = {"file": (filename, data)}
 

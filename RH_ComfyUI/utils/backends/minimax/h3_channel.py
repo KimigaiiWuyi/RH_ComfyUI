@@ -19,6 +19,7 @@ from .config import (
     MINIMAX_MODEL_H3,
     minimax_api_key,
     minimax_dry_run,
+    minimax_base_url,
     minimax_disabled_reason,
     is_minimax_model_enabled,
 )
@@ -44,24 +45,50 @@ class MiniMaxH3Channel(ProviderChannel):
         self,
         *,
         weight: int = 1,
-        credentials_resolver: Optional[Callable[[], tuple[str, bool]]] = None,
+        credentials_resolver: Optional[Callable[[], tuple[str, bool] | tuple[str, bool, str]]] = None,
+        base_url_resolver: Optional[Callable[[], str]] = None,
     ) -> None:
+        """初始化官方 MiniMax H3 通道。
+
+        外部扩展传入 ``credentials_resolver`` 时:
+        - 返回 3-tuple ``(api_key, dry_run, base_url)`` 或显式传入 ``base_url_resolver``:
+          使用调用方指定的 ``base_url``;
+        - 返回 2-tuple ``(api_key, dry_run)`` 且未传 ``base_url_resolver``:
+          跟随宿主 ``MiniMax_BaseURL`` 配置(默认 ``https://api.minimaxi.com``)。
+        """
         self.weight = weight
-        self._resolve = credentials_resolver or (lambda: (minimax_api_key(), minimax_dry_run()))
+        self._resolve = credentials_resolver or (lambda: (minimax_api_key(), minimax_dry_run(), minimax_base_url()))
+        self._resolve_base_url = base_url_resolver or minimax_base_url
         self._cached: Optional[MiniMaxH3Provider] = None
 
     def supports_remote_cancel(self) -> bool:
         return True
 
+    def _resolve_credentials(self) -> tuple[str, bool, str]:
+        resolved = self._resolve()
+        if len(resolved) == 3:
+            api_key, dry_run, raw_url = resolved
+            text = raw_url.strip()
+        else:
+            api_key, dry_run = resolved
+            text = self._resolve_base_url().strip()
+        if not text:
+            base_url = MiniMaxH3Provider.DEFAULT_BASE_URL
+        else:
+            if not text.startswith(("http://", "https://")):
+                text = f"https://{text}"
+            base_url = text.rstrip("/")
+        return api_key, dry_run, base_url
+
     def _get_provider(self) -> MiniMaxH3Provider:
-        api_key, dry_run = self._resolve()
+        api_key, dry_run, base_url = self._resolve_credentials()
         cached = self._cached
         if cached is not None:
-            if cached.api_key != api_key or cached.dry_run != dry_run:
-                cached.update_credentials(api_key=api_key, dry_run=dry_run)
+            if cached.api_key != api_key or cached.base_url != base_url or cached.dry_run != dry_run:
+                cached.update_credentials(api_key=api_key, base_url=base_url, dry_run=dry_run)
                 logger.info("[MiniMaxH3] 凭证已热更新")
             return cached
-        provider = MiniMaxH3Provider(api_key=api_key, dry_run=dry_run)
+        provider = MiniMaxH3Provider(api_key=api_key, base_url=base_url, dry_run=dry_run)
         self._cached = provider
         return provider
 

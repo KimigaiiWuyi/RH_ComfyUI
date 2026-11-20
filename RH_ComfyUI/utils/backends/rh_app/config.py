@@ -50,8 +50,18 @@ def rh_app_enabled_apps() -> list[str]:
     return out
 
 
+def is_rh_app_vendor_enabled() -> bool:
+    """ComfyUI / RunningHub 供应商总开关;未配置或空值默认开启。"""
+    raw = _cfg("ComfyUI_Enable")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return True
+    return bool(raw)
+
+
 def is_rh_app_enabled(name: str = "", webapp_id: str = "") -> bool:
-    """模型名或 webappId 是否在启用列表中。列表为空则全部关闭。"""
+    """总开关打开且模型名或 webappId 在启用列表中。列表为空则全部关闭。"""
+    if not is_rh_app_vendor_enabled():
+        return False
     enabled = rh_app_enabled_apps()
     if not enabled:
         return False
@@ -63,6 +73,8 @@ def is_rh_app_enabled(name: str = "", webapp_id: str = "") -> bool:
 
 
 def rh_app_disabled_reason(name: str, display_name: str) -> str | None:
+    if not is_rh_app_vendor_enabled():
+        return f"{display_name} 未启用:请在 Web 控制台打开「启用 ComfyUI / RunningHub 供应商」"
     if is_rh_app_enabled(name):
         return None
     label = (name or "").strip() or display_name
@@ -79,6 +91,7 @@ __all__ = [
     "RH_APP_MOSS_IMAGE",
     "RH_APP_OPTIONS",
     "is_rh_app_enabled",
+    "is_rh_app_vendor_enabled",
     "rh_app_disabled_reason",
     "rh_app_enabled_apps",
 ]

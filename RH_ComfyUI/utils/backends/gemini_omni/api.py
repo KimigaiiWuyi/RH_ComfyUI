@@ -105,7 +105,7 @@ class GeminiOmniAPI(GeminiImageAPI):
         if duration_s > 0:
             response_format["duration"] = f"{duration_s}s"
 
-        endpoint = self.base_url if (self.base_url and not self.is_vertex) else "官方"
+        endpoint = self.custom_base_url if (self.custom_base_url and not self.is_vertex) else "官方"
         logger.info(
             f"[Gemini-Omni] interactions.create model={model} vertex={self.is_vertex} "
             f"endpoint={endpoint} ratio={aspect_ratio} res={resolution} dur={duration_s}s "

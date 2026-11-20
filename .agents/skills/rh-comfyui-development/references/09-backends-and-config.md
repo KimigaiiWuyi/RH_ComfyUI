@@ -95,14 +95,16 @@ catalog-only 键(`frame_mode` / `image_size` / `task_mode` 等)从
 
 | 键 | 用途 |
 |---|---|
-| `ComfyUI_BaseURL` / `ComfyUI_Enabled_Workflows` | ComfyUI 地址 + **启用工作流列表**(GsListStrConfig,默认空;勾选/自填内部模型名或 json,改完即时生效) |
+| `ComfyUI_Enable` / `ComfyUI_BaseURL` / `RH_BaseURL` / `ComfyUI_Enabled_Workflows` | ComfyUI / RunningHub 总开关(默认开) + ComfyUI 地址 + RunningHub 官方/反代根地址(默认 `https://www.runninghub.cn`,供 RH AI 应用与 ComfyUI 代理模式共用) + **启用工作流列表**(GsListStrConfig,勾选/自填内部模型名或 json,改完即时生效) |
 | `RH_apikey` / `RH_App_Enabled_Apps` | RunningHub 通用 Key + **启用的 RH AI 应用**(GsListStrConfig,默认勾满 anima/多角度/抠图/高清/扩图;留空则全关;改完即时生效) |
-| `OpenAI_Image_apikey` / `OpenAI_Image_BaseURL` | OpenAI 兼容生图 |
-| `Gemini_Image_apikey` / `Gemini_Image_BaseURL` / `Gemini_Image_Use_Vertex` / `Gemini_Image_Project_ID` / `Gemini_Image_Location` / `Gemini_Image_SA_File` / `Gemini_Enabled_Models` | Gemini 生图(**显式开关** `Use_Vertex` 决定模式:开=VertexAI+ADC/SA(忽略 key),关=AI Studio+key;不再由 Project ID 推断。`BaseURL`=直连不通时的中转地址,仅 AI Studio 生效,留空直连官方)。`Gemini_Image_SA_File` 是 `GsFileUploadConfig`:控制台上传 JSON 到 `data/RHComfyUI/gemini/vertex_sa.json`,配置值是该文件绝对路径;留空走 ADC。旧的路径字符串不迁移,类型变化后该项重置为空。`Gemini_Enabled_Models` 勾选 banana1/banana2/banana2.1/banana_pro;已保存的旧列表不会自动勾上 banana2.1。留空则不走 Gemini 通道 |
-| `MiniMax_apikey` / `MiniMax_Enabled_Models` / `MIMO_apikey` | MiniMax(文生图/T2A/H3 共用 Key;启用列表默认空)/ MiMo |
-| `Seedance_apikey_{ark,runninghub}` + `Seedance_BaseURL_*` + `Seedance_Enable_*` | Seedance 内置供应商凭证(网关凭证在外部插件自己的面板) |
-| `OpenAI_Image_Providers` | OpenAI 兼容供应商池(重复组,每行一家,含 `weight` 负载权重;见 13 章;增删/改映射/改权重后需 `rh 刷新供应商`) |
-| `TX_AIArt_secret_id` / `TX_AIArt_secret_key` / `TX_AIArt_region` | 腾讯云混元扩图(`tx_aiart`);region 默认 `ap-guangzhou` |
+| `OpenAI_Image_apikey` / `OpenAI_Image_BaseURL` | OpenAI 兼容生图(已并入下方供应商池) |
+| `Gemini_Enable` / `Gemini_Image_BaseURL` / `Gemini_Image_apikey` / `Gemini_Image_Use_Vertex` / `Gemini_Image_Project_ID` / `Gemini_Image_Location` / `Gemini_Image_SA_File` / `Gemini_Enabled_Models` | Gemini 生图/视频/语音(总开关置第 1 项;`BaseURL` 置第 2 项,默认官方 `https://generativelanguage.googleapis.com`,留空亦直连官方,可改自定义反代,仅 AI Studio 生效;**显式开关** `Use_Vertex` 决定模式:开=VertexAI+ADC/SA(忽略 key),关=AI Studio+key)。`Gemini_Image_SA_File` 是 `GsFileUploadConfig`:控制台上传 JSON 到 `data/RHComfyUI/gemini/vertex_sa.json`,配置值是该文件绝对路径;留空走 ADC。`Gemini_Enabled_Models` 留空则不走 Gemini 通道 |
+| `MiniMax_Enable` / `MiniMax_BaseURL` / `MiniMax_apikey` / `MiniMax_Enabled_Models` | MiniMax(默认 `https://api.minimaxi.com`,文生图/T2A/H3 视频与图片共用 Base URL 与 Key) |
+| `MIMO_Enable` / `MIMO_BaseURL` / `MIMO_apikey` / `MIMO_Enabled_Models` | MiMo TTS(默认 `https://api.xiaomimimo.com/v1`) |
+| `FishAudio_Enable` / `FishAudio_BaseURL` / `FishAudio_apikey` / `FishAudio_Enabled_Models` | Fish Audio TTS/ASR(默认 `https://api.fish.audio`) |
+| `Seedance_Enable_{ark,runninghub}` + `Seedance_BaseURL_{ark,runninghub}` + `Seedance_apikey_{ark,runninghub}` | Seedance / Seedream 内置供应商凭证(总开关第 1 项,Base URL 第 2 项,默认官方地址;网关凭证在外部插件自己的面板) |
+| `OpenAI_Image_Providers` | OpenAI 兼容供应商池(重复组,每行一家含独立 `base_url` / `weight`;见 13 章;增删/改映射/改权重后需 `rh 刷新供应商`) |
+| `TX_AIArt_Enable` / `TX_AIArt_BaseURL` / `TX_AIArt_secret_id` / `TX_AIArt_secret_key` / `TX_AIArt_region` | 腾讯云混元扩图(`tx_aiart`);Base URL 默认 `https://aiart.tencentcloudapi.com`(反代时 TC3 签名仍用官方 host,不强覆 HTTP `Host` 头),region 默认 `ap-guangzhou` |
 
 **PLUGIN_CONFIG(plugin_config.py)— 插件行为**
 

@@ -82,9 +82,13 @@ def _sdk_thinking_level(level: str) -> ThinkingLevel | None:
     return None
 
 
+DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
+
+
 class GeminiImageAPI:
     """Gemini 生图客户端(@property 读配置,改完即时生效)"""
 
+    DEFAULT_BASE_URL: str = DEFAULT_GEMINI_BASE_URL
     # 轮询错误容忍窗(秒):已受理任务遇到 5xx/429/传输错先退避续轮,超时再抛
     poll_error_window_s: float = 600.0
     # active_tasks 登记的通道名;Omni 子类覆写以区分行统计
@@ -96,12 +100,25 @@ class GeminiImageAPI:
 
     @property
     def base_url(self) -> str:
-        """AI Studio 的中转地址(可选);留空直连官方端点。
+        """AI Studio 的接口地址;留空回退官方端点,缺少协议头时自动补 https://。
 
-        SDK 会在其后拼 ``/v1beta/...``(``api_version`` 不受影响),所以填到中转端
+        SDK 会在其后拼 ``/v1beta/...``(``api_version`` 不受影响),填到反代端
         的路径前缀为止即可,结尾带不带 ``/`` 都行(SDK 自己会规整)。
         """
-        return str(SERVICE_CONFIG.get_config("Gemini_Image_BaseURL").data or "").strip()
+        raw = str(SERVICE_CONFIG.get_config("Gemini_Image_BaseURL").data or "").strip()
+        if not raw:
+            return self.DEFAULT_BASE_URL
+        if not raw.startswith(("http://", "https://")):
+            return f"https://{raw}"
+        return raw
+
+    @property
+    def custom_base_url(self) -> str:
+        """若用户改成了非官方地址则返回该地址,否则返回空串走 SDK 官方默认。"""
+        url = self.base_url
+        if url.rstrip("/").lower() == self.DEFAULT_BASE_URL.rstrip("/").lower():
+            return ""
+        return url
 
     @property
     def project_id(self) -> str:
@@ -144,12 +161,13 @@ class GeminiImageAPI:
                 location=self.location,
                 credentials=credentials,
             )
-        # 中转地址只在 AI Studio 模式生效:Vertex 有自己的端点体系,
-        # 把 generativelanguage 的中转前缀套上去只会把它打歪。
-        if self.base_url:
+        # 反代/中转地址只在 AI Studio 模式生效:Vertex 有自己的端点体系,
+        # 把 generativelanguage 的前缀套上去只会把它打歪。
+        custom_url = self.custom_base_url
+        if custom_url:
             return genai.Client(
                 api_key=self.api_key,
-                http_options={"base_url": self.base_url},  # type: ignore[arg-type]
+                http_options={"base_url": custom_url},  # type: ignore[arg-type]
             )
         return genai.Client(api_key=self.api_key)
 
@@ -191,7 +209,7 @@ class GeminiImageAPI:
             contents = prompt
 
         img_sizes = ", ".join(f"{len(b)}B" for b in (images or [])) or "无"
-        endpoint = self.base_url if (self.base_url and not self.is_vertex) else "官方"
+        endpoint = self.custom_base_url if (self.custom_base_url and not self.is_vertex) else "官方"
         logger.info(
             f"[Gemini-Image] generate_content model={model} vertex={self.is_vertex} endpoint={endpoint} "
             f"ratio={aspect_ratio} size={image_size or '-'} thinking={thinking_level or '-'} "

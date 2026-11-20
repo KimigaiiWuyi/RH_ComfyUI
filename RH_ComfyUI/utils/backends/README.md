@@ -163,7 +163,7 @@ class GPTImage2Adapter(Adapter):
 | 方法 | 说明 |
 |------|------|
 | `get_node_info(webapp_id)` | 获取应用节点信息 |
-| `upload_file(file_data)` | 上传文件到 RunningHub |
+| `upload_file(file_data, filename="input.png", *, base_url=None)` | 上传文件到 RunningHub(可选指定 `base_url`) |
 | `submit_task(webapp_id, node_info_list)` | 提交 AI 应用任务 |
 | `query_task(task_id)` | 查询任务状态 |
 | `wait_for_result(task_id)` | 轮询等待任务完成 |

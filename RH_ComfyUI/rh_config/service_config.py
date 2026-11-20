@@ -93,8 +93,32 @@ _TX_AIART_MODEL_NAMES = ["tx_image_outpaint"]
 SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
     "divider_comfyui": GsDivider(
         "ComfyUI / RunningHub AI 应用",
-        "本地/远程 ComfyUI 与 RunningHub AI 应用。须在上方启用列表勾选后才分发。留空则全部不启用。增删列表即时生效。",
+        "本地/远程 ComfyUI 与 RunningHub AI 应用。"
+        "须打开「启用 ComfyUI / RunningHub 供应商」并在启用列表勾选后才分发。留空则全部不启用。增删列表即时生效。",
         "ComfyUI 服务配置",
+    ),
+    "ComfyUI_Enable": GsBoolConfig(
+        "启用 ComfyUI / RunningHub 供应商",
+        "是否启用 ComfyUI 工作流与 RunningHub AI 应用。关闭后 ComfyUI 工作流与 RunningHub AI 应用均不参与分发。",
+        True,
+    ),
+    "ComfyUI_BaseURL": GsStrConfig(
+        "ComfyUI 服务地址",
+        "用于设置 ComfyUI Server Address 的配置",
+        "127.0.0.1:8188",
+        options=[
+            "使用RunningHub代理",
+            "127.0.0.1:8188",
+        ],
+    ),
+    "RH_BaseURL": GsStrConfig(
+        "RunningHub Base URL",
+        "RunningHub 官方 API 根地址(用于 RunningHub AI 应用与 ComfyUI 代理模式)。"
+        "默认官方地址,支持修改为自定义反代地址。",
+        "https://www.runninghub.cn",
+        options=[
+            "https://www.runninghub.cn",
+        ],
     ),
     "ComfyUI_Enabled_Workflows": GsListStrConfig(
         "启用的 ComfyUI 工作流",
@@ -115,15 +139,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "已保存的旧列表不会自动勾上 moss-image,需要手动加上。",
         list(_RH_APP_NAMES),
         options=list(_RH_APP_NAMES),
-    ),
-    "ComfyUI_BaseURL": GsStrConfig(
-        "ComfyUI 服务地址",
-        "用于设置 ComfyUI Server Address 的配置",
-        "127.0.0.1:8188",
-        options=[
-            "使用RunningHub代理",
-            "127.0.0.1:8188",
-        ],
     ),
     "RH_apikey": GsStrConfig(
         "RunningHub API Key",
@@ -146,6 +161,16 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "banana2.lite / banana_pro / gemini_tts / gemini_omni12 均不走 Gemini。",
         True,
     ),
+    "Gemini_Image_BaseURL": GsStrConfig(
+        "Gemini Base URL(AI Studio)",
+        "Gemini AI Studio API 根地址,默认官方端点;支持修改为自定义反代地址"
+        "(如 https://你的反代域名/gemini/ ,SDK 会在其后拼 /v1beta/...)。"
+        "留空同样直连官方端点。仅 AI Studio 模式生效(VertexAI 走自己的端点,不吃这项)。",
+        "https://generativelanguage.googleapis.com",
+        options=[
+            "https://generativelanguage.googleapis.com",
+        ],
+    ),
     "Gemini_Enabled_Models": GsListStrConfig(
         "启用的 Gemini 模型",
         "从列表勾选要走 Gemini 通道的内部模型;可自由添加内部模型名。"
@@ -163,14 +188,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "Gemini API Key(AI Studio)",
         "AI Studio 个人版 API Key。默认模式(未开 VertexAI)用此项鉴权。",
         "",
-    ),
-    "Gemini_Image_BaseURL": GsStrConfig(
-        "Gemini 中转地址(AI Studio,可选)",
-        "服务器直连不到官方端点时填中转地址,如 https://你的中转域名/gemini/ ,"
-        "SDK 会在其后拼 /v1beta/...。留空则直连官方端点。仅 AI Studio 模式生效"
-        "(VertexAI 走自己的端点,不吃这项)。",
-        "",
-        options=[],
     ),
     "Gemini_Image_Use_Vertex": GsBoolConfig(
         "使用 VertexAI(组织版)",
@@ -209,6 +226,15 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "是否启用官方 MiniMax 通道。关闭后文生图 / T2A / 官方 H3 通道不参与分发;minimax_h3 若已挂外部插件通道仍可用。",
         True,
     ),
+    "MiniMax_BaseURL": GsStrConfig(
+        "MiniMax Base URL",
+        "MiniMax 官方 API 根地址(文生图 / 图生图 / T2A 语音 / H3 视频与图片共用)。"
+        "默认官方地址,支持修改为自定义反代地址。",
+        "https://api.minimaxi.com",
+        options=[
+            "https://api.minimaxi.com",
+        ],
+    ),
     "MiniMax_Enabled_Models": GsListStrConfig(
         "启用的 MiniMax 模型",
         "勾选要走官方 MiniMax 通道的模型;可自由添加内部模型名。"
@@ -232,6 +258,14 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "是否启用 MiMo TTS。关闭后 mimo_tts 不可用。",
         True,
     ),
+    "MIMO_BaseURL": GsStrConfig(
+        "MiMo Base URL",
+        "小米 MiMo TTS 官方 API 根地址。默认官方地址,支持修改为自定义反代地址。",
+        "https://api.xiaomimimo.com/v1",
+        options=[
+            "https://api.xiaomimimo.com/v1",
+        ],
+    ),
     "MIMO_Enabled_Models": GsListStrConfig(
         "启用的 MiMo 模型",
         "从列表勾选要启用的 MiMo 模型;可自由添加内部模型名。留空则全部不启用。共用下方 MiMo API Key。可选:mimo_tts。",
@@ -252,6 +286,14 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "启用 Fish Audio 供应商",
         "是否启用 Fish Audio。关闭后已勾选的档位均不可用。",
         True,
+    ),
+    "FishAudio_BaseURL": GsStrConfig(
+        "Fish Audio Base URL",
+        "Fish Audio 官方 API 根地址(TTS / 音色克隆 / 语音识别共用)。默认官方地址,支持修改为自定义反代地址。",
+        "https://api.fish.audio",
+        options=[
+            "https://api.fish.audio",
+        ],
     ),
     "FishAudio_Enabled_Models": GsListStrConfig(
         "启用的 Fish Audio 模型",
@@ -278,6 +320,15 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "是否启用火山方舟官方供应商。禁用后,Seedance 视频与 Seedream 5.0/5.5 图片均不会通过该供应商分发(同源开关)。",
         True,
     ),
+    "Seedance_BaseURL_ark": GsStrConfig(
+        "ARK Base URL",
+        "火山方舟 ARK 官方 API 地址(Seedance 视频端点 + Seedream 图片端点共用)。"
+        "默认值已填,一般无需修改;支持修改为自定义反代地址。",
+        "https://ark.cn-beijing.volces.com/api/v3",
+        options=[
+            "https://ark.cn-beijing.volces.com/api/v3",
+        ],
+    ),
     "Seedance_Enabled_Models": GsListStrConfig(
         "启用的 ARK 模型",
         "从列表勾选要走火山方舟 ARK 的内部模型;可自由添加内部模型名。"
@@ -294,14 +345,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "同时用于 Seedream 5.0 Lite / Pro 与 Seedream 5.5 图片系列(同源 Key)。",
         "",
     ),
-    "Seedance_BaseURL_ark": GsStrConfig(
-        "ARK Base URL",
-        "火山方舟 ARK 官方 API 地址(Seedance 视频端点 + Seedream 图片端点共用)。默认值已填,一般无需修改。",
-        "https://ark.cn-beijing.volces.com/api/v3",
-        options=[
-            "https://ark.cn-beijing.volces.com/api/v3",
-        ],
-    ),
     "divider_seedance_runninghub": GsDivider(
         "Seedance RunningHub",
         "RunningHub 平台的 Seedance 服务配置。",
@@ -311,6 +354,14 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "启用 RunningHub 供应商",
         "是否启用 RunningHub 供应商。禁用后,该供应商不会参与任务分发。",
         False,
+    ),
+    "Seedance_BaseURL_runninghub": GsStrConfig(
+        "RunningHub Base URL",
+        "RunningHub 平台的 Seedance API 地址。默认值已填,一般无需修改;支持修改为自定义反代地址。",
+        "https://www.runninghub.cn",
+        options=[
+            "https://www.runninghub.cn",
+        ],
     ),
     "Seedance_Enabled_Models_runninghub": GsListStrConfig(
         "启用的 RunningHub Seedance 模型",
@@ -324,14 +375,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "RunningHub API Key",
         "RunningHub 平台的 Seedance API Key。为空时回退使用 RH_apikey。",
         "",
-    ),
-    "Seedance_BaseURL_runninghub": GsStrConfig(
-        "RunningHub Base URL",
-        "RunningHub 平台的 Seedance API 地址。默认值已填,一般无需修改。",
-        "https://www.runninghub.cn",
-        options=[
-            "https://www.runninghub.cn",
-        ],
     ),
     "divider_openai_image_pool": GsDivider(
         "OpenAI 兼容生图供应商池",
@@ -398,6 +441,12 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "关闭后不参与 gpt-image 家族的负载均衡。",
         False,
     ),
+    "Azure_Image_Endpoint": GsStrConfig(
+        "Azure 终结点",
+        "Azure OpenAI 终结点,如 https://xxx.openai.azure.com(不含路径);支持填写自定义反代地址。",
+        "",
+        options=["https://xxx.openai.azure.com"],
+    ),
     "Azure_Image_Deployment": GsListStrConfig(
         "Azure 服务的模型",
         "勾选走本通道的模型。每项同时是 Foundry 部署名,"
@@ -411,12 +460,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "Azure API Key",
         "Azure OpenAI 资源的 API Key。为空则本通道不可用。",
         "",
-    ),
-    "Azure_Image_Endpoint": GsStrConfig(
-        "Azure 终结点",
-        "Azure OpenAI 终结点,如 https://xxx.openai.azure.com(不含路径)。",
-        "",
-        options=["https://xxx.openai.azure.com"],
     ),
     "Azure_Image_ApiVersion": GsStrConfig(
         "API 版本",
@@ -438,6 +481,12 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "启用可灵",
         "关闭后视频和图片都不走可灵。",
         False,
+    ),
+    "Kling_Endpoint": GsStrConfig(
+        "接口地址",
+        "可灵 API 根地址,不含路径。默认北京;新加坡站点或自定义反代可改成对应地址。",
+        DEFAULT_ENDPOINT,
+        options=[DEFAULT_ENDPOINT, SINGAPORE_ENDPOINT],
     ),
     "Kling_Enabled_Models": GsListStrConfig(
         "启用的可灵模型",
@@ -466,12 +515,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "",
         secret=True,
     ),
-    "Kling_Endpoint": GsStrConfig(
-        "接口地址",
-        "可灵 API 根地址,不含路径。默认北京;新加坡站点可改成对应域名。",
-        DEFAULT_ENDPOINT,
-        options=[DEFAULT_ENDPOINT, SINGAPORE_ENDPOINT],
-    ),
     "Kling_Max_Concurrency": GsStrConfig(
         "最大并发",
         "在途请求达到此数则暂时不可用。视频和图片共用这个上限。",
@@ -491,6 +534,12 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "是否启用 fal.ai 通道。禁用后 FAL 模型不参与分发;若已挂外部插件通道,模型仍可用。",
         False,
     ),
+    "FAL_Endpoint": GsStrConfig(
+        "FAL 队列地址",
+        "fal 队列 API 根地址(不含尾斜杠)。默认官方地址,支持修改为自定义反代地址。",
+        DEFAULT_QUEUE_ENDPOINT,
+        options=[DEFAULT_QUEUE_ENDPOINT],
+    ),
     "FAL_Enabled_Models": GsListStrConfig(
         "启用的 FAL 模型",
         f"勾选要走 FAL 通道的模型;可自由添加内部模型名。留空则 FAL 通道全关。可选:{', '.join(FAL_MODEL_NAMES)}。",
@@ -502,12 +551,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "fal.ai API Key(FAL_KEY),请求以 Authorization: Key 鉴权。",
         "",
         secret=True,
-    ),
-    "FAL_Endpoint": GsStrConfig(
-        "FAL 队列地址",
-        "fal 队列 API 根地址(不含尾斜杠)。",
-        DEFAULT_QUEUE_ENDPOINT,
-        options=[DEFAULT_QUEUE_ENDPOINT],
     ),
     "FAL_Max_Concurrency": GsStrConfig(
         "最大并发",
@@ -530,6 +573,19 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "若已挂外部插件通道,模型仍可用。",
         True,
     ),
+    "HappyHorse_BaseURL_dashscope": GsStrConfig(
+        "DashScope Base URL",
+        "DashScope API 根地址(不含尾斜杠)。默认华北2北京;国际站改为 dashscope-intl;支持修改为自定义反代地址。"
+        "图像同步会在根地址后接 /services/aigc/multimodal-generation/generation。"
+        "主机名含 dashscope-intl 或 ap-southeast 时,图像按新加坡价格计。"
+        "以 /api/v1 结尾的业务空间 maas 域名可以出图;"
+        "语音 WebSocket 仍要 dashscope 或 dashscope-intl 主机名。",
+        "https://dashscope.aliyuncs.com/api/v1",
+        options=[
+            "https://dashscope.aliyuncs.com/api/v1",
+            "https://dashscope-intl.aliyuncs.com/api/v1",
+        ],
+    ),
     "DashScope_Enabled_Models": GsListStrConfig(
         "启用的 DashScope 模型",
         "勾选要走官方 DashScope 通道的模型;可自由添加内部模型名。"
@@ -546,19 +602,6 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "阿里云 DashScope / 千问AI 平台 API Key。HappyHorse 1.1、万相 3.0、Qwen-Audio TTS 与 Qwen-Image 共用。",
         "",
     ),
-    "HappyHorse_BaseURL_dashscope": GsStrConfig(
-        "DashScope Base URL",
-        "DashScope API 根地址(不含尾斜杠)。默认华北2北京;国际站改为 dashscope-intl。"
-        "图像同步会在根地址后接 /services/aigc/multimodal-generation/generation。"
-        "主机名含 dashscope-intl 或 ap-southeast 时,图像按新加坡价格计。"
-        "以 /api/v1 结尾的业务空间 maas 域名可以出图;"
-        "语音 WebSocket 仍要 dashscope 或 dashscope-intl 主机名。",
-        "https://dashscope.aliyuncs.com/api/v1",
-        options=[
-            "https://dashscope.aliyuncs.com/api/v1",
-            "https://dashscope-intl.aliyuncs.com/api/v1",
-        ],
-    ),
     "divider_tx_aiart": GsDivider(
         "腾讯云混元扩图",
         "腾讯云混元 ImageOutpainting(aiart.tencentcloudapi.com)。"
@@ -569,6 +612,15 @@ SERVICE_CONFIG_DEFAULT: Dict[str, GSC] = {
         "启用腾讯云混元",
         "是否启用腾讯云混元扩图。关闭后 tx_image_outpaint 不可用。",
         True,
+    ),
+    "TX_AIArt_BaseURL": GsStrConfig(
+        "腾讯云混元 Base URL",
+        "腾讯云混元 AI 艺术 API 根地址。默认官方地址,支持修改为自定义反代地址"
+        "(反代转发给腾讯时请设置 Host: aiart.tencentcloudapi.com)。",
+        "https://aiart.tencentcloudapi.com",
+        options=[
+            "https://aiart.tencentcloudapi.com",
+        ],
     ),
     "TX_AIArt_Enabled_Models": GsListStrConfig(
         "启用的腾讯云混元模型",

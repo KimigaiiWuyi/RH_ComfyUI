@@ -22,12 +22,15 @@ from sqlalchemy import (
     delete,
     select,
     update,
+    inspect,
 )
 from sqlalchemy.orm import defer
-from sqlalchemy.engine import CursorResult
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import Connection, CursorResult
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, AsyncConnection
+from sqlalchemy.engine.reflection import Inspector
 
 from gsuid_core.logger import logger
+from gsuid_core.server import on_core_start_before
 from gsuid_core.webconsole.mount_app import PageSchema, GsAdminModel, site
 from gsuid_core.utils.database.startup import exec_list
 from gsuid_core.utils.database.base_models import Bind, BaseIDModel, with_session, with_read_session
@@ -2762,8 +2765,7 @@ exec_list.extend(
         'ALTER TABLE rhbind ADD COLUMN vip_tier VARCHAR(16) DEFAULT "free"',
         # ── admin stats 复合索引(与 SQLModel __table_args__ 对齐;旧库启动补齐) ──
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_created ON rhcomfyuitaskrecord (bot_id, created_at)",
-        # 同名 covering 加了 elapsed_ms/task_type;旧 5 列索引要先 DROP 再建
-        "DROP INDEX IF EXISTS ix_rhcomfyuitaskrecord_bot_created_user_spend",
+        # 旧 5 列同名索引由下方 _upgrade_rh_task_record_spend_index 按需删除后再建
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_created_user_spend "
         "ON rhcomfyuitaskrecord (bot_id, created_at, user_id, status, point_cost, elapsed_ms, task_type)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_user ON rhcomfyuitaskrecord (bot_id, user_id)",
@@ -2784,3 +2786,48 @@ exec_list.extend(
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuistatscache_bot_exp ON rhcomfyuistatscache (bot_id, expires_at)",
     ]
 )
+
+_SPEND_COVERING_INDEX_TABLE = "rhcomfyuitaskrecord"
+_SPEND_COVERING_INDEX_NAME = "ix_rhcomfyuitaskrecord_bot_created_user_spend"
+_SPEND_COVERING_INDEX_COLS = (
+    "bot_id",
+    "created_at",
+    "user_id",
+    "status",
+    "point_cost",
+    "elapsed_ms",
+    "task_type",
+)
+
+
+def _spend_index_needs_drop(sync_conn: Connection) -> bool:
+    inspector = inspect(sync_conn)
+    if not isinstance(inspector, Inspector) or not inspector.has_table(_SPEND_COVERING_INDEX_TABLE):
+        return False
+    for index in inspector.get_indexes(_SPEND_COVERING_INDEX_TABLE):
+        if index["name"] == _SPEND_COVERING_INDEX_NAME:
+            return tuple(index["column_names"]) != _SPEND_COVERING_INDEX_COLS
+    return False
+
+
+async def upgrade_task_record_spend_index(conn: AsyncConnection) -> bool:
+    """仅当同名 spend 覆盖索引仍是旧列定义时删除，交由后续 trans_adapter 重建。"""
+    if not await conn.run_sync(_spend_index_needs_drop):
+        return False
+    if conn.dialect.name == "mysql":
+        await conn.execute(text(f"DROP INDEX {_SPEND_COVERING_INDEX_NAME} ON {_SPEND_COVERING_INDEX_TABLE}"))
+    else:
+        await conn.execute(text(f"DROP INDEX IF EXISTS {_SPEND_COVERING_INDEX_NAME}"))
+    return True
+
+
+@on_core_start_before(priority=-82)
+async def _upgrade_rh_task_record_spend_index() -> None:
+    from gsuid_core.utils.database.base_models import engine
+
+    if not isinstance(engine, AsyncEngine):
+        return
+    async with engine.begin() as conn:
+        dropped = await upgrade_task_record_spend_index(conn)
+    if dropped:
+        logger.info("[RH_ComfyUI] 检测到旧版 spend 覆盖索引，已删除等待重建为 7 列索引")

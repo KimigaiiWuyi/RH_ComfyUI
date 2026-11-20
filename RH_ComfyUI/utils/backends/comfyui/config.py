@@ -60,8 +60,18 @@ def _aliases(token: str) -> set[str]:
     return aliases
 
 
+def is_comfyui_vendor_enabled() -> bool:
+    """ComfyUI / RunningHub 供应商总开关;未配置或空值默认开启。"""
+    raw = _cfg("ComfyUI_Enable")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return True
+    return bool(raw)
+
+
 def is_comfyui_workflow_enabled(name: str = "", workflow_file: str = "") -> bool:
-    """模型名或 workflow 文件名是否在启用列表中。列表为空则全部关闭。"""
+    """总开关打开且模型名或 workflow 文件名在启用列表中。列表为空则全部关闭。"""
+    if not is_comfyui_vendor_enabled():
+        return False
     enabled = comfyui_enabled_workflows()
     if not enabled:
         return False
@@ -75,6 +85,8 @@ def is_comfyui_workflow_enabled(name: str = "", workflow_file: str = "") -> bool
 
 
 def comfyui_disabled_reason(name: str, display_name: str) -> str | None:
+    if not is_comfyui_vendor_enabled():
+        return f"{display_name} 未启用:请在 Web 控制台打开「启用 ComfyUI / RunningHub 供应商」"
     if is_comfyui_workflow_enabled(name):
         return None
     label = (name or "").strip() or display_name
@@ -91,5 +103,6 @@ __all__ = [
     "COMFYUI_WORKFLOW_WAN22",
     "comfyui_disabled_reason",
     "comfyui_enabled_workflows",
+    "is_comfyui_vendor_enabled",
     "is_comfyui_workflow_enabled",
 ]

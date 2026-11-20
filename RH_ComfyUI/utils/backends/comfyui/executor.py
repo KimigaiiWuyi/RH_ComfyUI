@@ -44,12 +44,19 @@ class ComfyUIAdapter(Adapter):
     # ── Adapter 接口 ──
 
     async def check_available(self) -> bool:
+        from .config import is_comfyui_vendor_enabled
         from ....rh_config.comfyui_config import SERVICE_CONFIG
 
+        if not is_comfyui_vendor_enabled():
+            return False
         url: str = SERVICE_CONFIG.get_config("ComfyUI_BaseURL").data
         return bool(url) and url != "127.0.0.1:8188"
 
     async def get_unavailable_reason(self) -> str:
+        from .config import is_comfyui_vendor_enabled
+
+        if not is_comfyui_vendor_enabled():
+            return "未启用 ComfyUI / RunningHub 供应商,请在 Web 控制台打开「启用 ComfyUI / RunningHub 供应商」"
         return "未配置 ComfyUI 服务地址,请在 Web 控制台配置 ComfyUI_BaseURL"
 
     def audit_key_prefix(self) -> str:
