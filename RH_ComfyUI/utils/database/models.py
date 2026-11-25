@@ -842,7 +842,7 @@ class RHWalletOperation(BaseIDModel, table=True):
     )
     schema_version: str = Field(default="rh-wallet-op/v1")
     operation_key: str = Field(max_length=256)
-    job_key: str = Field(max_length=256, index=True)
+    job_key: str = Field(max_length=256)
     external_ref: str = Field(max_length=256, index=True)
     kind: str = Field(max_length=16)
     operation_version: int = Field(default=1)
@@ -1214,9 +1214,8 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     """RH_ComfyUI 任务执行统计记录"""
 
     # 复合索引: admin stats / list / TOP 用户 主路径 (bot_id + 时间/用户/状态)
-    # 旧库由文末 exec_list CREATE INDEX IF NOT EXISTS 补齐
+    # 严格前缀单列/短列索引已清理（由下方多列覆盖索引承担），旧库由 exec_list 删除
     __table_args__ = (
-        Index("ix_rhcomfyuitaskrecord_bot_created", "bot_id", "created_at"),
         # covering: 时间窗聚合积分/状态/耗时/类型,避免回含 JSON 的宽行
         Index(
             "ix_rhcomfyuitaskrecord_bot_created_user_spend",
@@ -1228,13 +1227,11 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
             "elapsed_ms",
             "task_type",
         ),
-        Index("ix_rhcomfyuitaskrecord_bot_user", "bot_id", "user_id"),
         Index("ix_rhcomfyuitaskrecord_bot_user_created", "bot_id", "user_id", "created_at"),
         Index("ix_rhcomfyuitaskrecord_bot_status_created", "bot_id", "status", "created_at"),
         Index("ix_rhcomfyuitaskrecord_user_created", "user_id", "created_at"),
         # 筛选项 DISTINCT 覆盖索引,避免扫含 64KB JSON 的宽行
         Index("ix_rhcomfyuitaskrecord_bot_pipeline", "bot_id", "task_name", "task_type"),
-        Index("ix_rhcomfyuitaskrecord_bot_bmodel", "bot_id", "backend_model"),
         Index("ix_rhcomfyuitaskrecord_bot_bmodel_type", "bot_id", "backend_model", "task_type"),
         Index("ix_rhcomfyuitaskrecord_bot_backend", "bot_id", "backend"),
         Index("ix_rhcomfyuitaskrecord_trace_id", "trace_id"),
@@ -1245,8 +1242,8 @@ class RHComfyuiTaskRecord(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True, title="序号")
 
     # ── 触发者 ──
-    user_id: str = Field(title="用户ID", index=True, max_length=64)
-    bot_id: str = Field(default="", title="Bot 平台", index=True, max_length=64)
+    user_id: str = Field(title="用户ID", max_length=64)
+    bot_id: str = Field(default="", title="Bot 平台", max_length=64)
     group_id: str = Field(default="", title="群号(私聊为空)", index=True, max_length=64)
 
     # ── 任务标识 ──
@@ -2764,11 +2761,9 @@ exec_list.extend(
         "ALTER TABLE rhbind ADD COLUMN refreshed_at_week INTEGER DEFAULT 0",
         'ALTER TABLE rhbind ADD COLUMN vip_tier VARCHAR(16) DEFAULT "free"',
         # ── admin stats 复合索引(与 SQLModel __table_args__ 对齐;旧库启动补齐) ──
-        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_created ON rhcomfyuitaskrecord (bot_id, created_at)",
         # 旧 5 列同名索引由下方 _upgrade_rh_task_record_spend_index 按需删除后再建
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_created_user_spend "
         "ON rhcomfyuitaskrecord (bot_id, created_at, user_id, status, point_cost, elapsed_ms, task_type)",
-        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_user ON rhcomfyuitaskrecord (bot_id, user_id)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_user_created "
         "ON rhcomfyuitaskrecord (bot_id, user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_status_created "
@@ -2776,12 +2771,18 @@ exec_list.extend(
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_user_created ON rhcomfyuitaskrecord (user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_pipeline "
         "ON rhcomfyuitaskrecord (bot_id, task_name, task_type)",
-        "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_bmodel ON rhcomfyuitaskrecord (bot_id, backend_model)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_bmodel_type "
         "ON rhcomfyuitaskrecord (bot_id, backend_model, task_type)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_backend ON rhcomfyuitaskrecord (bot_id, backend)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_trace_id ON rhcomfyuitaskrecord (trace_id)",
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuitaskrecord_bot_trace ON rhcomfyuitaskrecord (bot_id, trace_id)",
+        # 清理严格前缀冗余索引（对应多列覆盖/唯一索引已完全覆盖其查询路径）
+        "DROP INDEX IF EXISTS ix_rhwalletoperation_job_key",
+        "DROP INDEX IF EXISTS ix_rhcomfyuitaskrecord_bot_id",
+        "DROP INDEX IF EXISTS ix_rhcomfyuitaskrecord_user_id",
+        "DROP INDEX IF EXISTS ix_rhcomfyuitaskrecord_bot_created",
+        "DROP INDEX IF EXISTS ix_rhcomfyuitaskrecord_bot_user",
+        "DROP INDEX IF EXISTS ix_rhcomfyuitaskrecord_bot_bmodel",
         # 统计缓存表索引(表由 create_all 建出后补索引)
         "CREATE INDEX IF NOT EXISTS ix_rhcomfyuistatscache_bot_exp ON rhcomfyuistatscache (bot_id, expires_at)",
     ]
